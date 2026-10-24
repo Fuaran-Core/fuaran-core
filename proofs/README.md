@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 393 claims — 283 proved (282 across 37 models, 1 a host's own proof), 63 tested, 45 assumed (9 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
+**The ladder, counted:** 395 claims — 285 proved (284 across 37 models, 1 a host's own proof), 63 tested, 45 assumed (9 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -1086,7 +1086,7 @@ writer, off one shared base), checked pairwise for footprint interference exactl
 `Dag.conflicts` checks them, then either HALTED with the conflict report and nothing applied,
 or composed in arrival order and REPLAYED through the domain reducer from the base state.
 
-**Proved** (2)
+**Proved** (3)
 
 - <a id="row-fold-confluence-total"></a>**`fold-confluence-total`** — `fold_confluence_total` · fuaran-core#300
 
@@ -1104,13 +1104,23 @@ or composed in arrival order and REPLAYED through the domain reducer from the ba
 
   _Boundary:_ This row does NOT say that a slot write and a whole-node write of one node commute — the model refuses that pair on purpose (`whole_node_refuses_every_slot`), because a whole-node write is a write of every slot. Each clashing slot is tagged in its own address space, so a `SlotClash` is never deduplicated against the node-keyed shapes. No skeleton op narrows a footprint to a slot, so `Ops.footprint`, under a plain or a keyed `OpScope`, gives a domain that declares no slot access the four-set verdict; `Conformance.footprintLawsAt` counts the pairs only slot granularity frees, vacuously where none is declared.
 
+- <a id="row-conflict-report-emitted"></a>**`conflict-report-emitted`** — `all_conflicts_emitted_mem` · fuaran-core#582
+
+  The `LanesInterfere` report as `Dag.reconcileMany` EMITS it — every unordered lane pair `i < j` in lane order, each op pair in delta order, then the `ConcurrentUpdate`, `InsertPositionClash`, `MoveVsRemove` and `SlotClash` blocks, each address once and ascending by the id order — is stated by `all_conflicts_emitted`, clause for clause the `for` loops of `Dag.conflicts` and `interference` over F#'s ordered `Set`s, with `canon` the one sorted duplicate-free list of a set's members (`canon_unique`). It has EXACTLY the sweep's members (`all_conflicts_emitted_mem`: nothing lost, nothing invented), so it is empty exactly when the sweep is and `reconcile_many_emitted` is `reconcile_many` with its halt report as listed (`reconcile_many_emitted_agrees`); each shared address is reported once per op pair per shape and each clashing slot once (`pair_conflicts_emitted_distinct`), and the whole report is duplicate-free when no op occurs twice in the lane set (`all_conflicts_emitted_distinct`). A caller writes an `interfere` vector's answer from it in one sentence: the conflicts are `all_conflicts_emitted` at production's ordinal order over the exclusive lanes' ops, rendered in that order.
+
+  _With:_ `canon_unique`, `reconcile_many_emitted_agrees`, `pair_conflicts_emitted_distinct`, `all_conflicts_emitted_distinct`, `all_conflicts_emitted_perm`.
+
+  _Boundary:_ The order theorems assume `order_on lt`, a strict total order on ids; production's `String.CompareOrdinal` is one and the composition passes it, while the membership and distinctness theorems assume nothing of it. The order itself is the definition — the same loops as production's — and has no theorem beyond `canon_sorted`; that an F# `Set` enumerates exactly `canon` of its members is the model-bridge premise `sets-are-lists` carries for this row. An op that occurs twice in a lane set is reported against each occurrence, as production reports it, so the whole report's distinctness asks `distinct (concat ds)`. Agreement with production on the merge vectors is the export's stamps and `reconcile-differential`, not this row's.
+
 **Tested** (1)
 
-- <a id="row-fold-differential"></a>**`fold-differential`** — `Proofs.Oracle`, 8 cases · fuaran-core#131
+- <a id="row-fold-differential"></a>**`fold-differential`** — `Proofs.Oracle`, 9 cases · fuaran-core#131
 
   Production's delta recovery from a content-addressed DAG, its pairwise conflict sweep, the composition and the replay together agree with the extracted model over three lane pools, per lane set and per sampled arrival order — outcome and composed merge script, not merely a hash.
 
   _Boundary:_ Agreement is over the sets drawn and the orders enumerated, never over all inputs. Arrival orders are exhaustive up to four lanes and a 24-order sample above (the work-plan domain at five lanes). Every pool asserts that both outcome classes, fold and halt, were reached; on the two domain pools the host also asserts the theorem's instance on the extracted code — the oracle's own outcomes across all sampled orders are one outcome.
+
+**Rests on, or is bounded by:** [`sets-are-lists`](#row-sets-are-lists) (assumed).
 
 ### `DagClosure`
 
@@ -1122,7 +1132,7 @@ or composed in arrival order and REPLAYED through the domain reducer from the ba
 > `src/Fuaran.Core.OpStream.Dag/DagOpStream.fs` (fuaran-core Phases 134 to 437; a module of its
 > own since Phase 534).
 
-**Proved** (19)
+**Proved** (20)
 
 - <a id="row-slot-writes-commute"></a>**`slot-writes-commute`** — `slot_writes_commute` · fuaran-core#340
 
@@ -1141,6 +1151,14 @@ or composed in arrival order and REPLAYED through the domain reducer from the ba
   `Dag.reconcileMany` over the same heads named in two orders: the shared region is the same list, and from the state it reaches the checked fold of the exclusive lanes is outcome-equivalent (`reconcile_fold_order_free`, composing the partition's invariance under a permutation of the closures with `fold_confluence_total`).
 
   _Boundary:_ Under the diamond and nothing else.
+
+- <a id="row-lane-rejection-report"></a>**`lane-rejection-report`** — `lane_rejection_report_unique` · fuaran-core#582
+
+  The `LanesRejected` report as `Dag.reconcileMany` EMITS it — one `LaneRejection` per exclusive lane that does not apply on its own from the state the shared region reached, carrying its head, its delta's ops, the first node whose op the domain refused and the refusal, sorted by head id — is stated by `lane_rejection_report`, `replay_ids` per lane and the stable `sort_by` over the heads. Its entries' deltas, in head order, ARE `fold_once`'s rejecting lanes (`lane_rejections_are_the_rejecting_lanes`), so `fold_once` answers `LanesRejected` exactly when the report is non-empty and with exactly those lanes (`fold_once_lanes_rejected`); an entry is in the report exactly for a (head, lane) pair of the partition whose replay refuses, naming that refusal's node and rejection (`lane_rejections_sound`, `lane_rejections_complete`: nothing lost, nothing invented); each head once (`lane_rejections_heads_distinct`); and the sorted report is the ONE list of those entries ascending by head (`lane_rejection_report_unique`). A caller writes a `lanesRejected` vector's answer from it in one sentence: the lanes are `lane_rejection_report` at production's ordinal order over the deduplicated heads and their exclusive lanes from the shared state, each entry's head, node and rejection rendered in that order.
+
+  _With:_ `lane_rejections_are_the_rejecting_lanes`, `fold_once_lanes_rejected`, `lane_rejections_sound`, `lane_rejections_complete`, `lane_rejections_heads_distinct`, `lane_rejection_report_sorted`.
+
+  _Boundary:_ Stated for heads and lanes read in step (`len heads == len lanes`, which the partition gives: one lane per closure, one closure per deduplicated head) and, for each head once, distinct heads (`distinct_go`'s); the sort theorems assume `total_order lt`. Nothing is asked of `apply` — a lane's own replay is a property of the lane — nor of the DAG. The rejection type carries decidable equality (`rej:eqtype`) so that membership in the report can be stated; every domain's rejection is a plain value. `lanes_of d` spells the lanes as production's `opsOf dag ids`, and `lanes_of_is_lanes_by` bridges to `reconcile_fold_order_free`'s `lanes_by opof` where every id is held. The entry's delta is stated and not rendered by the merge vectors, which carry head, node and rejection.
 
 - <a id="row-dag-delta-recovery"></a>**`dag-delta-recovery`** — `between_chain` · fuaran-core#134
 
@@ -1282,7 +1300,7 @@ or composed in arrival order and REPLAYED through the domain reducer from the ba
 
   _Boundary:_ Agreement is over the pools drawn, never over all inputs.
 
-**Rests on, or is bounded by:** [`dag-outside-the-model`](#row-dag-outside-the-model) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`node-ids-distinct`](#row-node-ids-distinct) (assumed).
+**Rests on, or is bounded by:** [`dag-outside-the-model`](#row-dag-outside-the-model) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`node-ids-distinct`](#row-node-ids-distinct) (assumed).
 
 ### `WireDecode`
 
@@ -1559,6 +1577,8 @@ kept, which is everything the shipped op can do that the algebra can see.
 
 **Rests on, or is bounded by:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
+**Inherited through the models it opens:** [`sets-are-lists`](#row-sets-are-lists) (assumed).
+
 ### `Skeleton`
 
 [`Skeleton.fst`](Skeleton.fst) — checked, extracted to the oracle and run beside production by `Proofs.Oracle`. Opens `DagFold`, `TreeOps`.
@@ -1591,7 +1611,7 @@ kept, which is everything the shipped op can do that the algebra can see.
 
 **Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed).
 
-**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 ### `Chain`
 
@@ -2120,7 +2140,7 @@ Phase 137 shipped) is imported rather than remodelled, and this module adds `Ops
 
 **Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed).
 
-**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 ### `FootprintIn`
 
@@ -2150,7 +2170,7 @@ Phase 137 shipped) is imported rather than remodelled, and this module adds `Ops
 
 **Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed).
 
-**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 ### `TreeDiff`
 
@@ -2268,7 +2288,7 @@ same oracle assembly.
 
   _Boundary:_ Agreement is over the pool drawn, never over all inputs. The pool is constrained so that a node's content is a function of its id — a property of the problem rather than of the generator, because `Diff.toOps` is a shape diff that emits no `UpdateNode` (the operation alphabet has rewritten a node in place since fuaran-core#250; this diff does not), and a pair whose shared id carries different content in each tree is unreconstructible by any script it emits; measured, not assumed: a generator that redrew content reconstructed 1,738 of 4,000 pairs and the corrected one 20,000 of 20,000. That constraint is the proved theorem's `kinds_agree` hypothesis, so the pool and the statement quantify over the same pairs. The removes-first go-red loses on only some pairs, by design: the permutation is harmless where the removed regions hold no survivor, and the order buys correctness on the rest. Rejection PAYLOADS are not compared beyond the class and the offender a `TargetNotAContainer` names: `UnknownNode`'s `addressable` list is outside the comparison. Kit side, `Conformance.diffContainedLaws` certifies contained-diff scripts through the contained `applyAll` / `canApplyAll` under the witness's own predicate (`diffLaws` uses the plain pair, which fuaran-core#160 proved blind to containment); its refusal-exactness law's demanding direction was measured: 100 of 200 iterations mint a violating probe, all 100 are refused with the offender named by id and kind, and all 100 are accepted by the plain diff.
 
-**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 ### `Limits`
 
@@ -3625,7 +3645,7 @@ run threads `TreeOps.apply`, the footprint is `TreeOps.fp_all` and independence 
 
 **Rests on, or is bounded by:** [`arbitration-pinned-order`](#row-arbitration-pinned-order) (policy).
 
-**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 ### `DecimalText`
 
@@ -3795,7 +3815,7 @@ dispatch — a `Batch` is normalised inside first and dropped when empty. The sc
 
 **Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`lawful-abstract-witness`](#row-lawful-abstract-witness) (assumed).
 
-**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 ### `VocabularyVectors`
 
@@ -3884,7 +3904,7 @@ PARAMETER (`rd`, F#: the caller's `readsOf`), any function of the node and its s
 
 **Rests on, or is bounded by:** [`propagation-change-set-and-prior`](#row-propagation-change-set-and-prior) (assumed), [`propagation-ops-model-bridge`](#row-propagation-ops-model-bridge) (assumed).
 
-**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 ### `TreeFrame`
 
@@ -3954,7 +3974,7 @@ The definition is over the model's own tree and takes no parameter.
 
 **Rests on, or is bounded by:** [`write-gate-model-bridge`](#row-write-gate-model-bridge) (assumed).
 
-**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 ### `ColumnRefinement`
 
@@ -4248,7 +4268,7 @@ under fuel), `after`, the uncovered-node refusal, the side parents and the band.
 
 **Rests on, or is bounded by:** [`dag-outside-the-model`](#row-dag-outside-the-model) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed).
 
-**Inherited through the models it opens:** [`node-ids-distinct`](#row-node-ids-distinct) (assumed).
+**Inherited through the models it opens:** [`sets-are-lists`](#row-sets-are-lists) (assumed), [`node-ids-distinct`](#row-node-ids-distinct) (assumed).
 
 ### Assumed, policy, and tested beyond a model
 
@@ -4286,7 +4306,7 @@ The rows no model section carries. An `assumed` row is classed in the contract t
 
   _Assumes:_ the list-for-set reading loses nothing the comparison observes.
 
-  _Boundary:_ Multiplicity and order inside a report are therefore unobserved by construction, and nothing here claims anything about them.
+  _Boundary:_ Multiplicity and order inside a report are therefore unobserved by construction, and nothing here claims anything about them — except where a report is stated as emitted (`conflict-report-emitted`, `lane-rejection-report`): there `canon` reads a set as the one sorted duplicate-free list of its members, and this row's reading is the premise that an F# `Set` enumerates exactly that list. The sweep and every other model keep the list-as-set reading.
 
 - <a id="row-node-ids-distinct"></a>**`node-ids-distinct`** — `premise` · fuaran-core#134
 

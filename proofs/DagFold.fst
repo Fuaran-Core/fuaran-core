@@ -976,11 +976,674 @@ let fold_confluence_total #op #state #rej apply fp s0 ls1 ls2 p =
     fold_confluence_halt apply fp s0 ls1 ls2 p
 
 (* ======================================================================================
+   11. The conflict report as the reference EMITS it (Phase 582).
+
+   WHAT IS MODELLED. `Dag.conflicts` enumerates each shape's address SET — `concurrent`,
+   `Set.difference insertClash c1`, the two-step difference `moveRemove` becomes, and
+   `Footprint.slotClash` — and an F# `Set` enumerates its members once each, ascending. Section 2
+   reads those sets as lists under membership (ladder row `sets-are-lists`), so `pair_conflicts`
+   lists an address held by two of `concurrent`'s intersections twice, in footprint order, and
+   every theorem over the sweep is stated up to the canonical reading. This section states the
+   report production emits. `canon lt` is the ONE sorted, duplicate-free list with a set's
+   members (`canon_unique`) — what a `Set` enumerates — and `pair_conflicts_emitted` is
+   `pair_conflicts` with each address block made canonical: clause for clause the four
+   `for addr in cK` loops of `Dag.conflicts`, `slot_lt` the order F# compares a `(node, slot)`
+   tuple in. `conflicts_emitted`, `lane_conflicts_emitted` and `all_conflicts_emitted` are
+   section 3's sweeps over it, in the same pair order (`i < j` in lane order, `a` in lane `i`'s
+   order, `b` in lane `j`'s), and `reconcile_many_emitted` is `Dag.reconcileMany`'s halt with
+   that report — the `LanesInterfere` report a host must emit, conflict for conflict and in order.
+
+   THE PARAMETER. `lt` is the id order. Every theorem that speaks of order assumes `order_on lt`,
+   a strict total order (`DagClosure.total_order` is the same proposition at `string`);
+   production's `String.CompareOrdinal` is one, and the composition passes it. The membership and
+   distinctness theorems assume nothing of it. `fp` is unconstrained, as in section 3.
+
+   WHAT IS PROVED.
+     - `canon_mem`, `canon_distinct`, `canon_sorted`, `canon_unique` — `canon lt l` has `l`'s
+       members, each once, ascending, and is the only such list.
+     - `all_conflicts_emitted_mem` — the emitted report has EXACTLY the sweep's members (nothing
+       lost, nothing invented), so it is empty exactly when the sweep is
+       (`all_conflicts_emitted_nil_iff`), `reconcile_many_emitted` is `Ok` the same script exactly
+       when `reconcile_many` is and otherwise halts with the same canonical report
+       (`reconcile_many_emitted_agrees`), and the report is arrival-order-invariant read
+       canonically, as the sweep is (`all_conflicts_emitted_perm`).
+     - `pair_conflicts_emitted_distinct` — nothing duplicated within an op pair: each shared
+       address once per shape, each clashing slot once; `all_conflicts_emitted_distinct` — and
+       across the whole report when no op occurs twice in the lane set (an op that does is
+       reported against each occurrence, as production reports it).
+     - `all_conflicts_emitted_names` — every reported conflict names ops of the lane set, the
+       left from an earlier lane than the right (`lane_conflicts_emitted_names`).
+     - The order is the definition and needs no theorem: pair `i < j`, `a`, `b`, then
+       `ConcurrentUpdate`, `InsertPositionClash`, `MoveVsRemove`, `SlotClash`, each block
+       ascending by address (`slot_lt` for a slot) — `canon_sorted` is the ascending.
+   ====================================================================================== *)
+
+(* ---- 11.1 a strict total order, a stable sort by key, and the enumeration of a set ---- *)
+
+(* F#: `compare` on the key type — `String.CompareOrdinal` on an id. *)
+let order_on (#a:eqtype) (lt:a -> a -> bool) : prop =
+  (forall (x:a). not (lt x x)) /\
+  (forall (x y z:a). lt x y /\ lt y z ==> lt x z) /\
+  (forall (x y:a). x =!= y ==> (lt x y \/ lt y x))
+
+(* F#: `List.sortWith`, which is STABLE — `x` goes before the first element whose key is not
+   below its own, so an element never passes one of equal key that came before it. *)
+let rec insert_by (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (x:a) (l:list a)
+  : Tot (list a) =
+  match l with
+  | [] -> [x]
+  | y :: t -> if lt (key y) (key x) then y :: insert_by lt key x t else x :: y :: t
+
+let rec sort_by (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (l:list a)
+  : Tot (list a) =
+  match l with
+  | [] -> []
+  | x :: t -> insert_by lt key x (sort_by lt key t)
+
+(* Keys never descend, adjacent pair by adjacent pair. *)
+let rec sorted_by (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (l:list a) : Tot bool =
+  match l with
+  | [] -> true
+  | x :: t ->
+    (match t with
+     | [] -> true
+     | y :: _ -> not (lt (key y) (key x)) && sorted_by lt key t)
+
+let rec keys_of (#a:eqtype) (#k:eqtype) (key:a -> k) (l:list a) : Tot (list k) =
+  match l with
+  | [] -> []
+  | x :: t -> key x :: keys_of key t
+
+(* The identity, named so the key of a sort over the elements themselves is one term. *)
+let ident (#a:eqtype) (x:a) : Tot a = x
+
+(* Each member once — the LAST occurrence kept, which `canon` then orders. *)
+let rec dedup (#a:eqtype) (l:list a) : Tot (list a) =
+  match l with
+  | [] -> []
+  | x :: t -> if mem x t then dedup t else x :: dedup t
+
+(* F#: a `Set` enumerated — each member once, ascending. *)
+let canon (#a:eqtype) (lt:a -> a -> bool) (l:list a) : Tot (list a) =
+  sort_by lt ident (dedup l)
+
+let rec mem_insert_by (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (x:a) (l:list a) (z:a)
+  : Lemma (ensures mem z (insert_by lt key x l) == (z = x || mem z l))
+  = match l with
+    | [] -> ()
+    | y :: t -> if lt (key y) (key x) then mem_insert_by lt key x t z else ()
+
+let rec mem_sort_by (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (l:list a) (z:a)
+  : Lemma (ensures mem z (sort_by lt key l) == mem z l)
+  = match l with
+    | [] -> ()
+    | x :: t -> mem_sort_by lt key t z; mem_insert_by lt key x (sort_by lt key t) z
+
+let rec mem_keys_of (#a:eqtype) (#k:eqtype) (key:a -> k) (l:list a) (x:a)
+  : Lemma (requires mem x l) (ensures mem (key x) (keys_of key l))
+  = match l with
+    | [] -> ()
+    | y :: t -> if x = y then () else mem_keys_of key t x
+
+let rec mem_keys_insert_by (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (x:a) (l:list a) (kk:k)
+  : Lemma (ensures mem kk (keys_of key (insert_by lt key x l)) == (kk = key x || mem kk (keys_of key l)))
+  = match l with
+    | [] -> ()
+    | y :: t -> if lt (key y) (key x) then mem_keys_insert_by lt key x t kk else ()
+
+let rec mem_keys_sort_by (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (l:list a) (kk:k)
+  : Lemma (ensures mem kk (keys_of key (sort_by lt key l)) == mem kk (keys_of key l))
+  = match l with
+    | [] -> ()
+    | x :: t -> mem_keys_sort_by lt key t kk; mem_keys_insert_by lt key x (sort_by lt key t) kk
+
+let rec distinct_insert_by (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (x:a) (l:list a)
+  : Lemma (requires distinct l /\ not (mem x l)) (ensures distinct (insert_by lt key x l))
+  = match l with
+    | [] -> ()
+    | y :: t ->
+      if lt (key y) (key x) then begin
+        distinct_insert_by lt key x t;
+        mem_insert_by lt key x t y
+      end else ()
+
+let rec distinct_sort_by (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (l:list a)
+  : Lemma (requires distinct l) (ensures distinct (sort_by lt key l))
+  = match l with
+    | [] -> ()
+    | x :: t ->
+      distinct_sort_by lt key t;
+      mem_sort_by lt key t x;
+      distinct_insert_by lt key x (sort_by lt key t)
+
+let rec distinct_keys_insert_by (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (x:a) (l:list a)
+  : Lemma (requires distinct (keys_of key l) /\ not (mem (key x) (keys_of key l)))
+          (ensures distinct (keys_of key (insert_by lt key x l)))
+  = match l with
+    | [] -> ()
+    | y :: t ->
+      if lt (key y) (key x) then begin
+        distinct_keys_insert_by lt key x t;
+        mem_keys_insert_by lt key x t (key y)
+      end else ()
+
+let rec distinct_keys_sort_by (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (l:list a)
+  : Lemma (requires distinct (keys_of key l)) (ensures distinct (keys_of key (sort_by lt key l)))
+  = match l with
+    | [] -> ()
+    | x :: t ->
+      distinct_keys_sort_by lt key t;
+      mem_keys_sort_by lt key t (key x);
+      distinct_keys_insert_by lt key x (sort_by lt key t)
+
+let rec sorted_insert_by (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (x:a) (l:list a)
+  : Lemma (requires order_on lt /\ sorted_by lt key l) (ensures sorted_by lt key (insert_by lt key x l))
+  = match l with
+    | [] -> ()
+    | y :: t ->
+      if lt (key y) (key x) then begin
+        sorted_insert_by lt key x t;
+        (* the element after `y` is now `x`, which `y` is below, or `t`'s own head, which it was *)
+        match t with
+        | [] -> ()
+        | z :: _ -> if lt (key z) (key x) then () else ()
+      end else ()
+
+let rec sorted_sort_by (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (l:list a)
+  : Lemma (requires order_on lt) (ensures sorted_by lt key (sort_by lt key l))
+  = match l with
+    | [] -> ()
+    | x :: t -> sorted_sort_by lt key t; sorted_insert_by lt key x (sort_by lt key t)
+
+(* In a sorted list of distinct keys the head's key is strictly below every other. *)
+let rec sorted_head_below (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (x:a) (t:list a) (z:a)
+  : Lemma (requires order_on lt /\ sorted_by lt key (x :: t) /\ distinct (keys_of key (x :: t)) /\ mem z t)
+          (ensures lt (key x) (key z))
+          (decreases t)
+  = match t with
+    | y :: t' ->
+      assert (not (key x = key y));
+      if z = y then () else sorted_head_below lt key y t' z
+
+(* THEOREM. A sort by key is determined by its members when the keys are distinct: two sorted
+   lists of distinct keys with the same members are the same list. *)
+let rec sorted_by_unique (#a:eqtype) (#k:eqtype) (lt:k -> k -> bool) (key:a -> k) (l1 l2:list a)
+  : Lemma (requires order_on lt /\ sorted_by lt key l1 /\ sorted_by lt key l2 /\
+                    distinct (keys_of key l1) /\ distinct (keys_of key l2) /\
+                    (forall (z:a). mem z l1 <==> mem z l2))
+          (ensures l1 == l2)
+          (decreases l1)
+  = match l1, l2 with
+    | [], [] -> ()
+    | [], y :: _ -> assert (mem y l2)
+    | x :: _, [] -> assert (mem x l1)
+    | x :: t1, y :: t2 ->
+      assert (mem x l2);
+      assert (mem y l1);
+      if x = y then begin
+        let aux (z:a) : Lemma (mem z t1 <==> mem z t2) =
+          if mem z t1 then mem_keys_of key t1 z
+          else if mem z t2 then mem_keys_of key t2 z
+          else ()
+        in
+        FStar.Classical.forall_intro aux;
+        sorted_by_unique lt key t1 t2
+      end else begin
+        sorted_head_below lt key y t2 x;
+        sorted_head_below lt key x t1 y
+      end
+
+let rec mem_dedup (#a:eqtype) (l:list a) (z:a)
+  : Lemma (ensures mem z (dedup l) == mem z l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> mem_dedup t z
+
+let rec distinct_dedup (#a:eqtype) (l:list a)
+  : Lemma (ensures distinct (dedup l))
+  = match l with
+    | [] -> ()
+    | x :: t -> distinct_dedup t; mem_dedup t x
+
+let rec keys_of_ident (#a:eqtype) (l:list a)
+  : Lemma (ensures keys_of ident l == l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> keys_of_ident t
+
+let canon_mem (#a:eqtype) (lt:a -> a -> bool) (l:list a) (z:a)
+  : Lemma (ensures mem z (canon lt l) == mem z l)
+  = mem_dedup l z; mem_sort_by lt ident (dedup l) z
+
+let canon_distinct (#a:eqtype) (lt:a -> a -> bool) (l:list a)
+  : Lemma (ensures distinct (canon lt l))
+  = distinct_dedup l; distinct_sort_by lt ident (dedup l)
+
+let canon_sorted (#a:eqtype) (lt:a -> a -> bool) (l:list a)
+  : Lemma (requires order_on lt) (ensures sorted_by lt ident (canon lt l))
+  = sorted_sort_by lt ident (dedup l)
+
+(* THEOREM. The enumeration of a set: every sorted, duplicate-free list of `l`'s members is
+   `canon lt l` — so what F# enumerates from `Set.ofList l` is this list and no other. *)
+let canon_unique (#a:eqtype) (lt:a -> a -> bool) (l m:list a)
+  : Lemma (requires order_on lt /\ sorted_by lt ident m /\ distinct m /\
+                    (forall (z:a). mem z m <==> mem z l))
+          (ensures m == canon lt l)
+  = canon_sorted lt l;
+    canon_distinct lt l;
+    keys_of_ident m;
+    keys_of_ident (canon lt l);
+    FStar.Classical.forall_intro (canon_mem lt l);
+    sorted_by_unique lt ident m (canon lt l)
+
+(* F#: how `compare` orders a `(string * string)` tuple — the node, then the slot. *)
+let slot_lt (lt:string -> string -> bool) (p q:slot) : Tot bool =
+  let (n1, s1) = p in
+  let (n2, s2) = q in
+  lt n1 n2 || (n1 = n2 && lt s1 s2)
+
+let slot_lt_order (lt:string -> string -> bool)
+  : Lemma (requires order_on lt) (ensures order_on (slot_lt lt))
+  = let irr (p:slot) : Lemma (not (slot_lt lt p p)) = () in
+    let tr (p q r:slot) : Lemma (requires slot_lt lt p q /\ slot_lt lt q r) (ensures slot_lt lt p r) = () in
+    let tot (p q:slot) : Lemma (requires p =!= q) (ensures slot_lt lt p q \/ slot_lt lt q p) = () in
+    FStar.Classical.forall_intro irr;
+    FStar.Classical.forall_intro_3 (FStar.Classical.move_requires_3 tr);
+    FStar.Classical.forall_intro_2 (FStar.Classical.move_requires_2 tot)
+
+(* ---- 11.2 the report, clause for clause ---- *)
+
+(* F#: the body of `Dag.conflicts` for ONE op pair, as emitted: each `for addr in cK` walks a
+   `Set`, so each block is its address set's enumeration — `canon` of section 2's list. *)
+let pair_conflicts_emitted (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint) (a b:op)
+  : Tot (list (conflict op)) =
+  let fa = fp a in
+  let fb = fp b in
+  let c1 = canon lt (concurrent_or_slots fa fb) in
+  let c2 = canon lt (diff (insert_clash fa fb) c1) in
+  let c3 = canon lt (diff (diff (move_remove fa fb) c1) c2) in
+  let c4 = canon (slot_lt lt) (slot_clash fa fb) in
+  app (tag a b ConcurrentUpdate c1)
+      (app (tag a b InsertPositionClash c2)
+           (app (tag a b MoveVsRemove c3)
+                (tag_slots a b c4)))
+
+(* F#: the inner `for b in deltaB` of `Dag.conflicts`. *)
+let rec conflicts_with_emitted (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (a:op) (db:list op) : Tot (list (conflict op)) =
+  match db with
+  | [] -> []
+  | b :: t -> app (pair_conflicts_emitted lt fp a b) (conflicts_with_emitted lt fp a t)
+
+(* F#: `Dag.conflicts` — deltaA order × deltaB order, each pair's blocks in order. *)
+let rec conflicts_emitted (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (da db:list op) : Tot (list (conflict op)) =
+  match da with
+  | [] -> []
+  | a :: t -> app (conflicts_with_emitted lt fp a db) (conflicts_emitted lt fp t db)
+
+(* F#: the `for (j, b) in deltas do if i < j` inner sweep of `reconcileMany` for the lane at i. *)
+let rec lane_conflicts_emitted (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (d:list op) (rest:list (list op)) : Tot (list (conflict op)) =
+  match rest with
+  | [] -> []
+  | e :: t -> app (conflicts_emitted lt fp d e) (lane_conflicts_emitted lt fp d t)
+
+(* F#: the `cs` list of `reconcileMany` — the `LanesInterfere` report, every unordered lane
+   pair, i < j, in that order. *)
+let rec all_conflicts_emitted (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (ds:list (list op)) : Tot (list (conflict op)) =
+  match ds with
+  | [] -> []
+  | d :: rest -> app (lane_conflicts_emitted lt fp d rest) (all_conflicts_emitted lt fp rest)
+
+(* F#: `Dag.reconcileMany`'s step 2 — `Error (LanesInterfere cs)` with the report as emitted, or
+   on to the script: section 3's `reconcile_many` halting with the report as the reference lists
+   it. *)
+let reconcile_many_emitted (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (ds:list (list op)) : Tot (outcome (list op) (list (conflict op))) =
+  match all_conflicts_emitted lt fp ds with
+  | [] -> Ok (concat ds)
+  | cs -> Error cs
+
+(* ---- 11.3 nothing lost, nothing invented: the sweep's members exactly ---- *)
+
+let rec mem_tag (#op:eqtype) (a b:op) (s:shape) (addrs:list string) (c:conflict op)
+  : Lemma (ensures mem c (tag a b s addrs) <==>
+                   (c.left = a /\ c.right = b /\ c.shape = s /\ mem c.address addrs))
+  = match addrs with
+    | [] -> ()
+    | _ :: t -> mem_tag a b s t c
+
+let rec mem_tag_slots (#op:eqtype) (a b:op) (slots:list slot) (c:conflict op)
+  : Lemma (ensures mem c (tag_slots a b slots) <==>
+                   (c.left = a /\ c.right = b /\ SlotClash? c.shape /\
+                    mem (c.address, SlotClash?._0 c.shape) slots))
+  = match slots with
+    | [] -> ()
+    | _ :: t -> mem_tag_slots a b t c
+
+let pair_conflicts_emitted_mem (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (a b:op) (c:conflict op)
+  : Lemma (ensures mem c (pair_conflicts_emitted lt fp a b) <==> mem c (pair_conflicts fp a b))
+  = let fa = fp a in
+    let fb = fp b in
+    let c1 = concurrent_or_slots fa fb in
+    let e1 = canon lt c1 in
+    let c2 = diff (insert_clash fa fb) c1 in
+    let e2 = canon lt (diff (insert_clash fa fb) e1) in
+    let c3 = diff (diff (move_remove fa fb) c1) c2 in
+    let e3 = canon lt (diff (diff (move_remove fa fb) e1) e2) in
+    let c4 = slot_clash fa fb in
+    let e4 = canon (slot_lt lt) c4 in
+    FStar.Classical.forall_intro (canon_mem lt c1);
+    FStar.Classical.forall_intro (canon_mem lt (diff (insert_clash fa fb) e1));
+    FStar.Classical.forall_intro (canon_mem lt (diff (diff (move_remove fa fb) e1) e2));
+    FStar.Classical.forall_intro (canon_mem (slot_lt lt) c4);
+    mem_tag a b ConcurrentUpdate c1 c;
+    mem_tag a b ConcurrentUpdate e1 c;
+    mem_tag a b InsertPositionClash c2 c;
+    mem_tag a b InsertPositionClash e2 c;
+    mem_tag a b MoveVsRemove c3 c;
+    mem_tag a b MoveVsRemove e3 c;
+    mem_tag_slots a b c4 c;
+    mem_tag_slots a b e4 c
+
+let rec conflicts_with_emitted_mem (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (a:op) (db:list op) (c:conflict op)
+  : Lemma (ensures mem c (conflicts_with_emitted lt fp a db) <==> mem c (conflicts_with fp a db))
+  = match db with
+    | [] -> ()
+    | b :: t -> pair_conflicts_emitted_mem lt fp a b c; conflicts_with_emitted_mem lt fp a t c
+
+let rec conflicts_emitted_mem (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (da db:list op) (c:conflict op)
+  : Lemma (ensures mem c (conflicts_emitted lt fp da db) <==> mem c (conflicts fp da db))
+  = match da with
+    | [] -> ()
+    | a :: t -> conflicts_with_emitted_mem lt fp a db c; conflicts_emitted_mem lt fp t db c
+
+let rec lane_conflicts_emitted_mem (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (d:list op) (rest:list (list op)) (c:conflict op)
+  : Lemma (ensures mem c (lane_conflicts_emitted lt fp d rest) <==> mem c (lane_conflicts fp d rest))
+  = match rest with
+    | [] -> ()
+    | e :: t -> conflicts_emitted_mem lt fp d e c; lane_conflicts_emitted_mem lt fp d t c
+
+(* THEOREM. The report as emitted has exactly the sweep's members. *)
+let rec all_conflicts_emitted_mem (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (ds:list (list op)) (c:conflict op)
+  : Lemma (ensures mem c (all_conflicts_emitted lt fp ds) <==> mem c (all_conflicts fp ds))
+  = match ds with
+    | [] -> ()
+    | d :: rest -> lane_conflicts_emitted_mem lt fp d rest c; all_conflicts_emitted_mem lt fp rest c
+
+let rec nil_iff_no_mem (#a:eqtype) (l:list a)
+  : Lemma (ensures (l == [] <==> (forall (x:a). not (mem x l))))
+  = match l with
+    | [] -> ()
+    | x :: _ -> assert (mem x l)
+
+let all_conflicts_emitted_nil_iff (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (ds:list (list op))
+  : Lemma (ensures (all_conflicts_emitted lt fp ds == [] <==> all_conflicts fp ds == []))
+  = FStar.Classical.forall_intro (all_conflicts_emitted_mem lt fp ds);
+    nil_iff_no_mem (all_conflicts_emitted lt fp ds);
+    nil_iff_no_mem (all_conflicts fp ds)
+
+(* The canonical reading (section 4) of a report is a function of its members. *)
+let rec mem_u_of_mem (#op:eqtype) (c:conflict op) (cs:list (conflict op))
+  : Lemma (ensures mem_u c cs <==> (exists (d:conflict op). mem d cs /\ ueq c d))
+  = match cs with
+    | [] -> ()
+    | d :: t ->
+      mem_u_of_mem c t;
+      if ueq c d then assert (mem d cs /\ ueq c d) else ()
+
+let all_conflicts_emitted_same_report (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (ds:list (list op))
+  : Lemma (ensures same_report (all_conflicts_emitted lt fp ds) (all_conflicts fp ds))
+  = FStar.Classical.forall_intro (all_conflicts_emitted_mem lt fp ds);
+    let aux (c:conflict op)
+      : Lemma (mem_u c (all_conflicts_emitted lt fp ds) <==> mem_u c (all_conflicts fp ds))
+      = mem_u_of_mem c (all_conflicts_emitted lt fp ds); mem_u_of_mem c (all_conflicts fp ds)
+    in
+    FStar.Classical.forall_intro aux
+
+(* THEOREM. `reconcile_many_emitted` is `reconcile_many` with its halt report as the reference
+   lists it: `Ok` the same script exactly when the sweep is empty, and otherwise the same
+   canonical report — so every theorem of sections 7 to 10 about the halt holds of it. *)
+let reconcile_many_emitted_agrees (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (ds:list (list op))
+  : Lemma (ensures (match reconcile_many_emitted lt fp ds, reconcile_many fp ds with
+                    | Ok s1, Ok s2 -> s1 == s2
+                    | Error e1, Error e2 -> same_report e1 e2
+                    | _, _ -> False))
+  = all_conflicts_emitted_nil_iff lt fp ds;
+    all_conflicts_emitted_same_report lt fp ds
+
+(* The emitted report is arrival-order-invariant read canonically, as the sweep is (section 8). *)
+let all_conflicts_emitted_perm (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (ls1 ls2:list (list op)) (p:perm (list op) ls1 ls2)
+  : Lemma (ensures same_report (all_conflicts_emitted lt fp ls1) (all_conflicts_emitted lt fp ls2))
+  = FStar.Classical.forall_intro (all_conflicts_perm fp ls1 ls2 p);
+    all_conflicts_emitted_same_report lt fp ls1;
+    all_conflicts_emitted_same_report lt fp ls2
+
+(* ---- 11.4 nothing duplicated ---- *)
+
+let rec distinct_app_of (#a:eqtype) (l m:list a)
+  : Lemma (requires distinct l /\ distinct m /\ (forall (x:a). mem x l ==> not (mem x m)))
+          (ensures distinct (app l m))
+  = match l with
+    | [] -> ()
+    | _ :: t -> distinct_app_of t m
+
+let rec distinct_app_split (#a:eqtype) (l m:list a)
+  : Lemma (requires distinct (app l m))
+          (ensures distinct l /\ distinct m /\ (forall (x:a). mem x l ==> not (mem x m)))
+  = match l with
+    | [] -> ()
+    | _ :: t -> distinct_app_split t m
+
+let rec distinct_tag (#op:eqtype) (a b:op) (s:shape) (addrs:list string)
+  : Lemma (requires distinct addrs) (ensures distinct (tag a b s addrs))
+  = match addrs with
+    | [] -> ()
+    | x :: t -> distinct_tag a b s t; mem_tag a b s t ({ left = a; right = b; address = x; shape = s })
+
+let rec distinct_tag_slots (#op:eqtype) (a b:op) (slots:list slot)
+  : Lemma (requires distinct slots) (ensures distinct (tag_slots a b slots))
+  = match slots with
+    | [] -> ()
+    | (n, s) :: t ->
+      distinct_tag_slots a b t;
+      mem_tag_slots a b t ({ left = a; right = b; address = n; shape = SlotClash s })
+
+(* Every conflict of a pair's report names the pair. *)
+let pair_conflicts_emitted_names (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (a b:op) (c:conflict op)
+  : Lemma (requires mem c (pair_conflicts_emitted lt fp a b)) (ensures c.left = a /\ c.right = b)
+  = let fa = fp a in
+    let fb = fp b in
+    let e1 = canon lt (concurrent_or_slots fa fb) in
+    let e2 = canon lt (diff (insert_clash fa fb) e1) in
+    let e3 = canon lt (diff (diff (move_remove fa fb) e1) e2) in
+    let e4 = canon (slot_lt lt) (slot_clash fa fb) in
+    mem_tag a b ConcurrentUpdate e1 c;
+    mem_tag a b InsertPositionClash e2 c;
+    mem_tag a b MoveVsRemove e3 c;
+    mem_tag_slots a b e4 c
+
+(* THEOREM. Within one op pair, each shared address is reported once per shape and each
+   clashing slot once — under no hypothesis on the order. *)
+let pair_conflicts_emitted_distinct (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (a b:op)
+  : Lemma (ensures distinct (pair_conflicts_emitted lt fp a b))
+  = let fa = fp a in
+    let fb = fp b in
+    let e1 = canon lt (concurrent_or_slots fa fb) in
+    let e2 = canon lt (diff (insert_clash fa fb) e1) in
+    let e3 = canon lt (diff (diff (move_remove fa fb) e1) e2) in
+    let e4 = canon (slot_lt lt) (slot_clash fa fb) in
+    let t1 = tag a b ConcurrentUpdate e1 in
+    let t2 = tag a b InsertPositionClash e2 in
+    let t3 = tag a b MoveVsRemove e3 in
+    let t4 = tag_slots a b e4 in
+    canon_distinct lt (concurrent_or_slots fa fb);
+    canon_distinct lt (diff (insert_clash fa fb) e1);
+    canon_distinct lt (diff (diff (move_remove fa fb) e1) e2);
+    canon_distinct (slot_lt lt) (slot_clash fa fb);
+    distinct_tag a b ConcurrentUpdate e1;
+    distinct_tag a b InsertPositionClash e2;
+    distinct_tag a b MoveVsRemove e3;
+    distinct_tag_slots a b e4;
+    FStar.Classical.forall_intro (mem_tag a b ConcurrentUpdate e1);
+    FStar.Classical.forall_intro (mem_tag a b InsertPositionClash e2);
+    FStar.Classical.forall_intro (mem_tag a b MoveVsRemove e3);
+    FStar.Classical.forall_intro (mem_tag_slots a b e4);
+    distinct_app_of t3 t4;
+    distinct_app_of t2 (app t3 t4);
+    distinct_app_of t1 (app t2 (app t3 t4))
+
+let rec conflicts_with_emitted_names (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (a:op) (db:list op) (c:conflict op)
+  : Lemma (requires mem c (conflicts_with_emitted lt fp a db)) (ensures c.left = a /\ mem c.right db)
+  = match db with
+    | [] -> ()
+    | b :: t ->
+      if mem c (pair_conflicts_emitted lt fp a b) then pair_conflicts_emitted_names lt fp a b c
+      else conflicts_with_emitted_names lt fp a t c
+
+let rec conflicts_with_emitted_distinct (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (a:op) (db:list op)
+  : Lemma (requires distinct db) (ensures distinct (conflicts_with_emitted lt fp a db))
+  = match db with
+    | [] -> ()
+    | b :: t ->
+      conflicts_with_emitted_distinct lt fp a t;
+      pair_conflicts_emitted_distinct lt fp a b;
+      let aux (c:conflict op)
+        : Lemma (mem c (pair_conflicts_emitted lt fp a b) ==> not (mem c (conflicts_with_emitted lt fp a t)))
+        = if mem c (pair_conflicts_emitted lt fp a b) && mem c (conflicts_with_emitted lt fp a t) then begin
+            pair_conflicts_emitted_names lt fp a b c;
+            conflicts_with_emitted_names lt fp a t c
+          end else ()
+      in
+      FStar.Classical.forall_intro aux;
+      distinct_app_of (pair_conflicts_emitted lt fp a b) (conflicts_with_emitted lt fp a t)
+
+let rec conflicts_emitted_names (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (da db:list op) (c:conflict op)
+  : Lemma (requires mem c (conflicts_emitted lt fp da db)) (ensures mem c.left da /\ mem c.right db)
+  = match da with
+    | [] -> ()
+    | a :: t ->
+      if mem c (conflicts_with_emitted lt fp a db) then conflicts_with_emitted_names lt fp a db c
+      else conflicts_emitted_names lt fp t db c
+
+let rec conflicts_emitted_distinct (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (da db:list op)
+  : Lemma (requires distinct da /\ distinct db) (ensures distinct (conflicts_emitted lt fp da db))
+  = match da with
+    | [] -> ()
+    | a :: t ->
+      conflicts_emitted_distinct lt fp t db;
+      conflicts_with_emitted_distinct lt fp a db;
+      let aux (c:conflict op)
+        : Lemma (mem c (conflicts_with_emitted lt fp a db) ==> not (mem c (conflicts_emitted lt fp t db)))
+        = if mem c (conflicts_with_emitted lt fp a db) && mem c (conflicts_emitted lt fp t db) then begin
+            conflicts_with_emitted_names lt fp a db c;
+            conflicts_emitted_names lt fp t db c
+          end else ()
+      in
+      FStar.Classical.forall_intro aux;
+      distinct_app_of (conflicts_with_emitted lt fp a db) (conflicts_emitted lt fp t db)
+
+let rec lane_conflicts_emitted_names (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (d:list op) (rest:list (list op)) (c:conflict op)
+  : Lemma (requires mem c (lane_conflicts_emitted lt fp d rest))
+          (ensures mem c.left d /\ mem c.right (concat rest))
+  = match rest with
+    | [] -> ()
+    | e :: t ->
+      if mem c (conflicts_emitted lt fp d e) then conflicts_emitted_names lt fp d e c
+      else lane_conflicts_emitted_names lt fp d t c
+
+let rec lane_conflicts_emitted_distinct (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (d:list op) (rest:list (list op))
+  : Lemma (requires distinct d /\ distinct (concat rest))
+          (ensures distinct (lane_conflicts_emitted lt fp d rest))
+  = match rest with
+    | [] -> ()
+    | e :: t ->
+      distinct_app_split e (concat t);
+      lane_conflicts_emitted_distinct lt fp d t;
+      conflicts_emitted_distinct lt fp d e;
+      let aux (c:conflict op)
+        : Lemma (mem c (conflicts_emitted lt fp d e) ==> not (mem c (lane_conflicts_emitted lt fp d t)))
+        = if mem c (conflicts_emitted lt fp d e) && mem c (lane_conflicts_emitted lt fp d t) then begin
+            conflicts_emitted_names lt fp d e c;
+            lane_conflicts_emitted_names lt fp d t c
+          end else ()
+      in
+      FStar.Classical.forall_intro aux;
+      distinct_app_of (conflicts_emitted lt fp d e) (lane_conflicts_emitted lt fp d t)
+
+(* Every conflict names two ops of the lane set — by `lane_conflicts_emitted_names`, the left
+   from one lane and the right from a later one. *)
+let rec all_conflicts_emitted_names (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (ds:list (list op)) (c:conflict op)
+  : Lemma (requires mem c (all_conflicts_emitted lt fp ds))
+          (ensures mem c.left (concat ds) /\ mem c.right (concat ds))
+  = match ds with
+    | [] -> ()
+    | d :: rest ->
+      if mem c (lane_conflicts_emitted lt fp d rest) then lane_conflicts_emitted_names lt fp d rest c
+      else all_conflicts_emitted_names lt fp rest c
+
+(* THEOREM. When no op occurs twice in the lane set, the whole report is duplicate-free. *)
+let rec all_conflicts_emitted_distinct (#op:eqtype) (lt:string -> string -> bool) (fp:op -> footprint)
+  (ds:list (list op))
+  : Lemma (requires distinct (concat ds)) (ensures distinct (all_conflicts_emitted lt fp ds))
+  = match ds with
+    | [] -> ()
+    | d :: rest ->
+      distinct_app_split d (concat rest);
+      all_conflicts_emitted_distinct lt fp rest;
+      lane_conflicts_emitted_distinct lt fp d rest;
+      let aux (c:conflict op)
+        : Lemma (mem c (lane_conflicts_emitted lt fp d rest) ==> not (mem c (all_conflicts_emitted lt fp rest)))
+        = if mem c (lane_conflicts_emitted lt fp d rest) && mem c (all_conflicts_emitted lt fp rest) then begin
+            lane_conflicts_emitted_names lt fp d rest c;
+            all_conflicts_emitted_names lt fp rest c
+          end else ()
+      in
+      FStar.Classical.forall_intro aux;
+      distinct_app_of (lane_conflicts_emitted lt fp d rest) (all_conflicts_emitted lt fp rest)
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
    is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
 
+let twin_ord (x y:string) : Tot bool =
+  (x = "a" && not (y = "a")) || (x = "b" && y = "c")
+
+(* Every op reads and rewrites the one node `n`. *)
+let twin_cw (_:string) : Tot footprint =
+  { reads = [ "n" ]; structure_writes = []; content_writes = [ "n" ]; unknown_parent_writes = []; slot_reads = []; slot_writes = [] }
+
 let twins : list twin = [
+  { tname = "canon-enumerates-the-set";
+    tholds = (fun () -> canon twin_ord [ "c"; "a"; "c"; "b" ] = [ "a"; "b"; "c" ]) };
+  { tname = "emitted-report-lists-an-address-once";
+    tholds = (fun () ->
+      (* two content writes of `n` that also read it: the sweep lists `n` three times (once per
+         intersection of `concurrent`), the report once *)
+      len (pair_conflicts twin_cw "p" "q") = 3 &&
+      pair_conflicts_emitted twin_ord twin_cw "p" "q"
+      = [ { left = "p"; right = "q"; address = "n"; shape = ConcurrentUpdate } ]) };
   { tname = "independent-disjoint-footprints";
     tholds = (fun () ->
       independent

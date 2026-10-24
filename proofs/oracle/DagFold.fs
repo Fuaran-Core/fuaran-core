@@ -451,7 +451,161 @@ let rec mem_u = (fun ( c  :  conflict<'op> ) ( cs  :  Prims.list<conflict<'op>> 
      end))
 
 
-let twins : Prims.list<Twin.twin> = ({Twin.tname = "independent-disjoint-footprints"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = ("p")::[]; structure_writes = ("p")::[]; content_writes = ("n")::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []} {reads = ("q")::[]; structure_writes = ("q")::[]; content_writes = ("m")::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []}) true))})::({Twin.tname = "dependent-shared-structure-write"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = []} {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = []}) false))})::[]
+let rec insert_by = (fun ( lt  :  'k  ->  'k  ->  Prims.bool ) ( key  :  'a  ->  'k ) ( x  :  'a ) ( l  :  Prims.list<'a> ) -> (match (l) with
+| [] -> begin
+     (x)::[]
+     end
+| (y)::t -> begin
+      
+if (lt (key y) (key x)) then begin
+     (y)::(insert_by lt key x t)
+     end else begin
+     (x)::(y)::t
+     end
+     end))
+
+
+let rec sort_by = (fun ( lt  :  'k  ->  'k  ->  Prims.bool ) ( key  :  'a  ->  'k ) ( l  :  Prims.list<'a> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| (x)::t -> begin
+     (insert_by lt key x (sort_by lt key t))
+     end))
+
+
+let rec sorted_by = (fun ( lt  :  'k  ->  'k  ->  Prims.bool ) ( key  :  'a  ->  'k ) ( l  :  Prims.list<'a> ) -> (match (l) with
+| [] -> begin
+     true
+     end
+| (x)::t -> begin
+     (match (t) with
+| [] -> begin
+     true
+     end
+| (y)::uu___ -> begin
+     ((not ((lt (key y) (key x)))) && (sorted_by lt key t))
+     end)
+     end))
+
+
+let rec keys_of = (fun ( key  :  'a  ->  'k ) ( l  :  Prims.list<'a> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| (x)::t -> begin
+     ((key x))::(keys_of key t)
+     end))
+
+
+let ident = (fun ( x  :  'a ) -> x)
+
+
+let rec dedup = (fun ( l  :  Prims.list<'a> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| (x)::t -> begin
+      
+if (ListAlgebra.mem x t) then begin
+     (dedup t)
+     end else begin
+     (x)::(dedup t)
+     end
+     end))
+
+
+let canon = (fun ( lt  :  'a  ->  'a  ->  Prims.bool ) ( l  :  Prims.list<'a> ) -> (sort_by lt ident (dedup l)))
+
+
+let slot_lt : (Prims.string  ->  Prims.string  ->  Prims.bool)  ->  slot  ->  slot  ->  Prims.bool = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( p  :  slot ) ( q  :  slot ) -> (
+
+let uu___ = p
+in (match (uu___) with
+| (n1, s1) -> begin
+     (
+
+let uu___1 = q
+in (match (uu___1) with
+| (n2, s2) -> begin
+     ((lt n1 n2) || ((Prims.op_Equals n1 n2) && (lt s1 s2)))
+     end))
+     end)))
+
+
+let pair_conflicts_emitted = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( fp  :  'op  ->  footprint ) ( a  :  'op ) ( b  :  'op ) -> (
+
+let fa = (fp a)
+in (
+
+let fb = (fp b)
+in (
+
+let c1 = (canon lt (concurrent_or_slots fa fb))
+in (
+
+let c2 = (canon lt (ListAlgebra.diff (insert_clash fa fb) c1))
+in (
+
+let c3 = (canon lt (ListAlgebra.diff (ListAlgebra.diff (move_remove fa fb) c1) c2))
+in (
+
+let c4 = (canon (slot_lt lt) (slot_clash fa fb))
+in (ListAlgebra.app (tag a b ConcurrentUpdate c1) (ListAlgebra.app (tag a b InsertPositionClash c2) (ListAlgebra.app (tag a b MoveVsRemove c3) (tag_slots a b c4)))))))))))
+
+
+let rec conflicts_with_emitted = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( fp  :  'op  ->  footprint ) ( a  :  'op ) ( db  :  Prims.list<'op> ) -> (match (db) with
+| [] -> begin
+     []
+     end
+| (b)::t -> begin
+     (ListAlgebra.app (pair_conflicts_emitted lt fp a b) (conflicts_with_emitted lt fp a t))
+     end))
+
+
+let rec conflicts_emitted = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( fp  :  'op  ->  footprint ) ( da  :  Prims.list<'op> ) ( db  :  Prims.list<'op> ) -> (match (da) with
+| [] -> begin
+     []
+     end
+| (a)::t -> begin
+     (ListAlgebra.app (conflicts_with_emitted lt fp a db) (conflicts_emitted lt fp t db))
+     end))
+
+
+let rec lane_conflicts_emitted = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( fp  :  'op  ->  footprint ) ( d  :  Prims.list<'op> ) ( rest  :  Prims.list<Prims.list<'op>> ) -> (match (rest) with
+| [] -> begin
+     []
+     end
+| (e)::t -> begin
+     (ListAlgebra.app (conflicts_emitted lt fp d e) (lane_conflicts_emitted lt fp d t))
+     end))
+
+
+let rec all_conflicts_emitted = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( fp  :  'op  ->  footprint ) ( ds  :  Prims.list<Prims.list<'op>> ) -> (match (ds) with
+| [] -> begin
+     []
+     end
+| (d)::rest -> begin
+     (ListAlgebra.app (lane_conflicts_emitted lt fp d rest) (all_conflicts_emitted lt fp rest))
+     end))
+
+
+let reconcile_many_emitted = (fun ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( fp  :  'op  ->  footprint ) ( ds  :  Prims.list<Prims.list<'op>> ) -> (match ((all_conflicts_emitted lt fp ds)) with
+| [] -> begin
+     Ok ((concat ds))
+     end
+| cs -> begin
+     Error (cs)
+     end))
+
+
+let twin_ord : Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( x  :  Prims.string ) ( y  :  Prims.string ) -> (((Prims.op_Equals x "a") && (not ((Prims.op_Equals y "a")))) || ((Prims.op_Equals x "b") && (Prims.op_Equals y "c"))))
+
+
+let twin_cw : Prims.string  ->  footprint = (fun ( uu___  :  Prims.string ) -> {reads = ("n")::[]; structure_writes = []; content_writes = ("n")::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []})
+
+
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "canon-enumerates-the-set"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (canon twin_ord (("c")::("a")::("c")::("b")::[])) (("a")::("b")::("c")::[])))})::({Twin.tname = "emitted-report-lists-an-address-once"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (ListAlgebra.len (pair_conflicts twin_cw "p" "q")) (Prims.parse_int "3")) && (Prims.op_Equals (pair_conflicts_emitted twin_ord twin_cw "p" "q") (({left = "p"; right = "q"; address = "n"; shape = ConcurrentUpdate})::[]))))})::({Twin.tname = "independent-disjoint-footprints"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = ("p")::[]; structure_writes = ("p")::[]; content_writes = ("n")::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []} {reads = ("q")::[]; structure_writes = ("q")::[]; content_writes = ("m")::[]; unknown_parent_writes = []; slot_reads = []; slot_writes = []}) true))})::({Twin.tname = "dependent-shared-structure-write"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (independent {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = []} {reads = []; structure_writes = ("p")::[]; content_writes = []; unknown_parent_writes = []; slot_reads = []; slot_writes = []}) false))})::[]
 
 
 

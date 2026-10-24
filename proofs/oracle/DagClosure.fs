@@ -1471,6 +1471,74 @@ if (ListAlgebra.mem n.nid (ancestors_of d fuel c)) then begin
 
 let truncation_ok = (fun ( d  :  dag<'op> ) ( fuel  :  Prims.list<node<'op>> ) ( c  :  Prims.string ) ( keep  :  Prims.list<Prims.string> ) -> ((ListAlgebra.mem c keep) && (trunc_ok_nodes d fuel c keep d.nodes)))
 
+type lane_rejection<'op, 'rej> = {lr_head : Prims.string; lr_delta : Prims.list<'op>; lr_node : Prims.string; lr_reject : 'rej}
+
+
+let __proj__Mklane_rejection__item__lr_head = (fun ( projectee  :  lane_rejection<'op, 'rej> ) -> (match (projectee) with
+| {lr_head = lr_head; lr_delta = lr_delta; lr_node = lr_node; lr_reject = lr_reject} -> begin
+     lr_head
+     end))
+
+
+let __proj__Mklane_rejection__item__lr_delta = (fun ( projectee  :  lane_rejection<'op, 'rej> ) -> (match (projectee) with
+| {lr_head = lr_head; lr_delta = lr_delta; lr_node = lr_node; lr_reject = lr_reject} -> begin
+     lr_delta
+     end))
+
+
+let __proj__Mklane_rejection__item__lr_node = (fun ( projectee  :  lane_rejection<'op, 'rej> ) -> (match (projectee) with
+| {lr_head = lr_head; lr_delta = lr_delta; lr_node = lr_node; lr_reject = lr_reject} -> begin
+     lr_node
+     end))
+
+
+let __proj__Mklane_rejection__item__lr_reject = (fun ( projectee  :  lane_rejection<'op, 'rej> ) -> (match (projectee) with
+| {lr_head = lr_head; lr_delta = lr_delta; lr_node = lr_node; lr_reject = lr_reject} -> begin
+     lr_reject
+     end))
+
+
+let lr_head_of = (fun ( r  :  lane_rejection<'op, 'rej> ) -> r.lr_head)
+
+
+let lr_delta_of = (fun ( r  :  lane_rejection<'op, 'rej> ) -> r.lr_delta)
+
+
+let rec lanes_of = (fun ( d  :  dag<'op> ) ( ls  :  Prims.list<Prims.list<Prims.string>> ) -> (match (ls) with
+| [] -> begin
+     []
+     end
+| (l)::t -> begin
+     ((ops_of (nodes_for d l)))::(lanes_of d t)
+     end))
+
+
+let rec lane_rejections = (fun ( apply  :  'op  ->  'state  ->  DagFold.outcome<'state, 'rej> ) ( d  :  dag<'op> ) ( heads  :  Prims.list<Prims.string> ) ( lanes  :  Prims.list<Prims.list<Prims.string>> ) ( s  :  'state ) -> (match (((heads), (lanes))) with
+| ((h)::hs, (l)::ls) -> begin
+     (match ((replay_ids apply d.nodes l s)) with
+| DagFold.Error (RRejected (n, e)) -> begin
+     ({lr_head = h; lr_delta = (ops_of (nodes_for d l)); lr_node = n; lr_reject = e})::(lane_rejections apply d hs ls s)
+     end
+| uu___ -> begin
+     (lane_rejections apply d hs ls s)
+     end)
+     end
+| (uu___, uu___1) -> begin
+     []
+     end))
+
+
+let lane_rejection_report = (fun ( apply  :  'op  ->  'state  ->  DagFold.outcome<'state, 'rej> ) ( lt  :  Prims.string  ->  Prims.string  ->  Prims.bool ) ( d  :  dag<'op> ) ( heads  :  Prims.list<Prims.string> ) ( lanes  :  Prims.list<Prims.list<Prims.string>> ) ( s  :  'state ) -> (DagFold.sort_by lt lr_head_of (lane_rejections apply d heads lanes s)))
+
+
+let rec pairs : Prims.list<Prims.string>  ->  Prims.list<Prims.list<Prims.string>>  ->  Prims.list<(Prims.string * Prims.list<Prims.string>)> = (fun ( hs  :  Prims.list<Prims.string> ) ( ls  :  Prims.list<Prims.list<Prims.string>> ) -> (match (((hs), (ls))) with
+| ((h)::hs', (l)::ls') -> begin
+     (((h), (l)))::(pairs hs' ls')
+     end
+| (uu___, uu___1) -> begin
+     []
+     end))
+
 
 let rec all_ueq = (fun ( c  :  DagFold.conflict<'op> ) ( cs  :  Prims.list<DagFold.conflict<'op>> ) -> (match (cs) with
 | [] -> begin
@@ -1543,7 +1611,7 @@ let cs = (DagFold.pair_conflicts slot_write_fp (("n"), ("tier")) (("n"), ("tier"
 in ((DagFold.mem_u expected cs) && (all_ueq expected cs)))))})::({Twin.tname = "different-slots-fold-clean"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (DagFold.pair_conflicts slot_write_fp (("n"), ("tier")) (("n"), ("thinking"))) []))})::({Twin.tname = "slot-writes-commute-at-every-slot"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (lookup_slot (write_slot (("n"), ("tier")) "t2" (write_slot (("n"), ("thinking")) "high" [])) (("n"), ("thinking"))) (lookup_slot (write_slot (("n"), ("thinking")) "high" (write_slot (("n"), ("tier")) "t2" [])) (("n"), ("thinking")))))})::({Twin.tname = "drain-orders-a-diamond-by-the-tie-break"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order twin_lt twin_fuel twin_dag.nodes) (("a")::("b")::("c")::("m")::[])))})::({Twin.tname = "drain-refuses-a-dangling-parent"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain RefuseDangling twin_lt twin_fuel (({nid = "c"; nparents = ("z")::[]; nop = "c"})::[])) (Refused ("c"))))})::({Twin.tname = "replay-to-folds-the-drained-closure"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "m") (DagFold.Ok ("abcm"))))})::({Twin.tname = "replay-to-refuses-an-unknown-head"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_to twin_apply twin_lt twin_fuel twin_dag twin_fuel "" "zz") (DagFold.Error (RUnknownHead ("zz")))))})::({Twin.tname = "add-node-refuses-a-differing-node"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (add_node (fun ( p  :  node<Prims.string> ) ( q  :  node<Prims.string> ) -> (Prims.op_Equals p.nop q.nop)) {nid = "a"; nparents = []; nop = "z"} twin_dag) (Collision ("a"))))})::({Twin.tname = "total-order-by-takes-the-key-before-the-id"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (drain_order (by_key twin_dag.nodes (fun ( n  :  node<Prims.string> ) -> (Prims.op_Equals n.nid "b")) twin_bool_lt twin_lt) twin_fuel twin_dag.nodes) (("a")::("c")::("b")::("m")::[])))})::({Twin.tname = "conflicts-of-heads-is-the-lane-sweep-node-for-op"; Twin.tholds = (fun ( uu___  :  unit ) -> ((not ((Prims.op_Equals twin_heads_report []))) && (Prims.op_Equals (map_list (map_conflict node_op) twin_heads_report) (DagFold.all_conflicts twin_fp (map_list (fun ( ids  :  Prims.list<Prims.string> ) -> (ops_of (nodes_for twin_dag ids))) twin_excl)))))})::({Twin.tname = "reach-index-answers-the-walk"; Twin.tholds = (fun ( uu___  :  unit ) -> (
 
 let r = (reach_of_dag twin_lt twin_fuel twin_dag)
-in ((((Prims.op_Equals (reach_reaches twin_dag twin_fuel r "a" "m") true) && (Prims.op_Equals (reach_reaches twin_dag twin_fuel r "b" "c") false)) && (Prims.op_Equals (reach_reaches twin_dag twin_fuel r "zz" "m") false)) && (Prims.op_Equals (reach_ancestors twin_dag twin_fuel r "c") (("c")::("a")::[])))))})::({Twin.tname = "checkpoint-at-seals-the-node-it-folded"; Twin.tholds = (fun ( uu___  :  unit ) -> (twin_sealed_at "b" "ab" (checkpoint_at twin_apply twin_lt twin_fuel twin_dag twin_fuel twin_seal "" "b")))})::({Twin.tname = "replay-from-a-checkpoint-is-replay-from-genesis"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_from twin_apply twin_lt twin_fuel twin_dag twin_fuel (seal_at twin_seal "a" "a") "m") (DagFold.Ok ("abcm"))))})::({Twin.tname = "replay-from-refuses-a-branch-from-below-the-checkpoint"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_from twin_apply twin_lt twin_fuel twin_dag twin_fuel (seal_at twin_seal "b" "ab") "m") (DagFold.Error (CUncovered ("c")))))})::({Twin.tname = "truncation-keeps-the-replay"; Twin.tholds = (fun ( uu___  :  unit ) -> (
+in ((((Prims.op_Equals (reach_reaches twin_dag twin_fuel r "a" "m") true) && (Prims.op_Equals (reach_reaches twin_dag twin_fuel r "b" "c") false)) && (Prims.op_Equals (reach_reaches twin_dag twin_fuel r "zz" "m") false)) && (Prims.op_Equals (reach_ancestors twin_dag twin_fuel r "c") (("c")::("a")::[])))))})::({Twin.tname = "checkpoint-at-seals-the-node-it-folded"; Twin.tholds = (fun ( uu___  :  unit ) -> (twin_sealed_at "b" "ab" (checkpoint_at twin_apply twin_lt twin_fuel twin_dag twin_fuel twin_seal "" "b")))})::({Twin.tname = "replay-from-a-checkpoint-is-replay-from-genesis"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_from twin_apply twin_lt twin_fuel twin_dag twin_fuel (seal_at twin_seal "a" "a") "m") (DagFold.Ok ("abcm"))))})::({Twin.tname = "replay-from-refuses-a-branch-from-below-the-checkpoint"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (replay_from twin_apply twin_lt twin_fuel twin_dag twin_fuel (seal_at twin_seal "b" "ab") "m") (DagFold.Error (CUncovered ("c")))))})::({Twin.tname = "lane-rejection-report-is-sorted-by-head"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (lane_rejection_report twin_apply twin_lt twin_cc (("c")::("b")::[]) ((("c")::("x")::[])::(("x")::[])::[]) "s") (({lr_head = "b"; lr_delta = ("x")::[]; lr_node = "x"; lr_reject = "refused"})::({lr_head = "c"; lr_delta = ("c")::("x")::[]; lr_node = "x"; lr_reject = "refused"})::[])))})::({Twin.tname = "truncation-keeps-the-replay"; Twin.tholds = (fun ( uu___  :  unit ) -> (
 
 let cp = (seal_at twin_seal "q" "pq")
 in (((truncation_ok twin_chain twin_chain_fuel "q" (("q")::("r")::[])) && (Prims.op_Equals (replay_from twin_apply twin_lt twin_chain_fuel (truncate twin_chain (("q")::("r")::[])) twin_chain_fuel cp "r") (DagFold.Ok ("pqr")))) && (Prims.op_Equals (replay_from twin_apply twin_lt twin_chain_fuel twin_chain twin_chain_fuel cp "r") (DagFold.Ok ("pqr"))))))})::[]

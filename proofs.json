@@ -50,6 +50,30 @@
       }
     },
     {
+      "id": "conflict-report-emitted",
+      "level": "proved",
+      "statement": "The `LanesInterfere` report as `Dag.reconcileMany` EMITS it — every unordered lane pair `i < j` in lane order, each op pair in delta order, then the `ConcurrentUpdate`, `InsertPositionClash`, `MoveVsRemove` and `SlotClash` blocks, each address once and ascending by the id order — is stated by `all_conflicts_emitted`, clause for clause the `for` loops of `Dag.conflicts` and `interference` over F#'s ordered `Set`s, with `canon` the one sorted duplicate-free list of a set's members (`canon_unique`). It has EXACTLY the sweep's members (`all_conflicts_emitted_mem`: nothing lost, nothing invented), so it is empty exactly when the sweep is and `reconcile_many_emitted` is `reconcile_many` with its halt report as listed (`reconcile_many_emitted_agrees`); each shared address is reported once per op pair per shape and each clashing slot once (`pair_conflicts_emitted_distinct`), and the whole report is duplicate-free when no op occurs twice in the lane set (`all_conflicts_emitted_distinct`). A caller writes an `interfere` vector's answer from it in one sentence: the conflicts are `all_conflicts_emitted` at production's ordinal order over the exclusive lanes' ops, rendered in that order.",
+      "boundary": "The order theorems assume `order_on lt`, a strict total order on ids; production's `String.CompareOrdinal` is one and the composition passes it, while the membership and distinctness theorems assume nothing of it. The order itself is the definition — the same loops as production's — and has no theorem beyond `canon_sorted`; that an F# `Set` enumerates exactly `canon` of its members is the model-bridge premise `sets-are-lists` carries for this row. An op that occurs twice in a lane set is reported against each occurrence, as production reports it, so the whole report's distinctness asks `distinct (concat ds)`. Agreement with production on the merge vectors is the export's stamps and `reconcile-differential`, not this row's.",
+      "claim": "The `LanesInterfere` report as `Dag.reconcileMany` EMITS it — every unordered lane pair `i < j` in lane order, each op pair in delta order, then the `ConcurrentUpdate`, `InsertPositionClash`, `MoveVsRemove` and `SlotClash` blocks, each address once and ascending by the id order — is stated by `all_conflicts_emitted`, clause for clause the `for` loops of `Dag.conflicts` and `interference` over F#'s ordered `Set`s, with `canon` the one sorted duplicate-free list of a set's members (`canon_unique`). It has EXACTLY the sweep's members (`all_conflicts_emitted_mem`: nothing lost, nothing invented), so it is empty exactly when the sweep is and `reconcile_many_emitted` is `reconcile_many` with its halt report as listed (`reconcile_many_emitted_agrees`); each shared address is reported once per op pair per shape and each clashing slot once (`pair_conflicts_emitted_distinct`), and the whole report is duplicate-free when no op occurs twice in the lane set (`all_conflicts_emitted_distinct`). A caller writes an `interfere` vector's answer from it in one sentence: the conflicts are `all_conflicts_emitted` at production's ordinal order over the exclusive lanes' ops, rendered in that order. The order theorems assume `order_on lt`, a strict total order on ids; production's `String.CompareOrdinal` is one and the composition passes it, while the membership and distinctness theorems assume nothing of it. The order itself is the definition — the same loops as production's — and has no theorem beyond `canon_sorted`; that an F# `Set` enumerates exactly `canon` of its members is the model-bridge premise `sets-are-lists` carries for this row. An op that occurs twice in a lane set is reported against each occurrence, as production reports it, so the whole report's distinctness asks `distinct (concat ds)`. Agreement with production on the merge vectors is the export's stamps and `reconcile-differential`, not this row's.",
+      "phase": "fuaran-core#582",
+      "evidence": {
+        "theorem": "all_conflicts_emitted_mem",
+        "model": "proofs/DagFold.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [
+          "canon_unique",
+          "reconcile_many_emitted_agrees",
+          "pair_conflicts_emitted_distinct",
+          "all_conflicts_emitted_distinct",
+          "all_conflicts_emitted_perm"
+        ],
+        "operations": [
+          "Dag.conflicts",
+          "Dag.reconcileMany"
+        ]
+      }
+    },
+    {
       "id": "slot-writes-commute",
       "level": "proved",
       "statement": "Two writes to DIFFERENT slots of one node commute, at every slot a reader of the store can look up, and two slot writes are independent exactly when their slots differ (`slot_writes_independent_iff`) — so the precision the slot clauses buy is sound against a model of what a slot write does. The model is a store of `(slot, value)` bindings, latest first, where a write binds its slot and a read finds the latest binding. Two writes to ONE slot with different values disagree at that slot and the footprint refuses the pair (`same_slot_writes_disagree`); a whole-node write of the slot's node is refused against each of its slots, from either side (`whole_node_refuses_every_slot`).",
@@ -89,6 +113,30 @@
         "theorem": "reconcile_fold_order_free",
         "model": "proofs/DagClosure.fst",
         "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Dag.reconcileMany"
+        ]
+      }
+    },
+    {
+      "id": "lane-rejection-report",
+      "level": "proved",
+      "statement": "The `LanesRejected` report as `Dag.reconcileMany` EMITS it — one `LaneRejection` per exclusive lane that does not apply on its own from the state the shared region reached, carrying its head, its delta's ops, the first node whose op the domain refused and the refusal, sorted by head id — is stated by `lane_rejection_report`, `replay_ids` per lane and the stable `sort_by` over the heads. Its entries' deltas, in head order, ARE `fold_once`'s rejecting lanes (`lane_rejections_are_the_rejecting_lanes`), so `fold_once` answers `LanesRejected` exactly when the report is non-empty and with exactly those lanes (`fold_once_lanes_rejected`); an entry is in the report exactly for a (head, lane) pair of the partition whose replay refuses, naming that refusal's node and rejection (`lane_rejections_sound`, `lane_rejections_complete`: nothing lost, nothing invented); each head once (`lane_rejections_heads_distinct`); and the sorted report is the ONE list of those entries ascending by head (`lane_rejection_report_unique`). A caller writes a `lanesRejected` vector's answer from it in one sentence: the lanes are `lane_rejection_report` at production's ordinal order over the deduplicated heads and their exclusive lanes from the shared state, each entry's head, node and rejection rendered in that order.",
+      "boundary": "Stated for heads and lanes read in step (`len heads == len lanes`, which the partition gives: one lane per closure, one closure per deduplicated head) and, for each head once, distinct heads (`distinct_go`'s); the sort theorems assume `total_order lt`. Nothing is asked of `apply` — a lane's own replay is a property of the lane — nor of the DAG. The rejection type carries decidable equality (`rej:eqtype`) so that membership in the report can be stated; every domain's rejection is a plain value. `lanes_of d` spells the lanes as production's `opsOf dag ids`, and `lanes_of_is_lanes_by` bridges to `reconcile_fold_order_free`'s `lanes_by opof` where every id is held. The entry's delta is stated and not rendered by the merge vectors, which carry head, node and rejection.",
+      "claim": "The `LanesRejected` report as `Dag.reconcileMany` EMITS it — one `LaneRejection` per exclusive lane that does not apply on its own from the state the shared region reached, carrying its head, its delta's ops, the first node whose op the domain refused and the refusal, sorted by head id — is stated by `lane_rejection_report`, `replay_ids` per lane and the stable `sort_by` over the heads. Its entries' deltas, in head order, ARE `fold_once`'s rejecting lanes (`lane_rejections_are_the_rejecting_lanes`), so `fold_once` answers `LanesRejected` exactly when the report is non-empty and with exactly those lanes (`fold_once_lanes_rejected`); an entry is in the report exactly for a (head, lane) pair of the partition whose replay refuses, naming that refusal's node and rejection (`lane_rejections_sound`, `lane_rejections_complete`: nothing lost, nothing invented); each head once (`lane_rejections_heads_distinct`); and the sorted report is the ONE list of those entries ascending by head (`lane_rejection_report_unique`). A caller writes a `lanesRejected` vector's answer from it in one sentence: the lanes are `lane_rejection_report` at production's ordinal order over the deduplicated heads and their exclusive lanes from the shared state, each entry's head, node and rejection rendered in that order. Stated for heads and lanes read in step (`len heads == len lanes`, which the partition gives: one lane per closure, one closure per deduplicated head) and, for each head once, distinct heads (`distinct_go`'s); the sort theorems assume `total_order lt`. Nothing is asked of `apply` — a lane's own replay is a property of the lane — nor of the DAG. The rejection type carries decidable equality (`rej:eqtype`) so that membership in the report can be stated; every domain's rejection is a plain value. `lanes_of d` spells the lanes as production's `opsOf dag ids`, and `lanes_of_is_lanes_by` bridges to `reconcile_fold_order_free`'s `lanes_by opof` where every id is held. The entry's delta is stated and not rendered by the merge vectors, which carry head, node and rejection.",
+      "phase": "fuaran-core#582",
+      "evidence": {
+        "theorem": "lane_rejection_report_unique",
+        "model": "proofs/DagClosure.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [
+          "lane_rejections_are_the_rejecting_lanes",
+          "fold_once_lanes_rejected",
+          "lane_rejections_sound",
+          "lane_rejections_complete",
+          "lane_rejections_heads_distinct",
+          "lane_rejection_report_sorted"
+        ],
         "operations": [
           "Dag.reconcileMany"
         ]
@@ -328,7 +376,8 @@
           "the oracle agrees with production over every pair and triple of corpus ops",
           "an oracle handed a blind footprint DISAGREES with production, shrunk to two lanes",
           "the model's independence agrees with Ops.independent over the reference footprints",
-          "the model's conflicts are Dag.conflicts up to the canonical rendering"
+          "the model's conflicts are Dag.conflicts up to the canonical rendering",
+          "the model's emitted conflicts are Dag.conflicts verbatim, order and count, where the sweep is not"
         ]
       }
     },
@@ -395,8 +444,8 @@
       "id": "sets-are-lists",
       "level": "assumed",
       "statement": "The model reads sets as lists under membership and the host compares canonical (deduplicated, sorted) reports.",
-      "boundary": "Multiplicity and order inside a report are therefore unobserved by construction, and nothing here claims anything about them.",
-      "claim": "The model reads sets as lists under membership and the host compares canonical (deduplicated, sorted) reports. Multiplicity and order inside a report are therefore unobserved by construction, and nothing here claims anything about them.",
+      "boundary": "Multiplicity and order inside a report are therefore unobserved by construction, and nothing here claims anything about them — except where a report is stated as emitted (`conflict-report-emitted`, `lane-rejection-report`): there `canon` reads a set as the one sorted duplicate-free list of its members, and this row's reading is the premise that an F# `Set` enumerates exactly that list. The sweep and every other model keep the list-as-set reading.",
+      "claim": "The model reads sets as lists under membership and the host compares canonical (deduplicated, sorted) reports. Multiplicity and order inside a report are therefore unobserved by construction, and nothing here claims anything about them — except where a report is stated as emitted (`conflict-report-emitted`, `lane-rejection-report`): there `canon` reads a set as the one sorted duplicate-free list of its members, and this row's reading is the premise that an F# `Set` enumerates exactly that list. The sweep and every other model keep the list-as-set reading.",
       "phase": "fuaran-core#131",
       "class": "model-bridge",
       "closes": "permanent",

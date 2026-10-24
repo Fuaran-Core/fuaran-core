@@ -5445,6 +5445,251 @@ let truncation_preserves_replay (#op:eqtype) (#state #rej:Type)
 #pop-options
 
 (* ======================================================================================
+   22. The lane-rejection report (Phase 582).
+
+   WHAT IS MODELLED. Step 4 of `Dag.reconcileMany` as `reconcileRegion` emits it (F#: its
+   `rejected` list): each deduplicated head with its exclusive delta, in head order; the delta
+   replayed ON ITS OWN from the state the shared region reached (`fold w sharedState dag ids`,
+   section 16's `replay_ids`); a lane that rejects contributes one `LaneRejection` — the head,
+   the delta's ops (`opsOf dag ids`), the first node whose op the domain refused and the refusal
+   — and the list is sorted by head id (`List.sortWith` over `String.CompareOrdinal`, a stable
+   sort: section 11's `sort_by`). `Error (LanesRejected rs)` carries that list when it is
+   non-empty; `fold_once`'s `LanesRejected` carries the same lanes and nothing about them, and
+   this section says what.
+
+   THE PARAMETERS. `lt` is the id order, assumed `total_order` (section 11's `order_on` at
+   `string`); `apply` is any domain reducer — a lane's own replay is a property of the lane, so
+   nothing is asked of it, not the diamond; the DAG is any. `heads` and `lanes` are read in step,
+   as production zips them, so the theorems ask `len heads == len lanes`, which the partition
+   gives by construction (`excl_lanes` is one lane per closure, one closure per deduplicated
+   head); "each head once" asks `distinct heads`, which `distinct_go` gives. The rejection type
+   has decidable equality (`rej:eqtype`) so that membership in the report can be stated — every
+   domain's rejection is a plain value. `lanes_of d` spells the lanes as `fold_once` is handed
+   them (`opsOf dag ids`); `lanes_of_is_lanes_by` is the bridge to section 15's `lanes_by opof`
+   where `opof` reads the DAG and every id is held.
+
+   WHAT IS PROVED.
+     - `lane_rejections_are_the_rejecting_lanes` — the deltas of the report's entries, in head
+       order, ARE `rejecting`'s lanes (section 3) over the lanes' ops; so `fold_once` answers
+       `LanesRejected` exactly when the report is non-empty, with exactly those lanes
+       (`fold_once_lanes_rejected`).
+     - `lane_rejections_sound` / `lane_rejections_complete` — an entry is in the report exactly
+       for a (head, lane) pair of the partition whose lane `replay_ids` refuses from the shared
+       state, naming that refusal's node and rejection and the lane's ops: nothing lost, nothing
+       invented.
+     - `lane_rejections_heads_distinct` — each head once.
+     - `lane_rejection_report_sorted`, `_mem`, `_heads_distinct`, `_unique` — the sorted report has
+       the same entries, ascending by head, and is the ONE such list: what a host must emit.
+   ====================================================================================== *)
+
+(* F#: `LaneRejection<'Op, 'Rej>`. *)
+type lane_rejection (op:eqtype) (rej:eqtype) = {
+  lr_head   : string;
+  lr_delta  : list op;
+  lr_node   : string;
+  lr_reject : rej
+}
+
+let lr_head_of (#op:eqtype) (#rej:eqtype) (r:lane_rejection op rej) : Tot string = r.lr_head
+let lr_delta_of (#op:eqtype) (#rej:eqtype) (r:lane_rejection op rej) : Tot (list op) = r.lr_delta
+
+(* F#: `deltas |> List.map (fun (_, _, ops) -> ops)` — the lanes `fold_once` is handed, each the
+   ops of its ids (`opsOf dag ids`). *)
+let rec lanes_of (#op:eqtype) (d:dag op) (ls:list (list string)) : Tot (list (list op)) =
+  match ls with
+  | [] -> []
+  | l :: t -> ops_of (nodes_for d l) :: lanes_of d t
+
+(* F#: the `choose` over `deltas` — each lane replayed alone from `s`; its first refusal, with
+   the head and the delta, or nothing. *)
+let rec lane_rejections (#op:eqtype) (#state:Type) (#rej:eqtype)
+  (apply:op -> state -> outcome state rej) (d:dag op)
+  (heads:list string) (lanes:list (list string)) (s:state)
+  : Tot (list (lane_rejection op rej)) (decreases lanes) =
+  match heads, lanes with
+  | h :: hs, l :: ls ->
+    (match replay_ids apply d.nodes l s with
+     | Error (RRejected n e) ->
+       { lr_head = h; lr_delta = ops_of (nodes_for d l); lr_node = n; lr_reject = e }
+       :: lane_rejections apply d hs ls s
+     | _ -> lane_rejections apply d hs ls s)
+  | _, _ -> []
+
+(* F#: `rejected`, sorted — `List.sortWith (fun a b -> String.CompareOrdinal(a.Head, b.Head))`. *)
+let lane_rejection_report (#op:eqtype) (#state:Type) (#rej:eqtype)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool) (d:dag op)
+  (heads:list string) (lanes:list (list string)) (s:state)
+  : Tot (list (lane_rejection op rej)) =
+  sort_by lt lr_head_of (lane_rejections apply d heads lanes s)
+
+(* F#: `List.zip`, as production pairs each head with its delta — truncating, as the model's
+   walk does. *)
+let rec pairs (hs:list string) (ls:list (list string)) : Tot (list (string & list string)) (decreases ls) =
+  match hs, ls with
+  | h :: hs', l :: ls' -> (h, l) :: pairs hs' ls'
+  | _, _ -> []
+
+(* ---- 22.1 the bridge to section 15's spelling of the lanes ---- *)
+
+let rec ops_of_nodes_for_is_ops_by (#op:eqtype) (d:dag op) (opof:string -> op) (l:list string)
+  : Lemma (requires forall (id:string). mem id l ==>
+                      (Found? (lookup d.nodes id) /\ (Found?._0 (lookup d.nodes id)).nop == opof id))
+          (ensures ops_of (nodes_for d l) == ops_by opof l)
+  = match l with
+    | [] -> ()
+    | _ :: t -> ops_of_nodes_for_is_ops_by d opof t
+
+(* Where `opof` reads the DAG and every id of every lane is held, the two spellings agree. *)
+let rec lanes_of_is_lanes_by (#op:eqtype) (d:dag op) (opof:string -> op) (ls:list (list string))
+  : Lemma (requires forall (id:string). mem id (concat ls) ==>
+                      (Found? (lookup d.nodes id) /\ (Found?._0 (lookup d.nodes id)).nop == opof id))
+          (ensures lanes_of d ls == lanes_by opof ls)
+  = match ls with
+    | [] -> ()
+    | l :: t -> ops_of_nodes_for_is_ops_by d opof l; lanes_of_is_lanes_by d opof t
+
+(* ---- 22.2 the report IS `fold_once`'s rejecting lanes, with their heads and refusals ---- *)
+
+(* THEOREM. The deltas of the report's entries, in head order, are `rejecting`'s lanes. *)
+let rec lane_rejections_are_the_rejecting_lanes (#op:eqtype) (#state:Type) (#rej:eqtype)
+  (apply:op -> state -> outcome state rej) (d:dag op)
+  (heads:list string) (lanes:list (list string)) (s:state)
+  : Lemma (requires len heads == len lanes)
+          (ensures map_list lr_delta_of (lane_rejections apply d heads lanes s) ==
+                   rejecting apply s (lanes_of d lanes))
+          (decreases lanes)
+  = match heads, lanes with
+    | h :: hs, l :: ls ->
+      replay_ids_is_replay apply d l s;
+      lane_rejections_are_the_rejecting_lanes apply d hs ls s
+    | _, _ -> ()
+
+(* THEOREM. `fold_once` over the partition's lanes, the sweep having passed: `LanesRejected`
+   exactly when the report is non-empty, and the lanes it names are the report's deltas. *)
+let fold_once_lanes_rejected (#op:eqtype) (#state:Type) (#rej:eqtype)
+  (apply:op -> state -> outcome state rej) (fp:op -> footprint) (d:dag op)
+  (heads:list string) (lanes:list (list string)) (s:state)
+  : Lemma (requires len heads == len lanes /\ all_conflicts fp (lanes_of d lanes) == [])
+          (ensures (match fold_once apply fp s (lanes_of d lanes) with
+                    | LanesRejected rs ->
+                      Cons? rs /\ rs == map_list lr_delta_of (lane_rejections apply d heads lanes s)
+                    | LaneHalted _ -> False
+                    | _ -> lane_rejections apply d heads lanes s == []))
+  = lane_rejections_are_the_rejecting_lanes apply d heads lanes s;
+    match lane_rejections apply d heads lanes s with
+    | [] -> ()
+    | _ :: _ -> ()
+
+(* THEOREM (nothing invented). Every entry names a (head, lane) pair of the partition whose lane
+   `replay_ids` refuses from `s`, with that refusal's node and rejection and the lane's ops. *)
+let rec lane_rejections_sound (#op:eqtype) (#state:Type) (#rej:eqtype)
+  (apply:op -> state -> outcome state rej) (d:dag op)
+  (heads:list string) (lanes:list (list string)) (s:state) (r:lane_rejection op rej)
+  : Lemma (requires mem r (lane_rejections apply d heads lanes s))
+          (ensures exists (l:list string).
+                     mem (r.lr_head, l) (pairs heads lanes) /\
+                     replay_ids apply d.nodes l s == Error (RRejected r.lr_node r.lr_reject) /\
+                     r.lr_delta == ops_of (nodes_for d l))
+          (decreases lanes)
+  = match heads, lanes with
+    | h :: hs, l :: ls ->
+      (match replay_ids apply d.nodes l s with
+       | Error (RRejected n e) ->
+         if r = { lr_head = h; lr_delta = ops_of (nodes_for d l); lr_node = n; lr_reject = e }
+         then assert (mem (r.lr_head, l) (pairs heads lanes))
+         else lane_rejections_sound apply d hs ls s r
+       | _ -> lane_rejections_sound apply d hs ls s r)
+    | _, _ -> ()
+
+(* THEOREM (nothing lost). Every (head, lane) pair whose lane refuses is an entry. *)
+let rec lane_rejections_complete (#op:eqtype) (#state:Type) (#rej:eqtype)
+  (apply:op -> state -> outcome state rej) (d:dag op)
+  (heads:list string) (lanes:list (list string)) (s:state)
+  (h:string) (l:list string) (n:string) (e:rej)
+  : Lemma (requires mem (h, l) (pairs heads lanes) /\
+                    replay_ids apply d.nodes l s == Error (RRejected n e))
+          (ensures mem ({ lr_head = h; lr_delta = ops_of (nodes_for d l); lr_node = n; lr_reject = e })
+                       (lane_rejections apply d heads lanes s))
+          (decreases lanes)
+  = match heads, lanes with
+    | h' :: hs, l' :: ls ->
+      if h = h' && l = l' then () else lane_rejections_complete apply d hs ls s h l n e
+    | _, _ -> ()
+
+(* ---- 22.3 each head once ---- *)
+
+let rec lane_rejections_heads_sub (#op:eqtype) (#state:Type) (#rej:eqtype)
+  (apply:op -> state -> outcome state rej) (d:dag op)
+  (heads:list string) (lanes:list (list string)) (s:state) (x:string)
+  : Lemma (requires mem x (keys_of lr_head_of (lane_rejections apply d heads lanes s)))
+          (ensures mem x heads)
+          (decreases lanes)
+  = match heads, lanes with
+    | h :: hs, l :: ls ->
+      (match replay_ids apply d.nodes l s with
+       | Error (RRejected _ _) -> if x = h then () else lane_rejections_heads_sub apply d hs ls s x
+       | _ -> lane_rejections_heads_sub apply d hs ls s x)
+    | _, _ -> ()
+
+let rec lane_rejections_heads_distinct (#op:eqtype) (#state:Type) (#rej:eqtype)
+  (apply:op -> state -> outcome state rej) (d:dag op)
+  (heads:list string) (lanes:list (list string)) (s:state)
+  : Lemma (requires distinct heads)
+          (ensures distinct (keys_of lr_head_of (lane_rejections apply d heads lanes s)))
+          (decreases lanes)
+  = match heads, lanes with
+    | h :: hs, l :: ls ->
+      lane_rejections_heads_distinct apply d hs ls s;
+      (match replay_ids apply d.nodes l s with
+       | Error (RRejected _ _) ->
+         if mem h (keys_of lr_head_of (lane_rejections apply d hs ls s))
+         then lane_rejections_heads_sub apply d hs ls s h
+         else ()
+       | _ -> ())
+    | _, _ -> ()
+
+(* ---- 22.4 the sorted report ---- *)
+
+let lane_rejection_report_mem (#op:eqtype) (#state:Type) (#rej:eqtype)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool) (d:dag op)
+  (heads:list string) (lanes:list (list string)) (s:state) (r:lane_rejection op rej)
+  : Lemma (ensures mem r (lane_rejection_report apply lt d heads lanes s) ==
+                   mem r (lane_rejections apply d heads lanes s))
+  = mem_sort_by lt lr_head_of (lane_rejections apply d heads lanes s) r
+
+let lane_rejection_report_sorted (#op:eqtype) (#state:Type) (#rej:eqtype)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool) (d:dag op)
+  (heads:list string) (lanes:list (list string)) (s:state)
+  : Lemma (requires total_order lt)
+          (ensures sorted_by lt lr_head_of (lane_rejection_report apply lt d heads lanes s))
+  = assert (order_on lt);
+    sorted_sort_by lt lr_head_of (lane_rejections apply d heads lanes s)
+
+let lane_rejection_report_heads_distinct (#op:eqtype) (#state:Type) (#rej:eqtype)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool) (d:dag op)
+  (heads:list string) (lanes:list (list string)) (s:state)
+  : Lemma (requires distinct heads)
+          (ensures distinct (keys_of lr_head_of (lane_rejection_report apply lt d heads lanes s)))
+  = lane_rejections_heads_distinct apply d heads lanes s;
+    distinct_keys_sort_by lt lr_head_of (lane_rejections apply d heads lanes s)
+
+(* THEOREM. The report is the ONE list of the entries ascending by head: a host that emits the
+   entries sorted by head id emits this list and no other. *)
+let lane_rejection_report_unique (#op:eqtype) (#state:Type) (#rej:eqtype)
+  (apply:op -> state -> outcome state rej) (lt:string -> string -> bool) (d:dag op)
+  (heads:list string) (lanes:list (list string)) (s:state) (m:list (lane_rejection op rej))
+  : Lemma (requires total_order lt /\ distinct heads /\
+                    sorted_by lt lr_head_of m /\ distinct (keys_of lr_head_of m) /\
+                    (forall (r:lane_rejection op rej).
+                       mem r m <==> mem r (lane_rejections apply d heads lanes s)))
+          (ensures m == lane_rejection_report apply lt d heads lanes s)
+  = assert (order_on lt);
+    lane_rejection_report_sorted apply lt d heads lanes s;
+    lane_rejection_report_heads_distinct apply lt d heads lanes s;
+    FStar.Classical.forall_intro (lane_rejection_report_mem apply lt d heads lanes s);
+    sorted_by_unique lt lr_head_of m (lane_rejection_report apply lt d heads lanes s)
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
    is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
@@ -5571,6 +5816,12 @@ let twins : list twin = [
     tholds = (fun () ->
       replay_from twin_apply twin_lt twin_fuel twin_dag twin_fuel (seal_at twin_seal "b" "ab") "m"
       = Error (CUncovered "c")) };
+  { tname = "lane-rejection-report-is-sorted-by-head";
+    tholds = (fun () ->
+      (* heads named c then b; both lanes refuse at `x`; the report comes back b then c *)
+      lane_rejection_report twin_apply twin_lt twin_cc [ "c"; "b" ] [ [ "c"; "x" ]; [ "x" ] ] "s"
+      = [ { lr_head = "b"; lr_delta = [ "x" ]; lr_node = "x"; lr_reject = "refused" };
+          { lr_head = "c"; lr_delta = [ "c"; "x" ]; lr_node = "x"; lr_reject = "refused" } ]) };
   { tname = "truncation-keeps-the-replay";
     tholds = (fun () ->
       let cp = seal_at twin_seal "q" "pq" in
