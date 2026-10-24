@@ -3363,7 +3363,7 @@ type.
 
 - <a id="row-capability-codec-refusals-resolve"></a>**`capability-codec-refusals-resolve`** — `invocation_refusals_resolve` · fuaran-core#455
 
-  Every refusal `CapabilityCodec`'s readers answer over a document RESOLVES in it (`DecodeError.resolvesIn`, restated over the model's `jval` as `resolves_in`) and is not `InvalidJson` (`invocation_refusals_resolve`) — the invocation reader (the repeated-address refusal included, walked through `at`), the envelope reader for EVERY payload reader a caller hands it (`deferred_refusals_resolve`), the invoke-error reader (`invoke_error_refusals_resolve`) and the declaration reader (`capability_refusals_resolve`, the admission refusals at `signature.holes` and `determinism` and an entry's missing kind member included).
+  Every refusal `CapabilityCodec`'s readers answer over a document RESOLVES in it (`DecodeError.resolvesIn`, restated over the model's `jval` as `resolves_in`) and is not `InvalidJson` (`invocation_refusals_resolve`) — the invocation reader (the repeated-address refusal included, walked through `at`), the envelope reader for EVERY payload reader a caller hands it (`deferred_refusals_resolve`) and the typed envelope reader `CapabilitySeamCodec.decodeDeferred`, which passes a payload refusal through with its own code and path, for every payload reader whose own refusals resolve (`deferred_dec_sound`), the invoke-error reader (`invoke_error_refusals_resolve`) and the declaration reader (`capability_refusals_resolve`, the admission refusals at `signature.holes` and `determinism` and an entry's missing kind member included).
 
   _Boundary:_ Proved from one soundness lemma per decode-layer combinator and the transport lemma `ok_at_under`, `DecodeLayer.fst`'s section 6 restated at this module's types. Within the model: a refusal is its code and its path, its sentence not modelled (`capability-sections-parameters-abstract`).
 
@@ -3379,7 +3379,7 @@ type.
 
   The extracted section 18 agrees with `CapabilityCodec`'s invocation, envelope and invoke-error codecs over generated values (addresses drawn with replacement, every invoke-error case, every envelope case) and four mutations of each encoding — the canonical text or the encoded value, acceptance, the value read back, and, where production answers a typed refusal, its code and path — and on production every typed refusal resolves in the document it read. The go-red: a model writer that drops an argument disagrees.
 
-  _Boundary:_ The invoke-error reader (`CapabilitySeamCodec.decodeInvokeError`) and the envelope over a sentence-answering payload reader are compared on acceptance and value alone, as the model's refusal carries no sentence. Agreement is over the pools drawn, never over all inputs.
+  _Boundary:_ The invoke-error reader (`CapabilitySeamCodec.decodeInvokeError`) and the envelope over a sentence-answering payload reader (`CapabilityCodec.decodeDeferred`) are compared on acceptance and value alone, as the model's refusal carries no sentence; the typed envelope reader (`CapabilitySeamCodec.decodeDeferred`) is compared on code and path (Phase 570). Agreement is over the pools drawn, never over all inputs.
 
 - <a id="row-capability-sections-differential"></a>**`capability-sections-differential`** — `Proofs.Oracle`, 6 cases · fuaran-core#354
 

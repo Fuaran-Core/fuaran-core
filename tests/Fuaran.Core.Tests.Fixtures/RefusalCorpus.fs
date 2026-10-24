@@ -293,19 +293,6 @@ module RefusalCorpus =
         | Ok read -> [ "canonical", JStr(Canonical.write Rendering.CrossHost read) ]
         | Error(code, path) -> [ "code", JStr(DecodeError.codeName code); "path", DecodePath.toJson path ]
 
-    /// A reader whose model DISAGREES with the reference on an emitted vector: the reader stays the
-    /// reference's alone, every one of its vectors, and the disagreement is held — the export fails
-    /// when the named vector stops disagreeing, so the record cannot outlive the fault it states.
-    /// `deferred`: `proofs/Capability.fst`'s `deferred_of_j` takes its payload reader as
-    /// `jval -> outcome 'a string` and refuses every payload `OutOfRange`; production's
-    /// `CapabilitySeamCodec.decodeDeferred` passes its payload reader's own refusal through, so a
-    /// `ready` whose value is not a string is `WrongKind` there and `OutOfRange` in the model.
-    let disputedReaders: Map<string, string * string> =
-        [ "deferred",
-          ("ready-payload-refused",
-           "the model refuses a payload OutOfRange whatever its reader's code; the reference passes the payload reader's WrongKind through") ]
-        |> Map.ofList
-
     let private seamLine (v: SeamRefusalLaws.Vector) : CorpusCell =
         let result =
             SeamRefusalLaws.outcome v
@@ -316,26 +303,11 @@ module RefusalCorpus =
                 | Error _ -> failwithf "seam vector %s re-encoded to bytes that do not parse" v.Name)
             |> seamMembers
 
-        // The seam models read and write every reader they state (Phase 563); the rest are the
-        // reference's alone (`QueryOracle.Seams`).
+        // The seam models read and write every reader they state (Phase 563; `deferred` since Phase 570),
+        // and a disagreement fails the export; the rest are the reference's alone (`QueryOracle.Seams`).
         let model =
             QueryOracle.Seams.read v.Reader v.Document
             |> Option.map (fun (m, row, o) -> m, row, JObj(seamMembers o))
-
-        let model =
-            match Map.tryFind v.Reader disputedReaders, model with
-            | Some(disputed, why), Some(m, row, answer) when disputed = v.Name ->
-                if Canonical.write Rendering.CrossHost answer = Canonical.write Rendering.CrossHost (JObj result) then
-                    failwithf
-                        "the export refuses: vector %s is recorded as a disagreement of %s (ladder row %s: %s), and the model now agrees — the record is stale"
-                        v.Name
-                        m
-                        row
-                        why
-
-                None
-            | Some _, _ -> None
-            | None, m -> m
 
         CorpusCell.Value(
             JObj(

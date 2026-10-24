@@ -1052,7 +1052,8 @@ let private seamCodecTally =
           "ErrorsEncoded"
           "ErrorsRefused"
           "Deferred"
-          "DeferredRefused" ]
+          "DeferredRefused"
+          "SentenceDeferredRefused" ]
     |> Tally.sets [ "Codes" ]
 
 /// Runs the model's invocation, envelope and refusal codecs beside production's: the encoding, the
@@ -1203,28 +1204,65 @@ let private seamCodecDifferential
             | ModelCap.JStr s -> ModelCap.Ok s
             | _ -> ModelCap.Error "not a string"
 
+        let sameRead (p: Deferred<string>) (m: ModelCap.deferred<string>) =
+            match p, m with
+            | Pending, ModelCap.Pending -> true
+            | Ready a, ModelCap.Ready b
+            | Failed a, ModelCap.Failed b -> a = b
+            | _ -> false
+
+        // Two readers of the one envelope (Phase 570). The TYPED reader,
+        // `CapabilitySeamCodec.decodeDeferred` over a typed payload reader, passes the payload's refusal
+        // through, so it is compared on code and path against `deferred_dec` over the model's `d_str`.
+        // `CapabilityCodec.decodeDeferred`, whose payload reader answers a sentence, raises that refusal
+        // `OutOfRange` in production as in `deferred_of_j`; its refusal crosses as a sentence, so it is
+        // compared on acceptance and value.
         let readDeferred (j: JVal) (tally: Tally) =
             let tally = Tally.bump "Documents" tally
+            let mj = jvalToModel j
 
-            match
-                CapabilitySeamCodec.decodeDeferred
-                    (fun v ->
-                        pDec v
-                        |> Result.mapError (DecodeError.make DecodeCode.OutOfRange "a payload its reader accepts"))
-                    j,
-                ModelCap.deferred_of_j mDec (jvalToModel j)
-            with
-            | Ok Pending, ModelCap.Ok ModelCap.Pending -> tally
-            | Ok(Ready a), ModelCap.Ok(ModelCap.Ready b) when a = b -> tally
-            | Ok(Failed a), ModelCap.Ok(ModelCap.Failed b) when a = b -> tally
+            let tally =
+                match CapabilitySeamCodec.decodeDeferred Decoder.str j, ModelCap.deferred_dec ModelCap.d_str mj with
+                | Ok p, ModelCap.Ok m when sameRead p m -> tally
+                | Error pe, ModelCap.Error me when decodeError.Production pe = decodeError.Model me ->
+                    tally
+                    |> Tally.bump "DeferredRefused"
+                    |> Tally.reach "Codes" (string pe.Code)
+                    |> Differential.check (DecodeError.resolvesIn j pe) (fun () ->
+                        sprintf
+                            "seed %d: an envelope refusal does not resolve: %s in %s"
+                            i
+                            (decodeError.Production pe)
+                            (Canonical.write Rendering.CrossHost j))
+                | p, m ->
+                    Tally.disagree
+                        (sprintf
+                            "seed %d: the typed envelope readers disagree on %s: %A vs %A"
+                            i
+                            (Canonical.write Rendering.CrossHost j)
+                            p
+                            m)
+                        tally
+
+            // The text form reads the bytes the document renders to, so the model reads exactly that
+            // document too.
+            let text = Canonical.write Rendering.CrossHost j
+
+            let jt =
+                match Json.parse text with
+                | Ok v -> v
+                | Error _ -> j
+
+            match CapabilityCodec.decodeDeferred pDec text, ModelCap.deferred_of_j mDec (jvalToModel jt) with
+            | Ok p, ModelCap.Ok m when sameRead p m -> tally
             | Error _, ModelCap.Error me ->
                 tally
-                |> Tally.bump "DeferredRefused"
+                |> Tally.bump "SentenceDeferredRefused"
                 |> Tally.reach "Codes" (string (modelCodeOf me.d_code))
             | p, m ->
                 Tally.disagree
                     (sprintf
-                        "seed %d: the envelope readers disagree on %s: %A vs %A"
+                        "seed %d: the sentence envelope readers disagree on %s: %A vs %A"
                         i
                         (Canonical.write Rendering.CrossHost j)
                         p
@@ -1450,6 +1488,11 @@ let tests =
                   (n "DeferredRefused")
                   100
                   (sprintf "envelopes were refused (%d)" (n "DeferredRefused"))
+
+              Expect.isGreaterThan
+                  (n "SentenceDeferredRefused")
+                  100
+                  (sprintf "envelopes were refused through the sentence reader (%d)" (n "SentenceDeferredRefused"))
 
               let codes = Tally.reached "Codes" t
 

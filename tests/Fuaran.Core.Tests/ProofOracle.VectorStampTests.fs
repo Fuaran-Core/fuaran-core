@@ -88,7 +88,7 @@ let modelStamps: (string * (string * int)) list =
       "premises/string-model.json", ("JsonParse", 10)
       "refusals/codec-refusals.json", ("JsonParse", 59)
       "refusals/codec-refusals.json", ("WireColumn", 13)
-      "refusals/seam-refusals.json", ("Capability", 48)
+      "refusals/seam-refusals.json", ("Capability", 55)
       "refusals/seam-refusals.json", ("Query", 45) ]
 
 [<Tests>]
