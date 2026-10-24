@@ -12,9 +12,10 @@
 // a clean input both answer the same value. A case refine runs once its members all decoded, and a
 // host projection supplies only a short-circuiting decoder, so each adds at most one defect of its
 // own. Phase 541 — every node, non-generic union, record and kind spec is read through one record
-// of decoders, `CollectingDecoders`, so a host's decoder at a type applies at every depth. Codes
-// and paths are Core's `DecodeError`; a consumer whose specification orders or names defects
-// differently maps them at its own seam.
+// of decoders, `CollectingDecoders`, so a host's decoder at a type applies at every depth. Phase
+// 562 — so is every enumeration, JSON scalar and generic union, and a declared member the object
+// does not carry asks the record's `Absent` first. Codes and paths are Core's `DecodeError`; a
+// consumer whose specification orders or names defects differently maps them at its own seam.
 // ---------------------------------------------------------------------------
 let private cOne (r: Result<'T, DecodeError>) : Result<'T, DecodeError list> =
     match r with
@@ -70,18 +71,53 @@ let private cMap (dec: JVal -> Result<'T, DecodeError list>) (j: JVal) : Result<
         | errors -> Error errors
     | other -> cOne (Error(Decoder.wrongKind "object" other))
 
-// An absent required member is `dReq`'s refusal, sentence and path included.
+// The node's own framing (its `kind` member) read under its key: absent is `dReq`'s refusal.
 let private cReq (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError list>) : Result<'T, DecodeError list> =
     match fs |> List.tryFind (fun (k, _) -> k = name) with
     | Some(_, v) -> dec v |> cUnder (PathSegment.Key name)
     | None -> cOne (dReq name fs (fun _ -> dFail DecodeCode.SchemaFault "never read" "never read"))
 
-let private cOpt (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError list>) : Result<'T option, DecodeError list> =
-    match fs |> List.tryFind (fun (k, _) -> k = name) with
-    | Some(_, v) -> dec v |> cUnder (PathSegment.Key name) |> Result.map Some
-    | None -> Ok None
+// Phase 562 — a DECLARED member the object `j` does not carry: the record's `Absent` is asked first,
+// with the holder's name and the member's key. `Ok None` is the reading the member's presence rule
+// gives absence (`none`); `Ok(Some v)` reads `v` as the member; a refusal is the member's own, at its
+// key. The default `Absent` answers `Ok None`, so a record that overrides nothing reads as before.
+let private cAbsent
+    (ov: CollectingDecoders)
+    (holder: string)
+    (j: JVal)
+    (name: string)
+    (dec: JVal -> Result<'T, DecodeError list>)
+    (none: unit -> Result<'T, DecodeError list>)
+    : Result<'T, DecodeError list> =
+    match ov.Absent ov holder name j with
+    | Ok None -> none ()
+    | Ok(Some v) -> dec v |> cUnder (PathSegment.Key name)
+    | Error es -> Error(es |> List.map (DecodeError.under (PathSegment.Key name)))
 
-let private cDef (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError list>) (dflt: 'T) : Result<'T, DecodeError list> =
+// A required declared member: absent (and the hook answering `None`) is `dReq`'s refusal.
+let private cReqAt (ov: CollectingDecoders) (holder: string) (j: JVal) (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError list>) : Result<'T, DecodeError list> =
     match fs |> List.tryFind (fun (k, _) -> k = name) with
     | Some(_, v) -> dec v |> cUnder (PathSegment.Key name)
-    | None -> Ok dflt
+    | None -> cAbsent ov holder j name dec (fun () -> cOne (dReq name fs (fun _ -> dFail DecodeCode.SchemaFault "never read" "never read")))
+
+let private cOptAt (ov: CollectingDecoders) (holder: string) (j: JVal) (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError list>) : Result<'T option, DecodeError list> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v |> cUnder (PathSegment.Key name) |> Result.map Some
+    | None -> cAbsent ov holder j name (dec >> Result.map Some) (fun () -> Ok None)
+
+let private cDefAt (ov: CollectingDecoders) (holder: string) (j: JVal) (name: string) (fs: (string * JVal) list) (dec: JVal -> Result<'T, DecodeError list>) (dflt: 'T) : Result<'T, DecodeError list> =
+    match fs |> List.tryFind (fun (k, _) -> k = name) with
+    | Some(_, v) -> dec v |> cUnder (PathSegment.Key name)
+    | None -> cAbsent ov holder j name dec (fun () -> Ok dflt)
+
+// Phase 562 — the generated decoders at the JSON scalars, each the short-circuiting reader lifted.
+let private colString (_: CollectingDecoders) (j: JVal) : Result<string, DecodeError list> = cOne (dStr j)
+
+let private colInt (_: CollectingDecoders) (j: JVal) : Result<int, DecodeError list> = cOne (dInt j)
+
+let private colFloat (_: CollectingDecoders) (j: JVal) : Result<float, DecodeError list> = cOne (dFloat j)
+
+let private colBool (_: CollectingDecoders) (j: JVal) : Result<bool, DecodeError list> = cOne (dBool j)
+
+// Phase 562 — the generated `Absent`: every absent member reads by its presence rule.
+let private colAbsent (_: CollectingDecoders) (_: string) (_: string) (_: JVal) : Result<JVal option, DecodeError list> = Ok None
