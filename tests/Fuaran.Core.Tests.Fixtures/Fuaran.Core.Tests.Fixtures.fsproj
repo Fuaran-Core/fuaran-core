@@ -39,6 +39,8 @@
     <Compile Include="GeneratedModules.fs" />
     <Compile Include="VectorOracle.fs" />
     <Compile Include="VectorOracle.Capability.fs" />
+    <Compile Include="VectorOracle.Canon.fs" />
+    <Compile Include="VectorOracle.Column.fs" />
     <Compile Include="ApplyVectorExport.fs" />
     <Compile Include="PropagationVectorExport.fs" />
     <Compile Include="CanonicalFormVectorExport.fs" />

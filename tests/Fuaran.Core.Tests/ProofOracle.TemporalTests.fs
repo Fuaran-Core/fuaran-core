@@ -11,6 +11,7 @@ open Fuaran.Core
 open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.ProofOracle.Bridges
+open Fuaran.Core.Tests.CanonOracle
 
 // ---------------------------------------------------------------------------
 //  Phase 279 — the DECIMAL-TEXT bridge: a .NET string read as the model's symbols, and back.
@@ -128,7 +129,7 @@ module private TemporalDiff =
     /// A pair at a unit, asked of both: the range check, and in range its text, the text read back
     /// at the unit, and the coarsest unit of the text.
     let probeInstant (label: string) (u: TimeUnit) (second: float) (fraction: int) (t: Tally) : Tally =
-        let mu = ColumnDiff.toModelUnit u
+        let mu = ColumnOracle.toModelUnit u
 
         let t =
             t
@@ -169,7 +170,7 @@ module private TemporalDiff =
                 label
                 "unitOf"
                 (ColumnType.tag (TimestampType(TemporalText.unitOf prodText)))
-                (ColumnType.tag (TimestampType(ColumnDiff.ofModelUnit (Temporal.unit_of (canonToChs prodText)))))
+                (ColumnType.tag (TimestampType(ColumnOracle.ofModelUnit (Temporal.unit_of (canonToChs prodText)))))
                 t
 
     /// An instant text, asked of both at every unit: read to a pair or refused, canonical or not,
@@ -195,7 +196,7 @@ module private TemporalDiff =
                 label
                 (sprintf "unitOf %A" s)
                 (ColumnType.tag (TimestampType(TemporalText.unitOf s)))
-                (ColumnType.tag (TimestampType(ColumnDiff.ofModelUnit (Temporal.unit_of (canonToChs s)))))
+                (ColumnType.tag (TimestampType(ColumnOracle.ofModelUnit (Temporal.unit_of (canonToChs s)))))
                 t
 
         [ TimeUnit.Seconds
@@ -208,7 +209,7 @@ module private TemporalDiff =
                     label
                     (sprintf "tryInstant %s %A" (ColumnType.tag (TimestampType u)) s)
                     (prodInstant u s)
-                    (modelInstant (ColumnDiff.toModelUnit u) s)
+                    (modelInstant (ColumnOracle.toModelUnit u) s)
                     t)
             t
 

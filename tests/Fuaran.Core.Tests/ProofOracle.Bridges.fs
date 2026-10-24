@@ -19,6 +19,8 @@ open Fuaran.Core
 open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.CapabilityOracle
+open Fuaran.Core.Tests.CanonOracle
+open Fuaran.Core.Tests.ColumnOracle
 
 // ---------------------------------------------------------------------------
 //  Phase 535 — THE DIFFERENTIAL HARNESS. Every `Proofs.Oracle` differential is the same loop:
@@ -1236,127 +1238,6 @@ let showKinds (kinds: Set<string>) =
 //  `Canon`. The two would shadow each other exactly where the differential needs both.
 // ---------------------------------------------------------------------------
 
-/// The model's hex nibble, by value. Used in both directions of the bridge.
-let canonHexdOf (n: int) : WireCanon.hexd =
-    match n with
-    | 0 -> WireCanon.HD0
-    | 1 -> WireCanon.HD1
-    | 2 -> WireCanon.HD2
-    | 3 -> WireCanon.HD3
-    | 4 -> WireCanon.HD4
-    | 5 -> WireCanon.HD5
-    | 6 -> WireCanon.HD6
-    | 7 -> WireCanon.HD7
-    | 8 -> WireCanon.HD8
-    | 9 -> WireCanon.HD9
-    | 10 -> WireCanon.HDa
-    | 11 -> WireCanon.HDb
-    | 12 -> WireCanon.HDc
-    | 13 -> WireCanon.HDd
-    | 14 -> WireCanon.HDe
-    | 15 -> WireCanon.HDf
-    | _ -> failwithf "not a hex nibble: %d" n
-
-let canonHexdChar (d: WireCanon.hexd) : char =
-    match d with
-    | WireCanon.HD0 -> '0'
-    | WireCanon.HD1 -> '1'
-    | WireCanon.HD2 -> '2'
-    | WireCanon.HD3 -> '3'
-    | WireCanon.HD4 -> '4'
-    | WireCanon.HD5 -> '5'
-    | WireCanon.HD6 -> '6'
-    | WireCanon.HD7 -> '7'
-    | WireCanon.HD8 -> '8'
-    | WireCanon.HD9 -> '9'
-    | WireCanon.HDa -> 'a'
-    | WireCanon.HDb -> 'b'
-    | WireCanon.HDc -> 'c'
-    | WireCanon.HDd -> 'd'
-    | WireCanon.HDe -> 'e'
-    | WireCanon.HDf -> 'f'
-
-/// A .NET `char` as one of the model's constructors. TOTAL and CLASSIFYING: every character the
-/// canonical encoder distinguishes has its own constructor, and `CPlain` catches the rest
-/// VERBATIM — so two different ordinary characters are never identified, and `WireCanon.bridged`
-/// (the model's own statement of what this function has to be: a `CPlain` never carries a
-/// spelling another constructor already denotes) holds of everything produced here by
-/// construction. That is the level-3 assumption, written where it is discharged.
-let canonToCh (c: char) : WireCanon.ch =
-    match c with
-    | '"' -> WireCanon.CQuote
-    | '\\' -> WireCanon.CBackslash
-    | '{' -> WireCanon.CLBrace
-    | '}' -> WireCanon.CRBrace
-    | '[' -> WireCanon.CLBrack
-    | ']' -> WireCanon.CRBrack
-    | ':' -> WireCanon.CColon
-    | ',' -> WireCanon.CComma
-    | '-' -> WireCanon.CMinus
-    | '+' -> WireCanon.CPlus
-    | '.' -> WireCanon.CDot
-    | 'E' -> WireCanon.CUpE
-    | 'u' -> WireCanon.CLu
-    | c when c < ' ' -> WireCanon.CCtrl(int c >= 16, canonHexdOf (int c % 16))
-    | c when c >= '0' && c <= '9' -> WireCanon.CHexCh(canonHexdOf (int c - int '0'))
-    | c when c >= 'a' && c <= 'f' -> WireCanon.CHexCh(canonHexdOf (int c - int 'a' + 10))
-    | c -> WireCanon.CPlain(string c)
-
-let canonFromCh (c: WireCanon.ch) : string =
-    match c with
-    | WireCanon.CQuote -> "\""
-    | WireCanon.CBackslash -> "\\"
-    | WireCanon.CLBrace -> "{"
-    | WireCanon.CRBrace -> "}"
-    | WireCanon.CLBrack -> "["
-    | WireCanon.CRBrack -> "]"
-    | WireCanon.CColon -> ":"
-    | WireCanon.CComma -> ","
-    | WireCanon.CMinus -> "-"
-    | WireCanon.CPlus -> "+"
-    | WireCanon.CDot -> "."
-    | WireCanon.CUpE -> "E"
-    | WireCanon.CLu -> "u"
-    | WireCanon.CHexCh d -> string (canonHexdChar d)
-    | WireCanon.CCtrl(hi, lo) ->
-        string (
-            char (
-                (if hi then 16 else 0)
-                + int (
-                    canonHexdChar lo
-                    |> fun ch ->
-                        if ch <= '9' then
-                            int ch - int '0'
-                        else
-                            int ch - int 'a' + 10
-                )
-            )
-        )
-    | WireCanon.CPlain s -> s
-
-let canonToChs (s: string) : WireCanon.ch list = s |> Seq.map canonToCh |> List.ofSeq
-
-let canonFromChs (l: WireCanon.ch list) : string =
-    l |> List.map canonFromCh |> String.concat ""
-
-let rec canonToModel (v: JVal) : WireCanon.jval<int, float> =
-    match v with
-    | JStr s -> WireCanon.JStr(canonToChs s)
-    | JInt i -> WireCanon.JInt i
-    | JBool b -> WireCanon.JBool b
-    | JFloat f -> WireCanon.JFloat f
-    | JArr xs -> WireCanon.JArr(xs |> List.map canonToModel)
-    | JObj fs -> WireCanon.JObj(fs |> List.map (fun (k, v) -> (canonToChs k, canonToModel v)))
-
-let rec canonOfModel (v: WireCanon.jval<int, float>) : JVal =
-    match v with
-    | WireCanon.JStr s -> JStr(canonFromChs s)
-    | WireCanon.JInt i -> JInt i
-    | WireCanon.JBool b -> JBool b
-    | WireCanon.JFloat f -> JFloat f
-    | WireCanon.JArr xs -> JArr(xs |> List.map canonOfModel)
-    | WireCanon.JObj fs -> JObj(fs |> List.map (fun (k, v) -> (canonFromChs k, canonOfModel v)))
-
 /// The `wire` the model is parametric over, instantiated at production's own layouts. Two of the
 /// seven fields are worth naming.
 ///
@@ -1689,55 +1570,6 @@ module ColumnDiff =
     let compareText (label: string) (what: string) (prod: string) (model: string) (t: Tally) : Tally =
         Differential.compare Differential.text (label + ": " + what) prod model t
 
-    /// The model's host record: what a host computes about a number and about temporal text.
-    /// `finite` is `System.Double.IsFinite`, not production's `JVal.nonFiniteToken`, so the model
-    /// is not handed the function it is compared with.
-    let host: WireColumn.host<int, float> =
-        { to_float = float
-          int_text = fun i -> canonToChs (string i)
-          finite = System.Double.IsFinite
-          zero_int = 0
-          zero_float = 0.0 }
-
-    /// The column types the list model spells: since Phase 430 every one of `ColumnType.all`, the
-    /// four timestamp units included (the calendar is `Temporal.fst`'s, no longer a host field).
-    let modelTypes: ColumnType list = ColumnType.all
-
-    /// `TimeUnit` as `Temporal.fst` spells it, and back.
-    let toModelUnit (u: TimeUnit) : Temporal.time_unit =
-        match u with
-        | TimeUnit.Seconds -> Temporal.Seconds
-        | TimeUnit.Milliseconds -> Temporal.Milliseconds
-        | TimeUnit.Microseconds -> Temporal.Microseconds
-        | TimeUnit.Nanoseconds -> Temporal.Nanoseconds
-
-    let ofModelUnit (u: Temporal.time_unit) : TimeUnit =
-        match u with
-        | Temporal.Seconds -> TimeUnit.Seconds
-        | Temporal.Milliseconds -> TimeUnit.Milliseconds
-        | Temporal.Microseconds -> TimeUnit.Microseconds
-        | Temporal.Nanoseconds -> TimeUnit.Nanoseconds
-
-    let toModelType (t: ColumnType) : WireColumn.column_type =
-        match t with
-        | IntType -> WireColumn.IntType
-        | FloatType -> WireColumn.FloatType
-        | BoolType -> WireColumn.BoolType
-        | StringType -> WireColumn.StringType
-        | DateType -> WireColumn.DateType
-        | TimestampType u -> WireColumn.TimestampType(toModelUnit u)
-        | DecimalType -> WireColumn.DecimalType
-
-    let ofModelType (t: WireColumn.column_type) : ColumnType =
-        match t with
-        | WireColumn.IntType -> IntType
-        | WireColumn.FloatType -> FloatType
-        | WireColumn.BoolType -> BoolType
-        | WireColumn.StringType -> StringType
-        | WireColumn.DateType -> DateType
-        | WireColumn.TimestampType u -> TimestampType(ofModelUnit u)
-        | WireColumn.DecimalType -> DecimalType
-
     /// A canonical instant for a column at `u`: a whole second, or a fraction of the unit's own
     /// digits, or of a coarser unit's — every unit at least as coarse as the column's, which is
     /// every text `ofCells` and decode admit there.
@@ -1765,113 +1597,6 @@ module ColumnDiff =
         | TimeUnit.Milliseconds -> Some "2026-01-01T00:00:00.000125Z"
         | TimeUnit.Microseconds -> Some "2026-01-01T00:00:00.000000007Z"
         | TimeUnit.Nanoseconds -> None
-
-    let toModelCell (c: Cell) : WireColumn.cell<int, float> =
-        match c with
-        | Int i -> WireColumn.Int i
-        | Float f -> WireColumn.Float f
-        | Bool b -> WireColumn.Bool b
-        | Str s -> WireColumn.Str(canonToChs s)
-        | Date s -> WireColumn.Date(canonToChs s)
-        | Timestamp s -> WireColumn.Timestamp(canonToChs s)
-        | Null -> WireColumn.Null
-        | Decimal s -> WireColumn.Decimal(canonToChs s)
-
-    let ofModelCell (c: WireColumn.cell<int, float>) : Cell =
-        match c with
-        | WireColumn.Int i -> Int i
-        | WireColumn.Float f -> Float f
-        | WireColumn.Bool b -> Bool b
-        | WireColumn.Str s -> Str(canonFromChs s)
-        | WireColumn.Date s -> Date(canonFromChs s)
-        | WireColumn.Timestamp s -> Timestamp(canonFromChs s)
-        | WireColumn.Null -> Null
-        | WireColumn.Decimal s -> Decimal(canonFromChs s)
-
-    let toModelTable (t: Table) : WireColumn.table<int, float> =
-        // Phase 427: the model's schema entry is a name and a type; a field's metadata (its unit,
-        // label, description and extension members) is OUTSIDE the model until Phase 428 extends it.
-        { schema = t.Schema |> List.map (fun f -> canonToChs f.Name, toModelType f.Type)
-          columns =
-            t.Columns
-            |> List.map (fun c ->
-                ({ name = canonToChs c.Name
-                   ctype = toModelType c.Type
-                   cells = Column.toCells c |> List.map toModelCell }
-                : WireColumn.column<int, float>)) }
-
-    /// The model's table as production's. Used for the model's NORMAL FORM of a table production
-    /// already validated, so every column's cells fit its type and construction cannot refuse: a
-    /// refusal here is a real defect, in the model's normal form or in `Column.ofCells`.
-    let ofModelTable (t: WireColumn.table<int, float>) : Table =
-        { Schema =
-            t.schema
-            |> List.map (fun (n, ty) -> Field.create (canonFromChs n) (ofModelType ty))
-          Columns =
-            t.columns
-            |> List.map (fun c ->
-                let name = canonFromChs c.name
-
-                match Column.ofCells name (ofModelType c.ctype) (c.cells |> List.map ofModelCell) with
-                | Result.Ok col -> col
-                | Result.Error e -> failtestf "the model's column %s did not build as production's: %A" name e) }
-
-    let toModelSource (src: DataSource) : WireColumn.data_source<int, float> =
-        match src with
-        | Embedded t -> WireColumn.Embedded(toModelTable t)
-        | Ref r -> WireColumn.Ref(canonToChs r)
-
-    let ofModelSource (src: WireColumn.data_source<int, float>) : DataSource =
-        match src with
-        | WireColumn.Embedded t -> Embedded(ofModelTable t)
-        | WireColumn.Ref r -> Ref(canonFromChs r)
-
-    /// A refusal as the CLASS the model keeps: the case, the column where the case names one, and
-    /// for a `Malformed` which of the five faults it is. The model drops production's prose and its
-    /// counts (it carries no integers), so that is what the two sides can be held to.
-    let prodClass (e: ColumnError) : string =
-        match e with
-        | NotJson _ -> "NotJson"
-        | MissingField f -> "MissingField " + f
-        | MalformedShape _ -> "MalformedShape"
-        | UnknownType(got, _) -> "UnknownType " + got
-        | TypeMismatch(col, expected, _) -> "TypeMismatch " + col + " " + ColumnType.tag expected
-        | LengthMismatch(col, _, _) -> "LengthMismatch " + col
-        | NonFiniteFloat(col, _) -> "NonFiniteFloat " + col
-        | RaggedColumns(col, _, _) -> "RaggedColumns " + col
-        | Malformed d ->
-            if d.StartsWith "duplicate schema name: " then
-                "Malformed " + d
-            elif d.StartsWith "duplicate column name: " then
-                "Malformed " + d
-            elif d.StartsWith "duplicate column key in \"columns\": " then
-                "Malformed " + d
-            elif d.StartsWith "schema names with no column: " then
-                "Malformed schema names with no column"
-            elif d.StartsWith "columns absent from the schema: " then
-                "Malformed columns absent from the schema"
-            else
-                "Malformed <unrecognised: " + d + ">"
-
-    let modelClass (e: WireColumn.column_error) : string =
-        match e with
-        | WireColumn.MissingField f -> "MissingField " + canonFromChs f
-        | WireColumn.MissingColumn c -> "MissingField columns." + canonFromChs c
-        | WireColumn.MalformedShape -> "MalformedShape"
-        | WireColumn.UnknownType got -> "UnknownType " + canonFromChs got
-        | WireColumn.TypeMismatch(col, expected) ->
-            "TypeMismatch " + canonFromChs col + " " + ColumnType.tag (ofModelType expected)
-        | WireColumn.LengthMismatch col -> "LengthMismatch " + canonFromChs col
-        | WireColumn.NonFiniteFloat col -> "NonFiniteFloat " + canonFromChs col
-        | WireColumn.RaggedColumns col -> "RaggedColumns " + canonFromChs col
-        | WireColumn.OutOfModel -> "OutOfModel"
-        | WireColumn.Malformed fault ->
-            match fault with
-            | WireColumn.DuplicateSchemaName n -> "Malformed duplicate schema name: " + canonFromChs n
-            | WireColumn.DuplicateColumnName n -> "Malformed duplicate column name: " + canonFromChs n
-            | WireColumn.DuplicateColumnKey k -> "Malformed duplicate column key in \"columns\": " + canonFromChs k
-            | WireColumn.SchemaNameWithoutColumn -> "Malformed schema names with no column"
-            | WireColumn.ColumnOutsideSchema -> "Malformed columns absent from the schema"
 
     /// A decoded source as text, a float by its canonical layout — so two sources are compared as
     /// what they hold and a `Float -0.0` beside a `Float 0.0` is not a disagreement the wire could
@@ -2179,183 +1904,8 @@ module ColumnDiff =
 
 module UnitDiff =
 
-    /// A character of a unit's text as the model's symbol; anything outside the alphabet is `Other`.
-    let uchOf (c: char) : ModelUnit.uch =
-        match c with
-        | 'a' -> ModelUnit.La
-        | 'b' -> ModelUnit.Lb
-        | 'c' -> ModelUnit.Lc
-        | 'd' -> ModelUnit.Ld
-        | 'e' -> ModelUnit.Le
-        | 'f' -> ModelUnit.Lf
-        | 'g' -> ModelUnit.Lg
-        | 'h' -> ModelUnit.Lh
-        | 'i' -> ModelUnit.Li
-        | 'j' -> ModelUnit.Lj
-        | 'k' -> ModelUnit.Lk
-        | 'l' -> ModelUnit.Ll
-        | 'm' -> ModelUnit.Lm
-        | 'n' -> ModelUnit.Ln
-        | 'o' -> ModelUnit.Lo
-        | 'p' -> ModelUnit.Lp
-        | 'q' -> ModelUnit.Lq
-        | 'r' -> ModelUnit.Lr
-        | 's' -> ModelUnit.Ls
-        | 't' -> ModelUnit.Lt
-        | 'u' -> ModelUnit.Lu
-        | 'v' -> ModelUnit.Lv
-        | 'w' -> ModelUnit.Lw
-        | 'x' -> ModelUnit.Lx
-        | 'y' -> ModelUnit.Ly
-        | 'z' -> ModelUnit.Lz
-        | 'A' -> ModelUnit.UA
-        | 'B' -> ModelUnit.UB
-        | 'C' -> ModelUnit.UC
-        | 'D' -> ModelUnit.UD
-        | 'E' -> ModelUnit.UE
-        | 'F' -> ModelUnit.UF
-        | 'G' -> ModelUnit.UG
-        | 'H' -> ModelUnit.UH
-        | 'I' -> ModelUnit.UI
-        | 'J' -> ModelUnit.UJ
-        | 'K' -> ModelUnit.UK
-        | 'L' -> ModelUnit.UL
-        | 'M' -> ModelUnit.UM
-        | 'N' -> ModelUnit.UN
-        | 'O' -> ModelUnit.UO
-        | 'P' -> ModelUnit.UP
-        | 'Q' -> ModelUnit.UQ
-        | 'R' -> ModelUnit.UR
-        | 'S' -> ModelUnit.US
-        | 'T' -> ModelUnit.UT
-        | 'U' -> ModelUnit.UU
-        | 'V' -> ModelUnit.UV
-        | 'W' -> ModelUnit.UW
-        | 'X' -> ModelUnit.UX
-        | 'Y' -> ModelUnit.UY
-        | 'Z' -> ModelUnit.UZ
-        | '0' -> ModelUnit.D0
-        | '1' -> ModelUnit.D1
-        | '2' -> ModelUnit.D2
-        | '3' -> ModelUnit.D3
-        | '4' -> ModelUnit.D4
-        | '5' -> ModelUnit.D5
-        | '6' -> ModelUnit.D6
-        | '7' -> ModelUnit.D7
-        | '8' -> ModelUnit.D8
-        | '9' -> ModelUnit.D9
-        | '.' -> ModelUnit.Dot
-        | '/' -> ModelUnit.Slash
-        | '(' -> ModelUnit.LPar
-        | ')' -> ModelUnit.RPar
-        | '[' -> ModelUnit.LBr
-        | ']' -> ModelUnit.RBr
-        | '{' -> ModelUnit.LCur
-        | '}' -> ModelUnit.RCur
-        | '%' -> ModelUnit.Pct
-        | '_' -> ModelUnit.Under
-        | ''' -> ModelUnit.Apos
-        | '-' -> ModelUnit.Minus
-        | '+' -> ModelUnit.Plus
-        | '*' -> ModelUnit.Star
-        | '^' -> ModelUnit.Caret
-        | _ -> ModelUnit.Other
+    open Fuaran.Core.Tests.ColumnOracle.Units
 
-    /// The model's symbol as a character; `Other` has none and is written `?`.
-    let charOf (c: ModelUnit.uch) : char =
-        match c with
-        | ModelUnit.La -> 'a'
-        | ModelUnit.Lb -> 'b'
-        | ModelUnit.Lc -> 'c'
-        | ModelUnit.Ld -> 'd'
-        | ModelUnit.Le -> 'e'
-        | ModelUnit.Lf -> 'f'
-        | ModelUnit.Lg -> 'g'
-        | ModelUnit.Lh -> 'h'
-        | ModelUnit.Li -> 'i'
-        | ModelUnit.Lj -> 'j'
-        | ModelUnit.Lk -> 'k'
-        | ModelUnit.Ll -> 'l'
-        | ModelUnit.Lm -> 'm'
-        | ModelUnit.Ln -> 'n'
-        | ModelUnit.Lo -> 'o'
-        | ModelUnit.Lp -> 'p'
-        | ModelUnit.Lq -> 'q'
-        | ModelUnit.Lr -> 'r'
-        | ModelUnit.Ls -> 's'
-        | ModelUnit.Lt -> 't'
-        | ModelUnit.Lu -> 'u'
-        | ModelUnit.Lv -> 'v'
-        | ModelUnit.Lw -> 'w'
-        | ModelUnit.Lx -> 'x'
-        | ModelUnit.Ly -> 'y'
-        | ModelUnit.Lz -> 'z'
-        | ModelUnit.UA -> 'A'
-        | ModelUnit.UB -> 'B'
-        | ModelUnit.UC -> 'C'
-        | ModelUnit.UD -> 'D'
-        | ModelUnit.UE -> 'E'
-        | ModelUnit.UF -> 'F'
-        | ModelUnit.UG -> 'G'
-        | ModelUnit.UH -> 'H'
-        | ModelUnit.UI -> 'I'
-        | ModelUnit.UJ -> 'J'
-        | ModelUnit.UK -> 'K'
-        | ModelUnit.UL -> 'L'
-        | ModelUnit.UM -> 'M'
-        | ModelUnit.UN -> 'N'
-        | ModelUnit.UO -> 'O'
-        | ModelUnit.UP -> 'P'
-        | ModelUnit.UQ -> 'Q'
-        | ModelUnit.UR -> 'R'
-        | ModelUnit.US -> 'S'
-        | ModelUnit.UT -> 'T'
-        | ModelUnit.UU -> 'U'
-        | ModelUnit.UV -> 'V'
-        | ModelUnit.UW -> 'W'
-        | ModelUnit.UX -> 'X'
-        | ModelUnit.UY -> 'Y'
-        | ModelUnit.UZ -> 'Z'
-        | ModelUnit.D0 -> '0'
-        | ModelUnit.D1 -> '1'
-        | ModelUnit.D2 -> '2'
-        | ModelUnit.D3 -> '3'
-        | ModelUnit.D4 -> '4'
-        | ModelUnit.D5 -> '5'
-        | ModelUnit.D6 -> '6'
-        | ModelUnit.D7 -> '7'
-        | ModelUnit.D8 -> '8'
-        | ModelUnit.D9 -> '9'
-        | ModelUnit.Dot -> '.'
-        | ModelUnit.Slash -> '/'
-        | ModelUnit.LPar -> '('
-        | ModelUnit.RPar -> ')'
-        | ModelUnit.LBr -> '['
-        | ModelUnit.RBr -> ']'
-        | ModelUnit.LCur -> '{'
-        | ModelUnit.RCur -> '}'
-        | ModelUnit.Pct -> '%'
-        | ModelUnit.Under -> '_'
-        | ModelUnit.Apos -> '''
-        | ModelUnit.Minus -> '-'
-        | ModelUnit.Plus -> '+'
-        | ModelUnit.Star -> '*'
-        | ModelUnit.Caret -> '^'
-        | ModelUnit.Other -> '?'
-
-    let toText (s: string) : ModelUnit.text = s |> Seq.map uchOf |> List.ofSeq
-
-    let ofText (t: ModelUnit.text) : string =
-        t |> List.map charOf |> Array.ofList |> System.String
-
-    /// Production's unit as the model's, through its canonical text — a refusal here is a real
-    /// defect: the model declines a text production wrote as canonical.
-    let toModel (u: UnitOfMeasure) : ModelUnit.uom =
-        match ModelUnit.parse (toText (Unit.render u)) with
-        | ModelUnit.Ok m -> m
-        | ModelUnit.Refused r -> failtestf "the model refused production's canonical text %s: %A" (Unit.render u) r
-
-    let modelRender (m: ModelUnit.uom) : string = ofText (ModelUnit.render m)
 
     /// Production's `expected` prose as the model's enumeration — the one place the two spell a
     /// refusal differently, mapped once.
@@ -2778,11 +2328,14 @@ module VectorStamps =
         [ "apply/skeleton-apply.json", ("TreeOps", 25)
           "laws/capability-laws.json", ("Capability", 48)
           "laws/decimal-laws.json", ("DecimalText", 49)
+          "laws/decimal-laws.json", ("WireColumn", 7)
+          "laws/field-laws.json", ("WireColumn", 24)
           "laws/propagation-laws.json", ("Propagation", 73)
           "premises/int53.json", ("JsonParse", 29)
           "premises/recursion-depth.json", ("JsonParse", 13)
           "premises/string-model.json", ("JsonParse", 10)
-          "refusals/codec-refusals.json", ("JsonParse", 56) ]
+          "refusals/codec-refusals.json", ("JsonParse", 59)
+          "refusals/codec-refusals.json", ("WireColumn", 13) ]
 
     [<Tests>]
     let tests =

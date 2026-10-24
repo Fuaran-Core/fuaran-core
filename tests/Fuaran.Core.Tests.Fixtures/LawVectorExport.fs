@@ -476,6 +476,25 @@ module LawVectorExport =
               "mean-past-float", Mean, [ Decimal("1" + String.replicate 399 "0"); Decimal "0.5" ]
               "sum-not-decimal", Sum, [ Decimal "1"; Decimal "1e3" ] ]
 
+        /// A codec outcome as these vectors record it: the canonical bytes, or the refusal's class
+        /// (`NotJson` for a parse refusal, whichever parse fault it was).
+        let private codecCells (o: ColumnOracle.Outcome) : CorpusCell =
+            match o with
+            | Ok canonical -> jobj (accept [ "canonical", jstr canonical ])
+            | Error cls -> jobj (reject (cls.Split('/')[0]))
+
+        /// The `codecDecode` vectors the column model declines (the not-answered rule, D232): a JSON
+        /// number in the decimal column reaches the decoder as a float — a fraction, an exponent, or a
+        /// whole number past the 32-bit integer the parser reads as an int — and the decoder's
+        /// lenient-ingest arm for it is outside the model (`proofs/WireColumn.fst`, `decode_cell`).
+        let decodeOutOfModel: Map<string, string> =
+            [ "decode-integer-token-past-int32", "a whole number past 2^31 is read as a JSON float"
+              "decode-whole-exponent-token", "an exponent token is read as a JSON float"
+              "decode-refuses-fractional-token", "a fraction token is a JSON float"
+              "decode-refuses-integer-token-past-2-53", "a whole number past 2^53 is read as a JSON float"
+              "decode-refuses-whole-float-past-2-53", "an exponent token is read as a JSON float" ]
+            |> Map.ofList
+
         // ---- the vectors, computed by calling the kit ----
 
         let internal allVectors () : Vector list =
@@ -536,7 +555,9 @@ module LawVectorExport =
 
                   { Id = "decode-" + name
                     Case = "codecDecode"
-                    Model = None
+                    Model =
+                      ColumnOracle.decode ColumnOracle.CodecRow codecCells doc
+                      |> VectorOracle.admit decodeOutOfModel ("decode-" + name)
                     Input = [ "document", jstr doc ]
                     Expected =
                       match ColumnCodec.decode doc with
@@ -545,7 +566,12 @@ module LawVectorExport =
               for name, cells in encodeInputs ->
                   { Id = "encode-" + name
                     Case = "codecEncode"
-                    Model = None
+                    Model =
+                      match source cells with
+                      | Ok(Embedded t) ->
+                          ColumnOracle.encode codecCells t
+                          |> VectorOracle.admit Map.empty ("encode-" + name)
+                      | other -> failwithf "the decimal column for encode-%s did not build: %A" name other
                     Input = [ "cells", jarr (cells |> List.map cellJson) ]
                     Expected =
                       match source cells |> Result.bind ColumnCodec.tryEncode with
@@ -750,6 +776,12 @@ module LawVectorExport =
             | SchemaCompat.Breaking _ -> "breaking"
             | SchemaCompat.Unknown _ -> "unknown"
 
+        /// A codec outcome as these vectors record it (the decimal documents' shape).
+        let private codecCells (o: ColumnOracle.Outcome) : CorpusCell =
+            match o with
+            | Ok canonical -> jobj (accept [ "canonical", jstr canonical ])
+            | Error cls -> jobj (reject (cls.Split('/')[0]))
+
         // ---- the vectors, computed by calling the kit ----
 
         let internal allVectors () : Vector list =
@@ -770,14 +802,20 @@ module LawVectorExport =
 
                   { Id = "encode-" + name
                     Case = "fieldEncode"
-                    Model = None
+                    Model =
+                      Some
+                          { Model = ColumnOracle.Model
+                            LadderRow = ColumnOracle.FieldRow
+                            Cell = jobj (accept [ "canonical", jstr (ColumnOracle.fieldEntry f) ]) }
                     Input = members
                     Expected =
                       accept [ "canonical", jstr (Canonical.write Rendering.CrossHost (ColumnCodec.fieldJson f)) ] }
               for name, doc in decodeInputs ->
                   { Id = "decode-" + name
                     Case = "codecDecode"
-                    Model = None
+                    Model =
+                      ColumnOracle.decode ColumnOracle.FieldRow codecCells doc
+                      |> VectorOracle.admit Map.empty ("decode-" + name)
                     Input = [ "document", jstr doc ]
                     Expected =
                       match ColumnCodec.decode doc with

@@ -11,6 +11,7 @@ open Fuaran.Core
 open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.ProofOracle.Bridges
+open Fuaran.Core.Tests.CanonOracle
 
 // ---------------------------------------------------------------------------
 //  Phase 419 — the REFINEMENT: `ColumnRefinement` beside `Column.ofCells` / `Column.toCells`, the
@@ -27,7 +28,7 @@ open Fuaran.Core.Tests.ProofOracle.Bridges
 
 module private RefinementDiff =
 
-    let host = ColumnDiff.host
+    let host = ColumnOracle.host
 
     /// Production's column as the model's typed column: the case, every vector through `toArray`.
     let toTyped (c: Column) : ColumnRefinement.typed_column<int, float> =
@@ -48,7 +49,7 @@ module private RefinementDiff =
             | Dates(xs, _) -> ColumnRefinement.Dates(Vector.toArray xs |> List.ofArray |> List.map bigint, mask)
             | Timestamps(u, xs, f, _) ->
                 ColumnRefinement.Timestamps(
-                    ColumnDiff.toModelUnit u,
+                    ColumnOracle.toModelUnit u,
                     Vector.toArray xs |> List.ofArray |> List.map (fun s -> bigint (int64 s)),
                     toMOpt (f |> Option.map (fun fs -> Vector.toArray fs |> List.ofArray |> List.map bigint)),
                     mask
@@ -60,7 +61,9 @@ module private RefinementDiff =
         : ColumnRefinement.typed_column<int, float>)
 
     let toTypedTable (t: Table) : ColumnRefinement.typed_table<int, float> =
-        ({ tschema = t.Schema |> List.map (fun f -> canonToChs f.Name, ColumnDiff.toModelType f.Type)
+        ({ tschema =
+            t.Schema
+            |> List.map (fun f -> canonToChs f.Name, ColumnOracle.toModelType f.Type)
            tcolumns = t.Columns |> List.map toTyped }
         : ColumnRefinement.typed_table<int, float>)
 
@@ -75,7 +78,7 @@ module private RefinementDiff =
         |> String.concat ";"
 
     let showModelCells (cells: WireColumn.cell<int, float> list) : string =
-        cells |> List.map ColumnDiff.ofModelCell |> showCells
+        cells |> List.map ColumnOracle.ofModelCell |> showCells
 
     let private texts = [| "1.5"; "x"; ""; "12"; "2026-02-28"; "k\"q"; "é" |]
 
@@ -151,11 +154,11 @@ module private RefinementDiff =
     /// through its typed vector; and the literal bridge, counted rather than asserted.
     let probe (label: string) (name: string) (ty: ColumnType) (cells: Cell list) (widened: bool) (t: Tally) : Tally =
         let t = t |> Tally.bump "Draws" |> Tally.reach "Types" (ColumnType.tag ty)
-        let modelCells = cells |> List.map ColumnDiff.toModelCell
+        let modelCells = cells |> List.map ColumnOracle.toModelCell
         let prod = Column.ofCells name ty cells
 
         let model =
-            ColumnRefinement.of_cells host (canonToChs name) (ColumnDiff.toModelType ty) modelCells
+            ColumnRefinement.of_cells host (canonToChs name) (ColumnOracle.toModelType ty) modelCells
 
         match prod, model with
         | Result.Ok pc, WireColumn.Good mc ->
@@ -209,10 +212,10 @@ module private RefinementDiff =
                     (showCells prodCells)
                     (showCells cells))
         | Result.Error pe, WireColumn.Bad me ->
-            let p = ColumnDiff.prodClass pe
+            let p = ColumnOracle.prodClass pe
 
             t
-            |> compareText label "ofCells refused" p (ColumnDiff.modelClass me)
+            |> compareText label "ofCells refused" p (ColumnOracle.modelClass me)
             |> Tally.bump "Refused"
             |> Tally.reach "Classes" (p.Split(' ')[0])
         | Result.Ok pc, WireColumn.Bad me ->
@@ -220,13 +223,13 @@ module private RefinementDiff =
                 label
                 "ofCells"
                 ("ok " + showCells (Column.toCells pc))
-                ("refused " + ColumnDiff.modelClass me)
+                ("refused " + ColumnOracle.modelClass me)
                 t
         | Result.Error pe, WireColumn.Good mc ->
             compareText
                 label
                 "ofCells"
-                ("refused " + ColumnDiff.prodClass pe)
+                ("refused " + ColumnOracle.prodClass pe)
                 ("ok " + showModelCells (ColumnRefinement.to_cells mc))
                 t
 
@@ -241,7 +244,7 @@ module private RefinementDiff =
 
         refinementTally
         |> Differential.seeded trials r (fun i r t ->
-            let ty = ColumnDiff.modelTypes[draw ColumnDiff.modelTypes.Length]
+            let ty = ColumnOracle.modelTypes[draw ColumnOracle.modelTypes.Length]
             let rows = draw 5
             let drawn = [ for _ in 1..rows -> cellOf draw ty ]
             let cells = drawn |> List.map fst
@@ -270,12 +273,12 @@ module private RefinementDiff =
         let prodV =
             match Table.validate table with
             | Result.Ok() -> "ok"
-            | Result.Error e -> "refused " + ColumnDiff.prodClass e
+            | Result.Error e -> "refused " + ColumnOracle.prodClass e
 
         let showT (r: WireColumn.res<unit>) =
             match r with
             | WireColumn.Good _ -> "ok"
-            | WireColumn.Bad e -> "refused " + ColumnDiff.modelClass e
+            | WireColumn.Bad e -> "refused " + ColumnOracle.modelClass e
 
         let modelV = showT (ColumnRefinement.validate_t host tt)
         let listV = showT (WireColumn.validate host (ColumnRefinement.to_list_table tt))
@@ -423,7 +426,7 @@ let tests =
 
               Expect.equal
                   (Tally.reached "Types" fitting)
-                  (ColumnDiff.modelTypes |> List.map ColumnType.tag |> Set.ofList)
+                  (ColumnOracle.modelTypes |> List.map ColumnType.tag |> Set.ofList)
                   "every column type the list model spells was drawn"
 
               Expect.isGreaterThan

@@ -216,8 +216,28 @@ module RefusalCorpus =
         | Error cls -> [ "refusal", JStr cls ]
         | Ok canonical -> [ "canonical", JStr canonical ]
 
-    /// The parser model's outcome for a `json` vector (Phase 478): its read, re-encoded by the same
-    /// canonical writer. The `column` and `profile` codecs are answered by the reference alone.
+    /// The `column` vectors the column model declines (the not-answered rule, D232): each reaches a
+    /// lenient-ingest arm of the decoder, which is outside the model (`proofs/WireColumn.fst`) — a JSON
+    /// number where a decimal or timestamp column holds text (a fraction, an exponent, a whole number
+    /// past the 32-bit integer the parser reads as an int, an epoch number; `decode_cell`), a column
+    /// written as a bare array (`column_parts`), or a table with no schema (`decode_json`).
+    let columnOutOfModel: Map<string, string> =
+        [ "fraction-in-decimal", "a fraction token in a decimal column"
+          "whole-float-past-int53-in-decimal", "an exponent token in a decimal column"
+          "int-token-past-int32-in-decimal", "a whole number past 2^31 in a decimal column"
+          "whole-exponent-token-in-decimal", "an exponent token in a decimal column"
+          "negative-past-int32-in-decimal", "a whole number past 2^31 in a decimal column"
+          "timestamp-epoch-past-year-9999", "an epoch number in a timestamp column"
+          "timestamp-epoch-seconds", "an epoch number in a timestamp column"
+          "duplicate-schema-name", "its column is written as a bare array"
+          "ragged-columns", "it has no schema, so the decoder infers one"
+          "surplus-members-read-past", "its column is written as a bare array" ]
+        |> Map.ofList
+
+    /// The models' outcome for a vector (Phase 478, Phase 563): a `json` vector is the parser model's
+    /// read, re-encoded by the same canonical writer; a `column` vector is the parser model's read
+    /// decoded by the column model (a parse refusal is the parser's answer). The `profile` codec is
+    /// answered by the reference alone: no model states the profile grammar.
     let private modelOutcome (v: Vector) : (string * string * JVal) option =
         match v.Codec with
         | "json" ->
@@ -226,6 +246,13 @@ module RefusalCorpus =
                 |> Result.map (Canonical.write Rendering.CrossHost)
 
             Some(VectorOracle.JsonModel.Model, VectorOracle.JsonModel.LadderRow, JObj(outcomeMembers o))
+        | "column" ->
+            ColumnOracle.decode ColumnOracle.CodecRow (fun o -> CorpusCell.Value(JObj(outcomeMembers o))) v.Input
+            |> VectorOracle.admit columnOutOfModel v.Name
+            |> Option.map (fun a ->
+                match a.Cell with
+                | CorpusCell.Value answer -> a.Model, a.LadderRow, answer
+                | other -> failwithf "a refusal vector's answer is a compact value, not %A" other)
         | _ -> None
 
     let private line (v: Vector) : CorpusCell =

@@ -11,6 +11,7 @@ open Fuaran.Core
 open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.ProofOracle.Bridges
+open Fuaran.Core.Tests.CanonOracle
 
 // ---------------------------------------------------------------------------
 // Phase 428 — the field codec beside `WireColumn.fst` section 10.
@@ -18,62 +19,7 @@ open Fuaran.Core.Tests.ProofOracle.Bridges
 
 module private FieldDiff =
 
-    let host = ColumnDiff.host
-
-    let private toOpt (o: 'a option) : FStar_Pervasives_Native.option<'a> =
-        match o with
-        | Some x -> FStar_Pervasives_Native.Some x
-        | None -> FStar_Pervasives_Native.None
-
-    let private ofOpt (o: FStar_Pervasives_Native.option<'a>) : 'a option =
-        match o with
-        | FStar_Pervasives_Native.Some x -> Some x
-        | FStar_Pervasives_Native.None -> None
-
-    /// Production's field as the model's: the unit through `UnitDiff.toModel`, the extension map in
-    /// the key order `Map.toList` answers. `reverseExt` is the go-red's dial.
-    let toModelFieldWith (reverseExt: bool) (f: Field) : WireColumn.field =
-        let ext = f.Ext |> Map.toList |> List.map (fun (k, v) -> canonToChs k, canonToChs v)
-
-        { fname = canonToChs f.Name
-          fty = ColumnDiff.toModelType f.Type
-          funit = f.Unit |> Option.map UnitDiff.toModel |> toOpt
-          flabel = f.Label |> Option.map canonToChs |> toOpt
-          fdesc = f.Description |> Option.map canonToChs |> toOpt
-          fext = (if reverseExt then List.rev ext else ext) }
-
-    let toModelField (f: Field) : WireColumn.field = toModelFieldWith false f
-
-    /// The model's field as production's — the unit through its canonical text, the extension
-    /// members through `withExt` in the list's order.
-    let ofModelField (f: WireColumn.field) : Field =
-        let unit =
-            match ofOpt f.funit with
-            | Some m ->
-                match Unit.parse (UnitDiff.modelRender m) with
-                | Ok u -> Some u
-                | Error e -> failtestf "production refused the model's unit text %s: %A" (UnitDiff.modelRender m) e
-            | None -> None
-
-        let f0 = Field.create (canonFromChs f.fname) (ColumnDiff.ofModelType f.fty)
-
-        let f1 =
-            (match unit with
-             | Some u -> Field.withUnit u f0
-             | None -> f0)
-
-        let f2 =
-            (match ofOpt f.flabel with
-             | Some l -> Field.withLabel (canonFromChs l) f1
-             | None -> f1)
-
-        let f3 =
-            match ofOpt f.fdesc with
-            | Some d -> Field.withDescription (canonFromChs d) f2
-            | None -> f2
-
-        f.fext
-        |> List.fold (fun g (k, v) -> Field.withExt (canonFromChs k) (canonFromChs v) g) f3
+    let host = ColumnOracle.host
 
     let showField (f: Field) : string =
         f.Name
@@ -97,12 +43,12 @@ module private FieldDiff =
     let private showProdField (r: Result<Field, ColumnError>) : string =
         match r with
         | Result.Ok f -> "ok " + showField f
-        | Result.Error e -> "refused " + ColumnDiff.prodClass e
+        | Result.Error e -> "refused " + ColumnOracle.prodClass e
 
     let private showModelField (r: WireColumn.res<WireColumn.field>) : string =
         match r with
-        | WireColumn.Good f -> "ok " + showField (ofModelField f)
-        | WireColumn.Bad e -> "refused " + ColumnDiff.modelClass e
+        | WireColumn.Good f -> "ok " + showField (ColumnOracle.ofModelField f)
+        | WireColumn.Bad e -> "refused " + ColumnOracle.modelClass e
 
     /// The field tally: the fields drawn, those stating a unit, those with extension members and
     /// those with two or more; the documents read by both; the tables drawn, those `validate`
@@ -129,7 +75,7 @@ module private FieldDiff =
 
         let t =
             match prod with
-            | Result.Error e -> Tally.reach "Refusals" ((ColumnDiff.prodClass e).Split(' ')[0]) t
+            | Result.Error e -> Tally.reach "Refusals" ((ColumnOracle.prodClass e).Split(' ')[0]) t
             | Result.Ok _ -> t
 
         compareText label "decodeField" (showProdField prod) (showModelField model) t
@@ -145,7 +91,9 @@ module private FieldDiff =
             |> Tally.bumpIf (f.Ext.Count >= 2) "ExtMulti"
 
         let prodJson = ColumnCodec.fieldJson f
-        let modelJson = canonOfModel (WireColumn.field_json (toModelFieldWith reverseExt f))
+
+        let modelJson =
+            canonOfModel (WireColumn.field_json (ColumnOracle.toModelFieldWith reverseExt f))
 
         if reverseExt then
             compareText
@@ -161,18 +109,6 @@ module private FieldDiff =
 
     // ---- tables with metadata ----
 
-    let toModelTable (t: Table) : WireColumn.table_f<int, float> =
-        let m = ColumnDiff.toModelTable t
-
-        { fschema = t.Schema |> List.map toModelField
-          fcolumns = m.columns }
-
-    let ofModelTable (m: WireColumn.table_f<int, float>) : Table =
-        let stripped = ColumnDiff.ofModelTable (WireColumn.strip m)
-
-        { stripped with
-            Schema = m.fschema |> List.map ofModelField }
-
     let showTable (t: Table) : string =
         (t.Schema |> List.map showField |> String.concat ", ")
         + " | "
@@ -182,19 +118,19 @@ module private FieldDiff =
         match r with
         | Result.Ok(Embedded t) -> "ok " + showTable t
         | Result.Ok(Ref r) -> "ok ref " + r
-        | Result.Error e -> "refused " + ColumnDiff.prodClass e
+        | Result.Error e -> "refused " + ColumnOracle.prodClass e
 
     let private showModelSource (r: WireColumn.res<WireColumn.data_source_f<int, float>>) : string =
         match r with
-        | WireColumn.Good(WireColumn.Embedded_f t) -> "ok " + showTable (ofModelTable t)
+        | WireColumn.Good(WireColumn.Embedded_f t) -> "ok " + showTable (ColumnOracle.ofModelTableF t)
         | WireColumn.Good(WireColumn.Ref_f r) -> "ok ref " + canonFromChs r
-        | WireColumn.Bad e -> "refused " + ColumnDiff.modelClass e
+        | WireColumn.Bad e -> "refused " + ColumnOracle.modelClass e
 
     /// One table: `validate`; `encodeJson` beside `encode_json_f`; `decodeJson` of the encoding beside
     /// `decode_json_f`; and, for a table `validate` accepts, the round trip against the model's
     /// `normal_table_f` — the columns in schema order, every field intact.
     let probeTable (label: string) (table: Table) (t: Tally) : Tally =
-        let m = toModelTable table
+        let m = ColumnOracle.toModelTableF table
         let t = Tally.bump "Tables" t
         let prodValid = Table.validate table
         let modelValid = WireColumn.validate_f host m
@@ -202,12 +138,12 @@ module private FieldDiff =
         let prodV =
             match prodValid with
             | Result.Ok() -> "ok"
-            | Result.Error e -> "refused " + ColumnDiff.prodClass e
+            | Result.Error e -> "refused " + ColumnOracle.prodClass e
 
         let modelV =
             match modelValid with
             | WireColumn.Good _ -> "ok"
-            | WireColumn.Bad e -> "refused " + ColumnDiff.modelClass e
+            | WireColumn.Bad e -> "refused " + ColumnOracle.modelClass e
 
         let prodJson = ColumnCodec.encodeJson (Embedded table)
         let modelJson = WireColumn.encode_json_f host (WireColumn.Embedded_f m)
@@ -224,7 +160,7 @@ module private FieldDiff =
         match prodValid with
         | Result.Error _ -> t
         | Result.Ok() ->
-            let normal = ofModelTable (WireColumn.normal_table_f host m)
+            let normal = ColumnOracle.ofModelTableF (WireColumn.normal_table_f host m)
 
             t
             |> Tally.bumpIf (showTable normal <> showTable table) "OutsideNormalForm"
@@ -246,7 +182,7 @@ module private FieldDiff =
               let f =
                   Field.create
                       (names[rng.Next names.Length] + string i)
-                      ColumnDiff.modelTypes[rng.Next ColumnDiff.modelTypes.Length]
+                      ColumnOracle.modelTypes[rng.Next ColumnOracle.modelTypes.Length]
 
               let f =
                   if rng.Next 2 = 0 then

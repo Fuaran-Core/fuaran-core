@@ -11,6 +11,7 @@ open Fuaran.Core
 open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.ProofOracle.Bridges
+open Fuaran.Core.Tests.CanonOracle
 
 let private canonWire: WireCanon.wire<int, float> =
     { int_str = fun i -> canonToChs (string i)
