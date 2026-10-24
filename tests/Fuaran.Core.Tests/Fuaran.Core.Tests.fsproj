@@ -149,6 +149,8 @@
     <Compile Include="ProofOracle.ChainSnapshotTests.fs" />
     <Compile Include="ProofOracle.ColumnRefinementTests.fs" />
     <Compile Include="ProofOracle.DagFoldTests.fs" />
+    <Compile Include="ProofOracle.DagDrainTests.fs" />
+    <Compile Include="ProofOracle.DagMergeTests.fs" />
     <Compile Include="ProofOracle.DecimalTextTests.fs" />
     <Compile Include="ProofOracle.DecodeLayerTests.fs" />
     <Compile Include="ProofOracle.JsonParseTests.fs" />
