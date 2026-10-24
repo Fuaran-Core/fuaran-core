@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Fuaran-Core/fuaran-core/blob/main/docs/host-compliance.schema.json",
   "title": "hostCompliance",
-  "description": "A host's compliance declaration (fuaran-core Phase 484, DECISIONS.md D229): committed as `host-compliance.json` at the host's own root, it names, for rows of Core's claims ladder (proofs.json), the evidence the host offers. This schema is the SHAPE; whether the declaration is TRUE is Core's validator's question (`dotnet run --project tools/Fuaran.Core.Tools -- compliance <file>`, from the Core checkout `coreVersion` names), which reads the evidence map, the family manifests' adoption records and the host-premise rows. docs/host-compliance.md states every refusal and the verdict.",
+  "description": "A host's compliance declaration (fuaran-core Phase 484, DECISIONS.md D229, amended by D233): committed as `host-compliance.json` at the host's own root, it names, for rows of Core's claims ladder (proofs.json), the evidence the host offers. This schema is the SHAPE; whether the declaration is TRUE is Core's validator's question (`dotnet run --project tools/Fuaran.Core.Tools -- compliance <file>`, from the Core checkout `coreVersion` names), which reads the evidence map, the family manifests' adoption records, the host-premise rows and the ladder's host-proof rows. docs/host-compliance.md states every refusal and the verdict.",
   "type": "object",
   "required": ["kind", "host", "coreVersion", "rows"],
   "additionalProperties": false,
@@ -43,12 +43,13 @@
       "type": "object",
       "required": ["class"],
       "properties": {
-        "class": { "enum": ["vector-certified", "oracle-differential", "host-premise", "not-covered"] }
+        "class": { "enum": ["vector-certified", "oracle-differential", "host-premise", "proof-replayed", "not-covered"] }
       },
       "oneOf": [
         { "$ref": "#/$defs/vector-certified" },
         { "$ref": "#/$defs/oracle-differential" },
         { "$ref": "#/$defs/host-premise" },
+        { "$ref": "#/$defs/proof-replayed" },
         { "$ref": "#/$defs/not-covered" }
       ]
     },
@@ -85,6 +86,17 @@
         "class": { "const": "host-premise" },
         "probe": { "type": "string" },
         "cases": { "type": "integer", "minimum": 0, "maximum": 2147483647 }
+      }
+    },
+    "proof-replayed": {
+      "description": "The host's own verifier proved its code against a model of Core's, and replayed the proof (DECISIONS.md D233). It stands on the ladder row recording that proof (a `proved` row carrying `repo`, the host), and names the toolchain and the replay identity the row records. Core checks the citation, never the proof: it does not run the host's prover.",
+      "type": "object",
+      "required": ["class", "toolchain", "replay"],
+      "additionalProperties": false,
+      "properties": {
+        "class": { "const": "proof-replayed" },
+        "toolchain": { "type": "string", "minLength": 1 },
+        "replay": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
       }
     },
     "not-covered": {

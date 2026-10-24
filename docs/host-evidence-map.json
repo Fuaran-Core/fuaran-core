@@ -163,6 +163,7 @@
     {"id":"canon-numeral-layouts","level":"assumed","families":[],"oracle":[]},
     {"id":"canon-key-comparator","level":"assumed","families":[],"oracle":[]},
     {"id":"canon-character-bridge","level":"assumed","families":[],"oracle":[]},
+    {"id":"spine-escape-quoted","level":"proved","host":"fuaran-core-rs","families":[],"oracle":[]},
     {"id":"vocabulary-generated-model","level":"proved","model":"Vocabulary","families":[],"oracle":[]},
     {"id":"vocabulary-round-trip","level":"proved","model":"VocabularyProofs","families":[],"oracle":[]},
     {"id":"doc-vocabulary-generated-model","level":"proved","model":"DocVocabulary","families":[],"oracle":[]},

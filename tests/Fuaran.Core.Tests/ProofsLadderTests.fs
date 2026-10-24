@@ -48,8 +48,12 @@ module Fuaran.Core.Tests.ProofsLadderTests
 //   evidence-exists         (522) every path LADDER.md says must exist does (a policy row's
 //                           `document`, a tested row's `artifact` and `host`), every `supporting`
 //                           declaration is top-level in its model like `theorem` (reported under
-//                           theorem-exists), and no row carries `repo`: this family holds rows to
-//                           THIS tree, so a row resting on another repository's cannot be held here.
+//                           theorem-exists).
+//   host-proof              (566) a row carrying `repo` rests on another repository's tree, which this
+//                           family cannot read, so it is admitted in one shape only: a host's proof of
+//                           its own code, `proved`, naming its host key, its toolchain and replay
+//                           identities and commit in their forms, and a model of THIS tree it mirrors
+//                           (one the proof leg checks) with every mirrored definition top-level in it.
 //
 // WHAT IT DELIBERATELY IS NOT: a README parser — with ONE exception, taken at `contract-agrees`
 // and nowhere else, for the reason stated at that clause: the contract table is the same question
@@ -257,6 +261,48 @@ let private withProse (field: string) (value: string) (row: Nodes.JsonObject) =
 
 let private expectMutationFinding (description: string) (rowId: string) mutate (clause: string) (subject: string) =
     expectOneFindingIn [ "Model" ] description (mutated rowId mutate) clause subject
+
+/// `ladder-ok.json` with one more row, a host's proof row (Phase 566) that is well formed until `mutate`
+/// edits it: a proof `fixture-host` made of its own `proved_fn` against `Model.fst`'s `alpha` and `beta`.
+let private withHostProofRow (mutate: Nodes.JsonObject -> unit) : string =
+    let root = Nodes.JsonNode.Parse(fixture "ladder-ok.json")
+    let str (s: string) : Nodes.JsonNode = Nodes.JsonValue.Create s
+    let statement = "A host proved its own function against a model of this tree."
+    let boundary = "Fixture data: it covers nothing beyond this file."
+
+    let evidence =
+        Nodes.JsonObject(
+            [ for k, v in
+                  [ "theorem", "proved_fn"
+                    "model", "src/proved.rs"
+                    "prover", "verification/Dockerfile"
+                    "toolchain", "checker@1.0 solver@2.0"
+                    "replay", "sha256:" + String('a', 64)
+                    "commit", String('b', 40)
+                    "mirrors", "Model.fst" ] -> Collections.Generic.KeyValuePair<string, Nodes.JsonNode>(k, str v) ]
+        )
+
+    evidence["definitions"] <- Nodes.JsonArray(str "alpha", str "beta")
+
+    let row =
+        Nodes.JsonObject(
+            [ for k, v in
+                  [ "id", "fixture-host-proof"
+                    "level", "proved"
+                    "statement", statement
+                    "boundary", boundary
+                    "claim", statement + " " + boundary
+                    "phase", "fuaran-core#566"
+                    "repo", "fixture-host" ] -> Collections.Generic.KeyValuePair<string, Nodes.JsonNode>(k, str v) ]
+        )
+
+    row["evidence"] <- evidence
+    mutate row
+    root["claims"].AsArray().Add(row)
+    root.ToJsonString()
+
+let private expectHostProofFinding (description: string) mutate (subject: string) =
+    expectOneFindingIn [ "Model" ] description (withHostProofRow mutate) "host-proof" subject
 
 /// The probe family the Phase 483 go-reds name.
 let private fixtureProbe = "premiseFixture"
@@ -737,14 +783,63 @@ let proofsLadderTests =
                   "evidence-exists"
                   "oracle/NoSuch.fs"
 
-          testCase "go-red: evidence-exists — a row resting on another repository's tree"
+          // ---- Phase 566: a row resting on another repository's tree is a host's proof row, or a finding ----
+
+          testCase "go-red: host-proof — a row resting on another repository's tree that is not a host's proof row"
           <| fun _ ->
-              expectMutationFinding
+              // A proved row of this tree's, moved onto another's: it names none of the identities a host's
+              // proof row records, and its `repo` is no host key. One finding, naming the repository.
+              expectHostProofFinding
                   "foreign repo"
-                  "fixture-theorem"
-                  (fun r -> r["repo"] <- Nodes.JsonValue.Create "Elsewhere/other-repo")
-                  "evidence-exists"
+                  (fun r ->
+                      r["repo"] <- Nodes.JsonValue.Create "Elsewhere/other-repo"
+                      let ev = r["evidence"].AsObject()
+
+                      for k in [ "toolchain"; "replay"; "commit"; "mirrors"; "definitions" ] do
+                          ev.Remove k |> ignore)
                   "Elsewhere/other-repo"
+
+          testCase "a well-formed host's proof row is clean, so each go-red below fires on its own edit"
+          <| fun _ ->
+              let findings = checkLadder (fixtureInputs [ "Model" ]) (withHostProofRow ignore)
+              Expect.isEmpty findings (sprintf "the host's proof row is well formed:\n%s" (String.concat "\n" findings))
+
+          testCase "go-red: host-proof — a replay identity that is not a SHA-256"
+          <| fun _ ->
+              expectHostProofFinding
+                  "short replay"
+                  (fun r -> r["evidence"]["replay"] <- Nodes.JsonValue.Create "sha256:abc")
+                  "sha256:abc"
+
+          testCase "go-red: host-proof — a commit that is not 40 hex digits"
+          <| fun _ ->
+              expectHostProofFinding
+                  "short commit"
+                  (fun r -> r["evidence"]["commit"] <- Nodes.JsonValue.Create "ad4910f")
+                  "ad4910f"
+
+          testCase "go-red: host-proof — a row naming no toolchain"
+          <| fun _ ->
+              expectHostProofFinding
+                  "no toolchain"
+                  (fun r -> r["evidence"].AsObject().Remove "toolchain" |> ignore)
+                  "`evidence.toolchain`"
+
+          testCase "go-red: host-proof — a mirrored model the proof leg does not check"
+          <| fun _ ->
+              expectHostProofFinding
+                  "unregistered mirror"
+                  (fun r -> r["evidence"]["mirrors"] <- Nodes.JsonValue.Create "Unregistered.fst")
+                  "Unregistered.fst"
+
+          testCase "go-red: host-proof — a mirrored definition the model does not declare at top level"
+          <| fun _ ->
+              expectHostProofFinding
+                  "indented definition"
+                  (fun r ->
+                      r["evidence"]["definitions"] <-
+                          Nodes.JsonArray(Nodes.JsonValue.Create "alpha", Nodes.JsonValue.Create "delta"))
+                  "`delta`"
 
           // ---- the contract clause: the README table and the ladder, row for row ----
 

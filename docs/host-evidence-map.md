@@ -6,7 +6,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## The schema
 
-- `rows[]`, one per ladder row in ladder order: `id` and `level` (the row's), `model` (the F* module its evidence names, `proofs/<model>.fst`; absent when it names none), `families[]` (`family`, `file`, and `cases`, the count of that family's cases whose `answeredBy` names `model:<model>`), and `oracle[]` (the protocol functions whose table entry asks the model). A row with both lists empty is uncovered.
+- `rows[]`, one per ladder row in ladder order: `id` and `level` (the row's), `host` (on a host's own proof row only: the host whose proof it records), `model` (the F* module its evidence names, `proofs/<model>.fst`; absent when it names none), `families[]` (`family`, `file`, and `cases`, the count of that family's cases whose `answeredBy` names `model:<model>`), and `oracle[]` (the protocol functions whose table entry asks the model). A row with both lists empty is uncovered.
 - `worklist[]`: the uncovered `proved` rows, grouped by `model` in ordinal order.
 - `referenceOnly[]`: the families no model answered a case of, with their case counts.
 
@@ -14,7 +14,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## Summary
 
-392 rows: 193 offered, 199 uncovered (proved 124, tested 33, assumed 40, policy 2).
+393 rows: 193 offered, 1 a host's own proof, 199 uncovered (proved 124, tested 33, assumed 40, policy 2).
 
 ## Offers, by model
 
@@ -44,6 +44,14 @@ A `host-premise` row names no model: it is offered the probe family it names, ev
 | `host-int53` | `premiseInt53` (29) |
 | `host-sha256` | `premiseSha256` (17) |
 | `host-recursion-depth` | `premiseRecursionDepth` (13) |
+
+## A host's own proofs
+
+A row carrying `repo` records a proof a host made of its own code against a model of this repository's: it names the host, offers nothing, and is no gap. The host cites it in its compliance declaration as `proof-replayed` evidence ([host-compliance.md](host-compliance.md)).
+
+| Row | Host |
+|---|---|
+| `spine-escape-quoted` | `fuaran-core-rs` |
 
 ## Worklist: proved rows no host can offer evidence for
 

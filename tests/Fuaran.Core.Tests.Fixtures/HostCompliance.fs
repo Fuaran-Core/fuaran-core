@@ -7,7 +7,8 @@ module Fuaran.Core.Tests.HostCompliance
 //  DECLARE LOCAL. A host commits `host-compliance.json` at its own root (docs/host-compliance.md;
 //  the schema is docs/host-compliance.schema.json). For a ladder row it names one or more pieces of
 //  evidence, each of one CLASS from a closed set: `vector-certified`, `oracle-differential`,
-//  `host-premise`, or `not-covered` with a reason (DECISIONS.md D229).
+//  `host-premise`, `proof-replayed`, or `not-covered` with a reason (DECISIONS.md D229, amended by
+//  D233 for `proof-replayed`: a host's own proof, which the claims ladder records as a row of its own).
 //
 //  VALIDATE HERE. The validator reads three things this repository already derives, and nothing
 //  else: the evidence map (`ProofCoverage.EvidenceMap`, Phase 480: what Core offers for each row),
@@ -62,6 +63,10 @@ type Evidence =
     /// The host discharged a `host-premise` row on its own runtime: its leg reproduced every vector of
     /// the row's probe family.
     | HostPremise of probe: string * cases: int
+    /// The host's own verifier proved its code against a model of this repository's, and replayed the
+    /// proof at `toolchain`, over the replay record whose identity is `replay` (D233). It stands on a
+    /// host-proof row of the ladder, the one recording that proof; nothing here re-runs the prover.
+    | ProofReplayed of toolchain: string * replay: string
     /// The host offers nothing for the row, and says why.
     | NotCovered of reason: string
 
@@ -73,6 +78,7 @@ module Evidence =
         [ "vector-certified", [ "family"; "cases" ]
           "oracle-differential", [ "model"; "function"; "inputs"; "seed" ]
           "host-premise", [ "probe"; "cases" ]
+          "proof-replayed", [ "toolchain"; "replay" ]
           "not-covered", [ "reason" ] ]
 
     let className (e: Evidence) : string =
@@ -80,6 +86,7 @@ module Evidence =
         | Evidence.VectorCertified _ -> "vector-certified"
         | Evidence.OracleDifferential _ -> "oracle-differential"
         | Evidence.HostPremise _ -> "host-premise"
+        | Evidence.ProofReplayed _ -> "proof-replayed"
         | Evidence.NotCovered _ -> "not-covered"
 
     /// What makes two pieces of evidence on one row the same claim: the class and the thing it names.
@@ -88,6 +95,8 @@ module Evidence =
         | Evidence.VectorCertified(f, _) -> className e, f
         | Evidence.OracleDifferential(_, fn, _, _) -> className e, fn
         | Evidence.HostPremise(p, _) -> className e, p
+        // One row records one proof, so a second replay of it on the row is the same claim.
+        | Evidence.ProofReplayed _
         | Evidence.NotCovered _ -> className e, ""
 
 /// One row's declaration.
@@ -149,7 +158,11 @@ module Finding =
           "seed-empty", "an oracle differential with a blank seed"
           "not-a-premise", "`host-premise` on a row that is not a `host-premise` row"
           "probe-mismatch", "`host-premise` naming a probe other than the row's"
-          "premise-partial", "a premise discharged on fewer than every vector of its probe" ]
+          "premise-partial", "a premise discharged on fewer than every vector of its probe"
+          "not-a-proof", "`proof-replayed` on a row that records no host's proof"
+          "proof-host", "`proof-replayed` on a row recording another host's proof"
+          "toolchain-mismatch", "a toolchain other than the one the proof's row records"
+          "replay-mismatch", "a replay identity other than the one the proof's row records" ]
 
     let render (f: Finding) : string =
         sprintf "[%s] %s: %s" f.Code f.At f.Message
@@ -266,6 +279,8 @@ let private readEvidence (at: string) (v: JVal) : Result<Evidence, Finding list>
                             (both (count "inputs") (str "seed") (fun a b -> a, b))
                             (fun (mo, fn) (n, s) -> Evidence.OracleDifferential(mo, fn, n, s))
                     | "host-premise" -> both (str "probe") (cases "cases") (fun p c -> Evidence.HostPremise(p, c))
+                    | "proof-replayed" ->
+                        both (str "toolchain") (str "replay") (fun tc r -> Evidence.ProofReplayed(tc, r))
                     | _ -> str "reason" |> Result.map Evidence.NotCovered
 
                 match shape, read with
@@ -381,6 +396,15 @@ type FamilyRecord =
       Vectors: int
       Adoption: (string * Adoption) list }
 
+/// A host-proof row of the ladder (`proofs.json`, a `proved` row carrying `repo`; Phase 566): the host
+/// whose proof it records, and the two identities a citation must name. The ladder family
+/// (`ProofLadder`) holds the row's shape; this reads what a citation is checked against.
+type HostProof =
+    { RowId: string
+      Host: string
+      Toolchain: string
+      Replay: string }
+
 type Inputs =
     {
         /// The `<Version>` of the checkout judging the declaration.
@@ -393,6 +417,8 @@ type Inputs =
         Oracle: (string * string list) list
         /// Every family a self-enumerated manifest indexes.
         Records: FamilyRecord list
+        /// Every host-proof row of the ladder: the proof a `proof-replayed` piece cites.
+        Proofs: HostProof list
     }
 
 let private versionRe =
@@ -451,6 +477,41 @@ let records (files: (string * string) list) : Result<FamilyRecord list, string l
     | [] -> Ok(read |> List.collect (Result.defaultValue []))
     | errors -> Error errors
 
+/// The host-proof rows of the ladder text: every row carrying `repo`, read where its evidence names
+/// both identities. A row missing one is the ladder family's finding (`host-proof`), and a citation of it
+/// is refused here as `not-a-proof`.
+let proofs (ladderText: string) : Result<HostProof list, string list> =
+    let field (fields: (string * JVal) list) name =
+        match fields |> List.tryFind (fun (k, _) -> k = name) with
+        | Some(_, JStr s) -> Some s
+        | _ -> None
+
+    match Json.parse ladderText with
+    | Ok(JObj root) ->
+        match root |> List.tryFind (fun (k, _) -> k = "claims") with
+        | Some(_, JArr rows) ->
+            rows
+            |> List.choose (function
+                | JObj r ->
+                    let ev =
+                        match r |> List.tryFind (fun (k, _) -> k = "evidence") with
+                        | Some(_, JObj e) -> e
+                        | _ -> []
+
+                    match field r "id", field r "repo", field ev "toolchain", field ev "replay" with
+                    | Some id, Some host, Some tc, Some rp ->
+                        Some
+                            { RowId = id
+                              Host = host
+                              Toolchain = tc
+                              Replay = rp }
+                    | _ -> None
+                | _ -> None)
+            |> Ok
+        | _ -> Error [ "proofs.json carries no `claims` array" ]
+    | Ok _ -> Error [ "proofs.json is not a JSON object" ]
+    | Error e -> Error [ sprintf "proofs.json is not JSON (%s)" e ]
+
 /// The inputs this repository's tree holds.
 let liveInputs (root: string) : Result<Inputs, string list> =
     let ev = EvidenceMap.liveInputs root
@@ -460,15 +521,16 @@ let liveInputs (root: string) : Result<Inputs, string list> =
         | m when m.Success -> Ok m.Groups["v"].Value
         | _ -> Error [ "Directory.Build.props declares no <Version>" ]
 
-    match EvidenceMap.derive ev, records ev.VectorFiles, version with
-    | Ok map, Ok recs, Ok v ->
+    match EvidenceMap.derive ev, records ev.VectorFiles, version, proofs ev.Ladder with
+    | Ok map, Ok recs, Ok v, Ok ps ->
         Ok
             { CoreVersion = v
               Rows = map.Rows
               Families = map.Families |> List.map _.Family
               Oracle = ev.Oracle
-              Records = recs }
-    | a, b, c -> Error(errorsOf a @ errorsOf b @ errorsOf c)
+              Records = recs
+              Proofs = ps }
+    | a, b, c, d -> Error(errorsOf a @ errorsOf b @ errorsOf c @ errorsOf d)
 
 // ---------------------------------------------------------------------------
 //  Validating a declaration
@@ -606,6 +668,42 @@ let private evidenceFindings (i: Inputs) (host: string) (r: EvidenceMap.RowOffer
 
           if String.IsNullOrWhiteSpace seed then
               yield finding "seed-empty" at "names no seed: a run nobody can repeat is not evidence" ]
+    | Evidence.ProofReplayed(toolchain, replay) ->
+        match i.Proofs |> List.tryFind (fun p -> p.RowId = r.Id) with
+        | None ->
+            [ finding
+                  "not-a-proof"
+                  at
+                  (sprintf
+                      "`%s` records no host's proof: `proof-replayed` stands on the ladder row recording the host's proof (a row carrying `repo`)"
+                      r.Id) ]
+        | Some p when p.Host <> host ->
+            [ finding
+                  "proof-host"
+                  at
+                  (sprintf "`%s` records `%s`'s proof: a host cites its own proof, never another's" r.Id p.Host) ]
+        | Some p ->
+            [ if toolchain <> p.Toolchain then
+                  yield
+                      finding
+                          "toolchain-mismatch"
+                          at
+                          (sprintf
+                              "names the toolchain `%s`; `%s` records `%s`: a proof replayed under another toolchain is re-recorded in Core first"
+                              toolchain
+                              r.Id
+                              p.Toolchain)
+
+              if replay <> p.Replay then
+                  yield
+                      finding
+                          "replay-mismatch"
+                          at
+                          (sprintf
+                              "names the replay identity `%s`; `%s` records `%s`: the proof's files have moved since the row was recorded, or the identity is not this proof's"
+                              replay
+                              r.Id
+                              p.Replay) ]
     | Evidence.HostPremise(probe, cases) ->
         match r.Probe with
         | None -> [ finding "not-a-premise" at (sprintf "`%s` is not a host-premise row" r.Id) ]

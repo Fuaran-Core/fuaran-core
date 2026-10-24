@@ -77,6 +77,24 @@ let suiteForm =
 /// change did lives in that change's record.
 let internal historyForm = Regex(@"\bPhases?\s+[0-9]", RegexOptions.Compiled)
 
+/// A host's proof row (Phase 566): a `proved` row carrying `repo`, the host key of the repository whose
+/// own code the proof is about, and these evidence members beside `theorem`, `model` and `prover`
+/// (which name the proved function, its file and the toolchain's pin in THAT tree): `toolchain`, the
+/// identity of the checker and provers that replayed it; `replay`, the identity of the replay record;
+/// `commit`, the host commit the row was recorded at; `mirrors`, this repository's model the proof's
+/// logic restates; `definitions`, the declarations of that model it restates. A host's compliance
+/// declaration cites the row (docs/host-compliance.md, class `proof-replayed`).
+let hostProofMembers =
+    [ "theorem"; "model"; "prover"; "toolchain"; "replay"; "commit"; "mirrors" ]
+
+/// The host key a host-proof row's `repo` is, as the adoption records key a host.
+let internal hostKeyForm = Regex(@"^[a-z0-9]+(-[a-z0-9]+)*$", RegexOptions.Compiled)
+
+/// A replay identity: `sha256:` and the digest.
+let replayForm = Regex(@"^sha256:[0-9a-f]{64}$", RegexOptions.Compiled)
+
+let internal commitForm = Regex(@"^[0-9a-f]{40}$", RegexOptions.Compiled)
+
 /// The closed set a `model-bridge`'s `closes` is drawn from. A phase is not a member: this
 /// repository keeps no schedule, because its roadmap lives outside it and cannot be read from here
 /// (Phase 537, which deleted the scheduled half of the coverage clause until a writer for a list of
@@ -170,7 +188,9 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                     | None -> [ finding id "phase-form" "no `phase` member" ]
 
                 let provedFindings =
-                    if level <> Some "proved" then
+                    // A host's proof row (Phase 566) names a model in ITS tree, which this family cannot
+                    // read: `host-proof` below checks what it can instead.
+                    if level <> Some "proved" || (strMember row "repo").IsSome then
                         []
                     else
                         let theorem = ev |> Option.bind (fun e -> strMember e "theorem")
@@ -354,19 +374,95 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                                   (sprintf "`evidence.%s` %s is not a file (looked under %s)" field p inputs.Root) ]
                         | _ -> []
 
-                    (match level with
-                     | Some "policy" -> mustExist "document"
-                     | Some "tested" -> mustExist "artifact" @ mustExist "host"
-                     | _ -> [])
-                    @ (match strMember row "repo" with
-                       | Some r ->
-                           [ finding
-                                 id
-                                 "evidence-exists"
-                                 (sprintf
-                                     "carries `repo`: \"%s\" — this family holds every row to this repository's own tree, so a row resting on another's cannot be checked here"
-                                     r) ]
-                       | None -> [])
+                    match level with
+                    | Some "policy" -> mustExist "document"
+                    | Some "tested" -> mustExist "artifact" @ mustExist "host"
+                    | _ -> []
+
+                // ---- Phase 566: a host's own proof, recorded here ----
+                // This family holds every row to this repository's tree, so a row resting on another
+                // repository's is admitted in ONE shape only: a host's proof of its own code against a
+                // model of this repository's (`hostProofMembers`). What the family checks is what this
+                // tree can answer without the host's tree or its prover: the host key, the identities
+                // the row records in their forms, and that the model the proof mirrors is one the proof
+                // leg checks and declares every definition the row says it mirrors. That the host's
+                // replay checks is the host's run, never this family's.
+                let hostProofFindings =
+                    match strMember row "repo" with
+                    | None -> []
+                    | Some r ->
+                        let str name =
+                            ev
+                            |> Option.bind (fun e -> strMember e name)
+                            |> Option.filter (String.IsNullOrWhiteSpace >> not)
+
+                        let problems =
+                            [ if not (hostKeyForm.IsMatch r) then
+                                  yield "it is not a host key (lower-case letters and digits in `-`-separated words)"
+
+                              if level <> Some "proved" then
+                                  yield "a host's proof row is at level `proved`"
+
+                              let absent = hostProofMembers |> List.filter (fun name -> (str name).IsNone)
+
+                              if not (List.isEmpty absent) then
+                                  yield
+                                      sprintf
+                                          "it names no %s (a host's proof row carries %s)"
+                                          (absent |> List.map (sprintf "`evidence.%s`") |> String.concat ", ")
+                                          (hostProofMembers |> List.map (sprintf "`%s`") |> String.concat ", ")
+
+                              match str "replay" with
+                              | Some v when not (replayForm.IsMatch v) ->
+                                  yield
+                                      sprintf
+                                          "`evidence.replay` \"%s\" is not `sha256:` and 64 lower-case hex digits"
+                                          v
+                              | _ -> ()
+
+                              match str "commit" with
+                              | Some v when not (commitForm.IsMatch v) ->
+                                  yield sprintf "`evidence.commit` \"%s\" is not 40 lower-case hex digits" v
+                              | _ -> ()
+
+                              match str "mirrors" with
+                              | Some path ->
+                                  let full = Path.Combine(inputs.Root, path)
+
+                                  if not (List.contains (moduleOf path) inputs.Modules && File.Exists full) then
+                                      yield
+                                          sprintf
+                                              "`evidence.mirrors` %s is not a model the proof leg checks (%s)"
+                                              path
+                                              (String.concat ", " inputs.Modules)
+                                  else
+                                      let text = File.ReadAllText full
+
+                                      match ev |> Option.bind (fun e -> strArrayMember e "definitions") with
+                                      | None
+                                      | Some [] ->
+                                          yield
+                                              "it names no `evidence.definitions` (the declarations of the mirrored model the proof restates)"
+                                      | Some names ->
+                                          for n in names do
+                                              if not (declaresTopLevel text n) then
+                                                  yield
+                                                      sprintf
+                                                          "%s declares no top-level `%s`, which `evidence.definitions` names"
+                                                          path
+                                                          n
+                              | None -> () ]
+
+                        match problems with
+                        | [] -> []
+                        | ps ->
+                            [ finding
+                                  id
+                                  "host-proof"
+                                  (sprintf
+                                      "carries `repo`: \"%s\", so it is a host's proof row, and %s"
+                                      r
+                                      (String.concat "; " ps)) ]
 
                 // ---- Phase 174: which KIND of assumed an `assumed` row is ----
                 let cls = strMember row "class"
@@ -547,13 +643,14 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                 @ provedFindings
                 @ testedFindings
                 @ pathFindings
+                @ hostProofFindings
                 @ classFindings
                 @ dischargeFindings)
             |> List.concat
 
         let covered =
             rows
-            |> List.filter (fun r -> strMember r "level" = Some "proved")
+            |> List.filter (fun r -> strMember r "level" = Some "proved" && (strMember r "repo").IsNone)
             |> List.choose (fun r -> objMember r "evidence" |> Option.bind (fun e -> strMember e "model"))
             |> List.map moduleOf
             |> Set.ofList
@@ -768,8 +865,13 @@ let renderLadderSummary (ladderText: string) : string =
         |> List.filter (fun r -> strMember r "class" = Some cls)
         |> List.length
 
+    // A host's own proof (a row carrying `repo`, Phase 566) names a file in the host's tree, not one of
+    // this repository's models, so it is counted apart.
+    let hostProofs, ownProved =
+        at "proved" |> List.partition (fun r -> (strMember r "repo").IsSome)
+
     let provedModels =
-        at "proved"
+        ownProved
         |> List.choose (fun r ->
             match r.TryGetProperty "evidence" with
             | true, e -> strMember e "model"
@@ -778,10 +880,12 @@ let renderLadderSummary (ladderText: string) : string =
         |> List.length
 
     sprintf
-        "**The ladder, counted:** %d claims — %d proved across %d models, %d tested, %d assumed (%d `domain-obligation`, %d `model-bridge`, %d `premise`, %d `host-premise`), %d policy."
+        "**The ladder, counted:** %d claims — %d proved (%d across %d models, %d a host's own proof), %d tested, %d assumed (%d `domain-obligation`, %d `model-bridge`, %d `premise`, %d `host-premise`), %d policy."
         (List.length rows)
         (List.length (at "proved"))
+        (List.length ownProved)
         provedModels
+        (List.length hostProofs)
         (List.length (at "tested"))
         (List.length (at "assumed"))
         (assumedIn "domain-obligation")

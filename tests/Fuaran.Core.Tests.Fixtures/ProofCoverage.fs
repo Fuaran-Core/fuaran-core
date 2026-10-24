@@ -951,6 +951,10 @@ module EvidenceMap =
             Oracle: string list
             /// The probe family a `host-premise` row names (Phase 483), or none.
             Probe: string option
+            /// The host whose own proof a host-proof row records (its `repo`, Phase 566), or none. Such a
+            /// row is the host's evidence, not an offer: it names no model of this repository's, is
+            /// offered nothing, and is no gap on the worklist.
+            Host: string option
         }
 
         member r.Offered = not (List.isEmpty r.Families && List.isEmpty r.Oracle)
@@ -1035,17 +1039,25 @@ module EvidenceMap =
             | _ -> Ok None
         | Ok _ -> Ok None
 
-    let private ladderRows (ladderText: string) : (string * string * string option * string option) list =
+    let private ladderRows
+        (ladderText: string)
+        : (string * string * string option * string option * string option) list =
         use doc = JsonDocument.Parse ladderText
 
         match doc.RootElement.TryGetProperty "claims" with
         | true, c when c.ValueKind = JsonValueKind.Array ->
             c.EnumerateArray()
             |> Seq.map (fun r ->
+                let host = strMember r "repo"
+
+                // A host-proof row's `model` is a file in the host's tree, never a model of this one.
                 let model =
-                    objMember r "evidence"
-                    |> Option.bind (fun e -> strMember e "model")
-                    |> Option.map moduleOfPath
+                    if host.IsSome then
+                        None
+                    else
+                        objMember r "evidence"
+                        |> Option.bind (fun e -> strMember e "model")
+                        |> Option.map moduleOfPath
 
                 let probe =
                     if strMember r "class" = Some "host-premise" then
@@ -1056,7 +1068,8 @@ module EvidenceMap =
                 strMember r "id" |> Option.defaultValue "<no id>",
                 strMember r "level" |> Option.defaultValue "<no level>",
                 model,
-                probe)
+                probe,
+                host)
             |> List.ofSeq
         | _ -> []
 
@@ -1077,7 +1090,7 @@ module EvidenceMap =
                 | Ok(Some f) -> Some f
                 | _ -> None)
 
-        let ladderModels = rows |> List.choose (fun (_, _, m, _) -> m) |> Set.ofList
+        let ladderModels = rows |> List.choose (fun (_, _, m, _, _) -> m) |> Set.ofList
 
         let findings =
             [ if List.isEmpty rows then
@@ -1110,7 +1123,7 @@ module EvidenceMap =
 
               let familyIds = families |> List.map _.Family |> Set.ofList
 
-              for id, _, _, probe in rows do
+              for id, _, _, probe, _ in rows do
                   match probe with
                   | Some p when not (familyIds.Contains p) ->
                       yield sprintf "`%s` names the probe `%s`, which no vector file under conformance/ is" id p
@@ -1119,7 +1132,7 @@ module EvidenceMap =
         if not (List.isEmpty findings) then
             Error findings
         else
-            let offer (id, level, model, probe) =
+            let offer (id, level, model, probe, host) =
                 let families, oracle =
                     match model, probe with
                     | None, Some p ->
@@ -1151,7 +1164,8 @@ module EvidenceMap =
                   Model = model
                   Families = families
                   Oracle = oracle
-                  Probe = probe }
+                  Probe = probe
+                  Host = host }
 
             Ok
                 { Rows = rows |> List.map offer
@@ -1163,7 +1177,7 @@ module EvidenceMap =
     /// with no model groups under ""). Over `proved` this is the worklist for new families.
     let uncovered (level: string) (m: EvidenceMap) : (string * string list) list =
         m.Rows
-        |> List.filter (fun r -> r.Level = level && not r.Offered)
+        |> List.filter (fun r -> r.Level = level && not r.Offered && r.Host.IsNone)
         |> List.groupBy (fun r -> r.Model |> Option.defaultValue "")
         |> List.sortWith ordinal
         |> List.map (fun (model, rs) -> model, rs |> List.map _.Id)
@@ -1200,6 +1214,9 @@ module EvidenceMap =
             JObj
                 [ yield "id", JStr r.Id
                   yield "level", JStr r.Level
+                  match r.Host with
+                  | Some host -> yield "host", JStr host
+                  | None -> ()
                   match r.Model with
                   | Some model -> yield "model", JStr model
                   | None -> ()
@@ -1241,8 +1258,12 @@ module EvidenceMap =
         let offered = m.Rows |> List.filter _.Offered
         let levels = m.Rows |> List.map _.Level |> List.distinct
 
+        let hostProofs = m.Rows |> List.filter _.Host.IsSome
+
         let uncoveredCount level =
-            m.Rows |> List.filter (fun r -> r.Level = level && not r.Offered) |> List.length
+            m.Rows
+            |> List.filter (fun r -> r.Level = level && not r.Offered && r.Host.IsNone)
+            |> List.length
 
         let byModel =
             offered
@@ -1273,7 +1294,7 @@ module EvidenceMap =
           yield "## The schema"
           yield ""
           yield
-              "- `rows[]`, one per ladder row in ladder order: `id` and `level` (the row's), `model` (the F* module its evidence names, `proofs/<model>.fst`; absent when it names none), `families[]` (`family`, `file`, and `cases`, the count of that family's cases whose `answeredBy` names `model:<model>`), and `oracle[]` (the protocol functions whose table entry asks the model). A row with both lists empty is uncovered."
+              "- `rows[]`, one per ladder row in ladder order: `id` and `level` (the row's), `host` (on a host's own proof row only: the host whose proof it records), `model` (the F* module its evidence names, `proofs/<model>.fst`; absent when it names none), `families[]` (`family`, `file`, and `cases`, the count of that family's cases whose `answeredBy` names `model:<model>`), and `oracle[]` (the protocol functions whose table entry asks the model). A row with both lists empty is uncovered."
           yield "- `worklist[]`: the uncovered `proved` rows, grouped by `model` in ordinal order."
           yield "- `referenceOnly[]`: the families no model answered a case of, with their case counts."
           yield ""
@@ -1285,10 +1306,11 @@ module EvidenceMap =
 
           yield
               sprintf
-                  "%d rows: %d offered, %d uncovered (%s)."
+                  "%d rows: %d offered, %d a host's own proof, %d uncovered (%s)."
                   m.Rows.Length
                   offered.Length
-                  (m.Rows.Length - offered.Length)
+                  hostProofs.Length
+                  (m.Rows.Length - offered.Length - hostProofs.Length)
                   (levels
                    |> List.map (fun l -> sprintf "%s %d" l (uncoveredCount l))
                    |> String.concat ", ")
@@ -1336,6 +1358,20 @@ module EvidenceMap =
                       (r.Families
                        |> List.map (fun f -> sprintf "%s (%d)" (code f.Family) f.Cases)
                        |> String.concat ", ")
+
+          yield ""
+          yield "## A host's own proofs"
+          yield ""
+
+          yield
+              "A row carrying `repo` records a proof a host made of its own code against a model of this repository's: it names the host, offers nothing, and is no gap. The host cites it in its compliance declaration as `proof-replayed` evidence ([host-compliance.md](host-compliance.md))."
+
+          yield ""
+          yield "| Row | Host |"
+          yield "|---|---|"
+
+          for r in hostProofs do
+              yield sprintf "| %s | %s |" (code r.Id) (r.Host |> Option.map code |> Option.defaultValue "")
 
           yield ""
           yield "## Worklist: proved rows no host can offer evidence for"

@@ -40,6 +40,12 @@ module private Case =
     let nc (reason: string) =
         JObj [ "class", JStr "not-covered"; "reason", JStr reason ]
 
+    let pr (toolchain: string) (replay: string) =
+        JObj
+            [ "class", JStr "proof-replayed"
+              "toolchain", JStr toolchain
+              "replay", JStr replay ]
+
     let row (id: string) (evidence: JVal list) =
         JObj [ "row", JStr id; "evidence", JArr evidence ]
 
@@ -92,15 +98,19 @@ module private Case =
         rowWhere i "the `host-int53` premise" (fun r -> r.Id = "host-int53")
 
     let bareRow (i: Inputs) =
-        rowWhere i "offered nothing" (fun r -> not r.Offered)
+        rowWhere i "offered nothing" (fun r -> not r.Offered && r.Host.IsNone)
 
-    /// The live inputs with the spine's premise record measured at every vector: no host has
-    /// discharged a premise yet, so the `host-premise` class is exercised on an edited record.
-    let inputs () =
-        let i = live ()
-        withAdoption "premiseInt53" (Adoption.Measured (record i "premiseInt53").Vectors) i
+    /// The ladder row recording the spine's own proof of its escape (Phase 566).
+    let proofOf (i: Inputs) =
+        match i.Proofs |> List.tryFind (fun p -> p.Host = host) with
+        | Some p -> p
+        | None -> failtestf "the ladder records no proof of `%s`'s (every case built on it would be vacuous)" host
 
-    /// A declaration that validates: one of each class, every count the record carries.
+    /// The inputs every case starts from: the live tree's, unedited, since the spine's records carry a
+    /// discharge of every premise probe at every vector (Phase 564).
+    let inputs () = live ()
+
+    /// A declaration that validates: one of each class, every count and identity the records carry.
     let baseRows (i: Inputs) =
         [ row
               (treeRow i).Id
@@ -108,7 +118,8 @@ module private Case =
                 od "TreeOps" "tree.apply" 1000 "seed-1" ]
           row (jsonRow i).Id [ vc "codecRefusals" (measured i "codecRefusals") ]
           row (premiseRow i).Id [ hp "premiseInt53" (record i "premiseInt53").Vectors ]
-          row (bareRow i).Id [ nc "Core offers no evidence for this row" ] ]
+          row (bareRow i).Id [ nc "Core offers no evidence for this row" ]
+          row (proofOf i).RowId [ pr (proofOf i).Toolchain (proofOf i).Replay ] ]
 
     let baseDeclaration (i: Inputs) =
         declaration host i.CoreVersion (baseRows i)
@@ -349,6 +360,42 @@ let private goReds: GoRed list =
           (onRows (fun i rows ->
               rows
               |> Case.replaceRow 2 (row (Case.premiseRow i).Id [ Case.hp "premiseSha256" 17 ])))
+      goRed
+          "not-a-proof"
+          "`proof-replayed` on a row that records no proof"
+          (onRows (fun i rows ->
+              let p = Case.proofOf i
+
+              rows
+              |> Case.replaceRow 0 (row (Case.treeRow i).Id [ Case.pr p.Toolchain p.Replay ])))
+      goRed "proof-host" "another host's proof" (fun i ->
+          let i' =
+              { i with
+                  Proofs = i.Proofs |> List.map (fun p -> { p with Host = "another-host" }) }
+
+          let p = Case.proofOf i
+
+          i',
+          Case.declaration
+              Case.host
+              i.CoreVersion
+              (Case.baseRows i
+               |> Case.replaceRow 4 (row p.RowId [ Case.pr p.Toolchain p.Replay ])))
+      goRed
+          "toolchain-mismatch"
+          "a proof replayed under another toolchain"
+          (onRows (fun i rows ->
+              let p = Case.proofOf i
+
+              rows
+              |> Case.replaceRow 4 (row p.RowId [ Case.pr (p.Toolchain + " extra@1.0") p.Replay ])))
+      goRed
+          "replay-mismatch"
+          "a replay identity the row does not record"
+          (onRows (fun i rows ->
+              let p = Case.proofOf i
+              let moved = "sha256:" + String('0', 64)
+              rows |> Case.replaceRow 4 (row p.RowId [ Case.pr p.Toolchain moved ])))
       goRed "premise-partial" "a premise discharged on all but one vector" (fun i ->
           let short = (Case.record i "premiseInt53").Vectors - 1
           let i' = Case.withAdoption "premiseInt53" (Adoption.Measured short) i
@@ -379,7 +426,8 @@ module private Synthetic =
           Model = model
           Families = families
           Oracle = oracle
-          Probe = probe }
+          Probe = probe
+          Host = None }
 
     /// `certified` (model `M`: family `f1`, function `fn1`), `premise` (probe `p1`), `unrecorded`
     /// (model `N`: family `f2`, which no manifest indexes) and `bare` (nothing offered).
@@ -403,7 +451,8 @@ module private Synthetic =
                  Manifest = "conformance/x/manifest.json"
                  Vectors = 5
                  Adoption = [ "h", Adoption.Measured 5; "partial", Adoption.Measured 5 ] }
-              : FamilyRecord) ] }
+              : FamilyRecord) ]
+          Proofs = [] }
 
     let full =
         [ Case.row "certified" [ Case.vc "f1" 10; Case.od "M" "fn1" 7 "s" ]
@@ -447,10 +496,10 @@ let tests =
               | Ok v ->
                   Expect.equal
                       (v.ByClass |> List.map snd)
-                      [ 2; 1; 1; 1 ]
-                      "two certifications, one differential, one discharge and one named gap"
+                      [ 2; 1; 1; 1; 1 ]
+                      "two certifications, one differential, one discharge, one replayed proof and one named gap"
 
-                  Expect.isFalse v.Compliant "four rows declared of the many Core offers evidence for"
+                  Expect.isFalse v.Compliant "five rows declared of the many Core offers evidence for"
                   Expect.isFalse v.Parity "and so no parity"
 
           testList
@@ -469,14 +518,10 @@ let tests =
               let covered = goReds |> List.map _.Code |> Set.ofList
               Expect.equal covered declared "the go-reds cover exactly the declared codes"
 
-          testCase "the go-reds' one edit to the live tree is the premise record (the spine has discharged none)"
+          testCase "the go-reds start from the live tree unedited: the base declaration validates against it as it is"
           <| fun _ ->
               let i = Case.live ()
-              let found = Case.codes i (Case.baseDeclaration i)
-
-              Expect.isTrue
-                  (found |> List.forall (fun c -> c = "adoption-unmeasured"))
-                  (sprintf "the base declaration is refused only on the premise's record, found %A" found)
+              Expect.isEmpty (Case.codes i (Case.baseDeclaration i)) "the live records carry every count it names"
 
           testList
               "verdict"
@@ -678,15 +723,8 @@ let tests =
                             File.Delete path
 
                 let live () =
-                    // The live tree's own records: the one discharge the cases need is not in them, so the
-                    // tool's run declares the other classes only.
                     let i = Case.live ()
-
-                    Case.declaration
-                        Case.host
-                        i.CoreVersion
-                        (Case.baseRows i
-                         |> List.filter (fun r -> not ((Json.render r).Contains "host-premise")))
+                    Case.declaration Case.host i.CoreVersion (Case.baseRows i)
 
                 testCase "a valid declaration: exit 0 and the verdict on stdout"
                 <| fun _ ->
