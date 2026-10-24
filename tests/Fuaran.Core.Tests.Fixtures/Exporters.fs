@@ -141,14 +141,22 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
         Freshness = Bytes }
       { Family = "escape"
         Root = OwnedConformance.root
-        Files = fun dir -> [ EscapeCorpus.path dir, EscapeCorpus.render () ]
+        // Phase 568 — the table and its self-enumerated index, held byte for byte.
+        Files =
+          fun dir ->
+              [ EscapeCorpus.path dir, EscapeCorpus.render ()
+                EscapeCorpus.manifestPath dir, EscapeCorpus.renderManifest () ]
         FilesAt = None
         Write = None
         SharedIndexes = fun _ -> []
         Freshness = Bytes }
       { Family = "encoding"
         Root = OwnedConformance.root
-        Files = fun dir -> [ EncodingCorpus.path dir, EncodingCorpus.render () ]
+        // Phase 568 — the table and its self-enumerated index, held byte for byte.
+        Files =
+          fun dir ->
+              [ EncodingCorpus.path dir, EncodingCorpus.render ()
+                EncodingCorpus.manifestPath dir, EncodingCorpus.renderManifest () ]
         FilesAt = None
         Write = None
         SharedIndexes = fun _ -> []

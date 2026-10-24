@@ -97,6 +97,56 @@ let tests =
                   (Ok """{"id":"n","kind":{"$type":"Select","multiple":true,"values":["y"]}}""")
                   "an equality test reads the sibling's value"
 
+          // Phase 568 — the planted defect: a decoder that reads a member whose presence condition fails
+          // instead of dropping it, leaving the drop to the encoder. It is the reference's decoder over the
+          // fixture with every presence condition removed, then the reference's encoder over the fixture,
+          // and it must fail each vector carrying an ill-typed value under a failed condition.
+          testCase
+              "go-red: a decoder that reads a member whose presence condition fails fails the canonical-form vectors"
+          <| fun _ ->
+              let unconditioned =
+                  { idl with
+                      Kinds =
+                          idl.Kinds
+                          |> List.map (fun k ->
+                              { k with
+                                  Fields = k.Fields |> List.map (fun f -> { f with Presence = None }) }) }
+
+              let host (doc: string) =
+                  Decode.decode unconditioned doc |> Result.bind (Encode.encode idl)
+
+              let committed =
+                  System.IO.File.ReadAllText(
+                      System.IO.Path.Combine(OwnedConformance.root (), "laws", CanonicalFormVectorExport.fileName)
+                  )
+
+              let member' (m: (string * JVal) list) (k: string) =
+                  match m |> List.tryFind (fun (n, _) -> n = k) with
+                  | Some(_, JStr x) -> x
+                  | _ -> failtestf "a vector carries no string `%s`" k
+
+              let caught =
+                  match Json.parse committed with
+                  | Ok(JObj ms) ->
+                      match ms |> List.tryFind (fun (k, _) -> k = "vectors") with
+                      | Some(_, JArr vs) ->
+                          vs
+                          |> List.choose (function
+                              | JObj m when host (member' m "document") <> Ok(member' m "expected") ->
+                                  Some(member' m "id")
+                              | JObj _ -> None
+                              | _ -> failtest "a vector is an object")
+                      | _ -> failtest "the file carries no vectors"
+                  | _ -> failtest "the committed file does not read"
+
+              printfn "a decoder that reads a failed-condition member is caught by: %A" caught
+
+              for pinned in
+                  [ "presence-fails-unread"
+                    "presence-equals-fails-unread"
+                    "presence-equals-default-fails-unread" ] do
+                  Expect.contains caught pinned (sprintf "%s pins the decoder's drop" pinned)
+
           testCase "an alias decodes to the canonical member, and a refusal inside it is at the canonical spelling"
           <| fun _ ->
               match

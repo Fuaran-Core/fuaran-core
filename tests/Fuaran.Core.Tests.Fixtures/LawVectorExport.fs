@@ -212,6 +212,11 @@ module LawVectorExport =
 
             [ validates (sprintf "capability-%d-accept" d.Iteration) d declaration acceptArgs
               validates (sprintf "capability-%d-out-of-space" d.Iteration) d declaration [ "h0", outOfSpace ]
+              // Phase 568 — each bound of the range is pinned by a pair, one at it and one past it (the
+              // D226 shape): `accept` sits at the lower bound and `out-of-space` past the upper, and these
+              // two are the other halves, so a host one unit off either bound, early or late, fails one.
+              validates (sprintf "capability-%d-at-upper-bound" d.Iteration) d declaration [ "h0", string d.Hi ]
+              validates (sprintf "capability-%d-past-lower-bound" d.Iteration) d declaration [ "h0", string (d.Lo - 1) ]
               validates (sprintf "capability-%d-unknown-arg" d.Iteration) d declaration [ "nope", inSpace ]
 
               // The captured value is the draw itself: neither side computes it, and both carry it.
@@ -258,7 +263,7 @@ module LawVectorExport =
             + "the captured value, and build one capability per iteration over a single required value hole `h0` in "
             + "IntRange(lo, hi) with effect readsHost and the determinism set of the (i mod 7)th non-empty subset of {clock, random, network} in mask order (mask 1..7, bit 0 clock, bit 1 random, bit 2 network; the label names the members in that order joined by `+`). `capability` and `declaration` members carry a canonical "
             + "capability declaration as a JSON STRING — decode it with the host's capability codec. `validateArgs` "
-            + "vectors expect accept, or reject with a named error class and the offending address. `invocationKey` "
+            + "vectors expect accept, or reject with a named error class and the offending address; each bound of the range is pinned at it and one past it (`accept` at lo, `at-upper-bound` at hi, `past-lower-bound` at lo - 1, `out-of-space` at hi + 1: the range is inclusive at both ends). `invocationKey` "
             + "vectors expect the effect-identity key a non-deterministic invocation is journalled under, its "
             + "determinism tag, and the value the replay must return byte-identically. `declarationRoundTrip` expects "
             + "decode-then-encode to return the input bytes. `registryEnumerate` expects id-sorted enumeration "

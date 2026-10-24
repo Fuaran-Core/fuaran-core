@@ -531,8 +531,9 @@ module StructuralVectorExport =
                 | _ -> None)
             |> Option.defaultValue id
 
-    /// Build a scenario by calling the DAG's writes, in order. A refused write changes nothing.
-    let build (writes: Write list) : Result<Built, string> =
+    /// Run a scenario's writes on a DAG that already holds `start`'s nodes, in order, by calling the
+    /// DAG's writes. A refused write changes nothing.
+    let buildOn (start: Dag.T<SkeletonOp<RNode, string>>) (writes: Write list) : Result<Built, string> =
         writes
         |> List.fold
             (fun (acc: Result<Built, string>) w ->
@@ -570,9 +571,12 @@ module StructuralVectorExport =
                                 Outcomes = b.Outcomes @ [ w.Label, Error f ] }
                 })
             (Ok
-                { Dag = Dag.empty
+                { Dag = start
                   Outcomes = []
                   Ids = Map.empty })
+
+    /// Build a scenario from an empty DAG.
+    let build (writes: Write list) : Result<Built, string> = buildOn Dag.empty writes
 
     let internal readScenario (input: JVal) : Result<RNode * Write list, string> =
         result {
@@ -639,6 +643,21 @@ module StructuralVectorExport =
                       Op = op }
             }
 
+        /// The DAG a vector's `input.nodes` holds, keyed by each node's recorded id and never
+        /// re-hashed: a `verify` vector's nodes may be tampered, and a `write` vector's may be forged.
+        let private heldOf (input: JVal) : Result<Dag.T<SkeletonOp<RNode, string>>, string> =
+            result {
+                let! items = reqArr "nodes" input
+                let! nodes = items |> traverse readNode
+
+                return!
+                    nodes
+                    |> List.map (fun n -> n.Id, n)
+                    |> Map.ofList
+                    |> Dag.ofNodes
+                    |> Result.mapError (fun k -> sprintf "the node map is keyed wrongly at %s" k.Key)
+            }
+
         let private writesAnswer (b: Built) : JVal =
             JArr(
                 b.Outcomes
@@ -689,16 +708,14 @@ module StructuralVectorExport =
                               "ranks", JObj(order |> List.map (fun id -> b.LabelOf id, JInt ranks[id]))
                               "replays", JArr replays
                               "replayAll", JObj(replayAnswer b all) ]
+                | "write" ->
+                    let! held = heldOf input
+                    let! ws = reqArr "writes" input
+                    let! writes = ws |> traverse readWrite
+                    let! b = buildOn held writes
+                    return JObj [ "writes", writesAnswer b ]
                 | "verify" ->
-                    let! items = reqArr "nodes" input
-                    let! nodes = items |> traverse readNode
-
-                    let! dag =
-                        nodes
-                        |> List.map (fun n -> n.Id, n)
-                        |> Map.ofList
-                        |> Dag.ofNodes
-                        |> Result.mapError (fun k -> sprintf "the node map is keyed wrongly at %s" k.Key)
+                    let! dag = heldOf input
 
                     match Dag.firstBreak skeleton dag with
                     | None -> return JObj [ "verdict", JStr "intact" ]
@@ -716,24 +733,15 @@ module StructuralVectorExport =
         /// The models' answer to a vector (Phase 563). A `verify` vector is the DAG walker's model's
         /// (`Chain.first_break`). A `build` vector is the reference's alone: its answer carries the heads
         /// and the ranks, which no model states (`Dag.heads`, `Dag.ranks`), beside the content ids, the
-        /// order and the replays, so no model answers the whole of it.
+        /// order and the replays, so no model answers the whole of it. A `write` vector is the
+        /// reference's alone too (Phase 568): its answer is the write's refusal of an id the DAG holds
+        /// for other content, and no model states a DAG write over a held node set.
         let modelAnswer (v: Vector) : VectorOracle.Answer option =
             match v.Case with
             | "verify" ->
                 let answered =
-                    result {
-                        let! items = reqArr "nodes" v.Input
-                        let! nodes = items |> traverse readNode
-
-                        let! dag =
-                            nodes
-                            |> List.map (fun n -> n.Id, n)
-                            |> Map.ofList
-                            |> Dag.ofNodes
-                            |> Result.mapError (fun k -> sprintf "the node map is keyed wrongly at %s" k.Key)
-
-                        return ChainOracle.verify hashFn ApplyVectorExport.encodeOp dag
-                    }
+                    heldOf v.Input
+                    |> Result.map (ChainOracle.verify hashFn ApplyVectorExport.encodeOp)
 
                 match answered with
                 | Ok answer ->
@@ -779,6 +787,30 @@ module StructuralVectorExport =
             let tamper i f =
                 nodes |> List.mapi (fun j n -> if i = j then f n else n)
 
+            // Phase 568 — the one write refusal a write from an empty DAG cannot reach under SHA-256: an id
+            // the DAG already holds for other content. The held set carries a node recorded under the id
+            // alice's removal of a2 hashes to, holding another op, beside an honest node of bob's.
+            let held (parents: string list) (actor: Actor) (op: SkeletonOp<RNode, string>) =
+                { Id = Dag.nodeId skeleton parents actor op
+                  Parents = parents
+                  Actor = actor
+                  Op = op }
+
+            let honest = held [] bob (RemoveNode "a1")
+
+            let forged =
+                { held [] alice (RemoveNode "a2") with
+                    Op = RemoveNode "b1" }
+
+            let writeCase id description (ns: DagNode<SkeletonOp<RNode, string>> list) writes =
+                { Id = id
+                  Case = "write"
+                  Description = description
+                  Input =
+                    JObj
+                        [ "nodes", JArr(ns |> List.map nodeJ)
+                          "writes", JArr(writes |> List.map writeJ) ] }
+
             [ buildCase
                   "build-fork-and-merge"
                   "A genesis write, two writers forking off it, and an agent's mergeAll of the two heads (named in reverse; the parents are sorted). Each node's id is sha256(sorted parents joined by \",\" + \"|\" + actor + \"|\" + op)."
@@ -820,6 +852,13 @@ module StructuralVectorExport =
                     w "l2" "appendOn" [ "@l1" ] alice (InsertChild("a", node "c3" "para" []))
                     w "s1" "appendOn" [ "@g" ] bob (InsertChild("b", node "c4" "para" []))
                     w "m" "mergeAll" [ "@l2"; "@s1" ] bob (Batch []) ]
+              writeCase
+                  "write-content-id-collision"
+                  "Writes on a DAG that already holds nodes, keyed by their recorded ids and not re-hashed. The same op by the same actor on the same parents as a held node is that node; a write whose id the DAG holds for other content is refused as a contentIdCollision naming that id (its member is `nodeId`), and nothing is recorded; a write on a held node by its literal id is a new node."
+                  [ honest; forged ]
+                  [ w "same" "appendOn" [] bob (RemoveNode "a1")
+                    w "collide" "appendOn" [] alice (RemoveNode "a2")
+                    w "child" "appendOn" [ honest.Id ] alice (InsertChild("a", node "w1" "para" [])) ]
               verifyCase "verify-intact" "The nodes of build-fork-and-merge verify." nodes
               verifyCase
                   "verify-tampered-op"
@@ -839,6 +878,7 @@ module StructuralVectorExport =
             + "The ops are the skeleton ops in the apply/ family's encoding, over the apply/ family's tree envelope; a state is a tree. "
             + "A `build` vector runs `input.writes` in order from an empty DAG (verb appendOn: the parents as given, [] for genesis; verb mergeAll: the parents deduplicated and sorted; a parent `@label` is the node an earlier write recorded under that label, anything else a literal id) and expects each write's id or its refusal, the heads, the whole-DAG order (Kahn's drain, smallest id first among the ready nodes), each node's rank (0 for a root, else one past its deepest parent), each head replayed from `input.state0` and the whole DAG replayed in that order (accept with the tree's canonical bytes and sha256, or reject naming the first rejecting node). "
             + "Nodes are named by the label of the write that first recorded them. "
+            + "A `write` vector runs `input.writes` the same way on the DAG `input.nodes` holds (each node keyed by its recorded id and not re-hashed, so a held node may be forged) and expects each write's id or its refusal; a write whose id the DAG holds for different parents (modulo order), actor or op is refused as `contentIdCollision`, naming the id as `nodeId`. "
             + "A `verify` vector walks `input.nodes` in the same drain order and expects `intact` or the first `break` (content-id mismatch, then missing parent). "
             + "Every expectation is computed by calling Core (Dag.appendOn, mergeAll, heads, totalOrderBy, ranks, tryReplayTo, replayAllBy, firstBreak); there is no kitVersion stamp."
 
@@ -1067,6 +1107,20 @@ module StructuralVectorExport =
                     on "g" "y" bob (InsertChild("b", node "y1" "para" []))
                     on "g" "z" agent (InsertChild("another-missing-parent", node "z1" "para" [])) ]
                   [ "z"; "y"; "x" ]
+                  None
+              // Phase 568 — the heads of lanes-rejected reverse into their id order, so a host that reverses
+              // the heads in place of sorting passes it. These four rejected lanes' id order (p, s, q, r)
+              // is none of the order the heads are named in, its reverse, or the labels' order.
+              case
+                  "lanes-rejected-id-order"
+                  "Four lanes do not apply and one does, the heads named in an order that is not the rejected lanes' head-id order, nor its reverse, nor their labels' order: the rejected lanes are named sorted by head id, ordinally."
+                  [ g
+                    on "g" "p" alice (InsertChild("missing-p", node "p1" "para" []))
+                    on "g" "q" bob (InsertChild("missing-q", node "q1" "para" []))
+                    on "g" "r" agent (InsertChild("missing-r", node "r1" "para" []))
+                    on "g" "s" bob (InsertChild("missing-s", node "s1" "para" []))
+                    on "g" "y" bob (InsertChild("b", node "y1" "para" [])) ]
+                  [ "q"; "y"; "r"; "p"; "s" ]
                   None
               case
                   "no-common-base"

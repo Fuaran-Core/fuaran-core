@@ -71,6 +71,30 @@ let private has (name: string) (v: JVal) : bool =
 
 let private verdictOf (expected: JVal) : string = str "verdict" expected
 
+/// A tagged value's tag: a string as it is, an object's `$type` (else its first member).
+let private tag (v: JVal) : string =
+    match v with
+    | JStr s -> s
+    | JObj ms ->
+        match ms |> List.tryFind (fun (k, _) -> k = "$type") with
+        | Some(_, JStr t) -> t
+        | _ -> fst ms.Head
+    | other -> sprintf "%A" other
+
+/// The ids of the committed vectors of `f` a host answering through `answer` disagrees with: the
+/// family's own reading (`checkFile`) with the answer replaced, so a planted defect is judged exactly
+/// as Core's own answer is.
+let private caughtBy (f: Family) (answer: string -> JVal -> Result<JVal, string>) : string list =
+    checkFile { f with Answer = answer } (committed f)
+    |> List.map (fun finding -> finding.Substring(f.Name.Length + 1).Split(':').[0])
+    |> List.distinct
+
+/// An object with one member's value replaced through `edit`, every other member as it is.
+let private editMember (name: string) (edit: JVal -> JVal) (v: JVal) : JVal =
+    match v with
+    | JObj ms -> JObj(ms |> List.map (fun (k, x) -> if k = name then k, edit x else k, x))
+    | other -> other
+
 let rec private permutations (xs: 'a list) : 'a list list =
     match xs with
     | [] -> [ [] ]
@@ -202,6 +226,46 @@ let private dagLaws () =
                         1 + (parents |> List.map (fun p -> ranks[p]) |> List.max)
 
                 Expect.equal ranks[nodeId] expectedRank (id + ": a rank is a Lamport depth")
+        | "write" ->
+            // The law: a write's id is Dag.nodeId of its parents, actor and op, and a contentIdCollision
+            // names exactly that id, which the vector's held nodes record for other content.
+            let held = arr "nodes" input |> List.map (fun n -> str "id" n, n) |> Map.ofList
+
+            let mutable ids: Map<string, string> = Map.empty
+
+            for wr, outcome in List.zip (arr "writes" input) (arr "writes" expected) do
+                let label = str "label" wr
+                let actor = ok (decodeActor (str "actor" wr))
+                let op = ok (ApplyVectorExport.decodeOp (str "op" wr))
+
+                let parents =
+                    arr "parents" wr
+                    |> List.map (function
+                        | JStr p when p.StartsWith "@" -> ids[p.Substring 1]
+                        | JStr p -> p
+                        | _ -> failtest "a parent")
+                    |> fun ps -> if str "verb" wr = "mergeAll" then List.distinct ps else ps
+
+                let computed = Dag.nodeId skeleton parents actor op
+
+                if has "id" outcome then
+                    Expect.equal (str "id" outcome) computed (sprintf "%s: write %s's id is Dag.nodeId" id label)
+                    ids <- Map.add label computed ids
+                else
+                    let refused = ok (Json.parse (str "refused" outcome))
+
+                    if tag refused = "contentIdCollision" then
+                        Expect.equal
+                            (str "nodeId" refused)
+                            computed
+                            (sprintf "%s: write %s's collision names its id" id label)
+
+                        let holder = held[computed]
+
+                        Expect.notEqual
+                            (str "op" holder, str "actor" holder)
+                            (ApplyVectorExport.encodeOp op, Actor.encode actor)
+                            (sprintf "%s: the node held under %s is other content" id computed)
         | "verify" ->
             // The law: a vector is intact exactly when every node hashes to its id and every parent
             // is held - recomputed here node by node, without the walker.
@@ -313,15 +377,6 @@ let private diffLaws () =
 let private reached (f: Family) (pick: JVal -> string list) : Set<string> =
     parsed f |> List.collect (fun (_, _, _, e) -> pick e) |> Set.ofList
 
-let private tag (v: JVal) : string =
-    match v with
-    | JStr s -> s
-    | JObj ms ->
-        match ms |> List.tryFind (fun (k, _) -> k = "$type") with
-        | Some(_, JStr t) -> t
-        | _ -> fst ms.Head
-    | other -> sprintf "%A" other
-
 [<Tests>]
 let tests =
     testList
@@ -404,7 +459,8 @@ let tests =
 
                   Expect.equal (verdicts "chain") (set [ "intact"; "break" ]) "chain: both walk verdicts"
 
-                  // dag: every write refusal but `contentIdCollision`, which needs a SHA-256 collision.
+                  // dag: every write refusal; `contentIdCollision` is reached by a write on a held, forged
+                  // node (Phase 568), since a write from an empty DAG reaches it only by a SHA-256 collision.
                   Expect.equal
                       (reached (family "dag") (fun e ->
                           if has "writes" e then
@@ -416,8 +472,8 @@ let tests =
                                       None)
                           else
                               []))
-                      (set [ "unknownParent"; "commaInParentId"; "emptyParentId" ])
-                      "dag: every write refusal reachable without a hash collision"
+                      (set [ "unknownParent"; "commaInParentId"; "emptyParentId"; "contentIdCollision" ])
+                      "dag: every write refusal"
 
                   Expect.equal
                       (reached (family "dag") (fun e -> if has "reason" e then [ str "reason" e ] else []))
@@ -464,6 +520,85 @@ let tests =
                       "diff: every change kind the envelope can show"
 
                   Expect.equal (verdicts "diff") (set [ "diff"; "refuse" ]) "diff: both verdicts"
+
+          // Phase 568 — the planted defects. Each is a host defect the spine ports found the families
+          // could not see, planted here on Core's own answer exactly as a host would carry it, and each
+          // must fail the vector that pins it.
+          yield
+              testCase "go-red: a host that spells contentIdCollision's id member `id` fails the dag family"
+              <| fun _ ->
+                  let dag = family "dag"
+
+                  let respell (refused: JVal) =
+                      match refused with
+                      | JStr text ->
+                          match ok (Json.parse text) with
+                          | JObj ms when tag (JObj ms) = "contentIdCollision" ->
+                              JStr(
+                                  Canonical.write
+                                      Rendering.CrossHost
+                                      (JObj(ms |> List.map (fun (k, x) -> (if k = "nodeId" then "id" else k), x)))
+                              )
+                          | _ -> refused
+                      | other -> other
+
+                  let mutant case input =
+                      dag.Answer case input
+                      |> Result.map (
+                          editMember "writes" (function
+                              | JArr ws -> JArr(ws |> List.map (editMember "refused" respell))
+                              | other -> other)
+                      )
+
+                  let caught = caughtBy dag mutant
+                  printfn "the `id` spelling is caught by: %A" caught
+                  Expect.contains caught "write-content-id-collision" "the collision vector pins the member's name"
+
+          yield
+              testCase
+                  "go-red: a host that orders the rejected lanes by reversing, keeping or labelling the heads fails the merge family"
+              <| fun _ ->
+                  let merge = family "merge"
+
+                  // Each planted host reports the same rejected lanes in its own order: the heads as
+                  // named, reversed; as named; or by the head's label.
+                  let reorder (rank: JVal -> string list -> string -> int) (input: JVal) (expected: JVal) =
+                      let heads =
+                          arr "heads" input
+                          |> List.map (function
+                              | JStr l -> l
+                              | _ -> failtest "a head label")
+                          |> List.distinct
+
+                      if has "verdict" expected && verdictOf expected = "lanesRejected" then
+                          editMember
+                              "lanes"
+                              (function
+                              | JArr lanes -> JArr(lanes |> List.sortBy (fun l -> rank input heads (str "head" l)))
+                              | other -> other)
+                              expected
+                      else
+                          expected
+
+                  let hosts =
+                      [ "reversal", (fun _ (heads: string list) h -> -(List.findIndex ((=) h) heads))
+                        "the heads' order", (fun _ (heads: string list) h -> List.findIndex ((=) h) heads)
+                        "label order",
+                        (fun _ (heads: string list) h ->
+                            List.findIndex
+                                ((=) h)
+                                (List.sortWith (fun a b -> System.String.CompareOrdinal(a, b)) heads)) ]
+
+                  for name, rank in hosts do
+                      let caught =
+                          caughtBy merge (fun case input -> merge.Answer case input |> Result.map (reorder rank input))
+
+                      printfn "a host ordering the rejected lanes by %s is caught by: %A" name caught
+
+                      Expect.contains
+                          caught
+                          "lanes-rejected-id-order"
+                          (sprintf "the id-order vector pins the sort against %s" name)
 
           yield
               testCase "the four families are rows of the exporter table, one each"

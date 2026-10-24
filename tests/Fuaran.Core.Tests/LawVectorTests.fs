@@ -132,7 +132,11 @@ let private capabilityVerdict (r: Result<unit, InvokeError>) : (string * JVal) l
     | Error(UnknownArg(addr, _)) -> [ "verdict", JStr "reject"; "error", JStr "unknownArg"; "addr", JStr addr ]
     | Error _ -> [ "verdict", JStr "reject"; "error", JStr "unexpected" ]
 
-let private checkCapabilityVector (v: JVal) : string option =
+/// A vector's finding against a host whose `validateArgs` is `validate`; `None` when it agrees.
+let private checkCapabilityVectorWith
+    (validate: Capability -> (string * string) list -> Result<unit, InvokeError>)
+    (v: JVal)
+    : string option =
     let id = str "id" v |> Option.defaultValue "<no id>"
     let input = field "input" v |> Option.defaultValue (JObj [])
 
@@ -159,7 +163,7 @@ let private checkCapabilityVector (v: JVal) : string option =
     | Some "validateArgs", Some args ->
         match decl "capability" with
         | Error m -> Some m
-        | Ok(_, c) -> differs (capabilityVerdict (Capability.validateArgs c args))
+        | Ok(_, c) -> differs (capabilityVerdict (validate c args))
     | Some "invocationKey", Some args ->
         match decl "capability" with
         | Error m -> Some m
@@ -205,6 +209,9 @@ let private checkCapabilityVector (v: JVal) : string option =
         | _ -> Some(sprintf "%s: input.declarations missing" id)
     | Some other, _ -> Some(sprintf "%s: unknown case `%s`" id other)
     | None, _ -> Some(sprintf "%s: no case" id)
+
+let private checkCapabilityVector: JVal -> string option =
+    checkCapabilityVectorWith Capability.validateArgs
 
 let private capabilityVectorsOf (json: string) : Result<JVal list, string> =
     match Json.parse json with
@@ -646,6 +653,16 @@ let tests =
                   | Error(ArgOutOfSpace _) -> ()
                   | other -> failtestf "iteration %d: out-of-space was not ArgOutOfSpace (%A)" d.Iteration other
 
+                  // Phase 568 — the other halves of each bound's pair: the range is inclusive at both ends.
+                  Expect.equal
+                      (Capability.validateArgs d.Cap [ "h0", string d.Hi ])
+                      (Ok())
+                      (sprintf "iteration %d: the upper bound is accepted" d.Iteration)
+
+                  match Capability.validateArgs d.Cap [ "h0", string (d.Lo - 1) ] with
+                  | Error(ArgOutOfSpace _) -> ()
+                  | other -> failtestf "iteration %d: past the lower bound was not ArgOutOfSpace (%A)" d.Iteration other
+
                   match Capability.validateArgs d.Cap [ "nope", string d.Lo ] with
                   | Error(UnknownArg _) -> ()
                   | other -> failtestf "iteration %d: an unknown arg was not UnknownArg (%A)" d.Iteration other
@@ -661,8 +678,8 @@ let tests =
               | Ok vectors ->
                   Expect.equal
                       (List.length vectors)
-                      (6 * LawVectorExport.Capabilities.iterations)
-                      "six vectors per declared iteration"
+                      (8 * LawVectorExport.Capabilities.iterations)
+                      "eight vectors per declared iteration"
 
                   let failures = vectors |> List.choose checkCapabilityVector
                   Expect.isEmpty failures (sprintf "%A" failures)
@@ -699,6 +716,46 @@ let tests =
                   let failures = vectors |> List.choose checkCapabilityVector
                   Expect.equal (List.length failures) 1 "exactly the perturbed vector is named"
                   Expect.stringContains (List.head failures) "capability-0-accept" "and by its id"
+
+          // Phase 568 — the planted defect: a host whose range check is one unit off a bound, early or
+          // late, at either end, is a host that answers every vector as the reference does under that
+          // bound shifted (the D226 simulation), and each of the four must fail the vector at or past it.
+          testCase
+              "go-red: a host one unit off either bound of an integer range, early or late, fails the capability vectors"
+          <| fun _ ->
+              let shifted (dLo: int) (dHi: int) (c: Capability) =
+                  { c with
+                      Signature =
+                          { c.Signature with
+                              Holes =
+                                  c.Signature.Holes
+                                  |> List.map (fun h ->
+                                      match h.Kind with
+                                      | ValueHole(IntRange(lo, hi)) ->
+                                          { h with
+                                              Kind = ValueHole(IntRange(lo + dLo, hi + dHi)) }
+                                      | _ -> h) } }
+
+              match capabilityVectorsOf (LawVectorExport.Capabilities.render ()) with
+              | Error m -> failtest m
+              | Ok vectors ->
+                  for host, dLo, dHi, pinnedBy in
+                      [ "the lower bound early", 1, 0, "accept"
+                        "the lower bound late", -1, 0, "past-lower-bound"
+                        "the upper bound early", 0, -1, "at-upper-bound"
+                        "the upper bound late", 0, 1, "out-of-space" ] do
+                      let failed =
+                          vectors
+                          |> List.choose (
+                              checkCapabilityVectorWith (fun c args -> Capability.validateArgs (shifted dLo dHi c) args)
+                          )
+                          |> List.map (fun f -> f.Split(':').[0])
+
+                      printfn "a host off %s fails %d capability vectors: %A" host failed.Length failed
+
+                      Expect.isTrue
+                          (failed |> List.exists (fun id -> id.EndsWith("-" + pinnedBy)))
+                          (sprintf "a host off %s fails the %s vectors" host pinnedBy)
 
           testCase "the rendered capability artefact is LF-only and byte-stable across renders"
           <| fun _ ->

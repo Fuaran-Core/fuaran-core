@@ -101,7 +101,9 @@ module SpineAdoption =
               "premiseFloatDigits", 163, rs564
               "premiseInt53", 29, rs564
               "premiseSha256", 17, rs564
-              "premiseRecursionDepth", 13, rs564 ] }
+              "premiseRecursionDepth", 13, rs564
+              // Phase 568 — its first certification ran every line of the escape table (Phase 463).
+              "stringEscape", 38, rs463 ] }
 
     /// Phase 485's measurement of the Go spine: Core 0.41.0, landed at this spine commit.
     let private go485 =
@@ -123,16 +125,56 @@ module SpineAdoption =
               "premiseFloatDigits", 163, go485
               "premiseInt53", 29, go485
               "premiseSha256", 17, go485
-              "premiseRecursionDepth", 13, go485 ] }
+              "premiseRecursionDepth", 13, go485
+              // Phase 568 — its first certification ran every line of the escape table (Phase 485).
+              "stringEscape", 38, go485 ] }
 
     /// The spines, in the order every manifest lists their entries.
     let internal spines = [ rust; go ]
 
-    /// One spine's entry for one family.
+    /// The families a spine has decided not to run (Phase 568): its host key, the family id, and the
+    /// reason its own record gives, which the family's manifest row states beside the entry, because a
+    /// `declined` entry carries nothing but its status (D222.1). Both spines decline the `encoding/`
+    /// table: it pins the v1 profile of the stores the reference minted from `0.30.0` to `0.32.0`, and
+    /// a writer that keeps authored member order, and neither spine has read or minted such a store
+    /// (fuaran-core-rs D8, fuaran-core-go D4).
+    let internal declined: (string * string * string) list =
+        let encodingWhy =
+            "it pins the v1 profile of the stores the reference minted from 0.30.0 to 0.32.0 and a writer that keeps authored member order, which only a host that reads or mints such a store needs"
+
+        [ "fuaran-core-rs", "encodingProfile", encodingWhy
+          "fuaran-core-go", "encodingProfile", encodingWhy ]
+
+    /// One spine's entry for one family. A family both measured and declined is a contradiction in
+    /// this table, refused rather than resolved either way.
     let private entry (spine: Spine) (familyId: string) : string * HostAdoption =
-        match spine.Measured |> List.tryFind (fun (id, _, _) -> id = familyId) with
-        | Some(_, cases, source) -> spine.Host, HostAdoption.Measured(cases, source)
-        | None -> spine.Host, HostAdoption.Proposed
+        let isDeclined =
+            declined |> List.exists (fun (h, id, _) -> h = spine.Host && id = familyId)
+
+        match spine.Measured |> List.tryFind (fun (id, _, _) -> id = familyId), isDeclined with
+        | Some _, true -> failwithf "%s both measures and declines `%s`" spine.Host familyId
+        | Some(_, cases, source), false -> spine.Host, HostAdoption.Measured(cases, source)
+        | None, true -> spine.Host, HostAdoption.Declined
+        | None, false -> spine.Host, HostAdoption.Proposed
+
+    /// The sentences a family's manifest row states for the spines that decline it: one per reason,
+    /// naming the spines that give it in roster order.
+    let internal declineNotes (familyId: string) : string list =
+        [ for spine in spines do
+              for h, id, why in declined do
+                  if h = spine.Host && id = familyId then
+                      yield h, why ]
+        |> List.groupBy snd
+        |> List.map (fun (why, hosts) ->
+            let named = hosts |> List.map (fun (h, _) -> "`" + h + "`")
+
+            let subject =
+                match List.rev named with
+                | [ one ] -> one + " declines"
+                | last :: rest -> String.concat ", " (List.rev rest) + " and " + last + " decline"
+                | [] -> failwith "a group has a member"
+
+            sprintf "%s this family: %s." subject why)
 
     /// Every spine's entry for one family, in roster order.
     let internal adoptions (familyId: string) : (string * HostAdoption) list =

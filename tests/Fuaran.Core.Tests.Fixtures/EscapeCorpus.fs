@@ -3,6 +3,33 @@ namespace Fuaran.Core.Tests
 
 open Fuaran.Core
 
+/// The index of a line family (Phase 568): `escape/` and `encoding/` each carry one table, and each
+/// directory's own `manifest.json` records it in the one manifest schema with the adoption record
+/// (D222), so a host's measurement of a table is written where a host reads it. A table's vectors are
+/// its lines. The reference's entry is this repository's suite, which holds every line to the code
+/// (`StringEscapeTests`, `EncodingProfileTests`); the wire hosts read `proposed`; each spine's entry is
+/// the one table of spines' (`SpineAdoption`), whose declines are stated in the row's description.
+module LineFamilyManifest =
+
+    /// The index over one line table.
+    let internal manifest (familyId: string) (fileName: string) (lines: int) (summary: string) : CorpusManifest =
+        { Version = 1
+          Description =
+            "A Core-owned line table (Phase 568). SELF-ENUMERATED, as apply/ is: not indexed by the corpus root manifest.json. `vectors` counts the table's lines, each one vector. `adoption` is per host and is DATA: a host whose entry reads `proposed` reports the family BY NAME rather than skipping it, and flips its own entry in the change-set that lands its leg. This manifest is authoritative for the line count."
+          Families =
+            [ { Id = familyId
+                Kind = "line-vectors"
+                File = fileName
+                Vectors = lines
+                Adoption =
+                  ("fuaran", HostAdoption.Measured(lines, AdoptionSource.Here))
+                  :: (ApplyVectorExport.hostRoster |> List.map (fun h -> h, HostAdoption.Proposed))
+                  @ SpineAdoption.adoptions familyId
+                Description = String.concat " " (summary :: SpineAdoption.declineNotes familyId) } ] }
+
+    let manifestPath (familyDirName: string) (dir: string) =
+        System.IO.Path.Combine(dir, familyDirName, "manifest.json")
+
 /// The committed rendering of `StringEscapeVectors.lines` (Phase 349): the file a host in another
 /// language diffs its own rendering against, so the line FORMAT is pinned in the repository rather
 /// than recomputed by whoever reads it. Written by `render escape`, held to a fresh render below.
@@ -43,3 +70,16 @@ module EscapeCorpus =
 
     let path (dir: string) =
         System.IO.Path.Combine(dir, familyDirName, fileName)
+
+    /// The family's index (Phase 568).
+    let renderManifest () : string =
+        LineFamilyManifest.manifest
+            "stringEscape"
+            fileName
+            (List.length (StringEscapeVectors.lines ()))
+            "The one string spelling inside canonical JSON: each character's canonical spelling and actor encoding, then each named actor's encoding and chain pre-image."
+        |> CorpusFile.manifest
+        |> CorpusFile.render
+
+    let manifestPath (dir: string) =
+        LineFamilyManifest.manifestPath familyDirName dir

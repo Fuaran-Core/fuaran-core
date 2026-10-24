@@ -28,3 +28,16 @@ module EncodingCorpus =
 
     let path (dir: string) =
         System.IO.Path.Combine(dir, familyDirName, fileName)
+
+    /// The family's index (Phase 568).
+    let renderManifest () : string =
+        LineFamilyManifest.manifest
+            "encodingProfile"
+            fileName
+            (List.length (EncodingProfileVectors.lines ()))
+            "A content-addressed store's declared rendering: each value, actor and capture pre-image under the v1 profile (0.30.0 to 0.32.0) and the v2 profile (since 0.33.0)."
+        |> CorpusFile.manifest
+        |> CorpusFile.render
+
+    let manifestPath (dir: string) =
+        LineFamilyManifest.manifestPath familyDirName dir

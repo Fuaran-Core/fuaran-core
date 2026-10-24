@@ -100,6 +100,13 @@ module CanonicalFormVectorExport =
           "presence",
           """{"$type":"Select","multiple":true,"value":"x","values":["y"]}"""
           "presence-equals-explicit-default", "presence", """{"$type":"Select","multiple":false,"value":"x"}"""
+          // Phase 568 — a member whose condition fails is dropped by the DECODER, unread: its value may be
+          // anything, ill-typed included. The vectors above re-encode to the same bytes whether the decoder
+          // drops it or the encoder does, so a host whose decoder reads the member passes them all; each of
+          // these carries an ill-typed value under a failed condition, which such a host refuses.
+          "presence-fails-unread", "presence", """{"$type":"Grid","cols":"three","template":"1fr 2fr"}"""
+          "presence-equals-fails-unread", "presence", """{"$type":"Select","multiple":true,"value":7,"values":["y"]}"""
+          "presence-equals-default-fails-unread", "presence", """{"$type":"Select","value":"x","values":5}"""
           "default-empty-map-omitted", "default", """{"$type":"Notify","args":{}}"""
           "default-map-kept", "default", """{"$type":"Notify","args":{"k":"v"}}"""
           "default-empty-json-omitted", "default", """{"$type":"Notify","payload":{}}"""
@@ -135,8 +142,8 @@ module CanonicalFormVectorExport =
         + "otherwise the first alias in declared order), an enum case's aliases (lenient wire strings that decode to "
         + "the case and re-encode as its canonical string), a member's PRESENCE condition (`whenPresent` / `whenAbsent` "
         + "an Optional sibling, or `whenEquals` a sibling's scalar value, an absent OmitDefault sibling holding "
-        + "its default; a member whose condition fails is absent from the canonical form, so a decoder drops it and it "
-        + "decodes as its optionality's absence), and an empty-map or JSON default literal (omitted at its default, "
+        + "its default; a member whose condition fails is absent from the canonical form, so a decoder drops it UNREAD, "
+        + "whatever its value, ill-typed included, and it decodes as its optionality's absence), and an empty-map or JSON default literal (omitted at its default, "
         + "compared by canonical bytes). `vocabulary` is the fixture's idl.json; each vector reads `document` (a node "
         + "over that vocabulary) and expects `expected`, the canonical bytes the reference decodes and re-encodes it to, "
         + "computed by calling the pinned kit."

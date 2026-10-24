@@ -20,7 +20,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 | Model | Rows | Families (cases) | Oracle functions |
 |---|---|---|---|
-| `Capability` | 34 | `capabilityLaws` (48), `seamRefusals` (55) | — |
+| `Capability` | 34 | `capabilityLaws` (72), `seamRefusals` (55) | — |
 | `Chain` | 27 | `skeletonChain` (16), `skeletonDag` (4) | `chain.verify` |
 | `DagFold` | 3 | — | `dag.fold` |
 | `DecimalText` | 12 | `decimal` (49) | — |
@@ -159,7 +159,7 @@ Certified against the reference implementation alone, so a host passing one offe
 |---|---|---|
 | `skeletonDiff` | [`conformance/diff/skeleton-diff.json`](../conformance/diff/skeleton-diff.json) | 14 |
 | `encodingProfile` | [`conformance/encoding/encoding-profiles.json`](../conformance/encoding/encoding-profiles.json) | 47 |
-| `canonicalFormLaws` | [`conformance/laws/canonical-form-laws.json`](../conformance/laws/canonical-form-laws.json) | 17 |
-| `skeletonMerge` | [`conformance/merge/skeleton-merge.json`](../conformance/merge/skeleton-merge.json) | 12 |
+| `canonicalFormLaws` | [`conformance/laws/canonical-form-laws.json`](../conformance/laws/canonical-form-laws.json) | 20 |
+| `skeletonMerge` | [`conformance/merge/skeleton-merge.json`](../conformance/merge/skeleton-merge.json) | 13 |
 | `premiseFloatDigits` | [`conformance/premises/float-digits.json`](../conformance/premises/float-digits.json) | 163 |
 | `premiseSha256` | [`conformance/premises/sha256.json`](../conformance/premises/sha256.json) | 17 |

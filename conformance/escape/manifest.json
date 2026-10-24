@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "description": "A Core-owned line table (Phase 568). SELF-ENUMERATED, as apply/ is: not indexed by the corpus root manifest.json. `vectors` counts the table's lines, each one vector. `adoption` is per host and is DATA: a host whose entry reads `proposed` reports the family BY NAME rather than skipping it, and flips its own entry in the change-set that lands its leg. This manifest is authoritative for the line count.",
+  "families": [
+    { "id": "stringEscape", "kind": "line-vectors", "file": "string-escape.json", "vectors": 38, "adoption": { "fuaran": { "status": "adopted", "cases": 38 }, "fuaran-ts": { "status": "proposed" }, "fuaran-py": { "status": "proposed" }, "fuaran-go": { "status": "proposed" }, "fuaran-rs": { "status": "proposed" }, "fuaran-core-rs": { "status": "adopted", "cases": 38, "kitVersion": "0.41.0", "sha": "432509b7bbdf0f1a227914466d12c48abc35291f" }, "fuaran-core-go": { "status": "adopted", "cases": 38, "kitVersion": "0.41.0", "sha": "d0da7f1c22a6b9febee25fd03b3000e8e43ea60e" } }, "description": "The one string spelling inside canonical JSON: each character's canonical spelling and actor encoding, then each named actor's encoding and chain pre-image." }
+  ]
+}
