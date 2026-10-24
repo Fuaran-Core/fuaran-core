@@ -636,7 +636,7 @@ certified against and the spine commit that landed them, and `proposed` for a fa
 It reads Core's vectors from a Core checkout at the commit its own `core-pin.json` names, not from the
 shared corpus, because most of the families it runs have no corpus copy.
 
-**The law families have their own index** (Phase 564, DECISIONS.md D230). `conformance/laws/manifest.json`
+**The law families have their own index** (Phase 564, DECISIONS.md D231). `conformance/laws/manifest.json`
 is the one manifest schema over the law files this repository emits — one row per file, its id the file's
 own `family` member, its vector count read from the file, and the adoption record — so a host's measured law
 cases are written where a host reads them, not in a decision's prose. It is written at this repository's

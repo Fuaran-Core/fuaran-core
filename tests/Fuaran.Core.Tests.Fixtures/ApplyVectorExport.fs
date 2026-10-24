@@ -52,7 +52,7 @@ namespace Fuaran.Core.Tests
 // ============================================================================
 
 /// The Rust Core spine's adoption of the families this repository emits (Phase 463, DECISIONS.md D225;
-/// Phase 564, D230). `fuaran-core-rs` is Core's own twin, not a wire host: it answers a rejection in
+/// Phase 564, D231). `fuaran-core-rs` is Core's own twin, not a wire host: it answers a rejection in
 /// Core's vocabulary, so it is an ADOPTION host only and never joins a roster that maps Core's classes to
 /// a host's codes (`ApplyVectorExport.hostRoster`). Its measurements were made in its own repository, so
 /// each names the Core version its legs certified against and the spine commit that landed them; a family

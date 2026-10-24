@@ -2480,3 +2480,478 @@ let optionalNodeWitnessTests =
                           Expect.stringContains out "box\tc\n" "the box's one child"
                           Expect.stringContains out "tip\t\n" "a kind holding only an optional node has no children"
                           Expect.stringContains out "swapped\td\th" "a replacement keeps the keyed hint") ]
+
+// ---------------------------------------------------------------------------
+// Phase 562 (DECISIONS.md D230) — the collecting decoders take host decoders at the four positions
+// 541 left as leaves: every ENUMERATION, the four JSON SCALARS, every GENERIC union (one generic
+// `Decode` per union, so one host decoder covers every instantiation) and every declared member an
+// object does not carry (`Absent`), which is where a host's own reading over Core's token surface
+// (Phase 467) answers a member null by its position. Each test drives an override at every depth its
+// type occurs; the record that overrides nothing answers exactly what the plain entry answers.
+// ---------------------------------------------------------------------------
+
+module private Hooks =
+    let parse (s: string) =
+        match Decoder.parse ReadOptions.strict s with
+        | Ok j -> j
+        | Error e -> failwithf "the fixture parses: %A" e
+
+    /// `Priority` at four positions: a union case's record (`Trigger.Timer.owner`), a kind spec's
+    /// record (`Task.owner`), a kind spec itself (`Note.priority`) and the root kind's record
+    /// (`Section.owner`), each spelled `Urgent`, which the vocabulary does not declare.
+    let urgentText =
+        """{"id":"root","kind":{"$type":"Section","title":"t","children":[{"id":"task","kind":{"$type":"Task","name":"n","due":{"$type":"AllOf","rules":[{"$type":"Not","rule":{"$type":"Equals","key":"k","value":"v"}}]},"trigger":{"$type":"Timer","owner":{"priority":"Urgent"},"every":5,"fire":"<closure>"},"extras":{},"owner":{"name":"o","priority":"Urgent"}}},{"id":"note","kind":{"$type":"Note","text":"x","priority":"Urgent"}}],"owner":{"priority":"Urgent"},"estimate":{"$type":"Hours","amount":2.5}}}"""
+
+    let urgentPaths =
+        [ "$.kind.children[0].kind.trigger.owner.priority"
+          "$.kind.children[0].kind.owner.priority"
+          "$.kind.children[1].kind.priority"
+          "$.kind.owner.priority" ]
+
+    let pathOf (p: PathSegment list) =
+        "$"
+        + (p
+           |> List.map (function
+               | PathSegment.Key k -> "." + k
+               | PathSegment.Index i -> sprintf "[%d]" i)
+           |> String.concat "")
+
+    let defects (r: Result<'T, DecodeError list>) =
+        match r with
+        | Ok _ -> []
+        | Error es -> es |> List.map (fun e -> sprintf "%A %s" e.Code (pathOf e.Path))
+
+    /// The UI tier's lenient enum alias, as a host supplies it: `Urgent` reads as `High`.
+    let aliasing (calls: int ref) : CollectingDecoders =
+        { collectingDecoders with
+            Priority =
+                fun self j ->
+                    calls.Value <- calls.Value + 1
+
+                    match j with
+                    | JStr "Urgent" -> Ok Priority.High
+                    | _ -> collectingDecoders.Priority self j }
+
+    let rec priorities (n: Node<obj>) : Priority list =
+        [ match n.Kind with
+          | NodeKind.Section s -> yield! s.Owner |> Option.map _.Priority |> Option.toList
+          | NodeKind.Task s ->
+              match s.Trigger with
+              | Trigger.Timer(o, _, _)
+              | Trigger.Signal(o, _, _) -> yield o.Priority
+              | Trigger.Manual _ -> ()
+
+              yield s.Owner.Priority
+          | NodeKind.Note s -> yield s.Priority
+          | _ -> ()
+          for c in children n do
+              yield! priorities c ]
+
+    /// The scalars a host reads by its own rule: an integral float admitted at an integer slot, and
+    /// every string and float rewritten so the test can see where the hook ran.
+    let scalars (seen: ResizeArray<string>) : CollectingDecoders =
+        { collectingDecoders with
+            String =
+                fun self j ->
+                    seen.Add "string"
+                    collectingDecoders.String self j |> Result.map (fun s -> s.ToUpperInvariant())
+            Int =
+                fun self j ->
+                    seen.Add "int"
+
+                    match j with
+                    | JFloat f when f = floor f -> Ok(int f)
+                    | _ -> collectingDecoders.Int self j
+            Float =
+                fun self j ->
+                    seen.Add "float"
+                    collectingDecoders.Float self j |> Result.map (fun f -> f * 2.0) }
+
+    let rec strings (n: Node<obj>) : string list =
+        let rec rule (r: Rule) =
+            match r with
+            | Rule.Equals(k, v) -> [ k; v ]
+            | Rule.AllOf rs -> rs |> List.collect rule
+            | Rule.Not r -> rule r
+            | _ -> []
+
+        [ yield n.Id
+          match n.Kind with
+          | NodeKind.Section s -> yield s.Title
+          | NodeKind.Task s ->
+              yield s.Name
+              yield! rule s.Due
+              yield! s.Owner.Name |> Option.toList
+          | NodeKind.Note s -> yield s.Text
+          | _ -> ()
+          for c in children n do
+              yield! strings c ]
+
+    /// A host's reading over Core's token surface (Phase 467): a member `null` is read on the host's
+    /// rule and left out of its object, which is remembered (by the object's identity) with the
+    /// null's key, so the host's `Absent` can tell a null it read from a member never sent.
+    let readWithNulls (text: string) : JVal * (JVal -> string -> bool) =
+        let nulls =
+            System.Collections.Generic.Dictionary<obj, Set<string>>(HashIdentity.Reference)
+
+        let rec read (r: Reader) : JVal =
+            match Reader.peek r with
+            | JsonToken.Object ->
+                let members = ResizeArray<string * JVal>()
+                let nullKeys = ResizeArray<string>()
+
+                r
+                |> Reader.members (fun key m ->
+                    match Reader.peek m with
+                    | JsonToken.Null ->
+                        Reader.readNull m
+                        nullKeys.Add key
+                    | _ -> members.Add(key, read m))
+
+                let o = JObj(List.ofSeq members)
+
+                if nullKeys.Count > 0 then
+                    nulls.[box o] <- Set.ofSeq nullKeys
+
+                o
+            | JsonToken.Array ->
+                let items = ResizeArray<JVal>()
+                r |> Reader.items (fun item -> items.Add(read item))
+                JArr(List.ofSeq items)
+            | _ -> Reader.value r
+
+        match Reader.read ReadOptions.strict read text with
+        | Ok j ->
+            j,
+            fun o key ->
+                match nulls.TryGetValue(box o) with
+                | true, keys -> keys.Contains key
+                | _ -> false
+        | Error e -> failwithf "the host's reading refuses: %A" e
+
+    let nullRefusal: DecodeError =
+        { Code = DecodeCode.WrongKind
+          Path = []
+          Expected = "a value"
+          Message = "null is not admitted here" }
+
+    /// The host's null rule, by position: a null owner name reads as absent (read-compat); a null at
+    /// any other declared member is refused at the null's own path.
+    let nullRule (wasNull: JVal -> string -> bool) (asked: ResizeArray<string>) : CollectingDecoders =
+        { collectingDecoders with
+            Absent =
+                fun self holder key o ->
+                    if wasNull o key then
+                        asked.Add(holder + "." + key)
+
+                        match holder, key with
+                        | "Owner", "name" -> Ok None
+                        | _ -> Error [ nullRefusal ]
+                    else
+                        collectingDecoders.Absent self holder key o }
+
+    /// Every hook of the record delegating to the generated decoder: the identity override.
+    let identity: CollectingDecoders =
+        { collectingDecoders with
+            Priority = fun self j -> collectingDecoders.Priority self j
+            String = fun self j -> collectingDecoders.String self j
+            Int = fun self j -> collectingDecoders.Int self j
+            Float = fun self j -> collectingDecoders.Float self j
+            Bool = fun self j -> collectingDecoders.Bool self j
+            Absent = fun self h k o -> collectingDecoders.Absent self h k o }
+
+    // Mutations of a document: every member dropped, every scalar retyped.
+    let rec mutations (j: JVal) : JVal list =
+        match j with
+        | JObj fs ->
+            [ for i in 0 .. fs.Length - 1 do
+                  yield JObj(List.removeAt i fs)
+                  let k, v = fs.[i]
+
+                  for m in mutations v do
+                      yield JObj(List.updateAt i (k, m) fs) ]
+        | JArr xs ->
+            [ for i in 0 .. xs.Length - 1 do
+                  for m in mutations xs.[i] do
+                      yield JArr(List.updateAt i m xs) ]
+        | JStr _ -> [ JInt 7; JStr "Urgent" ]
+        | JInt _ -> [ JStr "x"; JFloat 2.5 ]
+        | JFloat _ -> [ JStr "x" ]
+        | JBool _ -> [ JStr "x" ]
+
+    /// A generic union over a type parameter at depth (`Each` holds `Binding<'T>` items), at three
+    /// instantiations and on the envelope: the host's one generic decoder reads a bare JSON value as
+    /// `Lit` and counts the instantiations it was asked at.
+    let genericIdl: Idl =
+        let binding t = TUnion("Binding", [ t ])
+
+        { NullChecked.idl with
+            Unions =
+                [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                    Name = "Binding"
+                    Params = [ "T" ]
+                    Cases =
+                      [ NullChecked.case "Lit" [ NullChecked.field "value" (TVar "T") Required ]
+                        NullChecked.case "Path" [ NullChecked.field "path" TStr Required ]
+                        NullChecked.case "Each" [ NullChecked.field "items" (TList(binding (TVar "T"))) Required ] ]
+                    Annotations = Annotations.Empty
+                    Discrimination = UnionDiscrimination.Tagged } ] }
+
+    let genericProbe =
+        String.concat
+            "\n"
+            [ "let seen = System.Collections.Generic.List<string>()"
+              "let bare ="
+              "    { new CollectingBinding with"
+              "        member _.Decode<'T>(self: CollectingDecoders, colT: JVal -> Result<'T, DecodeError list>, j: JVal) : Result<Binding<'T>, DecodeError list> ="
+              "            seen.Add(typeof<'T>.Name)"
+              "            match j with"
+              "            | JObj _ -> collectingDecoders.Binding.Decode(self, colT, j)"
+              "            | _ -> colT j |> Result.map Binding.Lit }"
+              "let bools = ref 0"
+              "let host ="
+              "    { collectingDecoders with"
+              "        Binding = bare"
+              "        Bool ="
+              "            fun self j ->"
+              "                bools.Value <- bools.Value + 1"
+              "                match j with"
+              "                | JStr \"yes\" -> Ok true"
+              "                | _ -> collectingDecoders.Bool self j }"
+              "let text = \"\"\"{\"hidden\":\"yes\",\"id\":\"t\",\"kind\":{\"$type\":\"Text\",\"text\":{\"$type\":\"Each\",\"items\":[\"a\",{\"$type\":\"Each\",\"items\":[\"b\"]}]},\"size\":3,\"all\":[\"yes\",{\"$type\":\"Path\",\"path\":\"p\"}]}}\"\"\""
+              "match decodeNodeAllWith host text, decodeNodeAll text with"
+              "| Ok n, Error es ->"
+              "    printfn \"host\\tok\""
+              "    printfn \"plain\\t%d\" es.Length"
+              "    printfn \"seen\\t%s\" (seen |> Seq.countBy id |> Seq.sort |> Seq.map (fun (k, c) -> sprintf \"%s=%d\" k c) |> String.concat \",\")"
+              "    printfn \"bool\\t%d\" bools.Value"
+              "    printfn \"hidden\\t%A\" n.Hidden"
+              "    match n.Kind with"
+              "    | NodeKind.Text s -> printfn \"text\\t%A\" s.Text"
+              "    | _ -> ()"
+              "| a, b -> printfn \"unexpected\\t%A\\t%A\" a b" ]
+
+[<Tests>]
+let collectingHookTests =
+    testList
+        "Phase 562 - the collecting decoders take host decoders at enumerations, scalars, Binding and null"
+        [ testCase "an enumeration's override is applied at every position the enumeration occurs" (fun _ ->
+              let j = Hooks.parse Hooks.urgentText
+
+              Expect.equal
+                  (Hooks.defects (decodeNodeJsonAll j))
+                  (Hooks.urgentPaths |> List.map (fun p -> "UnknownTag " + p))
+                  "the generated reading refuses the undeclared spelling at all four"
+
+              let calls = ref 0
+
+              match decodeNodeJsonAllWith (Hooks.aliasing calls) j with
+              | Ok n ->
+                  Expect.equal
+                      (Hooks.priorities n)
+                      [ Priority.High; Priority.High; Priority.High; Priority.High ]
+                      "aliased at each"
+
+                  Expect.equal calls.Value 4 "the host decoder ran once per position"
+              | Error es -> failtestf "the alias admits it: %A" (Hooks.defects (Error es)))
+
+          testCase "the scalar overrides are applied at every scalar position, and the node's id is framing" (fun _ ->
+              let j =
+                  Hooks.parse (Hooks.urgentText.Replace("Urgent", "High").Replace("\"every\":5", "\"every\":5.0"))
+
+              Expect.equal
+                  (Hooks.defects (decodeNodeJsonAll j))
+                  [ "WrongKind $.kind.children[0].kind.trigger.every" ]
+                  "the generated integer reader refuses an integral float"
+
+              let seen = ResizeArray<string>()
+
+              match decodeNodeJsonAllWith (Hooks.scalars seen) j with
+              | Ok n ->
+                  Expect.equal
+                      (Hooks.strings n)
+                      [ "root"; "T"; "task"; "N"; "K"; "V"; "O"; "note"; "X" ]
+                      "every declared string upper-cased at every depth; the ids are not slots"
+
+                  match n.Kind with
+                  | NodeKind.Section s ->
+                      Expect.equal s.Estimate (Some(Measure.Hours 5.0)) "the float, through a union case"
+
+                      match s.Children with
+                      | { Kind = NodeKind.Task t } :: _ ->
+                          match t.Trigger with
+                          | Trigger.Timer(_, every, _) -> Expect.equal every 5 "the integral float admitted"
+                          | other -> failtestf "a timer: %A" other
+                      | other -> failtestf "a task first: %A" other
+                  | other -> failtestf "a section: %A" other
+
+                  Expect.equal
+                      (seen |> Seq.countBy id |> Seq.sort |> List.ofSeq)
+                      [ "float", 1; "int", 1; "string", 6 ]
+                      "one call per declared string, integer and float position"
+              | Error es -> failtestf "the host's scalars admit it: %A" (Hooks.defects (Error es)))
+
+          testCase "a generic union's one host decoder runs at every instantiation, through a type parameter" (fun _ ->
+              let src = Overrides.emitted "Generic" Hooks.genericIdl
+              Expect.stringContains src "and CollectingBinding =" "the seam"
+              Expect.stringContains src "abstract Decode<'T> :" "generic in the union's parameter"
+
+              match Projected.runFsiWith Overrides.strict (Projected.scriptOf "Generic" src Hooks.genericProbe) with
+              | None -> skiptest "dotnet not on PATH - the compiled probe is skipped"
+              | Some(code, out, err) ->
+                  Expect.equal code 0 (sprintf "the emission and the probe compile: %s" err)
+
+                  let lines =
+                      out.Split('\n')
+                      |> Array.map _.TrimEnd('\r')
+                      |> Array.choose (fun l ->
+                          match l.IndexOf '\t' with
+                          | -1 -> None
+                          | i -> Some(l.Substring(0, i), l.Substring(i + 1)))
+                      |> Map.ofArray
+
+                  Expect.equal (lines.TryFind "host") (Some "ok") "the host's reading admits every bare value"
+                  Expect.equal (lines.TryFind "plain") (Some "5") "the generated reading refuses each of the five"
+
+                  Expect.equal
+                      (lines.TryFind "seen")
+                      (Some "Boolean=3,Int32=1,String=4")
+                      "asked at string (four, two of them inside Each), int, and bool (the list and the envelope)"
+
+                  Expect.equal
+                      (lines.TryFind "bool")
+                      (Some "2")
+                      "the host's boolean, as the argument decoder at both bool positions"
+
+                  Expect.equal
+                      (lines.TryFind "hidden")
+                      (Some "Some (Lit true)")
+                      "the envelope's Binding<bool>, read through both hooks"
+
+                  Expect.equal
+                      (lines.TryFind "text")
+                      (Some "Each [Lit \"a\"; Each [Lit \"b\"]]")
+                      "the bare items read as Lit beneath Each, at depth")
+
+          testCase "a member null is answered by its position, through the host's reading and Absent" (fun _ ->
+              let text =
+                  """{"id":"root","kind":{"$type":"Section","title":"t","children":[{"id":"inner","kind":{"$type":"Section","title":null,"children":[],"owner":{"name":null}}}],"owner":{"name":null,"priority":"High"}}}"""
+
+              Expect.isError
+                  (Decoder.parse ReadOptions.strict text)
+                  "Core's strict parse refuses the document at its first null"
+
+              let j, wasNull = Hooks.readWithNulls text
+              let asked = ResizeArray<string>()
+
+              Expect.equal
+                  (Hooks.defects (decodeNodeJsonAllWith (Hooks.nullRule wasNull asked) j))
+                  [ "WrongKind $.kind.children[0].kind.title" ]
+                  "the null title refused at its own path, at depth; both null owner names read as absent"
+
+              Expect.equal
+                  (List.ofSeq asked)
+                  [ "SectionSpec.title"; "Owner.name"; "Owner.name" ]
+                  "Absent asked at each null, by holder and key"
+
+              Expect.equal
+                  (Hooks.defects (decodeNodeJsonAll j))
+                  [ "MissingField $.kind.children[0].kind.title" ]
+                  "the generated Absent reads the erased null as an absent member")
+
+          testCase "Absent can stand a value in for a member, read by the member's own decoder" (fun _ ->
+              let j =
+                  Hooks.parse """{"id":"n","kind":{"$type":"Section","children":[],"owner":{}}}"""
+
+              let host =
+                  { collectingDecoders with
+                      Absent =
+                          fun self holder key o ->
+                              match holder, key with
+                              | "SectionSpec", "title" -> Ok(Some(JStr "untitled"))
+                              | "Owner", "priority" -> Ok(Some(JStr "Low"))
+                              | _ -> collectingDecoders.Absent self holder key o }
+
+              match decodeNodeJsonAllWith host j with
+              | Ok { Kind = NodeKind.Section s } ->
+                  Expect.equal s.Title "untitled" "a required member stood in"
+
+                  Expect.equal
+                      s.Owner
+                      (Some { Name = None; Priority = Priority.Low })
+                      "an omit-at-default member stood in, read by its enumeration"
+              | r -> failtestf "the stand-ins decode: %A" r)
+
+          testCase
+              "the record that overrides nothing answers the plain entry, over sampled documents and their mutations"
+              (fun _ ->
+                  match
+                      Sample.trySampleNodes DeriveIdl.deriveIdl (DeriveIdl.deriveIdl.Kinds |> List.map _.Tag) 562 25
+                  with
+                  | Error f -> failtestf "the vocabulary samples: %A" f
+                  | Ok samples ->
+                      let mutable n = 0
+
+                      for s in samples do
+                          let j =
+                              Encode.encode DeriveIdl.deriveIdl s
+                              |> Result.defaultWith failtest
+                              |> Hooks.parse
+
+                          for x in j :: (Hooks.mutations j |> List.truncate 120) do
+                              n <- n + 1
+                              let plain = Overrides.render (decodeNodeJsonAll x)
+
+                              Expect.equal
+                                  (Overrides.render (decodeNodeJsonAllWith collectingDecoders x))
+                                  plain
+                                  "the generated record"
+
+                              Expect.equal
+                                  (Overrides.render (decodeNodeJsonAllWith Hooks.identity x))
+                                  plain
+                                  "every hook delegating"
+
+                      Expect.isGreaterThan n 1000 "the pool is not vacuous")
+
+          testCase "a vocabulary type named as a collecting decoder is refused at generation" (fun _ ->
+              // An enumeration a selected kind reaches, named as one of the record's own fields.
+              let named (name: string) =
+                  { DeriveIdl.deriveIdl with
+                      Enums = DeriveIdl.deriveIdl.Enums @ [ Declare.enumOf name [ "A" ] ]
+                      Kinds =
+                          DeriveIdl.deriveIdl.Kinds
+                          @ [ NullChecked.kind "Holder" [ NullChecked.field "e" (TEnum name) Required ] ] }
+
+              for name in [ "String"; "Int"; "Float"; "Bool"; "Absent" ] do
+                  match
+                      Gen.fsharpModuleDerived
+                          GenSupport.Empty
+                          [ Derivation.SpecDecoders ]
+                          "M"
+                          (named name)
+                          [ "Note"; "Holder" ]
+                  with
+                  | Error(CodegenError.UnsupportedConstruct(what, _, _)) ->
+                      Expect.stringContains what ("'" + name + "'") (name + ": the clash is named")
+                  | other -> failtestf "%s: expected a refusal, got %A" name (other |> Result.map ignore)
+
+              let seam =
+                  { Hooks.genericIdl with
+                      Records =
+                          [ { Name = "CollectingBinding"
+                              Fields = []
+                              Annotations = Annotations.Empty
+                              Inline = false } ]
+                      Kinds =
+                          Hooks.genericIdl.Kinds
+                          @ [ NullChecked.kind
+                                  "Holder"
+                                  [ NullChecked.field "r" (TRecord "CollectingBinding") Required ] ] }
+
+              match
+                  Gen.fsharpModuleDerived GenSupport.Empty [ Derivation.SpecDecoders ] "M" seam [ "Text"; "Holder" ]
+              with
+              | Error(CodegenError.UnsupportedConstruct(what, _, _)) ->
+                  Expect.stringContains what "CollectingBinding" "the seam's clash is named"
+              | other -> failtestf "expected a refusal, got %A" (other |> Result.map ignore)) ]

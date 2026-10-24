@@ -973,3 +973,177 @@ module internal FSharpDerive =
         | Ok ps, Ok ms -> Ok(ps @ ms)
         | Error e, _
         | _, Error e -> Error e
+
+/// Phase 541 / 562 (DECISIONS.md D175, D230) — the RECORD of overridable collecting decoders, from
+/// the declarations a selection reaches: its type (one field per node, non-generic union, record,
+/// unprojected kind spec, enumeration and JSON scalar; a `Collecting<Union>` seam per generic union;
+/// and `Absent`), the generated enumeration decoders, and `collectingDecoders`, the generated value.
+/// The decoders it names are [[FSharpCodec.collectingDecl]]'s.
+module internal FSharpCollectingRecord =
+
+    /// The record's three pieces of module text.
+    type Parts =
+        {
+            /// `type CollectingDecoders`, and each generic union's seam beside it.
+            TypeDecl: string
+            /// Each enumeration's generated collecting decoder.
+            Defaults: string
+            /// `collectingDecoders`, the record of the generated decoders.
+            Generated: string
+        }
+
+    /// The record for `decl`, or the refusal of a vocabulary whose types the record would name alike.
+    let emit (sup: GenSupport) (decl: Decl) : Result<Parts, CodegenError> =
+        let msg, kinds, unions, records = decl.Msg, decl.Kinds, decl.Unions, decl.Records
+        let nodeTy = objParams msg "Node" []
+        let projected (k: IdlKind) = sup.KindProjections.ContainsKey k.Tag
+
+        let specTy (k: IdlKind) =
+            k.Tag + "Spec" + objParams msg (k.Tag + "Spec") []
+
+        // A projected kind's decoder is the host projection's, a leaf with no position beneath it.
+        // Phase 474 — an inline declaration is read from its holder's members, never from a value,
+        // so it has no slot: its readers take the record and the holder's members (`colMembers*`).
+        // Phase 562 — every enumeration and the four JSON scalars have a slot (D230.1).
+        let slots =
+            [ yield "Node", "Node" + nodeTy
+              for u in unions do
+                  if List.isEmpty u.Params && not (Decl.isKeyed u) then
+                      yield u.Name, u.Name + objParams msg u.Name []
+              for r in records do
+                  if not r.Inline then
+                      yield r.Name, r.Name + objParams msg r.Name []
+              for k in kinds do
+                  if not (projected k) then
+                      yield k.Tag + "Spec", specTy k
+              for e in decl.Enums do
+                  yield e.Name, e.Name
+              yield "String", "string"
+              yield "Int", "int"
+              yield "Float", "float"
+              yield "Bool", "bool" ]
+
+        // Phase 562 (D230.2) — a GENERIC union's slot is an interface whose one member, `Decode`, is
+        // generic in the union's parameters: an F# record field cannot be generic, and one field per
+        // instantiation would make a host restate its policy once per instantiation the vocabulary
+        // uses (and could not name an instantiation over a type parameter).
+        let generic =
+            unions
+            |> List.filter (fun u -> not (List.isEmpty u.Params) && not (Decl.isKeyed u))
+
+        let seamName (u: IdlUnion) = "Collecting" + u.Name
+
+        // A slot's field is named by its type, so two types the record would name alike (a vocabulary
+        // type named `String`, `Int`, `Float`, `Bool` or `Absent`, or two that print alike) are refused
+        // at generation rather than emitted as a module that does not compile; so is a vocabulary type
+        // named as a generic union's seam.
+        let fieldNames =
+            (slots |> List.map fst) @ (generic |> List.map _.Name) @ [ "Absent" ]
+
+        let typeNames =
+            Set.ofList (
+                [ "Node"; "NodeKind"; "CollectingDecoders" ]
+                @ (decl.Enums |> List.map _.Name)
+                @ (unions |> List.map _.Name)
+                @ (records |> List.map _.Name)
+                @ (kinds |> List.map (fun k -> k.Tag + "Spec"))
+            )
+
+        let collision =
+            match fieldNames |> List.countBy id |> List.tryFind (fun (_, n) -> n > 1) with
+            | Some(name, _) -> Some(sprintf "two collecting decoders named '%s'" name)
+            | None ->
+                generic
+                |> List.tryFind (fun u -> typeNames.Contains(seamName u))
+                |> Option.map (fun u ->
+                    sprintf "the collecting seam '%s' beside a vocabulary type of that name" (seamName u))
+
+        let genericSig (u: IdlUnion) =
+            let decoders =
+                u.Params
+                |> List.map (fun p -> sprintf "(JVal -> Result<'%s, DecodeError list>)" p)
+                |> String.concat " * "
+
+            sprintf
+                "Decode<%s> : CollectingDecoders * %s * JVal -> Result<%s%s, DecodeError list>"
+                (u.Params |> List.map (fun p -> "'" + p) |> String.concat ", ")
+                decoders
+                u.Name
+                (objParams msg u.Name u.Params)
+
+        let recordTypeDecl =
+            "/// Phase 541 — the collecting decoders a host may override, one per type the vocabulary reaches\n"
+            + "/// through a nested position. Each takes the record it is read from, so a decoder that delegates\n"
+            + "/// to `collectingDecoders.<Type> self` keeps every position beneath it reading `self`.\n"
+            + "/// Phase 562 — every enumeration and JSON scalar has a field too; a generic union's field is its\n"
+            + "/// `Collecting<Union>` seam, generic in the union's parameters; and `Absent` is asked at every\n"
+            + "/// declared member an object does not carry, with the holder's name, the key and the object.\n"
+            + "type CollectingDecoders =\n"
+            + (slots
+               |> List.mapi (fun i (field, ty) ->
+                   sprintf
+                       "%s%s: CollectingDecoders -> JVal -> Result<%s, DecodeError list>"
+                       (if i = 0 then "    { " else "      ")
+                       field
+                       ty)
+               |> String.concat "\n")
+            + (generic
+               |> List.map (fun u -> sprintf "\n      %s: %s" u.Name (seamName u))
+               |> String.concat "")
+            + "\n      Absent: CollectingDecoders -> string -> string -> JVal -> Result<JVal option, DecodeError list> }"
+            + (generic
+               |> List.map (fun u ->
+                   sprintf
+                       "\n\n/// Phase 562 — the collecting decoder of `%s` at every instantiation, from its argument decoders.\nand %s =\n    abstract %s"
+                       u.Name
+                       (seamName u)
+                       (genericSig u))
+               |> String.concat "")
+
+        // Phase 562 — each enumeration's generated collecting decoder, its short-circuiting one lifted.
+        let enumDefaults =
+            decl.Enums
+            |> List.map (fun e ->
+                sprintf
+                    "let private col%s (_: CollectingDecoders) (j: JVal) : Result<%s, DecodeError list> = cOne (dec%s j)"
+                    e.Name
+                    e.Name
+                    e.Name)
+            |> String.concat "\n\n"
+
+        let generatedDecl =
+            "/// Phase 541 — the generated collecting decoders: what every `decode*All` entry reads through, and\n"
+            + "/// the record a host copies (`{ collectingDecoders with <Type> = … }`) to override one type.\n"
+            + "let collectingDecoders: CollectingDecoders =\n"
+            + (slots
+               |> List.mapi (fun i (field, _) ->
+                   sprintf "%s%s = col%s" (if i = 0 then "    { " else "      ") field field)
+               |> String.concat "\n")
+            + (generic
+               |> List.map (fun u ->
+                   let ps = u.Params |> List.map (fun p -> "col" + p) |> String.concat ", "
+
+                   sprintf
+                       "\n      %s =\n        { new %s with\n            member _.Decode(__ov, %s, j) = col%s __ov %s j }"
+                       u.Name
+                       (seamName u)
+                       ps
+                       u.Name
+                       (u.Params |> List.map (fun p -> "col" + p) |> String.concat " "))
+               |> String.concat "")
+            + "\n      Absent = colAbsent }"
+
+        match collision with
+        | Some what ->
+            Error(
+                CodegenError.UnsupportedConstruct(
+                    what,
+                    "a collecting decoder is named by its type",
+                    "rename the vocabulary type"
+                )
+            )
+        | None ->
+            Ok
+                { TypeDecl = recordTypeDecl
+                  Defaults = enumDefaults
+                  Generated = generatedDecl }

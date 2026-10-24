@@ -203,12 +203,12 @@ let private encFloat (f: float) : JVal =
     /// The collecting twin of [[inlineDecRead]].
     let inlineColRead (idl: Idl) (o: string) (f: IdlField) : string option =
         match Decl.inlineSlot idl f.Type, f.Opt with
-        | Some(InlineSlot.Record r), _ -> Some(sprintf "colMembers%s __ov %s" r.Name o)
-        | Some(InlineSlot.Keyed(u, _)), Optional -> Some(sprintf "colMembers%s __ov %s" u.Name o)
+        | Some(InlineSlot.Record r), _ -> Some(sprintf "colMembers%s __ov j %s" r.Name o)
+        | Some(InlineSlot.Keyed(u, _)), Optional -> Some(sprintf "colMembers%s __ov j %s" u.Name o)
         | Some(InlineSlot.Keyed(u, keyed)), _ ->
             Some(
                 sprintf
-                    "(colMembers%s __ov %s |> Result.bind (function Some __v -> Ok __v | None -> Error [ Decoder.missing %s ]))"
+                    "(colMembers%s __ov j %s |> Result.bind (function Some __v -> Ok __v | None -> Error [ Decoder.missing %s ]))"
                     u.Name
                     o
                     (keyedFirst keyed)
@@ -770,8 +770,8 @@ let private encFloat (f: float) : JVal =
     // clean input both answer the same value — which `IdlSpecDecoderTests` holds.
     //
     // A LEAF — a scalar, an enum, a sentinel, a hosted slot, verbatim JSON — reports at most one
-    // defect, so its collecting form is its short-circuiting decoder lifted (`cLift` / `cOne`). Only
-    // an object, a list and a map have independent positions to collect over.
+    // defect, so its generated collecting form is its short-circuiting decoder lifted (`cLift` /
+    // `cOne`). Only an object, a list and a map have independent positions to collect over.
     // -----------------------------------------------------------------------
 
     /// Phase 524 — the F# COLLECTING decoder printer, derived from [[decPrinter]]
@@ -779,30 +779,51 @@ let private encFloat (f: float) : JVal =
     ///
     /// Phase 541 — a node, a non-generic union and a record are read through the overridable
     /// decoders `__ov` (the emitted `CollectingDecoders` record, see [[collectingDecl]]), handed
-    /// the same record, so a host's decoder at that type is the one applied at EVERY depth. A
-    /// generic union has no monomorphic slot in the record: its own decoder is called with the
-    /// record threaded through, so every position beneath it is still read through `__ov`.
+    /// the same record, so a host's decoder at that type is the one applied at EVERY depth.
+    ///
+    /// Phase 562 (DECISIONS.md D230) — so are an enumeration and the four JSON scalars, each a field
+    /// of the record whose generated value is the lifted leaf; and a generic union is read through
+    /// its field's generic `Decode`, handed the record and its argument decoders, so one host decoder
+    /// covers every instantiation. A sentinel, a hosted slot and verbatim JSON stay leaves: each is
+    /// the vocabulary's or the host's own codec already.
     let colPrinter: SlotPrinter =
-        SlotTraversal.collecting
-            decPrinter
-            (sprintf "(cLift %s)")
-            { decPrinter with
-                Var = fun v -> "col" + v
-                Named = fun n -> "(__ov." + n + " __ov)"
-                Union = fun n args -> "(col" + n + " __ov " + String.concat " " args + ")"
-                Node = "(__ov.Node __ov)"
-                List = sprintf "(cList %s)"
-                Map = sprintf "(cMap %s)" }
+        { SlotTraversal.collecting
+              decPrinter
+              (sprintf "(cLift %s)")
+              { decPrinter with
+                  Var = fun v -> "col" + v
+                  Named = fun n -> "(__ov." + n + " __ov)"
+                  Union = fun n args -> "(fun __j -> __ov." + n + ".Decode(__ov, " + String.concat ", " args + ", __j))"
+                  Node = "(__ov.Node __ov)"
+                  List = sprintf "(cList %s)"
+                  Map = sprintf "(cMap %s)" } with
+            Str = "(__ov.String __ov)"
+            Int = "(__ov.Int __ov)"
+            Bool = "(__ov.Bool __ov)"
+            Float = "(__ov.Float __ov)"
+            Enum = fun n -> "(__ov." + n + " __ov)" }
 
     /// The F# collecting member reader: [[memberDecPrinter]]'s presence, read through
     /// [[colPrinter]].
     let colMemberPrinter (idl: Idl) : MemberDecPrinter =
         { memberDecPrinter idl with
             Slot = colPrinter
-            Req = sprintf "cReq %s %s %s"
-            Opt = sprintf "cOpt %s %s %s"
-            Def = sprintf "cDef %s %s %s (%s)"
+            // Phase 562 — a declared member is read beside its holder (`__holder`, bound by every
+            // holder's decoder, see [[holderBinding]]) and the object `j`, so an absent one asks the
+            // record's `Absent` first.
+            Req = sprintf "cReqAt __ov __holder j %s %s %s"
+            Opt = sprintf "cOptAt __ov __holder j %s %s %s"
+            Def = sprintf "cDefAt __ov __holder j %s %s %s (%s)"
             Inline = fun o f -> inlineColRead idl o f }
+
+    /// Phase 562 — the `__holder` a holder's member reads name to the record's `Absent`: the holder's
+    /// F# name (`Owner`, `NoteSpec`, `Node`), or `Union.Case` for a union case. Bound only where a
+    /// member is read.
+    let holderBinding (indent: string) (holder: string) (members: (IdlField * string) list) : string =
+        if List.isEmpty members then
+            ""
+        else
+            sprintf "%slet __holder = %s\n" indent (SourceLit.fsString holder)
 
     /// Read every member (in declaration order — the order the defects are reported in), then
     /// build `final` when all of them decoded, else answer every member's defects, concatenated in
@@ -905,7 +926,7 @@ let private encFloat (f: float) : JVal =
                     | Some r -> collectRefined "            " binders r
                     | None -> collectAll "            " binders (sprintf "Ok(%s)" (ctor c))
 
-                sprintf "        | %s ->\n%s" wire body
+                sprintf "        | %s ->\n%s%s" wire (holderBinding "            " (u.Name + "." + c.Tag) members) body
 
         UnionTraversal.decoder
             { Read = read
@@ -956,10 +977,11 @@ let private encFloat (f: float) : JVal =
         let binders = members |> List.map (fun (f, e) -> ident f.Name, e)
 
         sprintf
-            "and private col%s (__ov: CollectingDecoders) (j: JVal) : Result<%s%s, DecodeError list> =\n    cObj j |> Result.bind (fun __fs ->\n%s)"
+            "and private col%s (__ov: CollectingDecoders) (j: JVal) : Result<%s%s, DecodeError list> =\n%s    cObj j |> Result.bind (fun __fs ->\n%s)"
             decName
             typeName
             (objParams msg typeName [])
+            (holderBinding "    " decName members)
             (collectAll "        " binders ("Ok " + recordLit typeName assigns))
 
     // -----------------------------------------------------------------------
@@ -1162,10 +1184,11 @@ let private encFloat (f: float) : JVal =
         let binders = members |> List.map (fun (f, e) -> ident f.Name, e)
 
         sprintf
-            "and private colMembers%s (__ov: CollectingDecoders) (__fs: (string * JVal) list) : Result<%s%s, DecodeError list> =\n%s"
+            "and private colMembers%s (__ov: CollectingDecoders) (j: JVal) (__fs: (string * JVal) list) : Result<%s%s, DecodeError list> =\n%s%s"
             r.Name
             r.Name
             (objParams msg r.Name [])
+            (holderBinding "    " r.Name members)
             (collectAll "    " binders ("Ok " + recordLit r.Name assigns))
 
     /// A presence-keyed union's collecting reader: [[keyedDecoder]]'s walk, every defect collected.
@@ -1191,14 +1214,15 @@ let private encFloat (f: float) : JVal =
 
                     Ok(
                         sprintf
-                            "    | Some %d ->\n%s"
+                            "    | Some %d ->\n%s%s"
                             i
+                            (holderBinding "        " (u.Name + "." + c.Tag) members)
                             (collectAll "        " binders (sprintf "Ok(Some(%s))" (keyedCtor u c)))
                     ))
         |> sequenceR
         |> Result.map (fun arms ->
             sprintf
-                "and private colMembers%s (__ov: CollectingDecoders) (__fs: (string * JVal) list) : Result<%s%s option, DecodeError list> =\n    dPick __fs %s |> cOne |> Result.bind (fun __i ->\n    match __i with\n%s\n    | _ -> Ok None)"
+                "and private colMembers%s (__ov: CollectingDecoders) (j: JVal) (__fs: (string * JVal) list) : Result<%s%s option, DecodeError list> =\n    dPick __fs %s |> cOne |> Result.bind (fun __i ->\n    match __i with\n%s\n    | _ -> Ok None)"
                 u.Name
                 u.Name
                 (objParams msg u.Name [])
@@ -1224,6 +1248,7 @@ let private encFloat (f: float) : JVal =
     /// no reflection, Fable-clean). `collectingDecoders` is the record of the generated decoders;
     /// the `decode*All` entries read through it, unchanged, and their `decode*AllWith` twins take
     /// a host's record, so a host decoder at a type is applied at every depth that type occurs.
+    /// The record itself is [[FSharpCollectingRecord.emit]]'s.
     let collectingDecl (sup: GenSupport) (decl: Decl) : Result<string, CodegenError> =
         let idl, msg, kinds, unions, records =
             decl.Idl, decl.Msg, decl.Kinds, decl.Unions, decl.Records
@@ -1233,38 +1258,6 @@ let private encFloat (f: float) : JVal =
 
         let specTy (k: IdlKind) =
             k.Tag + "Spec" + objParams msg (k.Tag + "Spec") []
-
-        // A generic union has no monomorphic field: its instantiations are read through the
-        // record by its own decoder (see [[colPrinter]]). A projected kind's decoder is the host
-        // projection's, a leaf with no position beneath it.
-        // Phase 474 — an inline declaration is read from its holder's members, never from a value,
-        // so it has no slot: its readers take the record and the holder's members (`colMembers*`).
-        let slots =
-            [ yield "Node", "Node" + nodeTy
-              for u in unions do
-                  if List.isEmpty u.Params && not (Decl.isKeyed u) then
-                      yield u.Name, u.Name + objParams msg u.Name []
-              for r in records do
-                  if not r.Inline then
-                      yield r.Name, r.Name + objParams msg r.Name []
-              for k in kinds do
-                  if not (projected k) then
-                      yield k.Tag + "Spec", specTy k ]
-
-        let recordTypeDecl =
-            "/// Phase 541 — the collecting decoders a host may override, one per type the vocabulary reaches\n"
-            + "/// through a nested position. Each takes the record it is read from, so a decoder that delegates\n"
-            + "/// to `collectingDecoders.<Type> self` keeps every position beneath it reading `self`.\n"
-            + "type CollectingDecoders =\n"
-            + (slots
-               |> List.mapi (fun i (field, ty) ->
-                   sprintf
-                       "%s%s: CollectingDecoders -> JVal -> Result<%s, DecodeError list>"
-                       (if i = 0 then "    { " else "      ")
-                       field
-                       ty)
-               |> String.concat "\n")
-            + " }"
 
         let colNodeKindDecl =
             let arms =
@@ -1312,12 +1305,13 @@ let private encFloat (f: float) : JVal =
             sprintf
                 "and private colNode (__ov: CollectingDecoders) (j: JVal) : Result<Node%s, DecodeError list> =\n"
                 nodeTy
+            + holderBinding "    " "Node" envelope
             + "    cObj j |> Result.bind (fun __fs ->\n"
             + collectAll "        " binders final
             + ")"
 
         let colRead =
-            MemberTraversal.colMembers (memberDecPrinter idl) (colMemberPrinter idl) (sprintf "cOne (%s)")
+            MemberTraversal.colMembers (colMemberPrinter idl) (colMemberPrinter idl) id
 
         let inlineCols =
             (unions
@@ -1332,9 +1326,12 @@ let private encFloat (f: float) : JVal =
 
         let groupR =
             CollectingTraversal.group
-                { Dec = memberDecPrinter idl
+                // Phase 562 — a leaf member is read by the collecting reader too, so a scalar's and an
+                // enumeration's go through their slots, and every declared member's absence through
+                // `Absent`; nothing is lifted.
+                { Dec = colMemberPrinter idl
                   Col = colMemberPrinter idl
-                  Lift = sprintf "cOne (%s)"
+                  Lift = id
                   Union = fun read u -> colUnionDecoder sup.CaseRefines decl read u
                   NodeKind = colNodeKindDecl
                   Node = colNodeDecl
@@ -1348,16 +1345,6 @@ let private encFloat (f: float) : JVal =
                         | None -> sprintf "and private col%sSpec (j: JVal) =\n    cOne (dec%sSpec j)" k.Tag k.Tag }
                 (ordinary decl)
             |> Result.bind (fun group -> inlineCols |> Result.map (fun cols -> String.concat "\n\n" (group :: cols)))
-
-        let generatedDecl =
-            "/// Phase 541 — the generated collecting decoders: what every `decode*All` entry reads through, and\n"
-            + "/// the record a host copies (`{ collectingDecoders with <Type> = … }`) to override one type.\n"
-            + "let collectingDecoders: CollectingDecoders =\n"
-            + (slots
-               |> List.mapi (fun i (field, _) ->
-                   sprintf "%s%s = col%s" (if i = 0 then "    { " else "      ") field field)
-               |> String.concat "\n")
-            + " }"
 
         let entries =
             [ yield
@@ -1413,10 +1400,16 @@ let private encFloat (f: float) : JVal =
                 [ Template.text "fs-collecting.fs.txt"
                   Template.text "fs-collecting-refine.fs.txt" ]
 
-        groupR
-        |> Result.map (fun group ->
-            helpers @ [ recordTypeDecl; group; generatedDecl; entries ]
-            |> String.concat "\n\n")
+        // Phase 562 — the record's type comes first: the prelude's member readers ask its `Absent`.
+        FSharpCollectingRecord.emit sup decl
+        |> Result.bind (fun record ->
+            groupR
+            |> Result.map (fun group ->
+                [ record.TypeDecl ]
+                @ helpers
+                @ (if record.Defaults = "" then [] else [ record.Defaults ])
+                @ [ group; record.Generated; entries ]
+                |> String.concat "\n\n"))
 
     /// The decode-side helper prelude, emitted once per module. `dTag` reads the
     /// DECLARED discriminator (Phase 108) — `"$type"` interpolates to exactly the
