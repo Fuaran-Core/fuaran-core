@@ -659,7 +659,7 @@ one renderer, and compares the two renders. Every vector carries the result as `
 
 | `answeredBy` | Meaning |
 |---|---|
-| `["reference"]` | no extracted model asks this vector's question; the reference alone answered it |
+| `["reference"]` | no extracted model answered this vector — none asks its question, or its model declines the input or disagrees (each stated below); the reference alone answered it |
 | `["reference", "model:<Model>"]` | the export evaluated the model on this input and it gave the same answer |
 
 **A disagreement fails the export.** `render <family>` stops, naming the vector, the model and the
@@ -673,25 +673,59 @@ and the structural families) it is the vector's last member. A `lines` file (`es
 has no member per line, so its stamp is a header member and speaks for every line; it reads `model:`
 only when the model answers every line.
 
-**What is model-stamped today** — the census `Proofs.Oracle` holds, so an exporter that stops asking
-its model is red:
+**A vector the model declines (Phase 563, D232).** A model that asks a vector's question may still decline
+its input: the input reaches a part of the code the model is not stated over. Such a vector is reference-only
+BY DECLARATION. Its exporter names it, with the reason, beside the vectors it emits, and the export holds the
+declaration to the model in both directions: a model that declines an undeclared vector fails the export, and so
+does a declared vector the model answers after all. A disagreement found on an emitted input is held the same
+way: the reader stays reference-only, and the export fails when the disagreement stops standing.
+
+**One answer, several models.** The stamp names the model that answers the vector's question. A model that only
+reads the input on the way is evaluated in the same run: the parser model reads every column-codec and
+decode-reject input, and `Chain.rec_payload` writes the escape table's pre-image envelope. Where the parser model
+refuses the input, the refusal is its answer, and the vector is stamped `JsonParse`.
+
+**What is model-stamped today** — the census `Proofs.Oracle` holds, so an exporter that stops asking its model
+is red:
 
 | File | Model | Ladder row | Vectors |
 |---|---|---|---|
 | `laws/propagation-laws.json` | `Propagation` | `propagation-differential` | 73 of 73 |
 | `laws/decimal-laws.json` | `DecimalText` | `decimal-text-differential` | 49 of 75 (`canonical`, `compare`, `add`) |
+| `laws/decimal-laws.json` | `WireColumn` | `column-codec-differential` | 7 of 75 (`codecDecode`, `codecEncode`) |
+| `laws/field-laws.json` | `WireColumn` | `field-codec-differential` | 24 of 43 (`fieldEncode`, `codecDecode`) |
+| `laws/capability-laws.json` | `Capability` | `capability-differential` | 48 of 72 (`validateArgs`, `invocationKey`) |
 | `apply/skeleton-apply.json` | `TreeOps` | `tree-differential` | 25 of 25 |
-| `refusals/codec-refusals.json` | `JsonParse` | `parser-differential` | 56 of 101 (every `json` vector) |
+| `refusals/codec-refusals.json` | `JsonParse` | `parser-differential` | 59 of 101 (every `json` vector, and 3 `column` parse refusals) |
+| `refusals/codec-refusals.json` | `WireColumn` | `column-codec-differential` | 13 of 101 (`column`) |
+| `refusals/seam-refusals.json` | `Capability` | `capability-seam-codec-differential`, `capability-sections-differential` | 48 of 138 |
+| `refusals/seam-refusals.json` | `Query` | `query-codec-differential` | 45 of 138 |
+| `decode/decode-rejects.json` | `DecodeLayer` | `decode-layer-differential` | 28 of 47 |
+| `decode/decode-rejects.json` | `JsonParse` | `parser-differential` | 8 of 47 (`InvalidJson`, at the root) |
+| `escape/string-escape.json` | `WireCanon` | `canon-differential` | every line (the file's stamp) |
+| `chain/skeleton-chain.json` | `Chain` | `chain-walker-differential` | 16 of 16 |
+| `dag/skeleton-dag.json` | `Chain` | `chain-walker-differential` | 4 of 11 (`verify`) |
 
-Every other vector is `["reference"]`. For some of them no model asks the question: an IDL's canonical
-form, the decimal `toFloat` and `aggregate` cases, a field's fingerprint, delta and compatibility, the
-wire-profile grammar, and the v1 encoding column. For others a model asks it but its exporter does not
-evaluate the model yet: the capability laws (`Capability`), the decimal and field codec cases
-(`WireColumn`), the `column` codec refusals (`WireColumn`), the seam readers'
-encode side (`Capability`, `Query`), the decode-layer refusals after the parse (`DecodeLayer`), the
-escape table (`WireCanon`), and the chain, DAG, merge and diff vectors (`Chain`, `DagClosure`,
-`DagFold`, `TreeDiff`). Those stay reference-only until their exporter evaluates the model. A stamp
-never says more than the run checked.
+The `premises/` families are `JsonParse`'s too (Phase 483). Every other vector is `["reference"]`, for a stated
+reason:
+
+- **No model asks the question:** an IDL's canonical form, the decimal `toFloat` and `aggregate` cases, a field's
+  fingerprint, delta and compatibility, the wire-profile grammar, the v1 encoding column, a capability
+  declaration's round trip (the model has an encoder and no decoder), a registry's enumeration (the model's
+  `enumerate` answers which ids are registered, not the id order the vector pins), the seams' strict-members
+  readings, `FieldChange` and the ops `Rejection` envelope, the DAG `build` vectors (they carry the heads and the
+  ranks, which no model states), and the diff family (its answer carries `Diff.changes`; `TreeDiff.fst`'s `d_*`
+  state `Tree.Digests.diff`, a different function).
+- **The model declines the input** (declared): 5 decimal and 10 column codec vectors whose input reaches a
+  lenient-ingest arm of the column decoder (a JSON number where a decimal or timestamp column holds text, a
+  bare-array column, an inferred schema), and the 11 decode rejects refused for a limit the parser breaches.
+- **The model disagrees** (held): the seam `deferred` reader. On `ready-payload-refused` the model answers
+  `OutOfRange`, where the reference passes its payload reader's `WrongKind` through.
+- **Not yet asked:** the merge family, which a composition of models answers (`Chain`'s DAG build for the ids,
+  `DagPrimitives.common_base`, `DagClosure.reconcile_many_drained`, `TreeOps` for the landing). A successor
+  phase carries it.
+
+A stamp never says more than the run checked.
 
 **For a host** the stamp is data, read like the adoption record. A host ignores an unknown member of a
 vector today. A host that reports what it certified against can now say whether it agreed with the

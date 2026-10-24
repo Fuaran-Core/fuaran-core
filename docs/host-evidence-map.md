@@ -14,19 +14,23 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## Summary
 
-392 rows: 128 offered, 264 uncovered (proved 181, tested 41, assumed 40, policy 2).
+392 rows: 193 offered, 199 uncovered (proved 124, tested 33, assumed 40, policy 2).
 
 ## Offers, by model
 
 | Model | Rows | Families (cases) | Oracle functions |
 |---|---|---|---|
-| `Chain` | 27 | — | `chain.verify` |
+| `Capability` | 34 | `capabilityLaws` (48), `seamRefusals` (48) | — |
+| `Chain` | 27 | `skeletonChain` (16), `skeletonDag` (4) | `chain.verify` |
 | `DagFold` | 3 | — | `dag.fold` |
 | `DecimalText` | 12 | `decimal` (49) | — |
-| `JsonParse` | 17 | `premiseInt53` (29), `premiseRecursionDepth` (13), `premiseStringModel` (10), `codecRefusals` (56) | `json.parse`, `wire.decode` |
+| `DecodeLayer` | 4 | `decodeRejects` (28) | — |
+| `JsonParse` | 17 | `decodeRejects` (8), `premiseInt53` (29), `premiseRecursionDepth` (13), `premiseStringModel` (10), `codecRefusals` (59) | `json.parse`, `wire.decode` |
 | `Propagation` | 15 | `propagationLaws` (73) | — |
+| `Query` | 20 | `seamRefusals` (45) | — |
 | `TreeOps` | 19 | `skeletonApply` (25) | `tree.apply`, `dag.fold` |
-| `WireCanon` | 16 | — | `wire.render` |
+| `WireCanon` | 16 | `stringEscape` (38) | `wire.render` |
+| `WireColumn` | 7 | `decimal` (7), `fieldLaws` (24), `codecRefusals` (13) | — |
 | `WireDecode` | 14 | — | `wire.decode` |
 
 ## Offers, by host premise
@@ -47,15 +51,11 @@ Grouped by model. Each group is a candidate vector family or oracle function.
 
 - `Arbitrate` (6): `arbitration-accepted-pairwise-independent`, `arbitration-merged-order-free`, `arbitration-accepted-maximal`, `arbitration-deterministic`, `arbitration-id-uniqueness-is-needed`, `arbitration-maximal-is-not-maximum`
 
-- `Capability` (31): `capability-unregistered-refused`, `policy-gate-before-body`, `policy-join-monotone`, `capability-validate-before-invoke`, `capability-envelope-three-outcomes`, `capability-enumerate-is-registry`, `capability-slot-hole-invocable-in-space`, `capability-invocation-key-injective`, `function-totality-law`, `function-hygiene-law`, `function-effect-law`, `function-audit-effect-join`, `function-determinism-label-bijection`, `capability-capture-records-declared`, `capability-register-total`, `capability-wf-holes`, `capability-invocation-key-deterministic`, `capability-register-well-formed`, `capability-bind-handlers-exact`, `capability-bind-handlers-order-independent`, `capability-pipeline-typecheck-topological`, `capability-pipeline-illtyped-iff-refused`, `capability-pipeline-evalfrom-agrees`, `capability-pipeline-dirty-instance`, `capability-codec-signature-roundtrip`, `capability-codec-capability-roundtrip`, `capability-codec-node-roundtrip`, `capability-codec-invocation-roundtrip`, `capability-codec-deferred-roundtrip`, `capability-codec-invoke-error-roundtrip`, `capability-codec-refusals-resolve`
-
 - `ColumnRefinement` (6): `column-refinement-to-cells-of-cells`, `column-refinement-of-cells-to-cells`, `column-refinement-validate-agrees`, `column-refinement-encode-agrees`, `column-refinement-ladder-transfers`, `column-refinement-validity-two-cases`
 
 - `DagClosure` (19): `slot-writes-commute`, `reconcile-sound`, `reconcile-order-free`, `dag-delta-recovery`, `fold-from-the-dag`, `topological-order-choice`, `general-topological-order`, `dangling-parent-policy`, `dag-delta-recovery-merged-head`, `fold-from-a-merged-dag`, `dag-checkpoint-replay`, `dag-checkpoint-truncation`, `conflicts-of-heads-is-the-sweep`, `reach-index-agrees`, `replay-to-fold-over-drain`, `replay-to-unknown-head-refused`, `replay-to-deterministic`, `append-refuses-differing-node`, `total-order-by-linear-extension`
 
 - `DagPrimitives` (8): `merge-base-divergence`, `merge-base-as-it-runs`, `common-base-maximal`, `reach-merge-base-agrees`, `reach-common-base-agrees`, `reach-try-topo-order-agrees`, `reach-between-agrees`, `dag-compaction-truncation`
-
-- `DecodeLayer` (3): `decode-layer-round-trip`, `decode-layer-totality`, `decode-layer-refusals-resolve`
 
 - `DocVocabulary` (1): `doc-vocabulary-generated-model`
 
@@ -72,8 +72,6 @@ Grouped by model. Each group is a candidate vector family or oracle function.
 - `Preservation` (20): `apply-preserves-parent-first`, `apply-total`, `reject-identity`, `apply-preserves-wf`, `keyed-apply-preserves-wf`, `canapply-preserves`, `invert-round-trip`, `invert-batch-round-trip`, `invert-all-round-trip`, `contained-clause-for-clause`, `not-a-container-exact`, `contained-preserves`, `contained-premises`, `graft-containment`, `canapply-contained-agrees`, `container-sequence-gap`, `contained-preserves-script`, `canapply-all-with-agrees`, `sequence-surface-total-instance`, `container-sequence-gap-closed`
 
 - `PropagationOps` (5): `propagation-changed-for-op-complete`, `propagation-kind-kept`, `propagation-dirty-from-op-complete`, `propagation-dirty-from-op-least`, `propagation-evalfrom-agrees-for-op`
-
-- `Query` (18): `query-unregistered-refused`, `query-validate-before-resolve`, `query-envelope-three-outcomes`, `query-enumerate-is-registry`, `query-invocation-key-deterministic`, `query-required-is-non-null`, `query-invocation-key-injective`, `query-validate-widens`, `query-register-refuses-duplicate-params`, `query-invocation-key-page-injective`, `query-invocation-key-unshaped`, `query-register-refuses-shape`, `query-registry-lifecycle`, `query-codec-declaration-roundtrip`, `query-codec-result-roundtrip`, `query-codec-deferred-result-roundtrip`, `query-codec-error-roundtrip`, `query-codec-refusals-resolve`
 
 - `Relation` (8): `relation-components-partition`, `relation-sort-partition`, `relation-reachable-least`, `relation-inverse-edge`, `relation-components-are-sccs`, `relation-components-deps-first`, `relation-cycles-among-spec`, `relation-terminals-spec`
 
@@ -99,8 +97,6 @@ Grouped by model. Each group is a candidate vector family or oracle function.
 
 - `VocabularyVectors` (1): `vocabulary-vectors-agree`
 
-- `WireColumn` (5): `column-codec-image-valid`, `column-codec-round-trip`, `column-codec-literal-round-trip-false`, `field-codec-round-trip`, `field-codec-plain-entry`
-
 - `WireVersioning` (6): `evolution-classify-sound`, `evolution-additive-monotone`, `evolution-preserve-exact`, `evolution-unknown-transport-only`, `evolution-bump-refuses-at-the-edge`, `evolution-field-additive-monotone`
 
 ## Every other uncovered row
@@ -113,15 +109,11 @@ A row naming no model (an `assumed` or `policy` row, or a law row) is answered b
 
 - `Arbitrate` (1): `arbitration-differential`
 
-- `Capability` (3): `capability-differential`, `capability-seam-codec-differential`, `capability-sections-differential`
-
 - `ColumnRefinement` (2): `column-refinement-differential`, `column-refinement-validity-differential`
 
 - `DagClosure` (6): `reconcile-differential`, `delta-recovery-differential`, `general-drain-differential`, `merged-head-differential`, `dag-primitives-differential`, `replay-to-differential`
 
 - `DagPrimitives` (1): `dag-boundaries-differential`
-
-- `DecodeLayer` (1): `decode-layer-differential`
 
 - `Normalize` (1): `normalize-differential`
 
@@ -130,8 +122,6 @@ A row naming no model (an `assumed` or `policy` row, or a law row) is answered b
 - `Preservation` (3): `preservation-differential`, `container-differential`, `script-differential`
 
 - `PropagationOps` (1): `propagation-ops-differential`
-
-- `Query` (2): `query-differential`, `query-codec-differential`
 
 - `Relation` (1): `relation-differential`
 
@@ -142,8 +132,6 @@ A row naming no model (an `assumed` or `policy` row, or a law row) is answered b
 - `Unit` (1): `unit-differential`
 
 - `Utf8` (1): `utf8-independent-oracle`
-
-- `WireColumn` (2): `column-codec-differential`, `field-codec-differential`
 
 - `WireVersioning` (4): `evolution-differential`, `evolution-table-coverage`, `evolution-bump-differential`, `evolution-old-document-differential`
 
@@ -161,16 +149,9 @@ Certified against the reference implementation alone, so a host passing one offe
 
 | Family | File | Cases |
 |---|---|---|
-| `skeletonChain` | [`conformance/chain/skeleton-chain.json`](../conformance/chain/skeleton-chain.json) | 16 |
-| `skeletonDag` | [`conformance/dag/skeleton-dag.json`](../conformance/dag/skeleton-dag.json) | 11 |
-| `decodeRejects` | [`conformance/decode/decode-rejects.json`](../conformance/decode/decode-rejects.json) | 47 |
 | `skeletonDiff` | [`conformance/diff/skeleton-diff.json`](../conformance/diff/skeleton-diff.json) | 14 |
 | `encodingProfile` | [`conformance/encoding/encoding-profiles.json`](../conformance/encoding/encoding-profiles.json) | 47 |
-| `stringEscape` | [`conformance/escape/string-escape.json`](../conformance/escape/string-escape.json) | 38 |
 | `canonicalFormLaws` | [`conformance/laws/canonical-form-laws.json`](../conformance/laws/canonical-form-laws.json) | 17 |
-| `capabilityLaws` | [`conformance/laws/capability-laws.json`](../conformance/laws/capability-laws.json) | 72 |
-| `fieldLaws` | [`conformance/laws/field-laws.json`](../conformance/laws/field-laws.json) | 43 |
 | `skeletonMerge` | [`conformance/merge/skeleton-merge.json`](../conformance/merge/skeleton-merge.json) | 12 |
 | `premiseFloatDigits` | [`conformance/premises/float-digits.json`](../conformance/premises/float-digits.json) | 163 |
 | `premiseSha256` | [`conformance/premises/sha256.json`](../conformance/premises/sha256.json) | 17 |
-| `seamRefusals` | [`conformance/refusals/seam-refusals.json`](../conformance/refusals/seam-refusals.json) | 138 |

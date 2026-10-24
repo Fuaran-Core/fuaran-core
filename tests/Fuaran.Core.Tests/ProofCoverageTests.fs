@@ -1074,12 +1074,13 @@ let evidenceMapTests =
 
               let target =
                   before.Rows
-                  |> List.find (fun r -> r.Level = "proved" && List.isEmpty r.Families && r.Oracle = [ "chain.verify" ])
+                  // Phase 563: the chain rows now carry vector families too, so the row is a DAG-fold one.
+                  |> List.find (fun r -> r.Level = "proved" && List.isEmpty r.Families && r.Oracle = [ "dag.fold" ])
 
               let after =
                   EvidenceMapCase.derived
                       { inputs with
-                          Oracle = inputs.Oracle |> List.filter (fun (name, _) -> name <> "chain.verify") }
+                          Oracle = inputs.Oracle |> List.filter (fun (name, _) -> name <> "dag.fold") }
 
               Expect.isFalse (EvidenceMapCase.row after target.Id).Offered "the row is uncovered without the function"
 
