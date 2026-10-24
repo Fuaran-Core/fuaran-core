@@ -71,15 +71,31 @@ module SpineAdoption =
     let private phase463 =
         AdoptionSource.Host("0.41.0", "432509b7bbdf0f1a227914466d12c48abc35291f")
 
-    /// The families the spine runs, by family id, with the cases its legs asserted and where.
+    /// Phase 564's measurement: Core 0.41.0, landed at this spine commit.
+    let private phase564 =
+        AdoptionSource.Host("0.41.0", "ad6cad6725738bd2c48139a4f4a2c14a14c9c79d")
+
+    /// The families the spine runs, by family id, with the cases its legs asserted and where. A family
+    /// whose leg did not change keeps the measurement that stands.
     let private measured =
         [ "skeletonApply", 25, phase463
-          "codecRefusals", 56, phase463
           "decodeRejects", 47, phase463
           "skeletonChain", 16, phase463
           "skeletonDag", 11, phase463
-          // The `canonical`, `compare`, `add` and `toFloat` cases (Phase 463).
-          "decimal", 53, phase463 ]
+          "codecRefusals", 101, phase564
+          "seamRefusals", 138, phase564
+          "skeletonMerge", 12, phase564
+          "skeletonDiff", 14, phase564
+          "capabilityLaws", 72, phase564
+          "decimal", 75, phase564
+          "fieldLaws", 43, phase564
+          "propagationLaws", 73, phase564
+          "canonicalFormLaws", 17, phase564
+          "premiseStringModel", 29, phase564
+          "premiseFloatDigits", 163, phase564
+          "premiseInt53", 29, phase564
+          "premiseSha256", 17, phase564
+          "premiseRecursionDepth", 13, phase564 ]
 
     /// The spine's entry for one family.
     let internal adoption (familyId: string) : string * HostAdoption =

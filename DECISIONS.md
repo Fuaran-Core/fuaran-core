@@ -279,6 +279,14 @@ the measurement that stands rather than borrowing a newer commit that did not ch
 `apply/manifest.json` row moves only when the apply measurement does. D225's certification and adoption clauses hold
 no count: the record does.
 
+*What the spine runs (D230.4).* At `fuaran-core-rs` `ad6cad6`, against this repository at the commit that recorded the
+index, the spine answers every vector of every family with a manifest: both refusal families (the `json`, `column` and
+`profile` codec vectors, and the seam documents), the decode rejects, the five structural families, the five law
+families and the five host-premise probes. Its record reads `adopted` at the family's full vector count on each, so
+no family reads `proposed`; apply, chain, DAG and decode keep Phase 463's measurement. The `encoding/` table, which has
+no manifest, it does not run: it pins the v1 profile of stores minted by `0.30.0` to `0.32.0` and an authored-order
+writer, neither of which the spine holds (its DECISIONS.md D8).
+
 ## 2026-10-23 — D229: a host declares its compliance per ladder row in four closed evidence classes, Core's tool validates the declaration against the evidence map, the adoption records and the premise rows, and computes `compliant` and `parity`; the cross-host matrix is a projection outside this repository
 
 **Status:** Live

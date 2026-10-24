@@ -2,6 +2,6 @@
   "version": 1,
   "description": "A Core-owned structural family over the skeleton witness (Phase 549). SELF-ENUMERATED, as apply/ is: not indexed by the corpus root manifest.json. `adoption` is per host and is DATA: a host whose entry reads `proposed` reports the family BY NAME rather than skipping it, and flips its own entry to `adopted` in the change-set that lands its leg. This manifest is authoritative for the vector count.",
   "families": [
-    { "id": "skeletonMerge", "kind": "merge-vectors", "file": "skeleton-merge.json", "vectors": 12, "adoption": { "fuaran": { "status": "adopted", "cases": 12 }, "fuaran-ts": { "status": "proposed" }, "fuaran-py": { "status": "proposed" }, "fuaran-go": { "status": "proposed" }, "fuaran-rs": { "status": "proposed" }, "fuaran-core-rs": { "status": "proposed" } }, "description": "The common base and the N-lane reconcile over skeleton ops: the merge script and the tree it lands on, or the fault." }
+    { "id": "skeletonMerge", "kind": "merge-vectors", "file": "skeleton-merge.json", "vectors": 12, "adoption": { "fuaran": { "status": "adopted", "cases": 12 }, "fuaran-ts": { "status": "proposed" }, "fuaran-py": { "status": "proposed" }, "fuaran-go": { "status": "proposed" }, "fuaran-rs": { "status": "proposed" }, "fuaran-core-rs": { "status": "adopted", "cases": 12, "kitVersion": "0.41.0", "sha": "ad6cad6725738bd2c48139a4f4a2c14a14c9c79d" } }, "description": "The common base and the N-lane reconcile over skeleton ops: the merge script and the tree it lands on, or the fault." }
   ]
 }
