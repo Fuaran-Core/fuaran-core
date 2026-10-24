@@ -280,7 +280,7 @@ the measurement that stands rather than borrowing a newer commit that did not ch
 `apply/manifest.json` row moves only when the apply measurement does. D225's certification and adoption clauses hold
 no count: the record does.
 
-*What the spine runs (D231.4).* At `fuaran-core-rs` `ad6cad6`, against this repository at the commit that recorded the
+*What the spine runs (D231.4).* At `fuaran-core-rs` `0aa91db`, against this repository at the commit that recorded the
 index, the spine answers every vector of every family with a manifest: both refusal families (the `json`, `column` and
 `profile` codec vectors, and the seam documents), the decode rejects, the five structural families, the five law
 families and the five host-premise probes. Its record reads `adopted` at the family's full vector count on each, so

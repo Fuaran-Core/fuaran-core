@@ -73,7 +73,7 @@ module SpineAdoption =
 
     /// Phase 564's measurement: Core 0.41.0, landed at this spine commit.
     let private phase564 =
-        AdoptionSource.Host("0.41.0", "ad6cad6725738bd2c48139a4f4a2c14a14c9c79d")
+        AdoptionSource.Host("0.41.0", "0aa91dbcdd92834166add12c72d3606f483c6711")
 
     /// The families the spine runs, by family id, with the cases its legs asserted and where. A family
     /// whose leg did not change keeps the measurement that stands.
