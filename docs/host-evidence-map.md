@@ -14,7 +14,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## Summary
 
-393 rows: 193 offered, 1 a host's own proof, 199 uncovered (proved 124, tested 33, assumed 40, policy 2).
+393 rows: 227 offered, 1 a host's own proof, 165 uncovered (proved 97, tested 26, assumed 40, policy 2).
 
 ## Offers, by model
 
@@ -22,7 +22,9 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 |---|---|---|---|
 | `Capability` | 34 | `capabilityLaws` (72), `seamRefusals` (55) | — |
 | `Chain` | 27 | `skeletonChain` (16), `skeletonDag` (4) | `chain.verify` |
+| `DagClosure` | 25 | `skeletonMerge` (7) | — |
 | `DagFold` | 3 | — | `dag.fold` |
+| `DagPrimitives` | 9 | `skeletonMerge` (1) | — |
 | `DecimalText` | 12 | `decimal` (49) | — |
 | `DecodeLayer` | 4 | `decodeRejects` (28) | — |
 | `JsonParse` | 17 | `decodeRejects` (8), `premiseInt53` (29), `premiseRecursionDepth` (13), `premiseStringModel` (10), `codecRefusals` (59) | `json.parse`, `wire.decode` |
@@ -60,10 +62,6 @@ Grouped by model. Each group is a candidate vector family or oracle function.
 - `Arbitrate` (6): `arbitration-accepted-pairwise-independent`, `arbitration-merged-order-free`, `arbitration-accepted-maximal`, `arbitration-deterministic`, `arbitration-id-uniqueness-is-needed`, `arbitration-maximal-is-not-maximum`
 
 - `ColumnRefinement` (6): `column-refinement-to-cells-of-cells`, `column-refinement-of-cells-to-cells`, `column-refinement-validate-agrees`, `column-refinement-encode-agrees`, `column-refinement-ladder-transfers`, `column-refinement-validity-two-cases`
-
-- `DagClosure` (19): `slot-writes-commute`, `reconcile-sound`, `reconcile-order-free`, `dag-delta-recovery`, `fold-from-the-dag`, `topological-order-choice`, `general-topological-order`, `dangling-parent-policy`, `dag-delta-recovery-merged-head`, `fold-from-a-merged-dag`, `dag-checkpoint-replay`, `dag-checkpoint-truncation`, `conflicts-of-heads-is-the-sweep`, `reach-index-agrees`, `replay-to-fold-over-drain`, `replay-to-unknown-head-refused`, `replay-to-deterministic`, `append-refuses-differing-node`, `total-order-by-linear-extension`
-
-- `DagPrimitives` (8): `merge-base-divergence`, `merge-base-as-it-runs`, `common-base-maximal`, `reach-merge-base-agrees`, `reach-common-base-agrees`, `reach-try-topo-order-agrees`, `reach-between-agrees`, `dag-compaction-truncation`
 
 - `DocVocabulary` (1): `doc-vocabulary-generated-model`
 
@@ -119,10 +117,6 @@ A row naming no model (an `assumed` or `policy` row, or a law row) is answered b
 
 - `ColumnRefinement` (2): `column-refinement-differential`, `column-refinement-validity-differential`
 
-- `DagClosure` (6): `reconcile-differential`, `delta-recovery-differential`, `general-drain-differential`, `merged-head-differential`, `dag-primitives-differential`, `replay-to-differential`
-
-- `DagPrimitives` (1): `dag-boundaries-differential`
-
 - `Normalize` (1): `normalize-differential`
 
 - `OpStreamLoad` (1): `op-stream-load-differential`
@@ -160,6 +154,5 @@ Certified against the reference implementation alone, so a host passing one offe
 | `skeletonDiff` | [`conformance/diff/skeleton-diff.json`](../conformance/diff/skeleton-diff.json) | 14 |
 | `encodingProfile` | [`conformance/encoding/encoding-profiles.json`](../conformance/encoding/encoding-profiles.json) | 47 |
 | `canonicalFormLaws` | [`conformance/laws/canonical-form-laws.json`](../conformance/laws/canonical-form-laws.json) | 20 |
-| `skeletonMerge` | [`conformance/merge/skeleton-merge.json`](../conformance/merge/skeleton-merge.json) | 13 |
 | `premiseFloatDigits` | [`conformance/premises/float-digits.json`](../conformance/premises/float-digits.json) | 163 |
 | `premiseSha256` | [`conformance/premises/sha256.json`](../conformance/premises/sha256.json) | 17 |

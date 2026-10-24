@@ -1217,4 +1217,70 @@ let tests =
                           t)
 
               let t = Differential.seeded 10 (ConfRng.ofSeed 4572) step (Tally.empty [])
-              Differential.expectLoses "an index between that drops a node disagrees with production" t ]
+              Differential.expectLoses "an index between that drops a node disagrees with production" t
+
+          // ---- Phase 569: the merge family's stamp, the composition perturbed one step at a time ----
+
+          testCase "go-red: the merge composition with one step perturbed refuses the export at the vector it moves"
+          <| fun _ ->
+              // The merge vectors are stamped by a composition of four models (D238). Each step is
+              // perturbed ALONE here, and each must refuse the render at the first vector that step
+              // moves — so a green render is one every step of the composition could have lost.
+              let merge =
+                  match StructuralVectorExport.tryFamily "merge" with
+                  | Some f -> f
+                  | None -> failtest "the merge family is a row of the exporter table"
+
+              let faithful = StructuralVectorExport.Merge.modelSteps
+
+              let render steps =
+                  { merge with
+                      Model = StructuralVectorExport.Merge.modelAnswerWith steps }
+                  |> StructuralVectorExport.renderVectors
+
+              Expect.isNonEmpty (render faithful) "the faithful composition renders the family (the control)"
+
+              // The rule `reconcile_many_drained` states: each head's whole delta from the base, nothing
+              // shared — the composition the phase's shard named, and the rule Phase 300 replaced.
+              let eachHeadsDelta (model: DagClosure.dag<_>) (baseId: string) (heads: string list) =
+                  let fuel = drainFuel model.nodes
+
+                  let lanes =
+                      heads
+                      |> List.map (fun h ->
+                          DagClosure.between_drained ordLt fuel model fuel baseId h |> DagClosure.ids_of)
+
+                  ({ Heads = heads
+                     Shared = []
+                     Exclusive = lanes
+                     Script = DagFold.concat lanes }
+                  : Partition)
+
+              for step, perturbed, moved in
+                  [ "the DAG build's hash",
+                    { faithful with
+                        Hash = fun p s -> faithful.Hash p ("~" + s) },
+                    "clean-two-lanes"
+                    "the base, ignoring a named one",
+                    { faithful with
+                        Base = fun _ common -> common },
+                    "named-base"
+                    "the partition, each head's whole delta",
+                    { faithful with
+                        Partition = eachHeadsDelta },
+                    "named-base"
+                    "the footprint, blind",
+                    { faithful with
+                        Fp = fun _ -> TreeOps.empty_fp },
+                    "insert-position-clash"
+                    "the apply, the identity",
+                    { faithful with
+                        Apply = fun _ t -> DagFold.Ok t },
+                    "clean-two-lanes" ] do
+                  Expect.throwsC (fun () -> render perturbed |> ignore) (fun e ->
+                      Expect.stringContains e.Message "the export refuses" (step + ": the render refuses")
+
+                      Expect.stringContains
+                          e.Message
+                          moved
+                          (step + ": the refusal names the first vector the step moves")) ]

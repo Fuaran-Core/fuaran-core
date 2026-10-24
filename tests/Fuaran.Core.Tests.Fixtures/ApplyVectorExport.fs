@@ -585,7 +585,7 @@ module ApplyVectorExport =
     /// The model's rejection as the family pins it — the same class and address `rejectionJ` writes
     /// for production's (Phase 478). The model carries neither `WouldNestUnderSelf`'s relation nor
     /// `UnknownNode`'s enumeration, and the pinned projection reads neither, so nothing is invented.
-    let private modelRejectionJ (r: TreeOps.rejection) : JVal =
+    let modelRejectionJ (r: TreeOps.rejection) : JVal =
         match r with
         | TreeOps.DuplicateId d -> Canonical.typed "duplicateId" [ "id", JStr d ]
         | TreeOps.UnknownNode(target, _) -> Canonical.typed "unknownNode" [ "target", JStr target ]

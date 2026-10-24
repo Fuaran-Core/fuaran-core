@@ -911,76 +911,99 @@ module StructuralVectorExport =
             script
             |> List.fold (fun acc op -> Result.bind (skeleton.Witness.Apply op) acc) (Ok state)
 
+        /// A `reconcile` vector's input: the scenario, the heads' labels, and the base's label if it names one.
+        let internal readReconcile (input: JVal) : Result<RNode * Write list * string list * string option, string> =
+            result {
+                let! state0, writes = readScenario input
+                let! headsJ = reqArr "heads" input
+                let! heads = strs headsJ
+
+                let! named =
+                    match field "base" input with
+                    | Some(JStr l) -> Ok(Some l)
+                    | Some other -> Error(sprintf "the member `base` is not a string: %A" other)
+                    | None -> Ok None
+
+                return state0, writes, heads, named
+            }
+
+        /// An answer's members, rendered once for the reference's answer and the models' alike: every
+        /// write's id, the common base (empty when there is none), and with no base the `noBase`
+        /// verdict, else the base and the outcome's members.
+        let private render
+            (labelOf: string -> string)
+            (ids: (string * string) list)
+            (common: string option)
+            (baseId: string option)
+            (outcome: (string * JVal) list)
+            : JVal =
+            let idsJ = "ids", JObj(ids |> List.map (fun (l, id) -> l, JStr id))
+
+            let commonJ =
+                "commonBase", JStr(common |> Option.map labelOf |> Option.defaultValue "")
+
+            match baseId with
+            | None -> JObj [ idsJ; commonJ; "verdict", JStr "noBase" ]
+            | Some b -> JObj([ idsJ; commonJ; "base", JStr(labelOf b) ] @ outcome)
+
+        let private merged (script: SkeletonOp<RNode, string> list) (t: RNode) : (string * JVal) list =
+            [ "verdict", JStr "merged"
+              "script", jstrs (script |> List.map ApplyVectorExport.encodeOp) ]
+            @ treeAnswer t
+
+        let private interfere (cs: MergeConflict<SkeletonOp<RNode, string>> list) : (string * JVal) list =
+            [ "verdict", JStr "interfere"; "conflicts", JArr(cs |> List.map conflictJ) ]
+
+        let private sharedRejected (node: string) (rejection: JVal) : (string * JVal) list =
+            [ "verdict", JStr "sharedRejected"; "node", JStr node; "rejection", rejection ]
+
+        let private unappliable (rejection: JVal) : (string * JVal) list =
+            [ "verdict", JStr "unappliable"; "rejection", rejection ]
+
         /// The answer to a `reconcile` vector, computed by calling Core.
         let answer (case: string) (input: JVal) : Result<JVal, string> =
             result {
                 match case with
                 | "reconcile" ->
-                    let! state0, writes = readScenario input
+                    let! state0, writes, headLabels, named = readReconcile input
                     let! b = build writes
-                    let! headsJ = reqArr "heads" input
-                    let! headLabels = strs headsJ
 
-                    let! heads =
-                        headLabels
-                        |> traverse (fun l ->
-                            match Map.tryFind l b.Ids with
-                            | Some id -> Ok id
-                            | None -> Error(sprintf "the head `%s` names no recorded write" l))
+                    let idOf (what: string) (l: string) =
+                        match Map.tryFind l b.Ids with
+                        | Some id -> Ok id
+                        | None -> Error(sprintf "the %s `%s` names no recorded write" what l)
 
+                    let! heads = headLabels |> traverse (idOf "head")
                     let common = Dag.commonBase b.Dag heads
 
-                    let! named =
-                        match field "base" input with
-                        | Some(JStr l) ->
-                            match Map.tryFind l b.Ids with
-                            | Some id -> Ok(Some id)
-                            | None -> Error(sprintf "the base `%s` names no recorded write" l)
-                        | Some other -> Error(sprintf "the member `base` is not a string: %A" other)
+                    let! namedId =
+                        match named with
+                        | Some l -> idOf "base" l |> Result.map Some
                         | None -> Ok None
 
                     let ids =
-                        "ids",
-                        JObj(
-                            b.Outcomes
-                            |> List.choose (fun (l, r) -> r |> Result.toOption |> Option.map (fun id -> l, JStr id))
-                        )
+                        b.Outcomes
+                        |> List.choose (fun (l, r) -> r |> Result.toOption |> Option.map (fun id -> l, id))
 
-                    let commonJ =
-                        "commonBase",
-                        (match common with
-                         | Some c -> JStr(b.LabelOf c)
-                         | None -> JStr "")
+                    let label = b.LabelOf
 
-                    match
-                        (match named with
-                         | Some n -> Some n
-                         | None -> common)
-                    with
-                    | None -> return JObj [ ids; commonJ; "verdict", JStr "noBase" ]
+                    match Option.orElse common namedId with
+                    | None -> return render label ids common None []
                     | Some baseId ->
                         let! baseState =
                             match Dag.tryReplayTo skeleton.Witness state0 b.Dag baseId with
                             | Ok s -> Ok s
                             | Error f -> Error(sprintf "the base does not replay: %A" f)
 
-                        let label = b.LabelOf
-
                         let outcome =
                             match Dag.reconcileMany skeleton.Witness footprintOf b.Dag baseId baseState heads with
                             | Ok script ->
                                 match landOn baseState script with
-                                | Ok t ->
-                                    [ "verdict", JStr "merged"
-                                      "script", jstrs (script |> List.map ApplyVectorExport.encodeOp) ]
-                                    @ treeAnswer t
-                                | Error r -> [ "verdict", JStr "unappliable"; "rejection", rejection r ]
-                            | Error(ReconcileFault.LanesInterfere cs) ->
-                                [ "verdict", JStr "interfere"; "conflicts", JArr(cs |> List.map conflictJ) ]
+                                | Ok t -> merged script t
+                                | Error r -> unappliable (rejection r)
+                            | Error(ReconcileFault.LanesInterfere cs) -> interfere cs
                             | Error(ReconcileFault.SharedHistoryRejected(n, rej)) ->
-                                [ "verdict", JStr "sharedRejected"
-                                  "node", JStr(label n)
-                                  "rejection", rejection rej ]
+                                sharedRejected (label n) (rejection rej)
                             | Error(ReconcileFault.LanesRejected lanes) ->
                                 [ "verdict", JStr "lanesRejected"
                                   "lanes",
@@ -993,9 +1016,145 @@ module StructuralVectorExport =
                                                 "rejection", rejection l.Reject ])
                                   ) ]
 
-                        return JObj([ ids; commonJ; "base", JStr(label baseId) ] @ outcome)
+                        return render label ids common (Some baseId) outcome
                 | other -> return! Error(sprintf "the merge family has no case `%s`" other)
             }
+
+        /// Why an `interfere` vector is the reference's: the models read sets as lists (`sets-are-lists`),
+        /// so the composition answers the conflicts as a SET, and the vector pins their order and count.
+        let private unorderedReport =
+            "the conflict report's order and multiplicity, which the vector pins, are not stated by the model: it reads sets as lists (ladder row sets-are-lists)"
+
+        /// Why a `lanesRejected` vector is the reference's: the model names which lanes do not apply, and
+        /// no model states the report the vector pins.
+        let private unstatedLaneReport =
+            "the rejected-lane report (each rejecting lane's head, the node that rejects and the rejection, sorted by head id) is stated by no model: DagFold.fold_once answers LanesRejected with the lanes alone"
+
+        /// The vectors the composition declines, each with the reason (D232.1): the export fails if the
+        /// composition declines another, or answers one of these after all.
+        let declaredNotAnswered: Map<string, string> =
+            Map
+                [ "insert-position-clash", unorderedReport
+                  "concurrent-update", unorderedReport
+                  "move-vs-remove", unorderedReport
+                  "lanes-rejected", unstatedLaneReport
+                  "lanes-rejected-id-order", unstatedLaneReport ]
+
+        /// An answer with its array `name` read as a set: each member through `pick`, deduplicated and
+        /// in canonical-text order — the reading under which a declined answer is still compared.
+        let private asSet (name: string) (pick: JVal -> JVal) (answer: JVal) : JVal =
+            match answer with
+            | JObj fields ->
+                fields
+                |> List.map (fun (k, x) ->
+                    match k, x with
+                    | k, JArr xs when k = name ->
+                        k, JArr(xs |> List.map pick |> List.distinctBy canonical |> List.sortBy canonical)
+                    | _ -> k, x)
+                |> JObj
+            | other -> other
+
+        /// The models' answer to a vector (Phase 569): the composition `MergeOracle.reconcile` states
+        /// (DECISIONS.md D238), over the tree model's own `apply` and footprint, its answer rendered by
+        /// `render` as the reference's is. A `noBase` answer is the common base's, so its stamp names
+        /// `DagPrimitives`; every other answer is the reconcile's, `DagClosure`. `steps` are the
+        /// composition's (`modelSteps`), or one of them perturbed by a go-red.
+        let modelAnswerWith
+            (steps: MergeOracle.Steps<SkeletonOp<RNode, string>, TreeOps.tree, TreeOps.rejection>)
+            (v: Vector)
+            : VectorOracle.Answer option =
+            let state0, writes, heads, named =
+                match readReconcile v.Input with
+                | Ok r -> r
+                | Error why -> failwithf "merge vector %s: the model's input does not read: %s" v.Id why
+
+            let modelWrites: MergeOracle.Write<SkeletonOp<RNode, string>> list =
+                writes
+                |> List.map (fun w ->
+                    { Label = w.Label
+                      Verb = w.Verb
+                      Parents = w.Parents
+                      Actor = Actor.encode w.Actor
+                      Op = w.Op })
+
+            let modelRejection r =
+                JStr(canonical (ApplyVectorExport.modelRejectionJ r))
+
+            let reference () =
+                match answer v.Case v.Input with
+                | Ok r -> r
+                | Error why -> failwithf "merge vector %s: %s" v.Id why
+
+            // A decline is for what the model does not state; what it does state still has to agree, so
+            // a declined answer is held to the reference's with the unstated array read as a set.
+            let declineAgreeing (name: string) (pick: JVal -> JVal) (model: JVal) (why: string) =
+                let m = canonical (asSet name pick model)
+                let r = canonical (asSet name pick (reference ()))
+
+                if m <> r then
+                    failwithf
+                        "the export refuses: vector `%s`: the extracted model %s disagrees with the reference (ladder row `%s`), `%s` read as a set — reference %s, model %s"
+                        v.Id
+                        MergeOracle.Model
+                        MergeOracle.LadderRow
+                        name
+                        r
+                        m
+
+                VectorOracle.Declined(MergeOracle.Model, MergeOracle.LadderRow, why)
+
+            let head (l: JVal) =
+                field "head" l |> Option.defaultValue (JStr "")
+
+            let asked =
+                match
+                    MergeOracle.reconcile
+                        steps
+                        ApplyVectorExport.encodeOp
+                        (VectorOracle.TreeModel.toTree state0)
+                        modelWrites
+                        heads
+                        named
+                with
+                | Error why -> VectorOracle.Declined(MergeOracle.Model, MergeOracle.LadderRow, why)
+                | Ok({ Verdict = MergeOracle.Interfere cs } as a) ->
+                    interfere (cs |> List.map MergeOracle.ofModelConflict)
+                    |> render a.LabelOf a.Ids a.CommonBase a.Base
+                    |> fun m -> declineAgreeing "conflicts" id m unorderedReport
+                | Ok({ Verdict = MergeOracle.LanesRejected heads } as a) ->
+                    [ "verdict", JStr "lanesRejected"
+                      "lanes", JArr(heads |> List.map (fun h -> JObj [ "head", JStr(a.LabelOf h) ])) ]
+                    |> render a.LabelOf a.Ids a.CommonBase a.Base
+                    |> fun m -> declineAgreeing "lanes" head m unstatedLaneReport
+                | Ok a ->
+                    let outcome =
+                        match a.Verdict with
+                        | MergeOracle.NoBase -> []
+                        | MergeOracle.Interfere _
+                        | MergeOracle.LanesRejected _ -> failwith "matched above"
+                        | MergeOracle.SharedRejected(n, rej) -> sharedRejected (a.LabelOf n) (modelRejection rej)
+                        | MergeOracle.Merged(script, landed) -> merged script (VectorOracle.TreeModel.ofTree landed)
+                        | MergeOracle.Unappliable rej -> unappliable (modelRejection rej)
+
+                    let model, row =
+                        match a.Verdict with
+                        | MergeOracle.NoBase -> MergeOracle.BaseModel, MergeOracle.BaseLadderRow
+                        | _ -> MergeOracle.Model, MergeOracle.LadderRow
+
+                    VectorOracle.Answered
+                        { Model = model
+                          LadderRow = row
+                          Cell = CorpusCell.Value(render a.LabelOf a.Ids a.CommonBase a.Base outcome) }
+
+            VectorOracle.admit declaredNotAnswered v.Id asked
+
+        /// The composition's steps as the models state them: the tree model's `apply` and footprint,
+        /// through the bridge, and the SHA-256 the family's ids are minted with.
+        let modelSteps: MergeOracle.Steps<SkeletonOp<RNode, string>, TreeOps.tree, TreeOps.rejection> =
+            let toOp = VectorOracle.TreeModel.toOpWith VectorOracle.TreeModel.toTree
+            MergeOracle.steps hashFn (fun op t -> TreeOps.apply (toOp op) t) (fun op -> TreeOps.op_fp (toOp op))
+
+        let modelAnswer (v: Vector) : VectorOracle.Answer option = modelAnswerWith modelSteps v
 
         let vectors () : Vector list =
             let t = baseTree ()
@@ -1318,10 +1477,8 @@ module StructuralVectorExport =
               "The common base and the N-lane reconcile over skeleton ops: the merge script and the tree it lands on, or the fault."
             Vectors = Merge.vectors
             Answer = Merge.answer
-            // Reference-only, NOT yet asked of its models (D232): the content ids (`Chain`'s DAG build),
-            // the common base (`DagPrimitives.common_base`), the script (`DagClosure.reconcile_many_drained`)
-            // and the landing (`TreeOps`) each have one, and the export does not compose them yet.
-            Model = fun _ -> None }
+            // Answered by the composition of models (D238), except the vectors it declares (D232.1).
+            Model = Merge.modelAnswer }
           { Name = "diff"
             DirName = DiffFamily.familyDirName
             FileName = DiffFamily.vectorsFileName

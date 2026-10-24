@@ -723,6 +723,8 @@ is red:
 | `escape/string-escape.json` | `WireCanon` | `canon-differential` | every line (the file's stamp) |
 | `chain/skeleton-chain.json` | `Chain` | `chain-walker-differential` | 16 of 16 |
 | `dag/skeleton-dag.json` | `Chain` | `chain-walker-differential` | 4 of 11 (`verify`) |
+| `merge/skeleton-merge.json` | `DagClosure` | `reconcile-differential` | 7 of 13 (`merged`, `sharedRejected`) |
+| `merge/skeleton-merge.json` | `DagPrimitives` | `dag-boundaries-differential` | 1 of 13 (`noBase`) |
 
 The `premises/` families are `JsonParse`'s too (Phase 483). Every other vector is `["reference"]`, for a stated
 reason:
@@ -738,9 +740,26 @@ reason:
 - **The model declines the input** (declared): 5 decimal and 10 column codec vectors whose input reaches a
   lenient-ingest arm of the column decoder (a JSON number where a decimal or timestamp column holds text, a
   bare-array column, an inferred schema), and the 11 decode rejects refused for a limit the parser breaches.
-- **Not yet asked:** the merge family, which a composition of models answers (`Chain`'s DAG build for the ids,
-  `DagPrimitives.common_base`, `DagClosure.reconcile_many_drained`, `TreeOps` for the landing). A successor
-  phase carries it.
+  And 5 of the 13 merge vectors: the 3 `interfere` vectors, because the models read sets as lists
+  (`sets-are-lists`) and so state the conflict report as a set, where the vector pins its order and count; and
+  the 2 `lanesRejected` vectors, because no model states the report they pin (each rejecting lane's head, the
+  node that rejects and the rejection, sorted by head id: `DagFold.fold_once` names the lanes alone). Each
+  declined vector is still held to the reference as far as the models state it — every id, the base, the
+  verdict, and the conflicts or the rejecting heads read as a set — and a disagreement there fails the export.
+
+**The merge family is a composition (Phase 569, D238).** No single model answers a merge vector, so the
+export composes four, every step an extracted model function: the content ids from `Chain`'s DAG build
+(`apply_step`, minting by `node_hash`), the common base from `DagPrimitives.common_base`, the base's state
+from `DagClosure.replay_to`, and the reconcile as `reconcile_fold_order_free` states `Dag.reconcileMany` —
+the partition (`DagClosure.shared_ids` and `excl_lanes` over the union's drain), the interference sweep
+(`DagFold.reconcile_many`), the shared region's replay (`DagClosure.replay_ids`) and the checked fold of the
+exclusive lanes (`DagFold.fold_once`) — over the tree model's own `apply` and footprint (`TreeOps`). The
+stamp names the model that answers the vector's question: `DagPrimitives` for a `noBase` answer, the common
+base's, and `DagClosure` for every other. `DagClosure.reconcile_many_drained` is not the reconcile: it folds
+each head's whole delta from the base, the rule Phase 300 replaced, and disagrees with the reference wherever
+heads share history above the base (`named-base`). The bridges are in
+`tests/Fuaran.Core.Tests.Fixtures/VectorOracle.Merge.fs`, and the suite perturbs each step alone and requires
+the render to refuse at the first vector that step moves.
 
 A stamp never says more than the run checked.
 
