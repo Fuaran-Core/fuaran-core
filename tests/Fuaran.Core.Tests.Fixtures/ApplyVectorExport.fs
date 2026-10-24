@@ -105,7 +105,7 @@ module SpineAdoption =
 
     /// Phase 485's measurement of the Go spine: Core 0.41.0, landed at this spine commit.
     let private go485 =
-        AdoptionSource.Host("0.41.0", "b1c903dbedeff7c936e08a7c635268804df875b9")
+        AdoptionSource.Host("0.41.0", "d0da7f1c22a6b9febee25fd03b3000e8e43ea60e")
 
     /// The Go spine (`Fuaran-Core/fuaran-core-go`): its first certification runs the json codec
     /// refusals, the decode rejects, the canonical, compare, add and toFloat decimal laws, the apply,
