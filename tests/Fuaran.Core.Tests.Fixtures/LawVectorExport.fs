@@ -173,16 +173,25 @@ module LawVectorExport =
             |> List.map (fun (addr, value) -> jobj [ "addr", jstr addr; "value", jstr value ])
             |> jarr
 
-        /// The verdict the kit gave, in host-neutral words. A refusal outside the two the law
-        /// distinguishes renders as `unexpected`; `LawVectorTests` fails on it, so it can never
-        /// reach the corpus.
-        let private verdictOf (r: Result<unit, InvokeError>) : (string * CorpusCell) list =
-            match r with
-            | Ok() -> [ "verdict", jstr "accept" ]
-            | Error(ArgOutOfSpace(addr, _, _)) ->
+        /// A verdict in host-neutral words — the reference's or the model's, through the one shape
+        /// (`CapabilityOracle.Verdict`). A refusal outside the two the law distinguishes renders as
+        /// `unexpected`; `LawVectorTests` fails on it, so it can never reach the corpus.
+        let private verdictCells (v: CapabilityOracle.Verdict) : (string * CorpusCell) list =
+            match v with
+            | CapabilityOracle.Verdict.Accept -> [ "verdict", jstr "accept" ]
+            | CapabilityOracle.Verdict.OutOfSpace addr ->
                 [ "verdict", jstr "reject"; "error", jstr "argOutOfSpace"; "addr", jstr addr ]
-            | Error(UnknownArg(addr, _)) -> [ "verdict", jstr "reject"; "error", jstr "unknownArg"; "addr", jstr addr ]
-            | Error _ -> [ "verdict", jstr "reject"; "error", jstr "unexpected" ]
+            | CapabilityOracle.Verdict.UnknownArg addr ->
+                [ "verdict", jstr "reject"; "error", jstr "unknownArg"; "addr", jstr addr ]
+            | CapabilityOracle.Verdict.Unexpected -> [ "verdict", jstr "reject"; "error", jstr "unexpected" ]
+
+        /// One `validateArgs` vector: the reference's verdict, and the model's on the same input.
+        let private validates (id: string) (d: Draw) (declaration: string) (args: (string * string) list) : Vector =
+            { Id = id
+              Case = "validateArgs"
+              Model = CapabilityOracle.answer (verdictCells (CapabilityOracle.validateArgs d.Cap args))
+              Input = [ "capability", jstr declaration; "args", argsJson args ]
+              Expected = verdictCells (CapabilityOracle.verdictOf (Capability.validateArgs d.Cap args)) }
 
         /// Every vector for one drawn iteration — the four properties `capabilityLaws` certifies,
         /// each as an independently runnable case.
@@ -201,33 +210,25 @@ module LawVectorExport =
                 | Ok r -> CapabilityRegistry.enumerate r |> List.map _.Id
                 | Error _ -> []
 
-            [ { Id = sprintf "capability-%d-accept" d.Iteration
-                Case = "validateArgs"
-                Model = None
-                Input = [ "capability", jstr declaration; "args", argsJson acceptArgs ]
-                Expected = verdictOf (Capability.validateArgs d.Cap acceptArgs) }
+            [ validates (sprintf "capability-%d-accept" d.Iteration) d declaration acceptArgs
+              validates (sprintf "capability-%d-out-of-space" d.Iteration) d declaration [ "h0", outOfSpace ]
+              validates (sprintf "capability-%d-unknown-arg" d.Iteration) d declaration [ "nope", inSpace ]
 
-              { Id = sprintf "capability-%d-out-of-space" d.Iteration
-                Case = "validateArgs"
-                Model = None
-                Input = [ "capability", jstr declaration; "args", argsJson [ "h0", outOfSpace ] ]
-                Expected = verdictOf (Capability.validateArgs d.Cap [ "h0", outOfSpace ]) }
-
-              { Id = sprintf "capability-%d-unknown-arg" d.Iteration
-                Case = "validateArgs"
-                Model = None
-                Input = [ "capability", jstr declaration; "args", argsJson [ "nope", inSpace ] ]
-                Expected = verdictOf (Capability.validateArgs d.Cap [ "nope", inSpace ]) }
-
+              // The captured value is the draw itself: neither side computes it, and both carry it.
               { Id = sprintf "capability-%d-invocation-key" d.Iteration
                 Case = "invocationKey"
-                Model = None
+                Model =
+                  CapabilityOracle.answer
+                      [ "key", jstr (CapabilityOracle.invocationKey d.Cap acceptArgs)
+                        "determinismTag", jstr (CapabilityOracle.determinismTag d.Cap)
+                        "capturedValue", jint d.Realized ]
                 Input = [ "capability", jstr declaration; "args", argsJson acceptArgs ]
                 Expected =
                   [ "key", jstr (Capability.invocationKey d.Cap acceptArgs)
                     "determinismTag", jstr (Capability.determinismTag d.Cap)
                     "capturedValue", jint d.Realized ] }
 
+              // No model answers this: the model has the declaration's encoder and no decoder.
               { Id = sprintf "capability-%d-declaration-round-trip" d.Iteration
                 Case = "declarationRoundTrip"
                 Model = None
@@ -240,6 +241,8 @@ module LawVectorExport =
                         | Error m -> "DECODE FAILED: " + m
                     ) ] }
 
+              // No model answers this: the model's `enumerate` answers which ids are registered, not
+              // the id order the vector pins (`proofs/Capability.fst`, `enumerate`).
               { Id = sprintf "capability-%d-registry-enumerate" d.Iteration
                 Case = "registryEnumerate"
                 Model = None

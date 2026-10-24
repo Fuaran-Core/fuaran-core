@@ -71,6 +71,47 @@ let stampValue (vectorId: string) (reference: JVal) (model: (string * string * J
     | name, _ -> failwithf "the `%s` stamp is a compact value" name
 
 // ---------------------------------------------------------------------------
+//  The "not answered" rule (Phase 563, DECISIONS.md D232)
+// ---------------------------------------------------------------------------
+//
+//  A model that asks a vector's question may still decline the vector's INPUT: the input lies outside
+//  the domain the model is stated over (the column model's `OutOfModel`, a reader the parser model does
+//  not carry). Such a vector is reference-only BY DECLARATION: its exporter names it, with the reason,
+//  beside the vectors it emits. The export holds the declaration to the run in both directions — a
+//  model that declines a vector the family did not declare fails the export, and so does a declared
+//  vector the model answers after all, because a declaration that no longer matches the model is a
+//  stamp saying less than the run checked. Nothing is skipped silently.
+
+/// What a model said when the exporter asked it about one vector.
+type Asked =
+    /// The model answered; the stamp holds the answer to the reference's.
+    | Answered of Answer
+    /// The model declined the input as outside what it models.
+    | Declined of model: string * ladderRow: string * why: string
+
+/// The model answer for vector `vectorId`, under the family's declared out-of-model vectors
+/// (`declared`, id to reason): the answer when the model answered an undeclared vector, none for a
+/// declared vector the model declined, and a failed export for either mismatch.
+let admit (declared: Map<string, string>) (vectorId: string) (asked: Asked) : Answer option =
+    match asked, Map.tryFind vectorId declared with
+    | Answered a, None -> Some a
+    | Declined _, Some _ -> None
+    | Declined(model, row, why), None ->
+        failwithf
+            "the export refuses: vector %s: the extracted model %s (ladder row %s) declines it as out of model (%s), and its family does not declare it reference-only"
+            vectorId
+            model
+            row
+            why
+    | Answered a, Some reason ->
+        failwithf
+            "the export refuses: vector %s is declared reference-only (%s), but the extracted model %s (ladder row %s) answers it — the declaration is stale"
+            vectorId
+            reason
+            a.Model
+            a.LadderRow
+
+// ---------------------------------------------------------------------------
 //  The JSON syntax layer (`proofs/JsonParse.fst`, ladder row `parser-differential`)
 // ---------------------------------------------------------------------------
 

@@ -18,6 +18,7 @@ module ModelUnit = Unit
 open Fuaran.Core
 open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
+open Fuaran.Core.Tests.CapabilityOracle
 
 // ---------------------------------------------------------------------------
 //  Phase 535 — THE DIFFERENTIAL HARNESS. Every `Proofs.Oracle` differential is the same loop:
@@ -1432,12 +1433,6 @@ let toMOpt (o: 'a option) : FStar_Pervasives_Native.option<'a> = VectorOracle.to
 
 let ofMOpt (o: FStar_Pervasives_Native.option<'a>) : 'a option = VectorOracle.ofMOpt o
 
-let hostToModel (h: HostEffect) : ModelCap.host_effect =
-    match h with
-    | Pure -> ModelCap.Pure
-    | ReadsHost -> ModelCap.ReadsHost
-    | WritesHost -> ModelCap.WritesHost
-
 /// Every determinism set over the three factors (Phase 319), the empty set first — the closed
 /// alphabet the model's characteristic vector ranges over.
 let allDeterminismSets: DeterminismSource list =
@@ -1448,19 +1443,6 @@ let allDeterminismSets: DeterminismSource list =
           |> List.map snd
           |> Set.ofList ]
 
-/// The set as the model's characteristic vector: a flag per factor, set exactly when the factor
-/// is a member.
-let detToModel (d: DeterminismSource) : ModelCap.determinism_source =
-    { ModelCap.determinism_source.has_clock = Set.contains ClockFactor d
-      ModelCap.determinism_source.has_random = Set.contains RandomFactor d
-      ModelCap.determinism_source.has_network = Set.contains NetworkFactor d }
-
-let effToModel (e: EffectClass) : ModelCap.effect_class =
-    { ModelCap.effect_class.host = hostToModel e.Host
-      ModelCap.effect_class.determinism = detToModel e.Determinism }
-
-/// A float range's bounds cross as opaque carriers (the readers premise): the round-trip `R`
-/// format, which parses back to the same double.
 /// A production `JVal` as the capability model's `jval` (Phase 354; shared with the query codec's
 /// differential since Phase 455), and back. A float crosses as its round-trip `R` text.
 let rec jvalToModel (v: JVal) : ModelCap.jval =
@@ -1560,49 +1542,6 @@ let jmutate (v: JVal) (r: ConfRng.T) : JVal * ConfRng.T =
             | _ -> Some(key, JArr [])
 
         jedit path f v, r3
-
-let spaceToModel (s: ValueSpace) : ModelCap.value_space =
-    match s with
-    | IntRange(lo, hi) -> ModelCap.IntRange(bigint lo, bigint hi)
-    | FloatRange(lo, hi) -> ModelCap.FloatRange(lo.ToString("R", inv), hi.ToString("R", inv))
-    | StringLen(lo, hi) -> ModelCap.StringLen(bigint lo, bigint hi)
-    | Enum xs -> ModelCap.Enum xs
-    | AnyString -> ModelCap.AnyString
-    | SlotTree c -> ModelCap.SlotTree(toMOpt c)
-
-let holeKindToModel (k: HoleKind) : ModelCap.hole_kind =
-    match k with
-    | ValueHole s -> ModelCap.ValueHole(spaceToModel s)
-    | SlotHole c -> ModelCap.SlotHole(toMOpt c)
-    | RepeatHole s -> ModelCap.RepeatHole(spaceToModel s)
-    | ActionHole e -> ModelCap.ActionHole(effToModel e)
-
-let sigEntryToModel (e: SigEntry) : ModelCap.sig_entry =
-    { ModelCap.sig_entry.s_addr = e.Addr
-      ModelCap.sig_entry.s_name = e.Name
-      ModelCap.sig_entry.s_kind = holeKindToModel e.Kind
-      ModelCap.sig_entry.s_required = e.Required }
-
-let sigToModel (sg: Signature) : ModelCap.signature =
-    { ModelCap.signature.sg_name = sg.Name
-      ModelCap.signature.sg_holes = sg.Holes |> List.map sigEntryToModel
-      ModelCap.signature.sg_effect = effToModel sg.Effect }
-
-let placementToModel (p: Placement) : ModelCap.placement =
-    match p with
-    | BuildTime -> ModelCap.BuildTime
-    | Server -> ModelCap.Server
-    | ClientDeclarative -> ModelCap.ClientDeclarative
-    | ClientIsland Pyodide -> ModelCap.ClientIsland ModelCap.Pyodide
-    | ClientIsland Fable -> ModelCap.ClientIsland ModelCap.Fable
-    | ClientIsland Js -> ModelCap.ClientIsland ModelCap.Js
-    | Precomputed -> ModelCap.Precomputed
-
-let capToModel (c: Capability) : ModelCap.capability =
-    { ModelCap.capability.c_id = c.Id
-      ModelCap.capability.c_signature = sigToModel c.Signature
-      ModelCap.capability.c_determinism = detToModel c.Determinism
-      ModelCap.capability.c_placement = placementToModel c.Placement }
 
 // ---- generators ----
 
@@ -2837,6 +2776,7 @@ module VectorStamps =
     /// is answered by the reference alone. A model wired into an exporter is one row here.
     let modelStamps: (string * (string * int)) list =
         [ "apply/skeleton-apply.json", ("TreeOps", 25)
+          "laws/capability-laws.json", ("Capability", 48)
           "laws/decimal-laws.json", ("DecimalText", 49)
           "laws/propagation-laws.json", ("Propagation", 73)
           "premises/int53.json", ("JsonParse", 29)

@@ -20,16 +20,7 @@ open Fuaran.Core
 open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.ProofOracle.Bridges
-
-let private spaceOfModel (s: ModelCap.value_space) : ValueSpace =
-    match s with
-    | ModelCap.IntRange(lo, hi) -> IntRange(int lo, int hi)
-    | ModelCap.FloatRange(lo, hi) -> FloatRange(System.Double.Parse(lo, inv), System.Double.Parse(hi, inv))
-    | ModelCap.StringLen(lo, hi) -> StringLen(int lo, int hi)
-    | ModelCap.Enum xs -> Enum xs
-    | ModelCap.AnyString -> AnyString
-    | ModelCap.SlotTree c -> SlotTree(ofMOpt c)
-
+open Fuaran.Core.Tests.CapabilityOracle
 
 // ------------------------------------------------------------------------------------------
 // Phase 187 — the DATA-ACQUISITION SEAM. `proofs/Query.fst` models `Fuaran.Core.Query`'s
@@ -312,17 +303,6 @@ let private genAdversarialFields (r: ConfRng.T) : string list * ConfRng.T =
               f ]
 
     fields, rng
-
-/// Production's own three calls, for the capability model's capture key (Phase 225).
-let private capKeyRenderers: ModelCap.key_renderers =
-    { ModelCap.key_renderers.k_hash = Hash.fnv1a
-      ModelCap.key_renderers.k_addr_le = fun (a: string) (b: string) -> System.String.CompareOrdinal(a, b) <= 0
-      ModelCap.key_renderers.k_field = Hash.canonicalField
-      ModelCap.key_renderers.k_canonical =
-        fun (sp: ModelCap.value_space) (v: string) ->
-            match Space.canonical (spaceOfModel sp) v with
-            | Some c -> FStar_Pervasives_Native.Some c
-            | None -> FStar_Pervasives_Native.None }
 
 let private prodQueryErrRender (e: QueryError) : string =
     match e with
@@ -1962,7 +1942,7 @@ let tests =
                   compared <- compared + 1
 
                   Expect.equal
-                      (ModelCap.invocation_key capKeyRenderers mcap args)
+                      (ModelCap.invocation_key keyRenderers mcap args)
                       (Capability.invocationKey cap args)
                       (sprintf "the capability model's key is production's on %A" args)
 

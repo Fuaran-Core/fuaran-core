@@ -16,6 +16,7 @@ open Fuaran.Core
 open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.ProofOracle.Bridges
+open Fuaran.Core.Tests.CapabilityOracle
 
 let private modelSpaceRender (s: ModelCap.value_space) : string =
     match s with
@@ -25,28 +26,6 @@ let private modelSpaceRender (s: ModelCap.value_space) : string =
     | ModelCap.Enum xs -> sprintf "enum{%s}" (String.concat "," xs)
     | ModelCap.AnyString -> "any"
     | ModelCap.SlotTree c -> sprintf "tree{%s}" (defaultArg (ofMOpt c) "*")
-
-/// The readers premise made concrete: the five host functions `Space.validate` and
-/// `Space.wellFormed` reach for, exactly as production calls them (Phase 229 added `kind_of`,
-/// production's `Space.slotKindOf`; Phase 307 `float_fault`, and restated `int_of` as production's
-/// own invariant reader — `Space.canonical` over the whole `int` range — where it was
-/// `Int32.TryParse` under the CURRENT culture, a reader production stopped using at Phase 295).
-let private readers: ModelCap.readers =
-    { ModelCap.readers.int_of =
-        fun s ->
-            match Space.canonical (IntRange(System.Int32.MinValue, System.Int32.MaxValue)) s with
-            | Some c -> FStar_Pervasives_Native.Some(bigint (System.Int32.Parse(c, inv)))
-            | None -> FStar_Pervasives_Native.None
-      ModelCap.readers.float_in =
-        fun lo hi s -> Space.validate (FloatRange(System.Double.Parse(lo, inv), System.Double.Parse(hi, inv))) s
-      ModelCap.readers.str_len = fun s -> bigint s.Length
-      ModelCap.readers.kind_of = fun s -> toMOpt (Space.slotKindOf s)
-      ModelCap.readers.float_fault =
-        fun lo hi ->
-            match Space.wellFormed (FloatRange(System.Double.Parse(lo, inv), System.Double.Parse(hi, inv))) with
-            | Ok() -> FStar_Pervasives_Native.None
-            | Error SpaceFault.Empty -> FStar_Pervasives_Native.Some ModelCap.SEmpty
-            | Error SpaceFault.NonFinite -> FStar_Pervasives_Native.Some ModelCap.SNonFinite }
 
 /// The go-red: an int reader that reads nothing, so every int-ranged value is out of space to
 /// the model and in space to production.
