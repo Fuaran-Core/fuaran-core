@@ -12,7 +12,7 @@ open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.FoldFixtures
 open Fuaran.Core.Tests.ProofOracle.Bridges
-open Fuaran.Core.Tests.ProofOracle.DagFoldTests
+open Fuaran.Core.Tests.MergeOracle
 
 // ---------------------------------------------------------------------------
 //  Phase 156 — the ID-ORDERED DRAIN over an abstract node set, beside production's own.
@@ -32,22 +32,14 @@ open Fuaran.Core.Tests.ProofOracle.DagFoldTests
 //  exists for, and it is why the go-red below runs there.
 // ---------------------------------------------------------------------------
 
-/// The id order production's `List.sort` imposes — the model's `lt` parameter, instantiated.
-let ordLt (a: string) (b: string) = System.String.CompareOrdinal(a, b) < 0
-
-/// The go-red instrument: the same drain at the REVERSED order, which is `pick_min` of a flipped
+/// The id order production's `List.sort` imposes is the model's `lt` instantiated (`ordLt`, the fixtures'
+/// `VectorOracle.Merge.fs`). The go-red instrument: the same drain at the REVERSED order, which is `pick_min` of a flipped
 /// total order and so the frontier's MAXIMUM. It satisfies everything the model asks of a
 /// selector — it is still a member of the frontier it is handed — so what it breaks is agreement
 /// with production and nothing else, which is exactly the claim these cases make. On a spine it
 /// cannot lose, because a one-element frontier has one minimum and one maximum; the multi-head
 /// union is what gives it room.
 let private ordGt (a: string) (b: string) = System.String.CompareOrdinal(a, b) > 0
-
-/// The model's `covers` bound: one walk step per node, plus the one its base case asks for.
-let drainFuel (ns: 'a list) : 'a list =
-    match ns with
-    | [] -> []
-    | n :: _ -> n :: ns
 
 /// The model nodes of a production DAG restricted to one head's ancestor closure — "the union" the
 /// drain is over. Nothing is recomputed across the bridge: the ids are the content hashes

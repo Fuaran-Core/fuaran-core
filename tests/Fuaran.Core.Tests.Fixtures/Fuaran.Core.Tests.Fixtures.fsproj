@@ -45,6 +45,7 @@
     <Compile Include="VectorOracle.Decode.fs" />
     <Compile Include="DagOf.fs" />
     <Compile Include="VectorOracle.Chain.fs" />
+    <Compile Include="VectorOracle.Merge.fs" />
     <Compile Include="ApplyVectorExport.fs" />
     <Compile Include="PropagationVectorExport.fs" />
     <Compile Include="CanonicalFormVectorExport.fs" />

@@ -13,7 +13,7 @@ open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.FoldFixtures
 open Fuaran.Core.Tests.ProofOracle.Bridges
-open Fuaran.Core.Tests.ProofOracle.DagFoldTests
+open Fuaran.Core.Tests.MergeOracle
 open Fuaran.Core.Tests.ProofOracle.DagDrainTests
 
 // ---------------------------------------------------------------------------
@@ -66,11 +66,6 @@ let private foldPullFold
             ([], dagM)
 
     baseId, merged, heads1, heads2, dag2
-
-let private foundId (r: DagClosure.found<string>) : string option =
-    match r with
-    | DagClosure.Found id -> Some id
-    | DagClosure.Missing -> None
 
 /// The go-red instrument for `mergeBase`: the model's own function at the REVERSED key — the same
 /// intersection, the same extracted `max_by`, with `deeper` flipped — so it returns the SHALLOWEST
@@ -190,17 +185,11 @@ let private modelMergeBase (model: DagClosure.dag<'Op>) (fuel: DagClosure.node<'
 // ---------------------------------------------------------------------------
 
 /// The model's reconcile script over a production DAG: the extracted `reconcile_ids` over the
-/// deduplicated heads' closures (`ancestors_of`), the base's closure, and the model's own drain of the
-/// union — each id mapped back to its op through the same DAG.
+/// partition `regionOf` computes (the deduplicated heads' closures, the base's closure, and the
+/// model's own drain of the union) — each id mapped back to its op through the same DAG.
 let private modelReconcileOps (dag: Dag.T<'Op>) (baseId: string) (heads: string list) : 'Op list =
-    let model = toModelDag dag
-    let fuel = model.nodes
-    let cs = heads |> List.distinct |> List.map (DagClosure.ancestors_of model fuel)
-    let baseC = DagClosure.ancestors_of model fuel baseId
-    let union = DagClosure.closure_nodes model.nodes (DagFold.concat cs)
-    let order = DagClosure.drain_order ordLt (drainFuel union) union
-
-    DagClosure.reconcile_ids order baseC cs |> List.map (fun id -> dag.Nodes[id].Op)
+    (regionOf (toModelDag dag) baseId heads).Script
+    |> List.map (fun id -> dag.Nodes[id].Op)
 
 let private blindPlanFootprint (_: PlanOp) : Footprint =
     { Reads = Set.empty
@@ -313,13 +302,9 @@ let private productionHeadsReport (fp: 'Op -> Footprint) (dag: Dag.T<'Op>) (base
 /// The extracted `conflicts_of_heads` over the same partition `modelReconcileOps` computes.
 let private modelHeadsReport (fp: 'Op -> Footprint) (dag: Dag.T<'Op>) (baseId: string) (heads: string list) =
     let model = toModelDag dag
-    let fuel = model.nodes
-    let cs = heads |> List.distinct |> List.map (DagClosure.ancestors_of model fuel)
-    let baseC = DagClosure.ancestors_of model fuel baseId
-    let union = DagClosure.closure_nodes model.nodes (DagFold.concat cs)
-    let order = DagClosure.drain_order ordLt (drainFuel union) union
+    let r = regionOf model baseId heads
 
-    DagClosure.conflicts_of_heads (fp >> toModelFootprint) model order baseC cs
+    DagClosure.conflicts_of_heads (fp >> toModelFootprint) model r.Order r.BaseClosure r.Closures
     |> List.map (fun c -> renderNodeConflict (c.left.nid, c.right.nid, c.address, ofModelShape c.shape))
     |> List.distinct
     |> List.sort

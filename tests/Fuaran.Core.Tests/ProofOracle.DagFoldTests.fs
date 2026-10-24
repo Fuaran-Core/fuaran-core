@@ -33,6 +33,7 @@ open Fuaran.Core.Tests
 open Fuaran.Core.Tests.Reference
 open Fuaran.Core.Tests.FoldFixtures
 open Fuaran.Core.Tests.ProofOracle.Bridges
+open Fuaran.Core.Tests.MergeOracle
 
 /// Counts one production outcome into a `foldTally`: folded clean, or halted (a rejection counts as neither).
 let private countOutcome (outcome: LaneFoldOutcome) (t: Tally) : Tally =
@@ -364,18 +365,7 @@ let private treeDiamondSample (oracleFp: SkeletonOp<RNode, string> -> Footprint)
 //  order on a spine — is exactly what these cases measure.
 // ---------------------------------------------------------------------------
 
-/// A production `Dag.T` as the model reads it: the same nodes, the same content ids, the same
-/// parent lists.
-let toModelDag (dag: Dag.T<'Op>) : DagClosure.dag<'Op> =
-    { DagClosure.nodes =
-        dag.Nodes
-        |> Map.toList
-        |> List.map (fun (_, n) ->
-            { DagClosure.nid = n.Id
-              DagClosure.nparents = n.Parents
-              DagClosure.nop = n.Op }) }
-
-/// The faithful bridge — what every real run uses.
+/// The faithful bridge (`toModelDag`, the fixtures' `VectorOracle.Merge.fs`) — what every real run uses.
 let private unperturbed (_: string) (_: string list) (dag: Dag.T<'Op>) : DagClosure.dag<'Op> = toModelDag dag
 
 /// The go-red instrument, and the fold family's blind-footprint counterpart for this layer: every

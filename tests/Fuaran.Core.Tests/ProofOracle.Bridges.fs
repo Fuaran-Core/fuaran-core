@@ -22,6 +22,7 @@ open Fuaran.Core.Tests.CapabilityOracle
 open Fuaran.Core.Tests.CanonOracle
 open Fuaran.Core.Tests.ColumnOracle
 open Fuaran.Core.Tests.DecodeOracle
+open Fuaran.Core.Tests.MergeOracle
 
 // ---------------------------------------------------------------------------
 //  Phase 535 — THE DIFFERENTIAL HARNESS. Every `Proofs.Oracle` differential is the same loop:
@@ -239,18 +240,8 @@ let toModelFootprint (f: Footprint) : DagFold.footprint =
       DagFold.slot_reads = Set.toList f.SlotReads
       DagFold.slot_writes = Set.toList f.SlotWrites }
 
-let ofModelShape (s: DagFold.shape) : MergeConflictShape =
-    match s with
-    | DagFold.ConcurrentUpdate -> MergeConflictShape.ConcurrentUpdate
-    | DagFold.InsertPositionClash -> MergeConflictShape.InsertPositionClash
-    | DagFold.MoveVsRemove -> MergeConflictShape.MoveVsRemove
-    | DagFold.SlotClash slot -> MergeConflictShape.SlotClash slot
-
-let ofModelConflict (c: DagFold.conflict<'Op>) : MergeConflict<'Op> =
-    { Left = c.left
-      Right = c.right
-      Address = c.address
-      Shape = ofModelShape c.shape }
+// The model's conflicts back as Core's (`ofModelShape`, `ofModelConflict`) are in the fixtures'
+// `VectorOracle.Merge.fs`, which the merge export reads too.
 
 let modelApply (w: StreamWitness<'Op, 'State, 'Rej>) (op: 'Op) (st: 'State) : DagFold.outcome<'State, 'Rej> =
     match w.Apply op st with
