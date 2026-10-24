@@ -83,6 +83,10 @@ type Outcome =
         CorpusFiles: string list
         /// This repository's files the act wrote, relative and forward-slashed: the commit to make.
         CoreFiles: string list
+        /// The branch the corpus checkout is on, `None` when its HEAD is detached.
+        CorpusBranch: string option
+        /// The branch this repository's checkout is on, `None` when its HEAD is detached.
+        CoreBranch: string option
     }
 
 let private triple (v: string) : (int * int * int) option = ChildProcess.Tags.version ("v" + v)
@@ -164,18 +168,36 @@ let slotText (version: string) (previous: string) (cls: SlotClass) (openedBy: st
                 higher
                 next
 
+    // `Phase 555` opens, `Phases 487 and 491` open
+    let verb =
+        if openedBy.StartsWith("Phases ", StringComparison.Ordinal) then
+            "open"
+        else
+            "opens"
+
     let paragraph =
         sprintf
-            "**Slot class: %s.** The %s after the released `%s`. It opens over `v%s`, which is a consumer's contract, so nothing rides it; %s ([`STABILITY.md`](../../STABILITY.md), \"Versioning policy\"). %s opens it. The conformance `kitVersion` stamp lines move to `%s` with the slot, and the corpus pin moves to the re-stamp of the declared copies."
+            "**Slot class: %s.** The %s after the released `%s`. It opens over `v%s`, which is a consumer's contract, so nothing rides it; %s ([`STABILITY.md`](../../STABILITY.md), \"Versioning policy\"). %s %s it. The conformance `kitVersion` stamp lines move to `%s` with the slot, and the corpus pin moves to the re-stamp of the declared copies."
             (className cls)
             kind
             previous
             previous
             why
             openedBy
+            verb
             version
 
-    sprintf "## %s — DRAFT\n\n%s\n" version (String.concat "\n" (wrap 115 paragraph))
+    // The section headings the class admits, empty, in the order an entry is read: a breaking slot
+    // carries both, an additive slot `### Additive`, an internal slot neither.
+    let sections =
+        match cls with
+        | Breaking -> [ "### Breaking"; "### Additive" ]
+        | Additive -> [ "### Additive" ]
+        | Internal -> []
+        |> List.map (sprintf "\n%s\n")
+        |> String.concat ""
+
+    sprintf "## %s — DRAFT\n\n%s\n%s" version (String.concat "\n" (wrap 115 paragraph)) sections
 
 /// `names` as prose: `a`, `a and b`, `a, b and c`.
 let private prose (names: string list) =
@@ -580,6 +602,13 @@ let corpusMessage (p: Plan) : string * string =
         "The fuaran-core %s slot moves the conformance kitVersion stamp. The declared copies, and the rows\nthe producer owns in their shared index, are re-stamped by the producer's own render\n(open-slot); no vector moves."
         v
 
+/// The branch `dir`'s HEAD is on, `None` when it is detached.
+let private branchOf (dir: string) : string option =
+    git dir [ "symbolic-ref"; "--short"; "-q"; "HEAD" ]
+    |> Result.toOption
+    |> Option.map _.Trim()
+    |> Option.filter (fun b -> b <> "")
+
 /// Carry out `p`: the corpus first (its declared files, staged by name, and its commit when any of
 /// them moved), then this repository's files and the pin naming the corpus HEAD that carries them.
 let apply (p: Plan) : Result<Outcome, string> =
@@ -637,7 +666,16 @@ let apply (p: Plan) : Result<Outcome, string> =
                   CorpusFiles = files
                   CoreFiles =
                     (p.CoreWrites |> List.map (fst >> relative r.Root)) @ [ "copies.json" ]
-                    |> List.distinct })))
+                    |> List.distinct
+                  CorpusBranch = branchOf r.Corpus
+                  CoreBranch = branchOf r.Root })))
+
+/// The remote and refspec a push names: the branch the tool read, or, for a detached HEAD, `HEAD`
+/// pushed to a branch the caller names.
+let private pushTarget (branch: string option) : string =
+    match branch with
+    | Some b -> sprintf "origin %s" b
+    | None -> "origin HEAD:<branch>"
 
 /// What the caller does next: the corpus commit pushed FIRST, then this repository's commit.
 let nextSteps (p: Plan) (o: Outcome) : string list =
@@ -651,11 +689,12 @@ let nextSteps (p: Plan) (o: Outcome) : string list =
               (o.CorpusHead.Substring(0, 7))
       sprintf "the corpus pin names %s; written here: %s" o.CorpusHead (String.concat ", " o.CoreFiles)
       "the two commits, the corpus FIRST (a pin naming a commit only one clone holds fails every CI checkout):"
-      sprintf "  1. git -C \"%s\" push" r.Corpus
+      sprintf "  1. git -C \"%s\" push %s" r.Corpus (pushTarget o.CorpusBranch)
       sprintf
-          "  2. git -C \"%s\" add %s; git -C \"%s\" commit -m \"release(core): open the %s slot\"; git -C \"%s\" push"
+          "  2. git -C \"%s\" add %s; git -C \"%s\" commit -m \"release(core): open the %s slot\"; git -C \"%s\" push %s"
           r.Root
           (String.concat " " o.CoreFiles)
           r.Root
           r.Version
-          r.Root ]
+          r.Root
+          (pushTarget o.CoreBranch) ]

@@ -461,4 +461,67 @@ let tests =
                   | Error es -> failtestf "%A" es
 
                   let outside (t: string) = t.Substring(t.IndexOf "\"$note\"")
-                  Expect.equal (outside edited) (outside real) "every byte after the pin is kept" ]
+                  Expect.equal (outside edited) (outside real) "every byte after the pin is kept"
+
+          testCase "the next steps push the branch each checkout is on, to its remote"
+          <| fun _ ->
+              using None (fun f ->
+                  // different branches, so a line naming the wrong checkout's branch is red
+                  git f.Corpus [ "checkout"; "-b"; "corpus-topic" ] |> ignore
+                  git f.Core [ "checkout"; "-b"; "core-topic" ] |> ignore
+
+                  let plan =
+                      match OpenSlot.plan (f.Request(opening, OpenSlot.Additive)) with
+                      | Ok p -> p
+                      | Error es -> failtestf "refused: %A" es
+
+                  let outcome =
+                      match OpenSlot.apply plan with
+                      | Ok o -> o
+                      | Error e -> failtest e
+
+                  let steps = OpenSlot.nextSteps plan outcome
+
+                  Expect.contains
+                      steps
+                      (sprintf "  1. git -C \"%s\" push origin corpus-topic" f.Corpus)
+                      "the corpus push names the remote and the corpus branch"
+
+                  Expect.isTrue
+                      (steps
+                       |> List.exists (fun l -> l.EndsWith(sprintf "git -C \"%s\" push origin core-topic" f.Core)))
+                      "the Core push names the remote and the Core branch")
+
+          testCase "the class sentence agrees in number with who opens the slot"
+          <| fun _ ->
+              let sentence (openedBy: string) =
+                  OpenSlot.slotText "0.9.1" "0.9.0" OpenSlot.Additive openedBy
+                  |> fun t -> t.Replace("\n", " ")
+
+              Expect.stringContains (sentence "Phase 555") "Phase 555 opens it." "one phase opens"
+              Expect.stringContains (sentence "Phases 474 and 549") "Phases 474 and 549 open it." "several phases open"
+
+          testCase "the draft carries the headings its class admits, empty, in the entry's reading order"
+          <| fun _ ->
+              let draft (cls: OpenSlot.SlotClass) =
+                  OpenSlot.slotText "0.10.0" "0.9.0" cls "Phase 555"
+
+              let sections (text: string) =
+                  text.Replace("\r\n", "\n").Split('\n')
+                  |> Array.filter (fun l -> l.StartsWith "### ")
+                  |> Array.toList
+
+              Expect.equal (sections (draft OpenSlot.Breaking)) [ "### Breaking"; "### Additive" ] "breaking: both"
+              Expect.equal (sections (draft OpenSlot.Additive)) [ "### Additive" ] "additive: one"
+              Expect.equal (sections (draft OpenSlot.Internal)) [] "internal: none"
+
+              // empty: nothing follows the last heading but its own spacing
+              Expect.isTrue
+                  ((draft OpenSlot.Breaking).EndsWith "### Breaking\n\n### Additive\n")
+                  "the sections hold no body"
+
+              // the draft stays a slot file the ledger reads
+              Expect.equal
+                  (Ledger.versionHeadings (draft OpenSlot.Breaking))
+                  [ "0.10.0", "## 0.10.0 — DRAFT" ]
+                  "one DRAFT heading, no other slot's" ]
