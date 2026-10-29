@@ -8,7 +8,6 @@
       "level": "proved",
       "statement": "A proved row whose phase citation is malformed.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "A proved row whose phase citation is malformed. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core-144",
       "evidence": {
         "theorem": "alpha",

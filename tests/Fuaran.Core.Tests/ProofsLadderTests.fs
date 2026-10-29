@@ -11,8 +11,8 @@ module Fuaran.Core.Tests.ProofsLadderTests
 // own rule (D30) is that a committed declared-or-generated artefact is pinned by a check; this
 // family is that check.
 //
-// FOURTEEN CLAUSES, each with a go-red beside it — six from Phase 144, four from Phase 174, four from
-// Phase 522:
+// FIFTEEN CLAUSES, each with a go-red beside it — six from Phase 144, four from Phase 174, three from
+// Phase 522, two from Phase 583:
 //
 //   theorem-exists          a `proved` row's `evidence.theorem` is a TOP-LEVEL `val` / `let` /
 //                           `let rec` of that name in the model it names.
@@ -39,8 +39,6 @@ module Fuaran.Core.Tests.ProofsLadderTests
 //   statement-boundary      (522) every row states what it claims in `statement` and what it does
 //                           NOT cover in `boundary`, both non-empty, and neither tells the row's
 //                           history: no `Phase NNN` in either — the row's `phase` is its one citation.
-//   claim-is-the-join       (522) `claim` is `statement` and `boundary` joined by one space: the
-//                           field a registry reading the ladder still reads, held to the two it is made of.
 //   tested-family-closed    (522) a `tested` row's family is one of three closed forms —
 //                           `Proofs.Oracle`, `Conformance.<law>` (a law the kit exports) or
 //                           `Suite:<Module>.<list>` (a test list this assembly declares) — and it
@@ -55,11 +53,17 @@ module Fuaran.Core.Tests.ProofsLadderTests
 //                           identities and commit in their forms, and a model of THIS tree it mirrors
 //                           (one the proof leg checks) with every mirrored definition top-level in it.
 //
+//   claim-retired           (583) no row carries `claim`. It was `statement` and `boundary` joined by one
+//                           space, kept while a registry read it (522's `claim-is-the-join`); the
+//                           registry reads the two fields now, so a third copy could only drift.
+//   formula-form            (583) a row's optional `formula` is a non-blank string — LaTeX, authored —
+//                           or absent; any other member shape is refused. It is permitted at every level.
+//
 // WHAT IT DELIBERATELY IS NOT: a README parser — with ONE exception, taken at `contract-agrees`
 // and nowhere else, for the reason stated at that clause: the contract table is the same question
 // the ladder answers, asked in the document a DOMAIN reads, and two answers that can silently
 // disagree are worse than either alone. Everything else about the prose — whether a row's
-// surrounding paragraph says what its `claim` says — stays a human act; what is pinned here is
+// surrounding paragraph says what its `statement` says — stays a human act; what is pinned here is
 // ROW-TO-TREE agreement, which is the half that can be mechanical.
 //
 // The check is parametrised over its four inputs — the root a model path resolves against, the
@@ -252,12 +256,9 @@ let private mutated (rowId: string) (mutate: Nodes.JsonObject -> unit) : string 
     mutate row
     root.ToJsonString()
 
-/// Set a row's statement or boundary and keep `claim` its join, so the mutation is ONE defect.
+/// Set a row's statement or boundary.
 let private withProse (field: string) (value: string) (row: Nodes.JsonObject) =
     row[field] <- Nodes.JsonValue.Create value
-
-    row["claim"] <-
-        Nodes.JsonValue.Create(row["statement"].GetValue<string>() + " " + row["boundary"].GetValue<string>())
 
 let private expectMutationFinding (description: string) (rowId: string) mutate (clause: string) (subject: string) =
     expectOneFindingIn [ "Model" ] description (mutated rowId mutate) clause subject
@@ -291,7 +292,6 @@ let private withHostProofRow (mutate: Nodes.JsonObject -> unit) : string =
                     "level", "proved"
                     "statement", statement
                     "boundary", boundary
-                    "claim", statement + " " + boundary
                     "phase", "fuaran-core#566"
                     "repo", "fixture-host" ] -> Collections.Generic.KeyValuePair<string, Nodes.JsonNode>(k, str v) ]
         )
@@ -323,7 +323,6 @@ let private withHostPremises (probes: string option list) (mutate: Nodes.JsonObj
         row["level"] <- Nodes.JsonValue.Create "assumed"
         row["statement"] <- Nodes.JsonValue.Create statement
         row["boundary"] <- Nodes.JsonValue.Create boundary
-        row["claim"] <- Nodes.JsonValue.Create(statement + " " + boundary)
         row["phase"] <- Nodes.JsonValue.Create "fuaran-core#483"
         row["class"] <- Nodes.JsonValue.Create "host-premise"
 
@@ -519,7 +518,7 @@ let proofsLadderTests =
 
               Expect.isTrue
                   (Set.contains "witnessLaws" laws)
-                  "`witnessLaws` is in it — the one law `proofs.json`'s own claim text names in prose"
+                  "`witnessLaws` is in it — the one law `proofs.json`'s own statement text names in prose"
 
           // ---- the subject ----
 
@@ -531,7 +530,10 @@ let proofsLadderTests =
                   File.ReadAllText(Path.Combine(repoRoot, "proofs", "kit", "templates", "proofs.json"))
 
               let shapeClauses =
-                  [ "[statement-boundary]"; "[claim-is-the-join]"; "[tested-family-closed]" ]
+                  [ "[statement-boundary]"
+                    "[claim-retired]"
+                    "[formula-form]"
+                    "[tested-family-closed]" ]
 
               let findings =
                   checkLadder
@@ -718,14 +720,65 @@ let proofsLadderTests =
                   "statement-boundary"
                   "Phase 12"
 
-          testCase "go-red: claim-is-the-join — a claim that says something its two fields do not"
+          // ---- Phase 583: `claim` retired, `formula` authored or absent ----
+
+          testCase "go-red: claim-retired — a row carrying `claim`, even as the exact join"
           <| fun _ ->
               expectMutationFinding
-                  "claim not the join"
+                  "claim carried"
                   "fixture-obligation"
-                  (fun r -> r["claim"] <- Nodes.JsonValue.Create "Something the statement never said.")
-                  "claim-is-the-join"
+                  (fun r ->
+                      r["claim"] <-
+                          Nodes.JsonValue.Create(
+                              r["statement"].GetValue<string>() + " " + r["boundary"].GetValue<string>()
+                          ))
+                  "claim-retired"
                   "fixture-obligation"
+
+          testCase "a row carrying a formula is admitted, at every level"
+          <| fun _ ->
+              let root = Nodes.JsonNode.Parse(fixture "ladder-ok.json")
+
+              for r in root["claims"].AsArray() do
+                  r["formula"] <- Nodes.JsonValue.Create @"\forall s.\; \mathrm{fold}(s) = \mathrm{fold}(\pi(s))"
+
+              let levels =
+                  root["claims"].AsArray()
+                  |> Seq.map (fun r -> r["level"].GetValue<string>())
+                  |> Set.ofSeq
+
+              Expect.equal levels (Set.ofList levelOrder) "the fixture ladder carries a row at each of the four levels"
+
+              Expect.isEmpty
+                  (checkLadder (fixtureInputs [ "Model" ]) (root.ToJsonString()))
+                  "a well-formed formula on every row, whatever its level, is no finding"
+
+          testCase "go-red: formula-form — an empty formula"
+          <| fun _ ->
+              expectMutationFinding
+                  "empty formula"
+                  "fixture-policy"
+                  (fun r -> r["formula"] <- Nodes.JsonValue.Create "  ")
+                  "formula-form"
+                  "empty string"
+
+          testCase "go-red: formula-form — a formula that is not a string"
+          <| fun _ ->
+              expectMutationFinding
+                  "formula as an array"
+                  "fixture-premise"
+                  (fun r -> r["formula"] <- Nodes.JsonArray(Nodes.JsonValue.Create "x = y"))
+                  "formula-form"
+                  "JSON array"
+
+          testCase "go-red: formula-form — a null formula is not an absent one"
+          <| fun _ ->
+              expectMutationFinding
+                  "formula as null"
+                  "fixture-differential"
+                  (fun r -> r["formula"] <- null)
+                  "formula-form"
+                  "JSON null"
 
           testCase "go-red: tested-family-closed — a family written as prose"
           <| fun _ ->

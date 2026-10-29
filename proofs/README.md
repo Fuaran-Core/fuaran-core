@@ -805,7 +805,8 @@ row's family must be one of three closed forms (`Proofs.Oracle`, `Conformance.<l
 entry but the two `shared` modules) must have at least one `proved` row; every row's `phase` and
 `level` must be the closed forms; and since Phase 522 every row states what it claims in `statement`
 and what it does not cover in `boundary`, tells no history in either (its `phase` is its one
-citation), and carries `claim` as their exact join for registries that still read it. So renaming a theorem without
+citation); a row carries no `claim` (the two fields' old join), and an optional `formula` is a non-blank
+LaTeX string or absent. So renaming a theorem without
 touching the file, or adding a model with no claim written down, fails the leg with the row named
 — the same posture as oracle drift, applied to the ladder. Each clause has a go-red fixture beside
 it (`../tests/Fuaran.Core.Tests/fixtures/proofs-ladder/`), so a green ladder is known to be one

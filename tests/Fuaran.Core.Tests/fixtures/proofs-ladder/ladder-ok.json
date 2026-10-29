@@ -8,7 +8,6 @@
       "level": "proved",
       "statement": "A clean proved row, so the every-module clause stays quiet.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "A clean proved row, so the every-module clause stays quiet. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "alpha",
@@ -25,7 +24,6 @@
       "level": "tested",
       "statement": "A tested row naming a case that exists.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "A tested row naming a case that exists. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "family": "Proofs.Oracle",
@@ -39,7 +37,6 @@
       "level": "assumed",
       "statement": "An assumed row that nothing discharges and no phase closes.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "An assumed row that nothing discharges and no phase closes. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "class": "premise",
       "evidence": {
@@ -51,7 +48,6 @@
       "level": "assumed",
       "statement": "An assumed row a domain discharges by running a law of the kit at its own witness.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "An assumed row a domain discharges by running a law of the kit at its own witness. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#174",
       "class": "domain-obligation",
       "dischargedBy": "Conformance.fixtureLaws",
@@ -64,7 +60,6 @@
       "level": "assumed",
       "statement": "An assumed row that is this repository's own model-to-production gap.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "An assumed row that is this repository's own model-to-production gap. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#174",
       "class": "model-bridge",
       "closes": "permanent",
@@ -77,7 +72,6 @@
       "level": "policy",
       "statement": "A policy row.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "A policy row. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "document": "contract-ok.md"

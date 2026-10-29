@@ -8,7 +8,6 @@
       "level": "proved",
       "statement": "A clean proved row, so the every-module clause stays quiet.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "A clean proved row, so the every-module clause stays quiet. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "alpha",
@@ -21,7 +20,6 @@
       "level": "assumed",
       "statement": "A model bridge whose closes is prose.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "A model bridge whose closes is prose. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#174",
       "class": "model-bridge",
       "closes": "soon, probably",

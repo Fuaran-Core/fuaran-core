@@ -8,7 +8,6 @@
       "level": "proved",
       "statement": "A clean proved row, so the every-module clause stays quiet.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "A clean proved row, so the every-module clause stays quiet. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "alpha",
@@ -21,7 +20,6 @@
       "level": "proved",
       "statement": "A proved row over a model the leg never checks.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "A proved row over a model the leg never checks. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "omega",

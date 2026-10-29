@@ -1,6 +1,6 @@
 module Fuaran.Core.Tests.ProofLadder
 
-// The claims ladder as a CHECK (Phase 144; clauses from Phases 174 and 522) and the proof roster it reads
+// The claims ladder as a CHECK (Phase 144; clauses from Phases 174, 522 and 583) and the proof roster it reads
 // (`proofs/modules.json`, Phase 504): the parametrised check, the contract table, the README ladder summary
 // render, and `parseRoster` — the ONE reading of the roster the cone selector (`ProofCone`) also uses
 // (DECISIONS.md D74). `ProofsLadderTests` (the Proofs.Ladder family) is what states the clauses and runs
@@ -353,15 +353,36 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                                           "no `%s` — a row says what it claims (`statement`) and what it does NOT cover (`boundary`)"
                                           name) ]
 
-                let joinFindings =
-                    match statement, boundary, strMember row "claim" with
-                    | Some s, Some b, Some c when c = s + " " + b -> []
-                    | Some _, Some _, _ ->
+                // ---- Phase 583: `claim` is retired, and `formula` is authored text or absent ----
+                let claimFindings =
+                    match row.TryGetProperty "claim" with
+                    | true, _ ->
                         [ finding
                               id
-                              "claim-is-the-join"
-                              "`claim` is not `statement` and `boundary` joined by one space — the registry reads `claim`, so it must say exactly what the two fields say" ]
+                              "claim-retired"
+                              "carries `claim` — the registry reads `statement` and `boundary`, so a third copy of their text is a field that can only drift" ]
                     | _ -> []
+
+                let formulaFindings =
+                    match row.TryGetProperty "formula" with
+                    | false, _ -> []
+                    | true, v when
+                        v.ValueKind = JsonValueKind.String
+                        && not (String.IsNullOrWhiteSpace(v.GetString()))
+                        ->
+                        []
+                    | true, v when v.ValueKind = JsonValueKind.String ->
+                        [ finding
+                              id
+                              "formula-form"
+                              "`formula` is an empty string — a row with nothing to typeset omits the field, and a reader falls back to `statement`" ]
+                    | true, v ->
+                        [ finding
+                              id
+                              "formula-form"
+                              (sprintf
+                                  "`formula` is a JSON %s; it is a LaTeX string or absent"
+                                  (v.ValueKind.ToString().ToLowerInvariant())) ]
 
                 // ---- Phase 522: every path LADDER.md says must exist, and only this tree ----
                 let pathFindings =
@@ -639,7 +660,8 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                 levelFindings
                 @ phaseFindings
                 @ proseFindings
-                @ joinFindings
+                @ claimFindings
+                @ formulaFindings
                 @ provedFindings
                 @ testedFindings
                 @ pathFindings
@@ -697,7 +719,7 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
 // proof contract" section is the table a DOMAIN reads to learn what it owes; `proofs.json` is the
 // table a TOOL reads for the same question. Two answers to one question that can silently disagree
 // are worse than either alone, so this one table is held to the ladder row for row. Everything else
-// in that document — including whether a row's prose says what its `claim` says — stays a human
+// in that document — including whether a row's prose says what its `statement` says — stays a human
 // act, which is the half a check cannot settle.
 
 let contractHeading = "## The Core-to-domain proof contract"

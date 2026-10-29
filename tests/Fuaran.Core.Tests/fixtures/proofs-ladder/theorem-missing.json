@@ -8,7 +8,6 @@
       "level": "proved",
       "statement": "A proved row naming a theorem that is not there.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "A proved row naming a theorem that is not there. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "alpha_not_declared",

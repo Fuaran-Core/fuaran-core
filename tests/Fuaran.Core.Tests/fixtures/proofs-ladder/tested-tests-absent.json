@@ -8,7 +8,6 @@
       "level": "proved",
       "statement": "A clean proved row.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "A clean proved row. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "alpha",
@@ -21,7 +20,6 @@
       "level": "tested",
       "statement": "A tested row carrying no case at all.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "A tested row carrying no case at all. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "family": "Proofs.Oracle"

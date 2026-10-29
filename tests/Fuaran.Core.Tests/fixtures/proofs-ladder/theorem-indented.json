@@ -8,7 +8,6 @@
       "level": "proved",
       "statement": "A proved row naming a local binding rather than a top-level declaration.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "A proved row naming a local binding rather than a top-level declaration. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "delta_indented",

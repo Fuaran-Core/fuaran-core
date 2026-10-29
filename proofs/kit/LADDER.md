@@ -20,9 +20,11 @@ Two kinds of reader, deliberately different.
   page; it may never be looser.
 
 Because the reader is tolerant, a field added here is additive: a ladder that does not carry it
-reads exactly as before. That is also why `claim` stays required beside `statement` and
-`boundary`: a registry written before the split reads `claim`, so a row carries the join until every
-registry reads the two fields it is made of.
+reads exactly as before. `formula` is such a field. A field taken AWAY is not additive, which is why
+`claim` (once `statement` and `boundary` joined by one space) stayed required until the registry read
+the two fields it was made of. It does now, and `claim` is gone: a registry reads `statement` and
+`boundary`, and a host family may refuse a row that still carries `claim`, since a third copy of the
+same text can only drift.
 
 ## The document
 
@@ -49,9 +51,9 @@ registry reads the two fields it is made of.
 |---|---|---|
 | `id` | required | A slug, unique within the file. Stable: a registry names a finding by it. |
 | `level` | required | `proved` \| `tested` \| `assumed` \| `policy`. A CLOSED set, refused when unrecognised — every plausible default is a level, so a typo would silently assert something. |
-| `statement` | required | What is claimed, in the present tense. Where a rendered statement (a formula, a typeset page) is wanted, it is generated from this field. |
+| `statement` | required | What is claimed, in the present tense, in prose. It stays required when the row carries a `formula`, and it is what a reader or host shows when the row carries none. |
 | `boundary` | required | What the claim does NOT cover: every hypothesis, parameter, premise, sampling limit and refutation a reader must not read past. The load-bearing half of a row, never empty. |
-| `claim` | required | `statement` and `boundary` joined by one space, exactly. Carried because a registry reads `claim`; the two fields are its source, and a host family holds the join. |
+| `formula` | optional | The claim typeset: a LaTeX string, non-empty, for a page that renders mathematics. AUTHORED beside `statement`, never generated from it, and allowed at every level. A page renders it where present and `statement` otherwise; it never replaces `boundary`, and a registry reads it as commentary. |
 | `evidence` | required | An object whose shape the level decides (below). Every level carries one. |
 | `phase` | optional | The change that established the row. Optional on purpose: a repository written to a public standard may not cite a planning surface outside itself. Where it is present it is the row's ONE citation: how the row came to be is that change's record, never prose in `statement` or `boundary`. |
 | `repo` | optional | The workspace-relative repository the evidence lives in, when it is not this one — a row may legitimately rest on a theorem proved in a repository it consumes. |
@@ -120,8 +122,9 @@ Some ladders were first written to an earlier spelling. The mapping is mechanica
 
 | Earlier | Here |
 |---|---|
-| `statement` alone, the boundary in its prose | `statement` and `boundary`, split; `claim` their join |
+| `statement` alone, the boundary in its prose | `statement` and `boundary`, split |
 | `claim` alone | the same split; the row's history, if its prose tells one, cut to `phase` |
+| `claim` beside `statement` and `boundary` | drop `claim`: it was their join |
 | proved `module` | `model` |
 | proved `lemmas: [a, b, c]` | `theorem: a`, `supporting: [b, c]` — or a row each, where each is a claim |
 | proved `prover: <alias>` + top-level `provers` | `prover: <the pin file>` |

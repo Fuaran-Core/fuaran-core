@@ -8,7 +8,6 @@
       "level": "proved",
       "statement": "A clean proved row, so the every-module clause stays quiet.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "A clean proved row, so the every-module clause stays quiet. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "theorem": "alpha",
@@ -21,7 +20,6 @@
       "level": "assumed",
       "statement": "An assumed row carrying no class at all.",
       "boundary": "Fixture data: it covers nothing beyond this file.",
-      "claim": "An assumed row carrying no class at all. Fixture data: it covers nothing beyond this file.",
       "phase": "fuaran-core#144",
       "evidence": {
         "assumption": "the fixture assumes nothing that matters"
