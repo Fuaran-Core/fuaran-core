@@ -263,6 +263,31 @@ it equal to them. [`CONTRIBUTING.md`](CONTRIBUTING.md) says how an entry is adde
 | D1 | 2026-06-17 | `Severity` is `[<RequireQualifiedAccess>]` | Live |
 <!-- decisions-index:end -->
 
+## 2026-10-29 — D243: a query's JSON Schema projects each result field's label as `title` and its description as `description`, each only where the field states one; the column's own `title` is a different object's member, so there is no precedence to rule
+
+**Status:** Live
+
+**Recorded by Phase 588.** `Fuaran.Core.Query` (`Query.toJsonSchema`); `tests/Fuaran.Core.Tests/SeamModelTests.fs`
+("a query schema"); rides the `0.41.0` draft (`docs/releases/0.41.0.md`, "Additive").
+
+*The premises, checked first.* `Query.toJsonSchema` emitted one `"title"`, the query id, on the root object, and
+projected a result column as its type's schema and nothing else, so a `Field`'s label and description (Phase 427)
+never reached it. `QueryParam` is `{ Name; Type; Required }` and is not a `Field`, so a parameter has no label or
+description to project; only the `x-result` columns gain members. No conformance family in this repository
+projects a query's schema, and no host twin in the repositories searched asserts `x-result`, so the vector is the
+pinned byte string in the suite, which a twin reads as a JSON document.
+
+*The ruling.* A result column's schema gains `"title"` (the label) and `"description"` (the description), each
+only where the field states one. A field with neither projects the bytes it always did. The members sit on the
+column's own schema object inside `x-result.properties`, while the query-level `"title"` is the query id on the
+root, so the two never meet and no precedence is needed; a column labelled `readings` leaves the root `"title"`
+as the query id, which the suite asserts. A unit and an extension member are not projected: JSON Schema has no
+keyword for either, and this change closes only the two it does.
+
+*Held by.* One vector carrying a field with both, one with each, and one with neither, the whole schema pinned
+byte for byte; the go-red is a projection that drops the description, which differs from the pinned bytes.
+Class additive: the output gains two optional members per field and no signature moves.
+
 ## 2026-10-29 — D242: the profile bump takes the profile's decode rule as data, `Versioning.DecodeRule`, so a profile whose decoders ignore an undeclared member gets no step for an added optional member; the default rule is the existing bump, answer for answer
 
 **Status:** Live

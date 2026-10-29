@@ -640,12 +640,32 @@ module Query =
         | TimestampType u -> JObj [ "type", JStr "string"; "pattern", JStr(timestampPattern u) ]
         | DecimalType -> JObj [ "type", JStr "string"; "pattern", JStr decimalPattern ]
 
+    /// The schema of one result column: its type's schema, then (Phase 588) the field's label as
+    /// `"title"` and its description as `"description"`, each only where the field states one, so a
+    /// field with neither projects exactly the bytes it always did. The members sit on the column's
+    /// own schema object, so the query-level `"title"` (the query id) is a different object's
+    /// member and never in tension with them.
+    let private resultFieldSchema (f: Field) : JVal =
+        match columnSchema f.Type with
+        | JObj members ->
+            JObj(
+                members
+                @ [ match f.Label with
+                    | Some l -> "title", JStr l
+                    | None -> ()
+                    match f.Description with
+                    | Some d -> "description", JStr d
+                    | None -> () ]
+            )
+        | other -> other
+
     /// Project a query into a STANDARD JSON Schema `object` — `Function.toJsonSchema`'s twin, over
     /// the same convention (Phase 251; the convention is written down beside `Function.toSchema`):
     /// no tag, `"title"` the query id, each parameter a property keyed by its NAME with the schema
     /// of its column type, the required ones listed, and what JSON Schema has no keyword for outside
     /// `properties` under `x-` keys — `x-effect` (the two-axis effect class, as there) and
-    /// `x-result`, the schema of ONE result row keyed by column name, so a model reads what comes
+    /// `x-result`, the schema of ONE result row keyed by column name (each column carrying its label as
+    /// `"title"` and its description as `"description"` where it states them, Phase 588), so a model reads what comes
     /// back without it reading as an argument to fill. A parameter's value is what
     /// `QueryCodec.decodeArgs` reads. `Canonical.write Rendering.CrossHost` of the result is canonical and stable for a
     /// fixed query.
@@ -659,4 +679,4 @@ module Query =
               "x-result",
               JObj
                   [ "type", JStr "object"
-                    "properties", JObj(q.ResultSchema |> List.map (fun f -> f.Name, columnSchema f.Type)) ] ]
+                    "properties", JObj(q.ResultSchema |> List.map (fun f -> f.Name, resultFieldSchema f)) ] ]

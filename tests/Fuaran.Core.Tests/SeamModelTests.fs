@@ -910,6 +910,48 @@ let tests =
                         "{\"properties\":{\"limit\":{\"maximum\":2147483647,\"minimum\":-2147483648,\"type\":\"integer\"},\"station\":{\"type\":\"string\"}},\"required\":[\"station\"],\"title\":\"readings\",\"type\":\"object\",\"x-effect\":{\"determinism\":\"network\",\"host\":\"readsHost\"},\"x-result\":{\"properties\":{\"celsius\":{\"type\":\"number\"},\"station\":{\"type\":\"string\"}},\"type\":\"object\"}}"
                         "bytes"
 
+                testCase
+                    "a result field's label is its title and its description its description, only where stated (Phase 588)"
+                <| fun _ ->
+                    let both =
+                        Field.create "celsius" FloatType
+                        |> Field.withLabel "Temperature"
+                        |> Field.withDescription "Degrees Celsius at the station"
+
+                    let labelOnly = Field.create "station" StringType |> Field.withLabel "Station"
+
+                    let describedOnly =
+                        Field.create "note" StringType |> Field.withDescription "Free text"
+
+                    let neither = Field.create "id" IntType
+
+                    let labelled =
+                        { readings with
+                            ResultSchema = [ both; labelOnly; describedOnly; neither ] }
+
+                    let rendered = Canonical.write Rendering.CrossHost (Query.toJsonSchema labelled)
+
+                    Expect.equal
+                        rendered
+                        "{\"properties\":{\"limit\":{\"maximum\":2147483647,\"minimum\":-2147483648,\"type\":\"integer\"},\"station\":{\"type\":\"string\"}},\"required\":[\"station\"],\"title\":\"readings\",\"type\":\"object\",\"x-effect\":{\"determinism\":\"network\",\"host\":\"readsHost\"},\"x-result\":{\"properties\":{\"celsius\":{\"description\":\"Degrees Celsius at the station\",\"title\":\"Temperature\",\"type\":\"number\"},\"id\":{\"maximum\":2147483647,\"minimum\":-2147483648,\"type\":\"integer\"},\"note\":{\"description\":\"Free text\",\"type\":\"string\"},\"station\":{\"title\":\"Station\",\"type\":\"string\"}},\"type\":\"object\"}}"
+                        "both, label only, description only, neither (the bytes it always was)"
+
+                    Expect.equal
+                        (propOf "title" (Query.toJsonSchema labelled))
+                        (JStr "readings")
+                        "the query-level title is the query id, whatever a column's label says"
+
+                    // The go-red: a projection that drops the description is a different byte string,
+                    // so the vector above goes red against it.
+                    let droppingDescription =
+                        { labelled with
+                            ResultSchema = labelled.ResultSchema |> List.map Field.withoutDescription }
+
+                    Expect.notEqual
+                        (Canonical.write Rendering.CrossHost (Query.toJsonSchema droppingDescription))
+                        rendered
+                        "a projection dropping the description differs"
+
                 testCase "a decimal parameter and a decimal result column project as patterned strings"
                 <| fun _ ->
                     let schema = Query.toJsonSchema invoices
