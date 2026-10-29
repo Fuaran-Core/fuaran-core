@@ -128,7 +128,9 @@ field Fuaran.Core.Idl.SupportArtifact.version : System.Int32 (literal)
 field Fuaran.Core.Idl.Trust+CustomGate+Tags.Allowed : System.Int32 (literal)
 field Fuaran.Core.Idl.Trust+CustomGate+Tags.InertPlaceholder : System.Int32 (literal)
 method Fuaran.Core.Idl.CodegenErrorModule.describe(Fuaran.Core.Idl.CodegenError) : System.String
+method Fuaran.Core.Idl.Diff.absorbedWhenUnknownMembersIgnored(Fuaran.Core.Idl.Codegen.Types.Classification) : System.Boolean
 method Fuaran.Core.Idl.Diff.bumpProfile(Fuaran.Core.Versioning+Capability, Fuaran.Core.Idl.Codegen.Types.Verdict) : Fuaran.Core.Idl.Codegen.Types.Bump
+method Fuaran.Core.Idl.Diff.bumpProfileUnder(Fuaran.Core.Versioning+DecodeRule, Fuaran.Core.Versioning+Capability, Fuaran.Core.Idl.Codegen.Types.Verdict) : Fuaran.Core.Idl.Codegen.Types.Bump
 method Fuaran.Core.Idl.Diff.changes(Fuaran.Core.Idl.Codegen.Types.Snapshot, Fuaran.Core.Idl.Codegen.Types.Snapshot) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.Change>
 method Fuaran.Core.Idl.Diff.classLabel(Fuaran.Core.Idl.Codegen.Types.VerdictClass) : System.String
 method Fuaran.Core.Idl.Diff.classOfLabel(System.String) : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.Codegen.Types.VerdictClass>

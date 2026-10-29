@@ -173,6 +173,20 @@ module Diff =
     /// caller a number to publish for a revision whose class nobody has established.
     let bumpProfile (baseProfile: Versioning.Capability) (v: Verdict) : Bump = DiffVerdict.bumpProfile baseProfile v
 
+    /// Phase 587 — `bumpProfile` for a profile whose decoders follow `rule`. Under
+    /// `Versioning.DecodeRule.RefusesUnknownMembers` it is `bumpProfile`, answer for answer. Under
+    /// `IgnoresUnknownMembers` a row that a consumer behind it absorbs moves nothing — an optional member
+    /// added above all — while a new tag, a loosened required member and a widened `int` slot still move
+    /// the minor, and a wire break the major. An undecided verdict yields no profile under either rule.
+    let bumpProfileUnder (rule: Versioning.DecodeRule) (baseProfile: Versioning.Capability) (v: Verdict) : Bump =
+        DiffVerdict.bumpProfileUnder rule baseProfile v
+
+    /// Phase 587 — is this row absorbed by a consumer behind it whose decoders ignore an undeclared member,
+    /// so that it moves no profile under `Versioning.DecodeRule.IgnoresUnknownMembers`? Total over `Change`;
+    /// `false` for every row that is not `Additive` or `BreakingForEmitters`.
+    let absorbedWhenUnknownMembersIgnored (c: Classification) : bool =
+        DiffVerdict.absorbedWhenUnknownMembersIgnored c
+
     /// The stable label of a consequence class. A contract: these strings are what
     /// an external gate greps and what the `docs/` table names.
     let consequenceLabel (c: FSharpConsequence) : string = DiffRules.consequenceLabel c

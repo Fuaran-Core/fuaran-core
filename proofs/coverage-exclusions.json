@@ -1137,6 +1137,15 @@
     },
     {
       "members": [
+        "Idl.Diff.absorbedWhenUnknownMembersIgnored",
+        "Idl.Diff.bumpProfileUnder"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The decode-rule face of the modelled `bumpProfile` (Phase 587): under `RefusesUnknownMembers` it is `bumpProfile`, and under `IgnoresUnknownMembers` it drops the rows a consumer behind them absorbs. Its law is measured on sampled documents read by the interpreter's ignoring and strict decoders, not modelled; the decode-rule tests stand in.",
+      "standIn": "tests/Fuaran.Core.Tests/DecodeRuleBumpTests.fs"
+    },
+    {
+      "members": [
         "Idl.Diff.report"
       ],
       "class": "measured-elsewhere",

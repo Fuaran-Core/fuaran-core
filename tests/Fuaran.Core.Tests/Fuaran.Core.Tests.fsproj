@@ -233,6 +233,7 @@
          committed CLI fixtures through Snapshots.repoFile. Appended here (append-only
          registration) — it depends on nothing else in this list. -->
     <Compile Include="IdlStabilityClassTests.fs" />
+    <Compile Include="DecodeRuleBumpTests.fs" />
     <!-- Phase 130 — the corpus lookup proved from a second worktree of this repository
          (created and removed by the test), beside the go-red that shows the climb it
          replaced finding nothing from the same place. Spawns git through ChildProcess.fs

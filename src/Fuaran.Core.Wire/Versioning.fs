@@ -332,6 +332,20 @@ module Versioning =
         /// ascending order. Bumps the major and resets the minor.
         | Breaking of removed: string list * added: string list
 
+    /// What a profile's decoders do with an object member their vocabulary does not declare (Phase 587) — the
+    /// one property of a decode rule that decides whether a revision's change reaches a consumer that is
+    /// `Behind`. A new TAG is not a member: an unknown discriminator meets §15.3's tolerance under either rule,
+    /// which is what the profile minor tells the consumer to apply.
+    [<RequireQualifiedAccess>]
+    type DecodeRule =
+        /// An undeclared member is refused (a strict reader). A member added to the vocabulary is unreadable
+        /// to a consumer that predates it, so the addition must move the minor. The default.
+        | RefusesUnknownMembers
+        /// An undeclared member is ignored on decode (a must-ignore reader, as the UI wire format's §2 rule 2).
+        /// A consumer that predates an added optional member reads every document carrying it, so that
+        /// addition needs no step.
+        | IgnoresUnknownMembers
+
     /// Classify the kind-tag delta `before` → `after`. No removals ⇒ `Additive`; any removal ⇒
     /// `Breaking`. (A *rename* surfaces as a removal + an add — correctly `Breaking`.)
     let classify (before: Set<string>) (after: Set<string>) : Evolution =

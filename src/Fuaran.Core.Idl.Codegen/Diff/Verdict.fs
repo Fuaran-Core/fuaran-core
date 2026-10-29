@@ -212,6 +212,96 @@ module internal DiffVerdict =
         | VerdictClass.Breaking -> 3
         | VerdictClass.Undecided -> 4
 
+    /// Phase 587 — is this row ABSORBED by a consumer that is behind it and whose decoders ignore an
+    /// undeclared member: does that consumer, holding the previous vocabulary, still read every document
+    /// the new revision admits? An absorbed row needs no profile step under
+    /// `Versioning.DecodeRule.IgnoresUnknownMembers`.
+    ///
+    /// Only an `Additive` or `BreakingForEmitters` row can be absorbed: a wire break is a major whatever the
+    /// reader does, a host-surface row moves nothing already, and an undecided row stops the bump. Among
+    /// those, the match is over the CHANGE and is total, so a case added to `Change` is decided here rather
+    /// than defaulted:
+    ///
+    ///  - absorbed: an OPTIONAL member added (a new document carries a key the consumer does not declare,
+    ///    and ignores); a union, enum or record introduced (reachable only from a member that also changed,
+    ///    which is that member's row); an authoring default added, withdrawn or moved, an annotation, and a
+    ///    wider alias list (none of them moves a canonical document).
+    ///  - not absorbed: a new TAG (`KindAdded`, `OpAdded`, `UnionCaseAdded`, `EnumCaseAdded`), which a
+    ///    consumer meets as a discriminator it cannot map; a required member loosened to optional, since
+    ///    a new document may omit what the consumer requires; and an `int` slot widened to `float`, since a
+    ///    new document may carry `2.5` where the consumer reads an integer. Each of the three is refused by
+    ///    the behind consumer under either rule.
+    ///  - every other case is never graded `Additive` or `BreakingForEmitters` today, and is NOT absorbed,
+    ///    so a later grading of one moves the minor exactly as `RefusesUnknownMembers` does.
+    let absorbedWhenUnknownMembersIgnored (c: Classification) : bool =
+        match c.Severity with
+        | BreakingWire
+        | Unclassifiable
+        | HostSurfaceOnly -> false
+        | Additive
+        | BreakingForEmitters ->
+            match c.Change with
+            | FieldAdded _
+            | UnionAdded _
+            | EnumAdded _
+            | RecordAdded _
+            | DefaultAdded _
+            | DefaultRemoved _
+            | DefaultChanged _
+            | FieldAnnotationsChanged _
+            | UnionCaseAnnotationsChanged _
+            | KindAnnotationsChanged _
+            | EnumCaseAnnotationsChanged _
+            | TypeAnnotationsChanged _
+            | FieldAliasesChanged _
+            | EnumCaseAliasesChanged _ -> true
+            | KindAdded _
+            | OpAdded _
+            | UnionCaseAdded _
+            | EnumCaseAdded _
+            | FieldOptionalityChanged _
+            | FieldTypeChanged _
+            | ArtifactVersionChanged _
+            | WireShapeChanged _
+            | HardenPolicyChanged _
+            | KindRemoved _
+            | KindRenamed _
+            | KindCategoryChanged _
+            | OpRemoved _
+            | UnionRemoved _
+            | UnionCaseRemoved _
+            | UnionParamsChanged _
+            | UnionTransparencyChanged _
+            | UnionTagRuleChanged _
+            | UnionCaseHostedChanged _
+            | EnumRemoved _
+            | EnumCaseRemoved _
+            | EnumHostMappingChanged _
+            | RecordRemoved _
+            | FieldRemoved _
+            | FieldHostSurfaceChanged _
+            | FieldPresenceChanged _
+            | SupportChanged _
+            | TypeLayoutChanged _
+            | FieldKeyedChanged _ -> false
+
+    /// Phase 587 — the `Versioning.Evolution` a verdict amounts to for a consumer under `rule`.
+    /// `RefusesUnknownMembers` is the verdict's own `Evolution`, unchanged; `IgnoresUnknownMembers` is
+    /// [[evolution]] over the rows such a consumer does not absorb ([[absorbedWhenUnknownMembersIgnored]]).
+    let evolutionUnder (rule: Versioning.DecodeRule) (v: Verdict) : Versioning.Evolution =
+        match rule with
+        | Versioning.DecodeRule.RefusesUnknownMembers -> v.Evolution
+        | Versioning.DecodeRule.IgnoresUnknownMembers ->
+            evolution (v.Changes |> List.filter (absorbedWhenUnknownMembersIgnored >> not))
+
+    /// Phase 587 — [[bumpProfile]] for a profile whose decoders follow `rule`. Under
+    /// `RefusesUnknownMembers` it is `bumpProfile`, answer for answer; under `IgnoresUnknownMembers` an
+    /// absorbed row moves nothing. An undecided verdict yields no profile under either rule.
+    let bumpProfileUnder (rule: Versioning.DecodeRule) (baseProfile: Versioning.Capability) (v: Verdict) : Bump =
+        match v.Undecided with
+        | [] -> Bump.Bumped(Versioning.bump baseProfile (evolutionUnder rule v))
+        | rows -> Bump.Undecided rows
+
     /// The profile a `baseProfile` bumps to under a verdict — `Versioning.bump`
     /// applied to `evolution`'s answer, which is the whole reason this module
     /// produces an `Evolution` at all.
@@ -220,6 +310,4 @@ module internal DiffVerdict =
     /// function that returned `baseProfile` unchanged, or a minor bump, would hand a
     /// caller a number to publish for a revision whose class nobody has established.
     let bumpProfile (baseProfile: Versioning.Capability) (v: Verdict) : Bump =
-        match v.Undecided with
-        | [] -> Bump.Bumped(Versioning.bump baseProfile v.Evolution)
-        | rows -> Bump.Undecided rows
+        bumpProfileUnder Versioning.DecodeRule.RefusesUnknownMembers baseProfile v

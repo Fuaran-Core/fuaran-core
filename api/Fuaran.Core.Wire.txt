@@ -25,6 +25,7 @@ attribute Fuaran.Core.ReaderModule RequireQualifiedAccess
 attribute Fuaran.Core.RenderFaultClass RequireQualifiedAccess
 attribute Fuaran.Core.RenderFaultModule RequireQualifiedAccess
 attribute Fuaran.Core.RootDecodeCode RequireQualifiedAccess
+attribute Fuaran.Core.Versioning+DecodeRule RequireQualifiedAccess
 attribute Fuaran.Core.Versioning+EnvelopeRefusal RequireQualifiedAccess
 attribute Fuaran.Core.Versioning+EnvelopeRefusalModule RequireQualifiedAccess
 attribute Fuaran.Core.Versioning+Evolution RequireQualifiedAccess
@@ -108,6 +109,8 @@ field Fuaran.Core.RootDecodeCode+Tags.WrongKind : System.Int32 (literal)
 field Fuaran.Core.Versioning+Compatibility+Tags.Behind : System.Int32 (literal)
 field Fuaran.Core.Versioning+Compatibility+Tags.Current : System.Int32 (literal)
 field Fuaran.Core.Versioning+Compatibility+Tags.Foreign : System.Int32 (literal)
+field Fuaran.Core.Versioning+DecodeRule+Tags.IgnoresUnknownMembers : System.Int32 (literal)
+field Fuaran.Core.Versioning+DecodeRule+Tags.RefusesUnknownMembers : System.Int32 (literal)
 field Fuaran.Core.Versioning+Decoded`1+Tags.Known : System.Int32 (literal)
 field Fuaran.Core.Versioning+Decoded`1+Tags.Unknown : System.Int32 (literal)
 field Fuaran.Core.Versioning+EnvelopeRefusal+Tags.ForeignProfile : System.Int32 (literal)
@@ -389,6 +392,8 @@ type Fuaran.Core.Versioning+Compatibility (union)
 type Fuaran.Core.Versioning+Compatibility+Behind (type)
 type Fuaran.Core.Versioning+Compatibility+Foreign (type)
 type Fuaran.Core.Versioning+Compatibility+Tags (type)
+type Fuaran.Core.Versioning+DecodeRule (union)
+type Fuaran.Core.Versioning+DecodeRule+Tags (type)
 type Fuaran.Core.Versioning+Decoded`1 (union)
 type Fuaran.Core.Versioning+Decoded`1+Known (type)
 type Fuaran.Core.Versioning+Decoded`1+Tags (type)
@@ -469,6 +474,8 @@ union-case Fuaran.Core.RootDecodeCode.WrongKind #0()
 union-case Fuaran.Core.Versioning+Compatibility.Current #0()
 union-case Fuaran.Core.Versioning+Compatibility.NewBehind #1(authored: Fuaran.Core.Versioning+Capability)
 union-case Fuaran.Core.Versioning+Compatibility.NewForeign #2(authored: Fuaran.Core.Versioning+Capability)
+union-case Fuaran.Core.Versioning+DecodeRule.IgnoresUnknownMembers #1()
+union-case Fuaran.Core.Versioning+DecodeRule.RefusesUnknownMembers #0()
 union-case Fuaran.Core.Versioning+Decoded`1.NewKnown #0(Item: !0)
 union-case Fuaran.Core.Versioning+Decoded`1.NewUnknown #1(Item: Fuaran.Core.Versioning+UnknownKind)
 union-case Fuaran.Core.Versioning+EnvelopeRefusal.NewForeignProfile #1(text: System.String, reason: System.String)
