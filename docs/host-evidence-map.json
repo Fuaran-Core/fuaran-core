@@ -60,7 +60,7 @@
     {"id":"tree-digest-preimage-injective","level":"proved","model":"TreeOps","families":[{"family":"skeletonApply","file":"conformance/apply/skeleton-apply.json","cases":25}],"oracle":["tree.apply","dag.fold"]},
     {"id":"tree-digest-fields-recover-shape","level":"proved","model":"TreeOps","families":[{"family":"skeletonApply","file":"conformance/apply/skeleton-apply.json","cases":25}],"oracle":["tree.apply","dag.fold"]},
     {"id":"tree-digest-differential","level":"tested","model":"TreeOps","families":[{"family":"skeletonApply","file":"conformance/apply/skeleton-apply.json","cases":25}],"oracle":["tree.apply","dag.fold"]},
-    {"id":"tree-algebra-well-formed-states","level":"assumed","families":[],"oracle":[]},
+    {"id":"tree-algebra-well-formed-states","level":"tested","model":"Preservation","families":[],"oracle":[]},
     {"id":"tree-algebra-batch-nesting","level":"proved","model":"TreeOps","families":[{"family":"skeletonApply","file":"conformance/apply/skeleton-apply.json","cases":25}],"oracle":["tree.apply","dag.fold"]},
     {"id":"preorder-parent-first","level":"proved","model":"TreeOps","families":[{"family":"skeletonApply","file":"conformance/apply/skeleton-apply.json","cases":25}],"oracle":["tree.apply","dag.fold"]},
     {"id":"apply-preserves-parent-first","level":"proved","model":"Preservation","families":[],"oracle":[]},

@@ -14,7 +14,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## Summary
 
-396 rows: 229 offered, 1 a host's own proof, 166 uncovered (proved 97, tested 27, assumed 40, policy 2).
+396 rows: 229 offered, 1 a host's own proof, 166 uncovered (proved 97, tested 28, assumed 39, policy 2).
 
 ## Offers, by model
 
@@ -121,7 +121,7 @@ A row naming no model (an `assumed` or `policy` row, or a law row) is answered b
 
 - `OpStreamLoad` (1): `op-stream-load-differential`
 
-- `Preservation` (3): `preservation-differential`, `container-differential`, `script-differential`
+- `Preservation` (4): `tree-algebra-well-formed-states`, `preservation-differential`, `container-differential`, `script-differential`
 
 - `PropagationOps` (1): `propagation-ops-differential`
 
@@ -139,7 +139,7 @@ A row naming no model (an `assumed` or `policy` row, or a law row) is answered b
 
 ### assumed
 
-- no model (40): `independence-diamond`, `dag-outside-the-model`, `extractor-and-compiler-trusted`, `sets-are-lists`, `node-ids-distinct`, `tree-algebra-well-formed-states`, `content-id-determines-content`, `chain-walk-order-is-productions`, `signature-binds-one-head`, `parser-float-readback-opaque`, `parser-alphabet-bridge`, `lawful-abstract-witness`, `witness-surface-scope`, `canon-numeral-layouts`, `canon-key-comparator`, `canon-character-bridge`, `capability-scalar-readers-abstract`, `capability-key-renderers-abstract`, `propagation-change-set-and-prior`, `propagation-prior-blind`, `propagation-read-witness`, `query-renderers-abstract`, `utf8-model-is-the-encoder`, `canon-unit-spelling`, `column-int-layouts`, `column-codec-abstractions`, `capability-body-total`, `capability-sections-parameters-abstract`, `capability-pipeline-body-total`, `query-codec-column-premises`, `propagation-ops-model-bridge`, `propagation-evaluator-total`, `write-gate-model-bridge`, `column-vector-is-its-contents`, `decode-layer-round-trip-premises`, `decode-layer-refusal-premises`, `decode-layer-model-bridge`, `index-node-is-its-record`, `op-stream-load-premises`, `op-stream-load-model-bridge`
+- no model (39): `independence-diamond`, `dag-outside-the-model`, `extractor-and-compiler-trusted`, `sets-are-lists`, `node-ids-distinct`, `content-id-determines-content`, `chain-walk-order-is-productions`, `signature-binds-one-head`, `parser-float-readback-opaque`, `parser-alphabet-bridge`, `lawful-abstract-witness`, `witness-surface-scope`, `canon-numeral-layouts`, `canon-key-comparator`, `canon-character-bridge`, `capability-scalar-readers-abstract`, `capability-key-renderers-abstract`, `propagation-change-set-and-prior`, `propagation-prior-blind`, `propagation-read-witness`, `query-renderers-abstract`, `utf8-model-is-the-encoder`, `canon-unit-spelling`, `column-int-layouts`, `column-codec-abstractions`, `capability-body-total`, `capability-sections-parameters-abstract`, `capability-pipeline-body-total`, `query-codec-column-premises`, `propagation-ops-model-bridge`, `propagation-evaluator-total`, `write-gate-model-bridge`, `column-vector-is-its-contents`, `decode-layer-round-trip-premises`, `decode-layer-refusal-premises`, `decode-layer-model-bridge`, `index-node-is-its-record`, `op-stream-load-premises`, `op-stream-load-model-bridge`
 
 ### policy
 

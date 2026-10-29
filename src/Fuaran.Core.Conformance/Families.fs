@@ -252,7 +252,7 @@ module Families =
           Unconditional "each iteration rebuilds a drawn node and re-reads every accessor",
           none "accessor round-trips only; no apply, no refusal path",
           ""
-          ("Conformance.opAlgebra", tree, BaseRun, [ "tree-algebra-well-formed-states" ]),
+          ("Conformance.opAlgebra", tree, BaseRun, []),
           Guarded [ "accepted"; "refused" ],
           drawn
               "canApply ≡ apply and totality read both outcomes; genOp DRAWS refusals, and the collision arm BUILDS them only where the witness can carry a multi-node subtree",

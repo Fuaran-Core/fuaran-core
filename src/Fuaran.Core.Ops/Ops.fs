@@ -1805,6 +1805,15 @@ module Ops =
                 | Some r -> Error r
                 | None -> Ok())
 
+    /// The base's own verdict, taken once at each public entry: the first id `root` carries twice
+    /// over the walk the scope locates through, or `None` for an id-unique base. `Tree.wellFormed`
+    /// over `s.Locate` is `Tree.wellFormedKeyed` under a keyed scope, as `Arbitration.arbitrate` and
+    /// `Diff.toOps` read it; the engine's steps assume what this establishes.
+    let private baseRefusal (s: Walks<'Node, 'Id>) (root: 'Node) : 'Id option =
+        match Tree.wellFormed s.Locate s.Ids root with
+        | Tree.RepeatedId d -> Some d
+        | Tree.Structural -> None
+
     /// Apply one skeleton op under `policy` and `scope` (Phase 517). Every failure is a typed
     /// `Rejection`, never an exception (GP4).
     ///
@@ -1831,13 +1840,28 @@ module Ops =
     /// (`StillReferenced`). A reference an insert or a rewrite brings in is not refused: whether it
     /// resolves is `Validator.referenceIntegrity`'s report. With `fun _ -> None` as its grammar a
     /// policy answers exactly what `Policy.none` answers.
+    ///
+    /// **The base.** A `root` carrying one id twice, over the walk the scope locates through, is
+    /// refused before any step is read: `DuplicateId d`, `d` the first id the preorder carries twice
+    /// (`Tree.wellFormed`'s verdict, `Tree.wellFormedKeyed`'s under a keyed scope). It is the check
+    /// every other entry a tree takes into the algebra already makes — `Tree.Index.build`,
+    /// `Arbitration.arbitrate` / `arbitrateIn` (`Inapplicable(0, DuplicateId d)`), `Diff.toOps` —
+    /// and with it here the ladder's input hypothesis (`tree-algebra-well-formed-states`) is
+    /// discharged at every entry: a tree the engine accepts was id-unique, and by
+    /// `apply_preserves_wf` (`proofs/Preservation.fst`) the tree it returns is. On an id-unique base
+    /// the check finds nothing and nothing else changes; it is made once per public entry, never per
+    /// step of a `Batch` or a script, because preservation carries the invariant across the steps.
     let apply
         (policy: Policy<'Node, 'Id>)
         (scope: OpScope<'Node, 'Id>)
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<'Node, Rejection<'Id>> =
-        stepWith policy (canHoldOf scope) (walksOf scope) op root
+        let s = walksOf scope
+
+        match baseRefusal s root with
+        | Some d -> Error(DuplicateId d)
+        | None -> stepWith policy (canHoldOf scope) s op root
 
     /// Dry-run validation (Phase 246): would `op` be accepted against `root` under `policy` and
     /// `scope`? The exact `Rejection` `apply` would return, and no new tree built for a non-batch op
@@ -1850,7 +1874,11 @@ module Ops =
         (op: SkeletonOp<'Node, 'Id>)
         (root: 'Node)
         : Result<unit, Rejection<'Id>> =
-        checkWith policy (canHoldOf scope) (walksOf scope) op root
+        let s = walksOf scope
+
+        match baseRefusal s root with
+        | Some d -> Error(DuplicateId d)
+        | None -> checkWith policy (canHoldOf scope) s op root
 
     /// Apply a sequence non-atomically (Phase 160) under `policy` and `scope`, threading the tree.
     ///
@@ -1868,7 +1896,16 @@ module Ops =
         : Result<'Node, ScriptRejection<'Node, 'Id>> =
         let canHold = canHoldOf scope
         let s = walksOf scope
-        script (fun node o -> stepWith policy canHold s o node) ops root
+
+        match baseRefusal s root with
+        | Some d ->
+            // The base's refusal, not an op's: nothing applied, and the tree offered is the one
+            // returned — the shape `Arbitration.arbitrate` gives the same base.
+            Error
+                { Applied = 0
+                  Rejection = DuplicateId d
+                  Tree = root }
+        | None -> script (fun node o -> stepWith policy canHold s o node) ops root
 
     /// Dry-run a sequence (Phase 246): the 0-based index of the first refused op and its envelope,
     /// exactly as `applyAll` under the same policy and scope would report them, and no tree returned.
@@ -1883,4 +1920,7 @@ module Ops =
         : Result<unit, int * Rejection<'Id>> =
         let canHold = canHoldOf scope
         let s = walksOf scope
-        dryRun (stepWith policy canHold s) ops root
+
+        match baseRefusal s root with
+        | Some d -> Error(0, DuplicateId d)
+        | None -> dryRun (stepWith policy canHold s) ops root

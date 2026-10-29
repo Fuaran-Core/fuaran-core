@@ -965,14 +965,34 @@
     },
     {
       "id": "tree-algebra-well-formed-states",
-      "level": "assumed",
-      "statement": "The tree the algebra runs over carries each id at most once — a hypothesis about the INPUT alone. It is a hypothesis rather than an oversight: the lookup that resolves an id returns the FIRST match in document order, so on a tree carrying one id twice what it returns is a fact about the order as well as the contents — and a reorder moves the order, which makes the diamond FALSE there rather than merely unproved. Preservation is not assumed: it is a theorem, `apply-preserves-wf`, so a tree that starts id-unique stays id-unique under every accepted operation.",
-      "boundary": "What remains unenforced is the entry point, and only the entry point: nothing downstream produces such a tree and the structural diff refuses one outright, but no shipped type carries the invariant. A shipped type or entry-point check carrying it would discharge the assumption.",
-      "phase": "fuaran-core#133",
-      "class": "domain-obligation",
-      "dischargedBy": "Conformance.opAlgebra",
+      "level": "tested",
+      "statement": "The tree the algebra runs over carries each id at most once, and that is no longer a hypothesis about the input: every public entry a tree takes into the skeleton-op algebra refuses a base carrying one id twice, as `DuplicateId d` naming the first id the preorder carries twice over the walk the scope locates through (`Tree.wellFormed`; `Tree.wellFormedKeyed` under a keyed scope) — `Ops.apply`, `Ops.canApply`, `Ops.applyAll` and `Ops.canApplyAll` (at position 0, the tree returned untouched), `Tree.Index.build`, `Arbitration.arbitrate` / `arbitrateIn` (every proposal `Inapplicable(0, DuplicateId d)`) and `Diff.toOps` (on either side). So a tree the engine accepts was id-unique, and by `apply-preserves-wf` the tree it returns is: the premise the fold and diamond theorems carry (`requires wf t`) is established at the entry by construction, and the fold holds no tree of its own — a tree reaches it only through the stream witness's apply, which is this entry. Why the premise mattered: the lookup that resolves an id returns the FIRST match in document order, so on a tree carrying one id twice what it returns is a fact about the order as well as the contents — and a reorder moves the order, which makes the diamond FALSE there rather than merely unproved.",
+      "boundary": "The entry check is production code held by its suite and a standing go-red, never proved: the model's `apply` carries no base guard, and its theorems state the invariant as a premise the checked entry now meets, so the bridge is this row and the suite rather than a theorem. The check reads the walk the scope locates through: under an unkeyed scope a repeat held only in a keyed position is invisible, exactly as `Tree.wellFormed` is. Two entries check no base by design and say so: `Arbitration.arbitrateWith`, which takes a caller's own `canApply` (handed `Ops.canApplyAll` it refuses as `arbitrate` does; handed a blind one it admits, which is the suite's go-red), and a domain's own decoder, whose tree reaches the algebra only through the entries above. No shipped type carries the invariant: the refusal was chosen over a carrier type, which would narrow every signature that takes a tree.",
+      "phase": "fuaran-core#586",
       "evidence": {
-        "assumption": "the tree the fold runs over carries each id at most once"
+        "family": "Suite:WellFormedEntryTests.wellFormedEntryTests",
+        "host": "tests/Fuaran.Core.Tests/WellFormedEntryTests.fs",
+        "model": "proofs/Preservation.fst",
+        "cases": [
+          "Ops.apply refuses a base carrying one id twice, under every scope and for every op kind",
+          "an id-unique base is untouched: the same ops are accepted on sample()",
+          "under a keyed scope the repeat is seen across the keyed walk, and only there",
+          "Ops.canApply, applyAll and canApplyAll refuse the same base at position 0, the tree untouched",
+          "Tree.Index.build refuses the base, naming the same id",
+          "Arbitration.arbitrate and arbitrateIn refuse the base: every proposal Inapplicable at 0, nothing accepted",
+          "Diff.toOps refuses a repeated id on either side",
+          "the standing go-red: arbitrateWith handed a blind canApply admits the base the scope-taking entries refuse"
+        ],
+        "operations": [
+          "Ops.apply",
+          "Ops.canApply",
+          "Ops.applyAll",
+          "Ops.canApplyAll",
+          "Tree.Index.build",
+          "Arbitration.arbitrate",
+          "Arbitration.arbitrateIn",
+          "Diff.toOps"
+        ]
       }
     },
     {

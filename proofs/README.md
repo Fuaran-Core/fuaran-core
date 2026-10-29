@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 396 claims — 285 proved (284 across 37 models, 1 a host's own proof), 64 tested, 45 assumed (9 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
+**The ladder, counted:** 396 claims — 285 proved (284 across 37 models, 1 a host's own proof), 65 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -65,7 +65,7 @@ rows offered neither, by model, as the worklist for new families.
 
 Every ladder in this directory ends at level 3 — **assumed, and stated as such** — and until
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
-is not enough, because the 45 assumed rows across these ladders are four different kinds of thing
+is not enough, because the 44 assumed rows across these ladders are four different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
 every `assumed` row, from a closed set of four, and this section is that classification in one
 place together with the contract it implies.
@@ -74,7 +74,7 @@ place together with the contract it implies.
   the theorems carry about the domain they are generic over. Each row names a **`dischargedBy`**
   law: a function of the shipped `Fuaran.Core.Conformance` kit whose green run **at your own
   witness** is the discharge. The discharge is SAMPLED and never a proof — the kit draws a
-  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 9 rows.
+  seed-replayable sample, and "sampled, never proved" is what level 3 means here. 8 rows.
 - **`model-bridge` — what THIS repository's model has not bridged, and what you inherit whether
   you run anything or not.** Gaps between the F\* model and the F# that ships: a numeric carrier
   the extraction cannot represent, a host-side mapping that is one line per case and is not itself
@@ -117,7 +117,6 @@ the `Proofs.Ladder` family holds them); edit the ladder, never these.
 | `extractor-and-compiler-trusted` | `premise` | — |
 | `sets-are-lists` | `model-bridge` | `permanent` |
 | `node-ids-distinct` | `premise` | — |
-| `tree-algebra-well-formed-states` | `domain-obligation` | `Conformance.opAlgebra` |
 | `content-id-determines-content` | `premise` | — |
 | `chain-walk-order-is-productions` | `model-bridge` | `permanent` |
 | `signature-binds-one-head` | `model-bridge` | `unscheduled` |
@@ -1576,7 +1575,7 @@ kept, which is everything the shipped op can do that the algebra can see.
 
   _Boundary:_ Agreement over the sampled cases only, never over all inputs; production is compared through the model's view of a node, an encoder that reads nothing (`index-node-is-its-record`).
 
-**Rests on, or is bounded by:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Rests on, or is bounded by:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 **Inherited through the models it opens:** [`sets-are-lists`](#row-sets-are-lists) (assumed).
 
@@ -1610,7 +1609,7 @@ kept, which is everything the shipped op can do that the algebra can see.
 
   _Boundary:_ This is the same pinned over-approximation `RemoveNode` and `MoveNode` pay, a precision limit of the current record rather than a real conflict between the updates; tightening it is a change to the `Footprint` record.
 
-**Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed).
+**Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed).
 
 **Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
@@ -2119,7 +2118,13 @@ Phase 137 shipped) is imported rather than remodelled, and this module adds `Ops
 
   _Boundary:_ What is closed is the absence of ANY container-aware sequence surface, not the plain pair's blindness — the plain pair is blind by construction, and changing that would move every existing caller.
 
-**Tested** (3)
+**Tested** (4)
+
+- <a id="row-tree-algebra-well-formed-states"></a>**`tree-algebra-well-formed-states`** — `Suite:WellFormedEntryTests.wellFormedEntryTests`, 8 cases · fuaran-core#586
+
+  The tree the algebra runs over carries each id at most once, and that is no longer a hypothesis about the input: every public entry a tree takes into the skeleton-op algebra refuses a base carrying one id twice, as `DuplicateId d` naming the first id the preorder carries twice over the walk the scope locates through (`Tree.wellFormed`; `Tree.wellFormedKeyed` under a keyed scope) — `Ops.apply`, `Ops.canApply`, `Ops.applyAll` and `Ops.canApplyAll` (at position 0, the tree returned untouched), `Tree.Index.build`, `Arbitration.arbitrate` / `arbitrateIn` (every proposal `Inapplicable(0, DuplicateId d)`) and `Diff.toOps` (on either side). So a tree the engine accepts was id-unique, and by `apply-preserves-wf` the tree it returns is: the premise the fold and diamond theorems carry (`requires wf t`) is established at the entry by construction, and the fold holds no tree of its own — a tree reaches it only through the stream witness's apply, which is this entry. Why the premise mattered: the lookup that resolves an id returns the FIRST match in document order, so on a tree carrying one id twice what it returns is a fact about the order as well as the contents — and a reorder moves the order, which makes the diamond FALSE there rather than merely unproved.
+
+  _Boundary:_ The entry check is production code held by its suite and a standing go-red, never proved: the model's `apply` carries no base guard, and its theorems state the invariant as a premise the checked entry now meets, so the bridge is this row and the suite rather than a theorem. The check reads the walk the scope locates through: under an unkeyed scope a repeat held only in a keyed position is invisible, exactly as `Tree.wellFormed` is. Two entries check no base by design and say so: `Arbitration.arbitrateWith`, which takes a caller's own `canApply` (handed `Ops.canApplyAll` it refuses as `arbitrate` does; handed a blind one it admits, which is the suite's go-red), and a domain's own decoder, whose tree reaches the algebra only through the entries above. No shipped type carries the invariant: the refusal was chosen over a carrier type, which would narrow every signature that takes a tree.
 
 - <a id="row-preservation-differential"></a>**`preservation-differential`** — `Proofs.Oracle`, 3 cases · fuaran-core#138
 
@@ -2139,7 +2144,7 @@ Phase 137 shipped) is imported rather than remodelled, and this module adds `Ops
 
   _Boundary:_ Agreement is over the pool drawn, never over all inputs. The predicate is drawn because the theorems quantify over it, and a run against one hand-picked instance certifies that instance and nothing about the quantifier.
 
-**Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed).
+**Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed).
 
 **Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
@@ -2169,7 +2174,7 @@ Phase 137 shipped) is imported rather than remodelled, and this module adds `Ops
 
   _Boundary:_ Holds only for footprints declared disjoint, both operations applicable, and an id-unique tree (`tree-algebra-well-formed-states`). Within the model; the correspondence to production is the differential's and the extractor's (premise `extractor-and-compiler-trusted`).
 
-**Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed).
+**Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed).
 
 **Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
@@ -2289,7 +2294,7 @@ same oracle assembly.
 
   _Boundary:_ Agreement is over the pool drawn, never over all inputs. The pool is constrained so that a node's content is a function of its id — a property of the problem rather than of the generator, because `Diff.toOps` is a shape diff that emits no `UpdateNode` (the operation alphabet has rewritten a node in place since fuaran-core#250; this diff does not), and a pair whose shared id carries different content in each tree is unreconstructible by any script it emits; measured, not assumed: a generator that redrew content reconstructed 1,738 of 4,000 pairs and the corrected one 20,000 of 20,000. That constraint is the proved theorem's `kinds_agree` hypothesis, so the pool and the statement quantify over the same pairs. The removes-first go-red loses on only some pairs, by design: the permutation is harmless where the removed regions hold no survivor, and the order buys correctness on the rest. Rejection PAYLOADS are not compared beyond the class and the offender a `TargetNotAContainer` names: `UnknownNode`'s `addressable` list is outside the comparison. Kit side, `Conformance.diffContainedLaws` certifies contained-diff scripts through the contained `applyAll` / `canApplyAll` under the witness's own predicate (`diffLaws` uses the plain pair, which fuaran-core#160 proved blind to containment); its refusal-exactness law's demanding direction was measured: 100 of 200 iterations mint a violating probe, all 100 are refused with the offender named by id and kind, and all 100 are accepted by the plain diff.
 
-**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 ### `Limits`
 
@@ -3646,7 +3651,7 @@ run threads `TreeOps.apply`, the footprint is `TreeOps.fp_all` and independence 
 
 **Rests on, or is bounded by:** [`arbitration-pinned-order`](#row-arbitration-pinned-order) (policy).
 
-**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 ### `DecimalText`
 
@@ -3816,7 +3821,7 @@ dispatch — a `Batch` is normalised inside first and dropped when empty. The sc
 
 **Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`lawful-abstract-witness`](#row-lawful-abstract-witness) (assumed).
 
-**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 ### `VocabularyVectors`
 
@@ -3905,7 +3910,7 @@ PARAMETER (`rd`, F#: the caller's `readsOf`), any function of the node and its s
 
 **Rests on, or is bounded by:** [`propagation-change-set-and-prior`](#row-propagation-change-set-and-prior) (assumed), [`propagation-ops-model-bridge`](#row-propagation-ops-model-bridge) (assumed).
 
-**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 ### `TreeFrame`
 
@@ -3975,7 +3980,7 @@ The definition is over the model's own tree and takes no parameter.
 
 **Rests on, or is bounded by:** [`write-gate-model-bridge`](#row-write-gate-model-bridge) (assumed).
 
-**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`tree-algebra-well-formed-states`](#row-tree-algebra-well-formed-states) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
+**Inherited through the models it opens:** [`independence-diamond`](#row-independence-diamond) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`sets-are-lists`](#row-sets-are-lists) (assumed), [`witness-surface-scope`](#row-witness-surface-scope) (assumed), [`index-node-is-its-record`](#row-index-node-is-its-record) (assumed).
 
 ### `ColumnRefinement`
 
@@ -4275,7 +4280,7 @@ under fuel), `after`, the uncovered-node refusal, the side parents and the band.
 
 The rows no model section carries. An `assumed` row is classed in the contract table above; a model section links each one its rows rest on.
 
-**Assumed** (45)
+**Assumed** (44)
 
 - <a id="row-independence-diamond"></a>**`independence-diamond`** — `domain-obligation` · discharged by `Conformance.footprintLawsAt` · fuaran-core#132
 
@@ -4316,14 +4321,6 @@ The rows no model section carries. An `assumed` row is classed in the contract t
   _Assumes:_ Dag.nodeHash is injective on the nodes a store holds — (sorted parents, actor, encoded op) of two held nodes never mint one id; append refuses a differing node and verifyDag re-checks every key.
 
   _Boundary:_ What is left assumed is only that two nodes a store actually holds do not share an id under a hash collision the store never saw offered. Under the 32-bit FNV-1a default a collision among offered nodes is a real event (about 0.3% at 5,000 nodes, even odds near 77,000): what that costs is a REFUSED append, never a silently replaced node.
-
-- <a id="row-tree-algebra-well-formed-states"></a>**`tree-algebra-well-formed-states`** — `domain-obligation` · discharged by `Conformance.opAlgebra` · fuaran-core#133
-
-  The tree the algebra runs over carries each id at most once — a hypothesis about the INPUT alone. It is a hypothesis rather than an oversight: the lookup that resolves an id returns the FIRST match in document order, so on a tree carrying one id twice what it returns is a fact about the order as well as the contents — and a reorder moves the order, which makes the diamond FALSE there rather than merely unproved. Preservation is not assumed: it is a theorem, `apply-preserves-wf`, so a tree that starts id-unique stays id-unique under every accepted operation.
-
-  _Assumes:_ the tree the fold runs over carries each id at most once.
-
-  _Boundary:_ What remains unenforced is the entry point, and only the entry point: nothing downstream produces such a tree and the structural diff refuses one outright, but no shipped type carries the invariant. A shipped type or entry-point check carrying it would discharge the assumption.
 
 - <a id="row-content-id-determines-content"></a>**`content-id-determines-content`** — `premise` · fuaran-core#145
 

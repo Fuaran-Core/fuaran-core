@@ -105,6 +105,7 @@
     <Compile Include="MergeTests.fs" />
     <Compile Include="ArbitrationTests.fs" />
     <Compile Include="KeyedArbitrationTests.fs" />
+    <Compile Include="WellFormedEntryTests.fs" />
     <Compile Include="KeyedSlotFoldTests.fs" />
     <Compile Include="SlotFootprintTests.fs" />
     <Compile Include="LightSetTests.fs" />
