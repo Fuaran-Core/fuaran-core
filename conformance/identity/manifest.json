@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "description": "A Core-owned line table (Phase 568). SELF-ENUMERATED, as apply/ is: not indexed by the corpus root manifest.json. `vectors` counts the table's lines, each one vector. `adoption` is per host and is DATA: a host whose entry reads `proposed` reports the family BY NAME rather than skipping it, and flips its own entry in the change-set that lands its leg. This manifest is authoritative for the line count.",
+  "families": [
+    { "id": "identity", "kind": "line-vectors", "file": "identity.json", "vectors": 9, "adoption": { "fuaran": { "status": "adopted", "cases": 9 }, "fuaran-ts": { "status": "proposed" }, "fuaran-py": { "status": "proposed" }, "fuaran-go": { "status": "proposed" }, "fuaran-rs": { "status": "proposed" }, "fuaran-core-rs": { "status": "proposed" }, "fuaran-core-go": { "status": "proposed" }, "fuaran-core-py": { "status": "proposed" } }, "description": "The identity of a declared record: its content address under a named profile of its canonical form under its vocabulary (docs/identity-rule.md), over a reference vocabulary that is a fixture, not a Core type." }
+  ]
+}

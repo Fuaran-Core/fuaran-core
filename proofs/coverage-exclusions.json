@@ -2288,15 +2288,6 @@
     },
     {
       "members": [
-        "ContentAddress.ofValue",
-        "ContentAddress.ofCanonicalText"
-      ],
-      "class": "measured-elsewhere",
-      "reason": "The profile-pinned constructor (Phase 382, D122 route B): SHA-256 over `Canonical`'s guarded text under the named profile, pinned under both profiles with the positive control that a control character moves the digest, and held to every stored result hash in the apply corpus; its refusals are `Canonical.tryWrite`'s and `isCanonical`'s.",
-      "standIn": "tests/Fuaran.Core.Tests/CodecTests.fs"
-    },
-    {
-      "members": [
         "Dag.ofNodes"
       ],
       "class": "measured-elsewhere",

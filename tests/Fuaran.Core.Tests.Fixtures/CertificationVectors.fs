@@ -264,3 +264,118 @@ let emitVectors () : int =
         File.WriteAllText(vectorsFile (), text.Replace("\r\n", "\n"), Text.UTF8Encoding false)
         printfn "regenerated %s" (vectorsFile ())
         0
+
+// ---------------------------------------------------------------------------
+// The identity rule's vectors (Phase 578, `docs/identity-rule.md`): declared values, as a JSON text in
+// the order an author happened to write them, mapped to their address under a named profile over the
+// reference vocabulary (`IdentityIdl`). Committed as `conformance/identity/identity.json`.
+// ---------------------------------------------------------------------------
+
+/// One identity vector: its name, the profile it mints under, and the record as a host receives it.
+type IdentityVector =
+    { Name: string
+      Profile: EncodingProfile
+      Input: string }
+
+/// The method digest every vector shares.
+let private identityMethod =
+    "sha256:" + Hash.sha256Hex "ordinary least squares, revision 3"
+
+/// The record's members as an author wrote them, in the order given.
+let private identityText (members: (string * JVal) list) =
+    Canonical.write Rendering.V2 (JObj members)
+
+let private sources (xs: string list) = JArr(xs |> List.map JStr)
+
+let private plainSources = [ "ledger/2026-q3#a1"; "survey/2026-09#b2" ]
+
+let private tagged (members: (string * JVal) list) =
+    ("$type", JStr IdentityIdl.RecordTag) :: members
+
+/// The base record in declaration order, under `profile`.
+let private baseOf (name: string) (profile: EncodingProfile) (srcs: string list) : IdentityVector =
+    { Name = name
+      Profile = profile
+      Input =
+        identityText (
+            tagged
+                [ "method", JStr identityMethod
+                  "sources", sources srcs
+                  "value", JStr "12.34" ]
+        ) }
+
+/// The vectors, in table order. Each pair the rule speaks of is `identityRelations`.
+let identityVectors: IdentityVector list =
+    let v2 = EncodingProfile.V2
+    let lineFeed = [ "ledger/2026-q3\na1"; "survey/2026-09#b2" ]
+
+    [ baseOf "declared order" v2 plainSources
+      { Name = "members permuted"
+        Profile = v2
+        Input =
+          identityText (
+              [ "value", JStr "12.34"
+                "sources", sources plainSources
+                "$type", JStr IdentityIdl.RecordTag
+                "method", JStr identityMethod ]
+          ) }
+      { Name = "unit at its default, written"
+        Profile = v2
+        Input =
+          identityText (
+              tagged
+                  [ "method", JStr identityMethod
+                    "sources", sources plainSources
+                    "value", JStr "12.34"
+                    "unit", JStr IdentityIdl.DefaultUnit ]
+          ) }
+      { Name = "unit present, not its default"
+        Profile = v2
+        Input =
+          identityText (
+              tagged
+                  [ "method", JStr identityMethod
+                    "sources", sources plainSources
+                    "value", JStr "12.34"
+                    "unit", JStr "kg" ]
+          ) }
+      { Name = "value one digit apart"
+        Profile = v2
+        Input =
+          identityText (
+              tagged
+                  [ "method", JStr identityMethod
+                    "sources", sources plainSources
+                    "value", JStr "12.35" ]
+          ) }
+      baseOf "sources in another order" v2 (List.rev plainSources)
+      baseOf "declared order, profile v1" EncodingProfile.V1 plainSources
+      baseOf "a source carrying a line feed, profile v1" EncodingProfile.V1 lineFeed
+      baseOf "a source carrying a line feed, profile v2" v2 lineFeed ]
+
+/// The pairs the rule makes a claim about: two vector names and whether their addresses are equal.
+let identityRelations: (string * string * bool) list =
+    [ "declared order", "members permuted", true
+      "declared order", "unit at its default, written", true
+      "declared order", "unit present, not its default", false
+      "declared order", "value one digit apart", false
+      "declared order", "sources in another order", false
+      "declared order", "declared order, profile v1", true
+      "a source carrying a line feed, profile v1", "a source carrying a line feed, profile v2", false ]
+
+/// One vector's canonical text under its profile and its address, the rule applied: read through the
+/// vocabulary, take the canonical form, render it under the profile, hash it.
+let identityAnswer (v: IdentityVector) : Result<string * string, string> =
+    IdentityIdl.read v.Input
+    |> Result.bind IdentityIdl.canonicalValue
+    |> Result.bind (fun canonical ->
+        IdentityIdl.address v.Profile canonical
+        |> Result.map (fun address -> Canonical.write (Rendering.ofProfile v.Profile) canonical, address))
+
+/// The table's lines: name, profile, input, canonical text, address, separated by one TAB.
+let identityLines () : string list =
+    [ for v in identityVectors do
+          match identityAnswer v with
+          | Ok(canonical, address) ->
+              yield String.Join("\t", [ v.Name; EncodingProfile.name v.Profile; v.Input; canonical; address ])
+          | Error e -> failwithf "identity vector '%s': %s" v.Name e ]

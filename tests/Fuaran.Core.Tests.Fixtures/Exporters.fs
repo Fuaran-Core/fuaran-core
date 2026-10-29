@@ -76,6 +76,42 @@ let private ownLawIndex (dir: string) : (string * string) list =
         []
 
 /// The table, given the reference run that measures the `families` row's `cases` column.
+/// The identity rule's table (Phase 578, `docs/identity-rule.md`) and its self-enumerated index:
+/// `CertificationVectors.identityLines` over the reference vocabulary `IdentityIdl`.
+module private IdentityCorpus =
+
+    let familyDirName = "identity"
+    let fileName = "identity.json"
+
+    let private summary =
+        "The identity of a declared record: its content address under a named profile of its canonical form under its vocabulary (docs/identity-rule.md), over a reference vocabulary that is a fixture, not a Core type."
+
+    let private description =
+        "Identity vectors (Phase 578). The identity of a declared record is the content address, under a named encoding profile, of the value its canonical form under its vocabulary reads as: members in the vocabulary's canonical order, absent optionals omitted, a member at its default not written. The vocabulary is a fixture shaped like a provenance record, a $type-tagged value with a method digest, a list of source fingerprints, a value written as canonical decimal text, and a unit omitted at its default 1. Each entry of `lines` is one line of the table, five fields separated by one TAB (U+0009), no field carrying a TAB or a line break: the vector's name; the profile (v1 or v2); the record as a host receives it, members in the order its author wrote them; its canonical text under the profile; and its address, sha256: and the lower-case hex SHA-256 of that text's UTF-8 bytes. A host reads the input through the vocabulary, takes the canonical form, renders it under the profile and hashes it, and gets the address, byte for byte."
+
+    let render () : string =
+        CorpusFile.render
+            { Head =
+                [ "family", CorpusFile.str "identity"
+                  "description", CorpusFile.str description
+                  "format", CorpusFile.str "name<TAB>profile<TAB>input<TAB>canonical<TAB>address"
+                  // A line carries no member, so the stamp is the file's, for every line (Phase 478): no
+                  // extracted model renders under a store profile, so the reference answers the table.
+                  "answeredBy", CorpusFile.answeredBy AnsweredBy.Reference ]
+              Items = "lines"
+              Rows = CertificationVectors.identityLines () |> List.map CorpusFile.str }
+
+    let path (dir: string) =
+        Path.Combine(dir, familyDirName, fileName)
+
+    let renderManifest () : string =
+        LineFamilyManifest.manifest "identity" fileName (List.length (CertificationVectors.identityLines ())) summary
+        |> CorpusFile.manifest
+        |> CorpusFile.render
+
+    let manifestPath (dir: string) =
+        LineFamilyManifest.manifestPath familyDirName dir
+
 let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list =
     [ { Family = "laws"
         Root = OwnedConformance.root
@@ -181,6 +217,17 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
       { Family = "premises"
         Root = OwnedConformance.root
         Files = PremiseProbeExport.files
+        FilesAt = None
+        Write = None
+        SharedIndexes = fun _ -> []
+        Freshness = Bytes }
+      // Phase 578 — the identity rule's table and its self-enumerated index, held byte for byte.
+      { Family = "identity"
+        Root = OwnedConformance.root
+        Files =
+          fun dir ->
+              [ IdentityCorpus.path dir, IdentityCorpus.render ()
+                IdentityCorpus.manifestPath dir, IdentityCorpus.renderManifest () ]
         FilesAt = None
         Write = None
         SharedIndexes = fun _ -> []

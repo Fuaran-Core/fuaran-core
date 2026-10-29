@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 395 claims — 285 proved (284 across 37 models, 1 a host's own proof), 63 tested, 45 assumed (9 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
+**The ladder, counted:** 396 claims — 285 proved (284 across 37 models, 1 a host's own proof), 64 tested, 45 assumed (9 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -391,7 +391,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.AiSurface` | 26 | 0 | 14 | 1 | 0 | 0 | 0 | 11 |
 | `Fuaran.Core.Column` | 124 | 47 | 51 | 3 | 0 | 0 | 0 | 23 |
 | `Fuaran.Core.Conformance` | 165 | 2 | 107 | 2 | 6 | 0 | 0 | 48 |
-| `Fuaran.Core.ContentAddress` | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 2 |
+| `Fuaran.Core.ContentAddress` | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Function` | 185 | 42 | 87 | 5 | 0 | 0 | 0 | 51 |
 | `Fuaran.Core.Idl` | 73 | 0 | 6 | 1 | 1 | 0 | 0 | 65 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
@@ -409,7 +409,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 64 | 0 | 25 | 3 | 0 | 0 | 0 | 36 |
 | `Fuaran.Core.Wire` | 144 | 67 | 11 | 3 | 4 | 0 | 0 | 59 |
-| **Total** | 1313 | 320 | 427 | 38 | 15 | 0 | 3 | 510 |
+| **Total** | 1313 | 322 | 427 | 38 | 15 | 0 | 3 | 508 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -4650,7 +4650,7 @@ The rows no model section carries. An `assumed` row is classed in the contract t
 
   _Boundary:_ A posture, not a theorem: argued for nowhere in this directory, no theorem addresses it, no ranking or quality judgement is modelled, and `arbitration-maximal-is-not-maximum` is the measured cost of it.
 
-**Tested beyond a model** (7)
+**Tested beyond a model** (8)
 
 - <a id="row-footprint-in-laws"></a>**`footprint-in-laws`** — `Conformance.footprintInLawsAt`, 3 cases · fuaran-core#500
 
@@ -4681,6 +4681,12 @@ The rows no model section carries. An `assumed` row is classed in the contract t
   The lane store, sampled on drawn multi-writer stores: `Dag.loadLanes` of `Dag.lanesToJsonl` is the store and its union is `fromJsonl` of the lane texts concatenated; the lane files read in any order load, order and replay identically; `totalOrderBy` is a linear extension at the default key and a drawn one, and restricts to every head's `tryTopoOrder` at a constant key; `laneCollisions` names exactly a lane handed a second, incomparable node and `loadLanes` refuses a node two lane files hold with different content; `appendOn` over the heads in any order mints `mergeAll`'s id, and the history below it is the folded binary merges' without their merge nodes, in the same drain order; `commonBase` is order-free and is `mergeBase` at two heads; `Dag.rehash` to SHA-256 verifies there and rehashes back to the store, and refuses an unverified one; `verifyLanes` names the lane of a changed node; and a DAG pruned of `prunable` keeps every retained root's replay, order and verification.
 
   _Boundary:_ Agreement over the drawn stores only, never over all inputs. A sample without a cross-lane merge, two heads, a lane fork or a content collision reds the family's guard rather than reading green.
+
+- <a id="row-declared-record-identity"></a>**`declared-record-identity`** — `Suite:IdentityRuleTests.identityTests`, 4 cases · fuaran-core#578
+
+  THE IDENTITY OF A DECLARED RECORD (`docs/identity-rule.md`). The identity of a record declared through a vocabulary is `ContentAddress.ofValue` under a NAMED `EncodingProfile` of the value its canonical form under that vocabulary reads as: members in the vocabulary's canonical order, an absent optional member omitted, a member at its declared default not written. Measured at the reference over the reference vocabulary's `identity` table: every line re-mints byte for byte through the shipped constructor; members permuted on input mint one address; a default written and a default left out mint one address; a member present against absent, a value one digit apart and a list in another order mint two; one value under `v1` and `v2` mints two digests where a string carries a line feed and one where none does; and under `v2` the address is `ContentAddress.ofCanonicalText` of the vocabulary's own canonical bytes.
+
+  _Boundary:_ Sampled over one reference vocabulary and its committed vectors, never proved. It inherits and does not re-prove `canonical-digest-preimage-injective` (under `v2`, for a vocabulary in the default Ordinal key order, the canonical text of a value with finite numbers and well-formed strings is the cross-host rendering that row is about) and, for a value written as decimal text, `decimal-text-one-number-one-text`; under `v1` no injectivity row applies. NOT claimed: SHA-256's collision resistance; anything about what a record MEANS or which members a domain declares; that two vocabularies declaring the same members mint one address (a vocabulary's key order, tag and defaults are part of its canonical form); that the digest carries its profile's name (the identity is the pair of the profile and the address). Core declares no record vocabulary of its own: the reference vocabulary is a test fixture.
 
 - <a id="row-column-temporal-dotnet-edge"></a>**`column-temporal-dotnet-edge`** — `Suite:ColumnTests.temporalTests`, 1 case · fuaran-core#430
 

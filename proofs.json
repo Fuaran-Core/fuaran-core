@@ -6359,6 +6359,28 @@
       }
     },
     {
+      "id": "declared-record-identity",
+      "level": "tested",
+      "statement": "THE IDENTITY OF A DECLARED RECORD (`docs/identity-rule.md`). The identity of a record declared through a vocabulary is `ContentAddress.ofValue` under a NAMED `EncodingProfile` of the value its canonical form under that vocabulary reads as: members in the vocabulary's canonical order, an absent optional member omitted, a member at its declared default not written. Measured at the reference over the reference vocabulary's `identity` table: every line re-mints byte for byte through the shipped constructor; members permuted on input mint one address; a default written and a default left out mint one address; a member present against absent, a value one digit apart and a list in another order mint two; one value under `v1` and `v2` mints two digests where a string carries a line feed and one where none does; and under `v2` the address is `ContentAddress.ofCanonicalText` of the vocabulary's own canonical bytes.",
+      "boundary": "Sampled over one reference vocabulary and its committed vectors, never proved. It inherits and does not re-prove `canonical-digest-preimage-injective` (under `v2`, for a vocabulary in the default Ordinal key order, the canonical text of a value with finite numbers and well-formed strings is the cross-host rendering that row is about) and, for a value written as decimal text, `decimal-text-one-number-one-text`; under `v1` no injectivity row applies. NOT claimed: SHA-256's collision resistance; anything about what a record MEANS or which members a domain declares; that two vocabularies declaring the same members mint one address (a vocabulary's key order, tag and defaults are part of its canonical form); that the digest carries its profile's name (the identity is the pair of the profile and the address). Core declares no record vocabulary of its own: the reference vocabulary is a test fixture.",
+      "claim": "THE IDENTITY OF A DECLARED RECORD (`docs/identity-rule.md`). The identity of a record declared through a vocabulary is `ContentAddress.ofValue` under a NAMED `EncodingProfile` of the value its canonical form under that vocabulary reads as: members in the vocabulary's canonical order, an absent optional member omitted, a member at its declared default not written. Measured at the reference over the reference vocabulary's `identity` table: every line re-mints byte for byte through the shipped constructor; members permuted on input mint one address; a default written and a default left out mint one address; a member present against absent, a value one digit apart and a list in another order mint two; one value under `v1` and `v2` mints two digests where a string carries a line feed and one where none does; and under `v2` the address is `ContentAddress.ofCanonicalText` of the vocabulary's own canonical bytes. Sampled over one reference vocabulary and its committed vectors, never proved. It inherits and does not re-prove `canonical-digest-preimage-injective` (under `v2`, for a vocabulary in the default Ordinal key order, the canonical text of a value with finite numbers and well-formed strings is the cross-host rendering that row is about) and, for a value written as decimal text, `decimal-text-one-number-one-text`; under `v1` no injectivity row applies. NOT claimed: SHA-256's collision resistance; anything about what a record MEANS or which members a domain declares; that two vocabularies declaring the same members mint one address (a vocabulary's key order, tag and defaults are part of its canonical form); that the digest carries its profile's name (the identity is the pair of the profile and the address). Core declares no record vocabulary of its own: the reference vocabulary is a test fixture.",
+      "phase": "fuaran-core#578",
+      "evidence": {
+        "family": "Suite:IdentityRuleTests.identityTests",
+        "host": "tests/Fuaran.Core.Tests/IdentityRuleTests.fs",
+        "cases": [
+          "every committed vector re-mints through ContentAddress.ofValue, byte for byte",
+          "the pairs the rule names: one address where it says one, two where it says two",
+          "under v2 the address is the digest of the vocabulary's own canonical bytes",
+          "a record built in memory mints the address of the same record received as text"
+        ],
+        "operations": [
+          "ContentAddress.ofCanonicalText",
+          "ContentAddress.ofValue"
+        ]
+      }
+    },
+    {
       "id": "column-temporal-dotnet-edge",
       "level": "tested",
       "statement": "The .NET edge converts through the integers: `Column.ofDateOnlys` / `tryDateOnly` go through `DayNumber`, `ofDateTimeOffsets` / `tryDateTimeOffset` through `UtcTicks` in integer arithmetic; a tick finer than the column's unit is refused as the `TypeMismatch` naming the finer unit, and a nanosecond with no tick answers `None`.",

@@ -504,6 +504,10 @@
          library); a go-red per refusal, the verdict's labels, the schema and the page. Appended
          (append-only). -->
     <Compile Include="HostComplianceTests.fs" />
+    <!-- Phase 578 - the identity rule certified at the reference: each conformance/identity/ line
+         re-minted through ContentAddress.ofValue, the relations the rule names, and the tie to the
+         vocabulary's own canonical bytes. Appended (append-only). -->
+    <Compile Include="IdentityRuleTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

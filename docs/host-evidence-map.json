@@ -364,6 +364,7 @@
     {"id":"column-temporal-calendar","level":"proved","model":"Temporal","families":[],"oracle":[]},
     {"id":"column-temporal-encodings","level":"proved","model":"Temporal","families":[],"oracle":[]},
     {"id":"column-temporal-order","level":"proved","model":"Temporal","families":[],"oracle":[]},
+    {"id":"declared-record-identity","level":"tested","families":[],"oracle":[]},
     {"id":"column-temporal-dotnet-edge","level":"tested","families":[],"oracle":[]},
     {"id":"column-temporal-differential","level":"tested","model":"Temporal","families":[],"oracle":[]},
     {"id":"column-field-metadata","level":"tested","families":[],"oracle":[]},
@@ -427,6 +428,7 @@
   "referenceOnly": [
     {"family":"skeletonDiff","file":"conformance/diff/skeleton-diff.json","cases":14},
     {"family":"encodingProfile","file":"conformance/encoding/encoding-profiles.json","cases":47},
+    {"family":"identity","file":"conformance/identity/identity.json","cases":9},
     {"family":"canonicalFormLaws","file":"conformance/laws/canonical-form-laws.json","cases":20},
     {"family":"premiseFloatDigits","file":"conformance/premises/float-digits.json","cases":163},
     {"family":"premiseSha256","file":"conformance/premises/sha256.json","cases":17}

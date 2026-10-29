@@ -14,7 +14,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## Summary
 
-395 rows: 229 offered, 1 a host's own proof, 165 uncovered (proved 97, tested 26, assumed 40, policy 2).
+396 rows: 229 offered, 1 a host's own proof, 166 uncovered (proved 97, tested 27, assumed 40, policy 2).
 
 ## Offers, by model
 
@@ -111,7 +111,7 @@ A row naming no model (an `assumed` or `policy` row, or a law row) is answered b
 
 ### tested
 
-- no model (7): `footprint-in-laws`, `container-laws`, `dag-checkpoint-replay-sampled`, `dag-checkpoint-truncation-sampled`, `lane-store-laws`, `column-temporal-dotnet-edge`, `column-field-metadata`
+- no model (8): `footprint-in-laws`, `container-laws`, `dag-checkpoint-replay-sampled`, `dag-checkpoint-truncation-sampled`, `lane-store-laws`, `declared-record-identity`, `column-temporal-dotnet-edge`, `column-field-metadata`
 
 - `Arbitrate` (1): `arbitration-differential`
 
@@ -153,6 +153,7 @@ Certified against the reference implementation alone, so a host passing one offe
 |---|---|---|
 | `skeletonDiff` | [`conformance/diff/skeleton-diff.json`](../conformance/diff/skeleton-diff.json) | 14 |
 | `encodingProfile` | [`conformance/encoding/encoding-profiles.json`](../conformance/encoding/encoding-profiles.json) | 47 |
+| `identity` | [`conformance/identity/identity.json`](../conformance/identity/identity.json) | 9 |
 | `canonicalFormLaws` | [`conformance/laws/canonical-form-laws.json`](../conformance/laws/canonical-form-laws.json) | 20 |
 | `premiseFloatDigits` | [`conformance/premises/float-digits.json`](../conformance/premises/float-digits.json) | 163 |
 | `premiseSha256` | [`conformance/premises/sha256.json`](../conformance/premises/sha256.json) | 17 |
