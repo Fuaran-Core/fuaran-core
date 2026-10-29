@@ -251,6 +251,16 @@
       "heldBy": "ExportersTests"
     },
     {
+      "path": "conformance/identity/identity.json",
+      "render": "identity",
+      "heldBy": "ExportersTests"
+    },
+    {
+      "path": "conformance/identity/manifest.json",
+      "render": "identity",
+      "heldBy": "ExportersTests"
+    },
+    {
       "path": "conformance/premises/string-model.json",
       "render": "premises",
       "heldBy": "ExportersTests"
