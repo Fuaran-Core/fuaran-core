@@ -169,15 +169,18 @@ method Fuaran.Core.TableModule.validate(Fuaran.Core.Table) : Microsoft.FSharp.Co
 method Fuaran.Core.TemporalText.civilOfDays(System.Int32) : Fuaran.Core.CivilDate
 method Fuaran.Core.TemporalText.compareInstants(System.String, System.String) : System.Int32
 method Fuaran.Core.TemporalText.dateText(System.Int32) : System.String
+method Fuaran.Core.TemporalText.dayOfDays(System.Int32) : System.Int32
 method Fuaran.Core.TemporalText.daysOfCivil(System.Int32, System.Int32, System.Int32) : System.Int32
 method Fuaran.Core.TemporalText.instantText(Fuaran.Core.TimeUnit, System.Double, System.Int32) : System.String
 method Fuaran.Core.TemporalText.isCanonicalDate(System.String) : System.Boolean
 method Fuaran.Core.TemporalText.isCanonicalTimestamp(System.String) : System.Boolean
 method Fuaran.Core.TemporalText.isDayInRange(System.Int32) : System.Boolean
 method Fuaran.Core.TemporalText.isInstantInRange(Fuaran.Core.TimeUnit, System.Double, System.Int32) : System.Boolean
+method Fuaran.Core.TemporalText.monthOfDays(System.Int32) : System.Int32
 method Fuaran.Core.TemporalText.tryDays(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.Int32>
 method Fuaran.Core.TemporalText.tryInstant(Fuaran.Core.TimeUnit, System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.Double, System.Int32>>
 method Fuaran.Core.TemporalText.unitOf(System.String) : Fuaran.Core.TimeUnit
+method Fuaran.Core.TemporalText.yearOfDays(System.Int32) : System.Int32
 method Fuaran.Core.TimeUnitModule.digits(Fuaran.Core.TimeUnit) : System.Int32
 method Fuaran.Core.TimeUnitModule.ofDigits(System.Int32) : Fuaran.Core.TimeUnit
 method Fuaran.Core.TimeUnitModule.scale(Fuaran.Core.TimeUnit) : System.Int32

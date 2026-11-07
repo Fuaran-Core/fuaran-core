@@ -388,7 +388,7 @@ families credit are credited over nested batches as well as flat ones.
 | Package | Operations | Ladder | Law family | trivial | forward | obsolete | host-seam | measured-elsewhere |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | `Fuaran.Core.AiSurface` | 26 | 0 | 14 | 1 | 0 | 0 | 0 | 11 |
-| `Fuaran.Core.Column` | 124 | 47 | 51 | 3 | 0 | 0 | 0 | 23 |
+| `Fuaran.Core.Column` | 127 | 50 | 51 | 3 | 0 | 0 | 0 | 23 |
 | `Fuaran.Core.Conformance` | 165 | 2 | 107 | 2 | 6 | 0 | 0 | 48 |
 | `Fuaran.Core.ContentAddress` | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Function` | 185 | 42 | 87 | 5 | 0 | 0 | 0 | 51 |
@@ -408,7 +408,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 64 | 0 | 25 | 3 | 0 | 0 | 0 | 36 |
 | `Fuaran.Core.Wire` | 144 | 67 | 11 | 3 | 4 | 0 | 0 | 59 |
-| **Total** | 1315 | 322 | 427 | 38 | 15 | 0 | 3 | 510 |
+| **Total** | 1318 | 325 | 427 | 38 | 15 | 0 | 3 | 510 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

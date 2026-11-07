@@ -120,9 +120,9 @@ module TemporalText =
         let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy
         (era - 1) * 146097 + doe - 719468
 
-    /// The civil date of a day count since 1970-01-01 (Hinnant's civil-from-days), the inverse of
-    /// `daysOfCivil` over the canonical range.
-    let civilOfDays (days: int) : CivilDate =
+    /// The year, month and day of a day count since 1970-01-01 (Hinnant's civil-from-days), the
+    /// inverse of `daysOfCivil` over the canonical range, allocating nothing.
+    let private civilParts (days: int) : struct (int * int * int) =
         // Shift by one 400-year era (146097 days) so every intermediate is non-negative over the
         // canonical range; the shift is undone on the year.
         let z = days + 719468 + 146097
@@ -134,9 +134,30 @@ module TemporalText =
         let d = doy - (153 * mp + 2) / 5 + 1
         let m = if mp < 10 then mp + 3 else mp - 9
 
-        { Year = yoe + (era - 1) * 400 + (if m <= 2 then 1 else 0)
-          Month = m
-          Day = d }
+        struct (yoe + (era - 1) * 400 + (if m <= 2 then 1 else 0), m, d)
+
+    /// The year of a day count, allocating nothing: what a per-row read of a date column takes.
+    let yearOfDays (days: int) : int =
+        let struct (year, _, _) = civilParts days
+        year
+
+    /// The month, `1`-`12`, of a day count, allocating nothing.
+    let monthOfDays (days: int) : int =
+        let struct (_, month, _) = civilParts days
+        month
+
+    /// The day of the month, `1`-`31`, of a day count, allocating nothing.
+    let dayOfDays (days: int) : int =
+        let struct (_, _, day) = civilParts days
+        day
+
+    /// The civil date of a day count since 1970-01-01.
+    let civilOfDays (days: int) : CivilDate =
+        let struct (year, month, day) = civilParts days
+
+        { Year = year
+          Month = month
+          Day = day }
 
     /// The day count of `0000-01-01`, the first day the canonical form spells.
     [<Literal>]
@@ -181,8 +202,8 @@ module TemporalText =
     /// The canonical text of a day count in range (`isDayInRange`). Outside it the text is not
     /// canonical; `Table.validate` refuses such a day before anything renders it.
     let dateText (days: int) : string =
-        let c = civilOfDays days
-        pad 4 c.Year + "-" + pad 2 c.Month + "-" + pad 2 c.Day
+        let struct (year, month, day) = civilParts days
+        pad 4 year + "-" + pad 2 month + "-" + pad 2 day
 
     // ---- instants ----
 

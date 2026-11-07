@@ -2401,6 +2401,13 @@ let temporalTests =
                               if c.Year <> y || c.Month <> m || c.Day <> d then
                                   failtestf "civilOfDays %d is %A, not %s" days c text
 
+                              if
+                                  TemporalText.yearOfDays days <> y
+                                  || TemporalText.monthOfDays days <> m
+                                  || TemporalText.dayOfDays days <> d
+                              then
+                                  failtestf "the parts of day %d are not %s" days text
+
                               expected <- expected + 1
                               dates <- dates + 1
                           | None -> ()
