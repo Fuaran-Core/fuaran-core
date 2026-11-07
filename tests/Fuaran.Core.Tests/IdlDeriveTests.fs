@@ -916,7 +916,7 @@ let private typedConsumer =
           "const r = decodeNode('{}');"
           "if (r.ok) {"
           "  const n: Node = r.value;"
-          "  const tag: 'Section' | 'Choice' | 'Task' | 'Note' = wireTag(n);"
+          "  const tag: 'Section' | 'Choice' | 'Task' | 'Attempt' | 'Note' = wireTag(n);"
           "  const tags: ReadonlyArray<string> = allWireTags;"
           "  const kids: Node[] = children(n);"
           "  const same: Node = withChildren(kids, n);"

@@ -208,8 +208,17 @@ let census (sources: (string * string) list) (candidates: string list) : (string
 
 // ── the real repository ──────────────────────────────────────────────────────────────────────────────
 
+// `wire-format-fixtures` is another repository, which CI checks out under this root: gitignored here,
+// so nothing a commit to this repository can change.
 let private skippedDirs =
-    set [ ".git"; "bin"; "obj"; ".vs"; "node_modules"; "TestResults" ]
+    set
+        [ ".git"
+          "bin"
+          "obj"
+          ".vs"
+          "node_modules"
+          "TestResults"
+          "wire-format-fixtures" ]
 
 /// Every file under the root but git's own: `.git` is a directory in a clone and a FILE in a linked
 /// worktree, and in neither is it something a commit can change.
