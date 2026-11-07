@@ -1239,6 +1239,48 @@ let private buildKitAsset (dir: string) : string =
         if Directory.Exists out then
             Directory.Delete(out, true)
 
+/// The builder run with `args`, answering its exit code and its output (Phase 606: a second producer).
+let private runAssetBuilder (args: string list) : int * string =
+    let builder = Path.Combine(proofsDir, "kit", "build-kit-asset.ps1")
+
+    match
+        ChildProcess.argv "pwsh" ([ "-NoProfile"; "-NonInteractive"; "-File"; builder ] @ args)
+        |> ChildProcess.run
+    with
+    | Error why -> failtestf "the asset builder could not run: %s" why
+    | Ok o -> o.Exit, o.Stdout + o.Stderr
+
+/// A second producer's repository in a scratch directory: `proofs/asset.json` of kind `proofsAsset`
+/// declaring two files, and `pins.json` holding its sha at `proofs.sha256` beside an unrelated member.
+let private secondProducer (assetPrefix: string option) : string =
+    let root =
+        Path.Combine(Path.GetTempPath(), "proofs-asset-producer-" + Guid.NewGuid().ToString "N")
+
+    let proofs = Path.Combine(root, "proofs")
+    Directory.CreateDirectory(Path.Combine(proofs, "oracle")) |> ignore
+    File.WriteAllText(Path.Combine(proofs, "Model.fst"), "module Model\r\nlet x = 1\r\n")
+    File.WriteAllText(Path.Combine(proofs, "oracle", "Model.fs"), "module Model\nlet x = 1\n")
+
+    let prefix =
+        match assetPrefix with
+        | Some p -> sprintf "\"assetPrefix\": \"%s\", " p
+        | None -> ""
+
+    File.WriteAllText(
+        Path.Combine(proofs, "asset.json"),
+        "{ \"kind\": \"proofsAsset\", "
+        + prefix
+        + "\"files\": [ { \"path\": \"Model.fst\", \"as\": \"models/Model.fst\" }, "
+        + "{ \"path\": \"oracle/Model.fs\", \"as\": \"oracle/Model.fs\" } ] }\n"
+    )
+
+    File.WriteAllText(
+        Path.Combine(root, "pins.json"),
+        "{\n  \"other\": { \"sha256\": \"0000\" },\n  \"proofs\": {\n    \"asset\": \"proofs-demo-<version>.tar\",\n    \"sha256\": \"\"\n  }\n}\n"
+    )
+
+    root
+
 let private expectOk (r: Result<'a, string>) (what: string) : 'a =
     match r with
     | Ok v -> v
@@ -1394,7 +1436,121 @@ let proofsKitTemplateTests =
                       "one planted line in one kit file moves the sha"
               finally
                   if Directory.Exists scratch then
-                      Directory.Delete(scratch, true) ]
+                      Directory.Delete(scratch, true)
+
+          // Phase 606 — the same builder serves a second producer from its own declaration, with
+          // its own archive name and its own committed-sha location, and the kit's defaults hold.
+          testCase
+              "a second producer builds its own asset, holds its own sha and is checked for drift by the one builder"
+          <| fun _ ->
+              let root = secondProducer (Some "proofs-demo")
+              let manifest = Path.Combine(root, "proofs", "asset.json")
+              let pins = Path.Combine(root, "pins.json")
+              let out = Path.Combine(root, "out")
+
+              let run extra =
+                  runAssetBuilder (
+                      [ "-Manifest"
+                        manifest
+                        "-OutDir"
+                        out
+                        "-Version"
+                        "1.2.3"
+                        "-ShaFile"
+                        pins
+                        "-ShaPath"
+                        "proofs.sha256" ]
+                      @ extra
+                  )
+
+              try
+                  let exitU, outU = run [ "-Update" ]
+                  Expect.equal exitU 0 (sprintf "-Update builds and records: %s" outU)
+
+                  Expect.isTrue
+                      (File.Exists(Path.Combine(out, "proofs-demo-1.2.3.tar")))
+                      "the archive is named by the declaration's assetPrefix, never the kit's"
+
+                  Expect.isFalse
+                      (File.Exists(Path.Combine(out, "proofs-kit-1.2.3.tar")))
+                      "no kit-named archive is written for a second producer"
+
+                  use doc = JsonDocument.Parse(File.ReadAllText pins)
+
+                  let recorded =
+                      doc.RootElement.GetProperty("proofs").GetProperty("sha256").GetString()
+
+                  Expect.isTrue (Regex.IsMatch(recorded, "^[0-9a-f]{64}$")) "the sha is written at -ShaPath"
+
+                  Expect.equal
+                      (doc.RootElement.GetProperty("other").GetProperty("sha256").GetString())
+                      "0000"
+                      "an unrelated sha256 member in the same file is untouched"
+
+                  Expect.stringContains outU recorded "the builder printed the sha it recorded"
+
+                  let exitC, outC = run [ "-Check" ]
+                  Expect.equal exitC 0 (sprintf "-Check holds the build to its own recorded sha: %s" outC)
+
+                  File.AppendAllText(Path.Combine(root, "proofs", "Model.fst"), "let y = 2\n")
+                  let exitR, outR = run [ "-Check" ]
+                  Expect.equal exitR 1 (sprintf "go-red: a moved declared file fails -Check with exit 1: %s" outR)
+
+                  Expect.stringContains
+                      outR
+                      "pins.json proofs.sha256"
+                      "the refusal names the producer's own sha location"
+              finally
+                  if Directory.Exists root then
+                      Directory.Delete(root, true)
+
+          testCase "go-red: a second producer's declaration naming no prefix, or the kit's, is refused (exit 2)"
+          <| fun _ ->
+              for prefix in [ None; Some "proofs-kit"; Some "Proofs Demo" ] do
+                  let root = secondProducer prefix
+
+                  try
+                      let code, output =
+                          runAssetBuilder
+                              [ "-Manifest"
+                                Path.Combine(root, "proofs", "asset.json")
+                                "-OutDir"
+                                Path.Combine(root, "out")
+                                "-Version"
+                                "1.2.3" ]
+
+                      Expect.equal code 2 (sprintf "assetPrefix %A is refused: %s" prefix output)
+                      Expect.stringContains output "assetPrefix" "the refusal names the member"
+                  finally
+                      if Directory.Exists root then
+                          Directory.Delete(root, true)
+
+          testCase "go-red: a sha location the file does not carry is refused, never created (exit 2)"
+          <| fun _ ->
+              let root = secondProducer (Some "proofs-demo")
+              let pins = Path.Combine(root, "pins.json")
+              let before = File.ReadAllText pins
+
+              try
+                  let code, output =
+                      runAssetBuilder
+                          [ "-Manifest"
+                            Path.Combine(root, "proofs", "asset.json")
+                            "-OutDir"
+                            Path.Combine(root, "out")
+                            "-Version"
+                            "1.2.3"
+                            "-ShaFile"
+                            pins
+                            "-ShaPath"
+                            "proofs.missing"
+                            "-Update" ]
+
+                  Expect.equal code 2 (sprintf "an absent path is refused: %s" output)
+                  Expect.equal (File.ReadAllText pins) before "the sha file is not rewritten"
+              finally
+                  if Directory.Exists root then
+                      Directory.Delete(root, true) ]
 
 // ---- the family ------------------------------------------------------------------------------
 

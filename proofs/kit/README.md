@@ -50,7 +50,7 @@ domain's own algebra a fill-in-the-holes act with exactly one hole that is an ob
 | `check-proof-leg.tests.ps1` | **The engine's refusals, held to their exit codes** (Phase 221). Runs the engine the way a caller does (`&`, in process) over a scratch proofs directory: a green control, then a missing host project, a host filter that cannot run and a refuted model, each of which must exit non-zero and never print `proofs: green`. Needs only the pin and the prover, never your models; `templates/check.ps1` calls it after a green leg. Its pin-resolution, mirror and oracle-guard arms (`R`, `M`, `I`) need no prover and run first; the rest report NOT RUN (exit 2) where there is no prover. | runs it from the asset |
 | `templates/MutualTypes.fst` | The post-pass's fixture — the smallest model that makes the backend emit a mutual type group. **Not a template to instantiate**, and not to be registered in `$modules`: it earns no committed oracle. | runs it from the asset |
 | `asset.json` | **The asset's contents** (Phase 536): every file the release asset carries, where it sits in the archive, and its role. The builder reads it and nothing else. | reads it |
-| `build-kit-asset.ps1` | **The builder** (Phase 536): the archive, reproducibly — fixed order, epoch timestamps, mode 0644, owner 0:0, LF, uncompressed ustar — so its sha256 is a function of the kit's bytes alone. `-Check` holds the build to `copies.json`'s `proofsKit.sha256`; `-Update` rewrites it. The suite, the publish workflow and an adopter's offline path all call it. | builds an offline asset with it |
+| `build-kit-asset.ps1` | **The builder** (Phase 536): the archive, reproducibly — fixed order, epoch timestamps, mode 0644, owner 0:0, LF, uncompressed ustar — so its sha256 is a function of the kit's bytes alone. `-Check` holds the build to `copies.json`'s `proofsKit.sha256`; `-Update` rewrites it. The suite, the publish workflow and an adopter's offline path all call it. Since Phase 606 it also builds a **second producer's** asset from that producer's own declaration (`-Manifest`, `-ShaFile`, `-ShaPath`; see "A second producer" below). | builds an offline asset with it |
 
 The asset also carries what used to be copied beside the kit, from `../`:
 
@@ -447,6 +447,40 @@ repository's `check.ps1` writes every run's to `proofs/obj/last-run.json` and re
 full run's as the empty cone's baseline, and its scheduled strict workflow summarises the run from it.
 The refusal tests hold every arm's record to the leg's exit code. Pass it from your own `check.ps1`
 (the caller template does).
+
+## A second producer (Phase 606)
+
+The kit is not the only repository whose models another repository's proof leg re-checks. Any such
+producer ships them the way the kit ships, as ONE reproducible release asset pinned by sha256, and
+builds it with **this** builder rather than a second one. The parts that belong to the producer come
+from its own declaration and its own files; nothing is renamed after the build and nothing borrows the
+kit's names:
+
+| Parameter | What it names | Default (the kit's own) |
+|---|---|---|
+| `-Manifest <file>` | The declaration: `files` (`path` under the proofs directory, `as` in the archive), exactly the kit's shape. Its `kind` is `proofsAsset`, and it carries `assetPrefix`, the archive's stem: `<assetPrefix>-<version>.tar`. A `proofsAsset` with no `assetPrefix`, or one naming `proofs-kit`, is refused (exit 2); so is a prefix that is not a lower-case file-name stem. | `<proofs>/kit/asset.json`, kind `proofsKitAsset`, archive `proofs-kit-<version>.tar` |
+| `-ProofsDir <dir>` | The directory the declaration's paths are relative to; its parent is the repository root (where `Directory.Build.props` supplies the version and the default sha file sits). | the manifest's own directory when `-Manifest` is given, else `proofs/` beside this kit |
+| `-ShaFile <file>` | The JSON file that commits the asset's sha256. | `copies.json` at the repository root |
+| `-ShaPath <a.b>` | Where in that file the sha256 is, as dot-separated property names. `-Check` reads it; `-Update` rewrites that one string in place, leaving every other byte of the file as it was, and refuses (exit 2) rather than guess when the path is absent or the rewrite cannot be placed exactly once. | `proofsKit.sha256` |
+
+With none of them the builder builds the kit byte for byte as before (the `Proofs.Kit` family holds
+the committed sha). A producer whose proofs directory holds `asset.json` and whose sha lives in its
+own `copies.json` under `proofs.sha256` builds, records and checks its asset with:
+
+```powershell
+pwsh <kit>/kit/build-kit-asset.ps1 -Manifest proofs/asset.json -ShaPath proofs.sha256 -Update   # the commit that moves a model
+pwsh <kit>/kit/build-kit-asset.ps1 -Manifest proofs/asset.json -ShaPath proofs.sha256 -Check    # the suite and the publish job
+```
+
+**Where `<kit>` comes from.** A producer that does not adopt the kit still obtains the builder from
+it: the kit asset carries `kit/build-kit-asset.ps1`, so the producer pins a kit release by sha256
+(the `proofs/proofs-kit.json` shape above), verifies and unpacks it, and runs the builder from the
+unpacked asset. There is no separate builder-only asset (DECISIONS.md D245). The builder's output is
+a function of the declared files alone, so which kit release supplied it does not move a producer's
+sha, and a kit release that changes the builder says so in its release notes.
+
+The consumer side needs nothing new: an adopter's leg opens a producer's models read-only with
+`-ModelDirs` and holds a committed floor to its asset with `-FloorDir`, as it does for the kit's.
 
 ## What this kit does not solve
 
