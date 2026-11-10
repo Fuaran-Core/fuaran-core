@@ -129,6 +129,51 @@ module internal ConcurrencyLaws =
                 "script-pair independence and op kind"
                 ([ "independent pair", independentPairs; spread.Demand ] @ kinds.Demands) ]
 
+    /// The child-list overlap of one op pair (Phase 625): the nodes one footprint accesses through a
+    /// slot that the other structure-writes, either way round — the pairs Phase 625 compares at the
+    /// child-list slot where Phase 340 compared them at the node.
+    let private childListOverlap (fa: Footprint) (fb: Footprint) : Set<string> =
+        let accessed (f: Footprint) =
+            Footprint.slotNodes (Set.union f.SlotWrites f.SlotReads)
+
+        Set.union (Set.intersect (accessed fa) fb.StructureWrites) (Set.intersect fa.StructureWrites (accessed fb))
+
+    /// The child-list slots one op pair clashes on (Phase 625), as `Ops.interference` names them.
+    let private childListClash (fa: Footprint) (fb: Footprint) : Set<string * string> =
+        Footprint.slotClash fa fb
+        |> Set.filter (fun (_, slot) -> slot = Footprint.childListSlot)
+
+    /// The child-list law's two readers agree (Phase 625): the child-list slots `Ops.interference`
+    /// names between two ops are exactly the ones `Dag.conflicts` reports as `SlotClash` at the parent.
+    let private childListReported (fa: Footprint) (fb: Footprint) (clash: Set<string * string>) : bool =
+        let reported =
+            Dag.conflicts id [ fa ] [ fb ]
+            |> List.choose (fun c ->
+                match c.Shape with
+                | MergeConflictShape.SlotClash slot when slot = Footprint.childListSlot -> Some(c.Address, slot)
+                | _ -> None)
+            |> Set.ofList
+
+        reported = clash
+
+    /// The child-list demands (Phase 625), bound only where the sample met a slot access beside a
+    /// structure write of its node at all: then a freed pair must have been drawn (so the commuting
+    /// arm ran), and the clash pairs are demanded only where the sample declared a child-list slot
+    /// access beside a structure write somewhere.
+    let private childListDemands (overlaps: int) (freed: int) (clashes: int) : (string * int) list =
+        if overlaps = 0 then
+            []
+        else
+            [ "child-list-freed pair", freed ]
+            @ (if clashes = 0 then
+                   []
+               else
+                   [ "child-list clash pair", clashes ])
+
+    /// The law text the two footprint families share (Phase 625).
+    let private childListLaw =
+        "a structure write is compared at its parent's child-list slot (a pair it frees beside a slot access of the parent commutes under the domain's Apply; a child-list slot access beside it is named SlotClash at (parent, #children) by Ops.interference and Dag.conflicts alike)"
+
     /// The footprint soundness law at a DOMAIN'S OWN ops (Phase 249) — Phase 78's soundness law
     /// (`footprintLaws`) lifted off `SkeletonOp`. `footprintLaws`, `mergeConflictLaws`,
     /// `reconcileLaws` and `concurrencyLawsWith` are all typed over the skeleton op algebra, so a
@@ -190,9 +235,19 @@ module internal ConcurrencyLaws =
                 Some "script-pair independence"
             )
 
+        // Phase 625 — a structure write is compared at its parent's child-list slot: a slot access
+        // beside a structure write of its node is free unless it touches the child-list slot, and a
+        // free pair must commute; a child-list access is named at the slot by both readers.
+        let childList = LawKit.LawCell(childListLaw, Some "script-pair independence")
+
         let mutable independentPairs = 0
         let mutable interferingPairs = 0
         let mutable refusedDraws = 0
+        // Phase 625 — op pairs a structure write meets a slot access of its node in; script pairs
+        // freed with one in them; op pairs that clash on the child-list slot.
+        let mutable childListOverlaps = 0
+        let mutable childListFreedPairs = 0
+        let mutable childListClashPairs = 0
         // Phase 340 — the slot dimension: ops whose footprint declares a slot access at all; pairs
         // independent ONLY because slots are compared at the slot (lifting every slot to its node
         // would make them interfere); pairs that collide on a slot.
@@ -252,10 +307,34 @@ module internal ConcurrencyLaws =
             // Phase 340 — every op pair that collides on a slot is named at that slot by both
             // readers: `Ops.interference` carries the pairs as `SlotClash`, and `Dag.conflicts`
             // reports one `SlotClash slot` at the node for each.
+            let mutable freedByChildList = false
+
             for oa in a do
                 for ob in b do
                     let fa = footprintOf oa
                     let fb = footprintOf ob
+
+                    // Phase 625 — the child-list comparison, per op pair.
+                    if not (Set.isEmpty (childListOverlap fa fb)) then
+                        childListOverlaps <- childListOverlaps + 1
+                        let clash = childListClash fa fb
+
+                        if Set.isEmpty clash then
+                            freedByChildList <- true
+                        else
+                            childListClashPairs <- childListClashPairs + 1
+
+                            childList.Check(
+                                childListReported fa fb clash,
+                                fun () ->
+                                    at (
+                                        sprintf
+                                            "Ops.interference names the child-list clash %A between %s and %s but Dag.conflicts does not report it as one"
+                                            clash
+                                            (sw.Encode oa)
+                                            (sw.Encode ob)
+                                    )
+                            )
 
                     let clashed =
                         Ops.interference fa fb
@@ -300,10 +379,28 @@ module internal ConcurrencyLaws =
 
                     let ba = applyAll b state |> Result.bind (applyAll a) |> Result.map hashState
 
+                    let commuted =
+                        match ab, ba with
+                        | Ok ha, Ok hb -> ha = hb
+                        | _ -> false
+
+                    // Phase 625 — a pair the child-list comparison frees is this law's to commute.
+                    if freedByChildList then
+                        childListFreedPairs <- childListFreedPairs + 1
+
+                        childList.Check(
+                            commuted,
+                            fun () ->
+                                at (
+                                    "a pair freed at the child-list slot (a slot access beside a structure write of its node) did not commute under the domain's Apply: a="
+                                    + render a
+                                    + " b="
+                                    + render b
+                                )
+                        )
+
                     soundness.Check(
-                        (match ab, ba with
-                         | Ok ha, Ok hb -> ha = hb
-                         | _ -> false),
+                        commuted,
                         fun () ->
                             at (
                                 "an INDEPENDENT pair did not commute under the domain's Apply: a="
@@ -332,6 +429,7 @@ module internal ConcurrencyLaws =
             else
                 [ "slot-independent pair", slotIndependentPairs
                   "slot-clash pair", slotClashPairs ]
+                @ childListDemands childListOverlaps childListFreedPairs childListClashPairs
 
         let dimension =
             if noSlots then
@@ -350,7 +448,7 @@ module internal ConcurrencyLaws =
             else
                 []
 
-        LawKit.results [ soundness; determinism; slotNamed ]
+        LawKit.results [ soundness; determinism; slotNamed; childList ]
         @ declaredSlots
         @ [ LawKit.guardBeside
                 runner
@@ -405,11 +503,19 @@ module internal ConcurrencyLaws =
             LawKit.LawCell
                 "base-aware footprint determinism at the domain's ops (a pure function of the state and the op)"
 
+        // Phase 625 — the child-list comparison at the base-aware footprint: each op read at the
+        // state the ops before it in its own script reach, as `Dag.conflictsIn` reads it.
+        let childList =
+            LawKit.LawCell(childListLaw, Some "script-pair independence and base-aware precision")
+
         let mutable independentPairs = 0
         let mutable pureIndependentPairs = 0
         let mutable freedPairs = 0
         let mutable interferingPairs = 0
         let mutable refusedDraws = 0
+        let mutable childListOverlaps = 0
+        let mutable childListFreedPairs = 0
+        let mutable childListClashPairs = 0
 
         let thread (rng: LawKit.Draws) (n: int) (s: 'State) =
             let mutable cur = s
@@ -432,6 +538,21 @@ module internal ConcurrencyLaws =
         let render (ops: 'Op list) =
             "[" + (ops |> List.map sw.Encode |> String.concat "; ") + "]"
 
+        // Each op of a script with the base-aware footprint at the state the ops before it reach
+        // (every drawn script applies, so the threading never stops short).
+        let threaded (s: 'State) (ops: 'Op list) =
+            ops
+            |> List.fold
+                (fun (cur, acc) op ->
+                    let f = footprintIn cur op
+
+                    match sw.Apply op cur with
+                    | Ok next -> next, (op, f) :: acc
+                    | Error _ -> cur, (op, f) :: acc)
+                (s, [])
+            |> snd
+            |> List.rev
+
         LawKit.run runner iterations (fun rng _ at ->
             let _, state = thread rng (rng.IntBelow 5) gen.State0
             let a, _ = thread rng (rng.IntBelow 3 + 1) state
@@ -442,6 +563,32 @@ module internal ConcurrencyLaws =
                     footprintIn state op = footprintIn state op,
                     fun () -> at ("footprintIn is not a pure function of the state and the op " + sw.Encode op)
                 )
+
+            // Phase 625 — the child-list comparison, per op pair, at the threaded footprints.
+            let mutable freedByChildList = false
+
+            for oa, fa in threaded state a do
+                for ob, fb in threaded state b do
+                    if not (Set.isEmpty (childListOverlap fa fb)) then
+                        childListOverlaps <- childListOverlaps + 1
+                        let clash = childListClash fa fb
+
+                        if Set.isEmpty clash then
+                            freedByChildList <- true
+                        else
+                            childListClashPairs <- childListClashPairs + 1
+
+                            childList.Check(
+                                childListReported fa fb clash,
+                                fun () ->
+                                    at (
+                                        sprintf
+                                            "Ops.interference names the child-list clash %A between %s and %s but Dag.conflicts does not report it as one"
+                                            clash
+                                            (sw.Encode oa)
+                                            (sw.Encode ob)
+                                    )
+                            )
 
             if not (List.isEmpty a) && not (List.isEmpty b) then
                 let pureClean = List.isEmpty (Dag.conflicts footprintOf a b)
@@ -471,10 +618,28 @@ module internal ConcurrencyLaws =
 
                     let ba = applyAll b state |> Result.bind (applyAll a) |> Result.map hashState
 
+                    let commuted =
+                        match ab, ba with
+                        | Ok ha, Ok hb -> ha = hb
+                        | _ -> false
+
+                    // Phase 625 — a pair the child-list comparison frees is this law's to commute.
+                    if freedByChildList then
+                        childListFreedPairs <- childListFreedPairs + 1
+
+                        childList.Check(
+                            commuted,
+                            fun () ->
+                                at (
+                                    "a pair freed at the child-list slot (a slot access beside a structure write of its node) did not commute under the domain's Apply: a="
+                                    + render a
+                                    + " b="
+                                    + render b
+                                )
+                        )
+
                     soundness.Check(
-                        (match ab, ba with
-                         | Ok ha, Ok hb -> ha = hb
-                         | _ -> false),
+                        commuted,
                         fun () ->
                             at (
                                 "a pair the base-aware footprint calls INDEPENDENT did not commute under the domain's Apply: a="
@@ -492,14 +657,15 @@ module internal ConcurrencyLaws =
                 else
                     interferingPairs <- interferingPairs + 1)
 
-        LawKit.results [ soundness; refinement; determinism ]
+        LawKit.results [ soundness; refinement; determinism; childList ]
         @ [ LawKit.guardBeside
                 runner
                 "script-pair independence and base-aware precision"
-                [ "independent pair", independentPairs
-                  "pure-independent pair", pureIndependentPairs
-                  "freed pair (refused by the pure footprint, admitted by the base-aware one)", freedPairs
-                  "interfering pair", interferingPairs ]
+                ([ "independent pair", independentPairs
+                   "pure-independent pair", pureIndependentPairs
+                   "freed pair (refused by the pure footprint, admitted by the base-aware one)", freedPairs
+                   "interfering pair", interferingPairs ]
+                 @ childListDemands childListOverlaps childListFreedPairs childListClashPairs)
                 [ "refused draw", refusedDraws ] ]
 
     /// The merge-conflict enumeration laws (Phase 64) — the teeth on `Dag.conflicts` and the

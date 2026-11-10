@@ -71,9 +71,13 @@ let independent_empty_right (f:footprint)
     inter_nil_iff f.slot_writes empty_fp.slot_writes;
     inter_nil_iff f.slot_writes empty_fp.slot_reads;
     inter_nil_iff f.slot_reads empty_fp.slot_writes;
-    inter_nil_iff (nodes f.slot_writes) (union empty_fp.content_writes (union empty_fp.reads empty_fp.structure_writes));
+    inter_nil_iff (nodes f.slot_writes) empty_fp.content_writes;
+    inter_nil_iff (child_slots f.structure_writes) (union empty_fp.slot_writes empty_fp.slot_reads);
+    inter_nil_iff (union f.slot_writes f.slot_reads) (child_slots empty_fp.structure_writes);
     inter_nil_iff (nodes f.slot_reads) empty_fp.content_writes;
-    inter_nil_iff (nodes empty_fp.slot_writes) (union f.content_writes (union f.reads f.structure_writes));
+    inter_nil_iff (nodes empty_fp.slot_writes) f.content_writes;
+    inter_nil_iff (child_slots empty_fp.structure_writes) (union f.slot_writes f.slot_reads);
+    inter_nil_iff (union empty_fp.slot_writes empty_fp.slot_reads) (child_slots f.structure_writes);
     inter_nil_iff (nodes empty_fp.slot_reads) f.content_writes
 
 let independent_empty_left (f:footprint)
@@ -142,9 +146,13 @@ let two_updates_independent (t:tree) (n m:tree)
     inter_nil_iff fa.slot_writes fb.slot_writes;
     inter_nil_iff fa.slot_writes fb.slot_reads;
     inter_nil_iff fa.slot_reads fb.slot_writes;
-    inter_nil_iff (nodes fa.slot_writes) (union fb.content_writes (union fb.reads fb.structure_writes));
+    inter_nil_iff (nodes fa.slot_writes) fb.content_writes;
+    inter_nil_iff (child_slots fa.structure_writes) (union fb.slot_writes fb.slot_reads);
+    inter_nil_iff (union fa.slot_writes fa.slot_reads) (child_slots fb.structure_writes);
     inter_nil_iff (nodes fa.slot_reads) fb.content_writes;
-    inter_nil_iff (nodes fb.slot_writes) (union fa.content_writes (union fa.reads fa.structure_writes));
+    inter_nil_iff (nodes fb.slot_writes) fa.content_writes;
+    inter_nil_iff (child_slots fb.structure_writes) (union fa.slot_writes fa.slot_reads);
+    inter_nil_iff (union fb.slot_writes fb.slot_reads) (child_slots fa.structure_writes);
     inter_nil_iff (nodes fb.slot_reads) fa.content_writes
 
 (* An in-place rewrite of a node inside the subtree a concurrent removal destroys is REFUSED: the
@@ -433,8 +441,34 @@ and leaf_vs_script_in (a:op) (os:list op) (t:tree)
                 | Ok ta1 -> fp_in_cons ta b1 bs ta1
                 | Error _ -> ()))))
 
+(* Phase 625 — the refused-script branch of the lifts below, proved in a context of its own: a
+   script whose head applies and whose tail refuses is refused, and a refused operation steps
+   with anything. Stated apart because the lift's own context, which carries two `independent`
+   facts, outgrew the query that used to re-derive it inline. *)
+let batch_refused_by_tail (o:op) (r:list op) (t to:tree)
+  : Lemma (requires apply o t == Ok to /\ Error? (apply (Batch r) to))
+          (ensures Error? (apply (Batch (o :: r)) t))
+  = ()
+
+let wstep_in_of_refused (a b:op) (t:tree)
+  : Lemma (requires Error? (apply a t)) (ensures wstep_in a b t)
+  = ()
+
+(* … and the branch where everything applies, from the two steps the lift has already proved:
+   the head against `b` at `t`, and the tail against `b` where the head lands. *)
+let batch_step_in (o:op) (r:list op) (b:op) (t to tb ta tb1:tree)
+  : Lemma (requires wf t /\ wf to /\ apply o t == Ok to /\ apply b t == Ok tb
+                    /\ apply (Batch r) to == Ok ta /\ apply o tb == Ok tb1
+                    /\ wstep_in o b t /\ wstep_in (Batch r) b to)
+          (ensures wstep_in (Batch (o :: r)) b t)
+  = fp_in_cons t o r to;
+    fp_in_cons tb o r tb1
+
 (* ---- move 3: anything in the fragment against anything in it, lifting on the left ---- *)
 
+(* Phase 625 — `independent` grew a child-list clause, and this lift's context carries two
+   instances of it; the query is given the room the wider definition costs. *)
+#push-options "--z3rlimit 100"
 let rec any_vs_any_in (a b:op) (t:tree)
   : Lemma (requires wf t /\ in_place a /\ in_place b /\ independent (op_fp_in t a) (op_fp_in t b))
           (ensures wstep_in a b t) (decreases a)
@@ -460,11 +494,14 @@ and script_vs_any_in (os:list op) (b:op) (t:tree)
           | Ok tb ->
             script_vs_any_in r b to;
             (match apply (Batch r) to with
-             | Error _ -> ()
+             | Error _ ->
+               batch_refused_by_tail o r t to;
+               wstep_in_of_refused (Batch os) b t
              | Ok ta ->
                (match apply o tb with
-                | Ok tb1 -> fp_in_cons tb o r tb1
+                | Ok tb1 -> batch_step_in o r b t to tb ta tb1
                 | Error _ -> ()))))
+#pop-options
 
 (* ---- THE THEOREM over the in-place fragment (section 8 restates it over everything but a move) ----
 
@@ -1101,6 +1138,8 @@ and leaf_vs_script_nm (a:op) (os:list op) (t:tree)
                 | Ok ta1 -> fp_in_cons ta b1 bs ta1
                 | Error _ -> ()))))
 
+(* Phase 625 — the same room and the same two steps as the in-place lift above. *)
+#push-options "--z3rlimit 100"
 let rec any_vs_any_nm (a b:op) (t:tree)
   : Lemma (requires wf t /\ no_move a /\ no_move b /\ independent (op_fp_in t a) (op_fp_in t b))
           (ensures wstep_in a b t) (decreases a)
@@ -1126,11 +1165,14 @@ and script_vs_any_nm (os:list op) (b:op) (t:tree)
           | Ok tb ->
             script_vs_any_nm r b to;
             (match apply (Batch r) to with
-             | Error _ -> ()
+             | Error _ ->
+               batch_refused_by_tail o r t to;
+               wstep_in_of_refused (Batch os) b t
              | Ok ta ->
                (match apply o tb with
-                | Ok tb1 -> fp_in_cons tb o r tb1
+                | Ok tb1 -> batch_step_in o r b t to tb ta tb1
                 | Error _ -> ()))))
+#pop-options
 
 (* ---- THE THEOREM over everything but a move (section 11 restates it over every operation) ---- *)
 
@@ -1967,6 +2009,8 @@ and leaf_vs_script_all (a:op) (os:list op) (t:tree)
                 | Ok ta1 -> fp_in_cons ta b1 bs ta1
                 | Error _ -> ()))))
 
+(* Phase 625 — the same room and the same two steps as the in-place lift above. *)
+#push-options "--z3rlimit 100"
 let rec any_vs_any_all (a b:op) (t:tree)
   : Lemma (requires wf t /\ independent (op_fp_in t a) (op_fp_in t b))
           (ensures wstep_in a b t) (decreases a)
@@ -1991,11 +2035,14 @@ and script_vs_any_all (os:list op) (b:op) (t:tree)
           | Ok tb ->
             script_vs_any_all r b to;
             (match apply (Batch r) to with
-             | Error _ -> ()
+             | Error _ ->
+               batch_refused_by_tail o r t to;
+               wstep_in_of_refused (Batch os) b t
              | Ok ta ->
                (match apply o tb with
-                | Ok tb1 -> fp_in_cons tb o r tb1
+                | Ok tb1 -> batch_step_in o r b t to tb ta tb1
                 | Error _ -> ()))))
+#pop-options
 
 let footprint_in_sound (a b:op) (t:tree)
   : Lemma (requires wf t /\ independent (op_fp_in t a) (op_fp_in t b))

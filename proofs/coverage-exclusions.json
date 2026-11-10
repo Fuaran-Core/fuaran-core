@@ -1555,12 +1555,14 @@
     },
     {
       "members": [
+        "Footprint.childListSlots",
         "Footprint.slotClash",
         "Footprint.slotsAgainstNode",
+        "Footprint.structural",
         "Footprint.union"
       ],
       "class": "measured-elsewhere",
-      "reason": "Footprint set algebra beside the modelled slot clauses (`slot-conflicts-agree` states the relation they compute); example-tested.",
+      "reason": "Footprint set algebra beside the modelled slot and unknown-parent clauses (`slot-conflicts-agree` states the relation they compute; `child_slots` and `structural` in proofs/DagFold.fst are the model's); example-tested.",
       "standIn": "tests/Fuaran.Core.Tests/SlotFootprintTests.fs"
     },
     {

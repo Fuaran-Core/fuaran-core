@@ -1384,11 +1384,12 @@ module Dag =
     // script cannot name), so `conflicts = []` is the promise that the two deltas commute — never a
     // false "clean merge". See STABILITY.md "Op-script footprint + independence".
 
-    /// Does `f` write structure — a NAMED parent's child-list (`StructureWrites`) or an UNKNOWN source
-    /// parent (a remove/move, `UnknownParentWrites`)? Mirrors `Ops.independent`'s internal predicate so
+    /// Does `f` touch structure — a NAMED parent's child-list (`StructureWrites`), an UNKNOWN source
+    /// parent (a remove/move, `UnknownParentWrites`), or (Phase 625) a child-list slot it reads or
+    /// writes? `Footprint.structural`, the set `Ops.interference`'s unknown-parent clause reads, so
     /// `conflicts` fires exactly when `Ops.independent` returns false.
     let private writesStructure (f: Footprint) : bool =
-        not (Set.isEmpty f.StructureWrites) || not (Set.isEmpty f.UnknownParentWrites)
+        not (Set.isEmpty (Footprint.structural f))
 
     /// Enumerate the merge conflicts between two branch deltas from a common base (Phase 64): every op
     /// pair `(a ∈ deltaA, b ∈ deltaB)` whose footprints are not independent, tagged by `Shape` and the

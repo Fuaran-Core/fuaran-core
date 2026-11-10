@@ -23,16 +23,28 @@ namespace Fuaran.Core
 ///     with *every* structural write in a concurrent script. THE pinned over-approximation (STABILITY.md
 ///     "Op-script footprint + independence").
 ///   - `SlotReads` / `SlotWrites` (Phase 340) — the SLOTS an op reads or writes, a slot being a
-///     `(node id, slot name)` pair: a named field of the node, or the key a keyed child sits under. A
-///     write to a slot is a write to PART of the node, so against the other four kinds it is read as a
-///     write of the node — a slot write of `n` collides with a content write, a structure write or a
-///     read of `n`, and a slot read of `n` with a content write of `n` — but against another slot access
-///     it is compared AT THE SLOT: two writes to different slots of one node commute, and only a write
-///     and an access of the SAME slot collide (`Interference.SlotClash`). No skeleton op writes a slot —
-///     every skeleton op rewrites a node whole, and a pure script cannot say which part of a payload
-///     changed — so `Ops.footprint` under every scope leaves both sets empty, and a domain op that
-///     writes a field by name declares it with `Footprint.slotEdit` / `Footprint.readingSlot`. A domain
-///     that declares no slot access gets the four-set verdict it always got.
+///     `(node id, slot name)` pair: a named field of the node, or the key a keyed child sits under.
+///     A slot access is compared AT THE SLOT against another slot access: two writes to different
+///     slots of one node commute, and only a write and an access of the SAME slot collide
+///     (`Interference.SlotClash`). Against the node sets it is an access of PART of the node: it
+///     collides with a content write of its node — a whole-node write is a write of every slot —
+///     and with nothing else (Phase 625). A `Reads` entry is an existence / identity read, which no
+///     slot write can change, so a slot write of `n` beside a read of `n` commutes; a reader of a
+///     node's CONTENT declares the slots it reads (`Footprint.readingSlot`). No skeleton op writes a
+///     slot — every skeleton op rewrites a node whole, and a pure script cannot say which part of a
+///     payload changed — so `Ops.footprint` under every scope leaves both sets empty, and a domain
+///     op that writes a field by name declares it with `Footprint.slotEdit` /
+///     `Footprint.readingSlot`. A domain that declares no slot access gets the four-set verdict it
+///     always got.
+///   - THE CHILD-LIST SLOT (Phase 625). A structure write of `p` changes one part of `p` — its child
+///     list — and is compared as that part: against a slot access it is a read and a write of
+///     `(p, Footprint.childListSlot)`, so it commutes with a write of any OTHER slot of `p` (a
+///     restyle of a container beside an insert into it, a move into or out of it, a removal under
+///     it) and clashes with an access of the child-list slot itself. Against the node sets nothing
+///     changes: two structure writes of one parent collide (the pinned same-parent rule), and the
+///     parent is read (`Reads`) by every op that writes its child list, so its destruction
+///     collides with them. A domain whose slot write can change a node's `Children` (or what its
+///     admission policy answers for them) declares a write of the child-list slot as well.
 ///
 /// **Conservativity is the contract:** `footprint` over-approximates — it records more collisions than a
 /// tree-aware analysis would. `Ops.independent = true` is therefore a *promise* (the scripts provably
@@ -79,26 +91,32 @@ type Interference =
     | SameParent of parents: Set<string>
     /// The left script removes, moves or rewrites in place nodes whose parent it cannot name, and the
     /// right script writes structure somewhere (the pinned unknown-parent over-approximation):
-    /// `relocated` is the left's `UnknownParentWrites`, `structural` the right's `StructureWrites ∪
-    /// UnknownParentWrites`. No address is shared — that is the clause's point.
+    /// `relocated` is the left's `UnknownParentWrites`, `structural` the right's
+    /// `Footprint.structural` — `StructureWrites ∪ UnknownParentWrites`, and (Phase 625) every node
+    /// whose child-list slot it reads or writes, since the parent the left cannot name may be that
+    /// node. No address is shared — that is the clause's point.
     | LeftUnknownParent of relocated: Set<string> * structural: Set<string>
     /// The mirror of `LeftUnknownParent`: the right script relocates, the left writes structure.
-    /// `structural` is the left's `StructureWrites ∪ UnknownParentWrites`, `relocated` the right's
+    /// `structural` is the left's `Footprint.structural`, `relocated` the right's
     /// `UnknownParentWrites`.
     | RightUnknownParent of structural: Set<string> * relocated: Set<string>
     /// Both scripts access the same SLOT of a node and at least one writes it (Phase 340):
     /// `left.SlotWrites ∩ right.SlotWrites`, `left.SlotWrites ∩ right.SlotReads` and
-    /// `left.SlotReads ∩ right.SlotWrites`, as one set of `(node, slot)` pairs — the exact slot a
-    /// repair has to look at, not the node. Two slot writes to DIFFERENT slots of one node fail no
-    /// clause.
+    /// `left.SlotReads ∩ right.SlotWrites`, and (Phase 625) the child-list slot `(p,
+    /// Footprint.childListSlot)` of every parent one script structure-writes against the slots the
+    /// other accesses, as one set of `(node, slot)` pairs — the exact slot a repair has to look at,
+    /// not the node. Two slot writes to DIFFERENT slots of one node fail no clause, and neither do a
+    /// structure write of `p` and a write of another slot of `p`.
     | SlotClash of slots: Set<string * string>
-    /// The left script accesses, through a slot, nodes the right script touches WHOLE (Phase 340): the
-    /// nodes of `left.SlotWrites` the right content-writes, reads or structure-writes, and the nodes
-    /// of `left.SlotReads` the right content-writes. A whole-node write is a write of every slot, so
-    /// it serialises against each of them — the conservative default every four-set footprint keeps.
+    /// The left script accesses, through a slot, nodes the right script content-writes (Phase 340):
+    /// the nodes of `left.SlotWrites ∪ left.SlotReads` in `right.ContentWrites`. A whole-node write is
+    /// a write of every slot, so it serialises against each of them. Since Phase 625 a read or a
+    /// structure write of the node is not a whole-node touch here: a read is of the node's
+    /// existence, which no slot write changes, and a structure write is compared at the child-list
+    /// slot (`SlotClash`).
     | LeftSlotsRightNode of nodes: Set<string>
-    /// The mirror of `LeftSlotsRightNode`: the right script accesses slots of nodes the left touches
-    /// whole.
+    /// The mirror of `LeftSlotsRightNode`: the right script accesses slots of nodes the left
+    /// content-writes.
     | RightSlotsLeftNode of nodes: Set<string>
 
 /// The footprint builders (Phase 315) — the address shapes `Ops.footprint` folds a skeleton op into,
@@ -177,12 +195,48 @@ module Footprint =
     /// same reads to the skeleton ops' footprint.
     let reading (ids: string list) : Footprint = { empty with Reads = Set.ofList ids }
 
+    /// The name of a node's CHILD-LIST slot (Phase 625): the `(p, childListSlot)` pair every
+    /// structure write of `p` denotes. `Ops.interference` compares a structure write against a slot
+    /// access at this slot, so a domain op that rewrites a node's structural children by slot
+    /// (`slotEdit p childListSlot`) clashes with every insert, move and removal there, and a write of
+    /// any other slot of `p` commutes with them. The `#` keeps a field name or a key from taking it
+    /// by accident, and a slot that did take it would only gain collisions: it would be compared as
+    /// the child list, which every structure write of its node already collides with at the node.
+    /// A keyed position is not the child list (`KeyedWitness.KeyedChildren` holds exactly the nodes
+    /// `Children` does not report), so a key's slot never names it.
+    [<Literal>]
+    let childListSlot = "#children"
+
+    /// The child-list slots a footprint's structure writes denote (Phase 625): `(p, childListSlot)`
+    /// for every `p` in `StructureWrites`.
+    let childListSlots (f: Footprint) : Set<string * string> =
+        f.StructureWrites |> Set.map (fun p -> p, childListSlot)
+
+    /// Everything a footprint touches of the tree's STRUCTURE (Phase 625): its named structure writes,
+    /// its unknown-parent writes, and every node whose child-list slot it reads or writes. The set the
+    /// unknown-parent clause meets (`Interference.LeftUnknownParent`): a removal or a move rewrites a
+    /// source parent it cannot name, which may be the node whose child list the other side reads or
+    /// rewrites by slot, so it serialises against that access as it does against an insert.
+    let structural (f: Footprint) : Set<string> =
+        let childListAccess (slots: Set<string * string>) =
+            slots |> Set.filter (fun (_, slot) -> slot = childListSlot) |> Set.map fst
+
+        Set.unionMany
+            [ f.StructureWrites
+              f.UnknownParentWrites
+              childListAccess f.SlotWrites
+              childListAccess f.SlotReads ]
+
     /// An in-place edit of ONE SLOT of a node (Phase 340) — a named field, or the key a keyed child
     /// sits under: a read and a write of the slot `(id, slot)`, and nothing at the node. Two edits of
     /// different slots of one node commute; two edits of one slot collide (`Interference.SlotClash`,
-    /// naming the slot); and an edit of any slot of `id` collides with a whole-node access of `id` —
-    /// a `contentEdit id`, a `removeNode id`, an `insertUnder id _`, a `reading [ id ]` — because a
-    /// whole-node write is a write of every slot (`Interference.LeftSlotsRightNode` and its mirror).
+    /// naming the slot); and an edit of any slot of `id` collides with a whole-node WRITE of `id` —
+    /// a `contentEdit id`, a `removeNode id`, the insert of `id` — because a whole-node write is a
+    /// write of every slot (`Interference.LeftSlotsRightNode` and its mirror). Since Phase 625 it
+    /// commutes with a read of `id` (`reading [ id ]`, an anchor or a reference: the node's existence,
+    /// which the edit does not change) and with a structure write of `id` (`insertUnder id _`, a
+    /// move into or out of `id`), which is compared at the child-list slot: an edit of the slot
+    /// `childListSlot` clashes with it, an edit of any other slot does not.
     /// A domain op that rewrites a node's field by name lowers to this where it used to lower to
     /// `contentEdit id`; `contentEdit` keeps meaning the whole node, and every other builder keeps
     /// recording the whole node, so a domain that never calls this folds exactly as before. NOT what
@@ -195,7 +249,9 @@ module Footprint =
     /// refused in the other. A domain op shaped like this one, which can land under a node a concurrent
     /// op removes, must fold in what its removal partners destroy itself (`Footprint`'s pinned
     /// over-approximation (2)) — read `Ops.footprint`'s `UpdateNode` clause, which records the
-    /// unknown-parent write for exactly this pair.
+    /// unknown-parent write for exactly this pair. And a slot write that can change the node's
+    /// structural `Children` — or what the domain's admission answers for a child of it — must write
+    /// `childListSlot` too, or it reads as commuting with an insert it does not commute with.
     let slotEdit (id: string) (slot: string) : Footprint =
         { empty with
             SlotReads = Set.singleton (id, slot)
@@ -204,7 +260,9 @@ module Footprint =
     /// A read of ONE SLOT of a node and no write (Phase 340): a reader of one field, which does not
     /// depend on a write to another. It collides with a write of that slot (`SlotClash`) and with a
     /// whole-node content write of `id` (`LeftSlotsRightNode` when the reader is the left side), and
-    /// with nothing else — where `reading [ id ]` collides with every slot write of `id` too.
+    /// with nothing else; a read of `childListSlot` also collides with every structure write of `id`
+    /// (Phase 625). A reader of a node's content declares each slot it reads with this: `reading [ id ]`
+    /// is a read of the node's existence, which no slot write changes (Phase 625).
     let readingSlot (id: string) (slot: string) : Footprint =
         { empty with
             SlotReads = Set.singleton (id, slot) }
@@ -213,21 +271,27 @@ module Footprint =
     let slotNodes (slots: Set<string * string>) : Set<string> = Set.map fst slots
 
     /// The slots two footprints CLASH on (Phase 340) — `Interference.SlotClash`'s set: the slots both
-    /// write, and the slots one writes and the other reads, either way round. Symmetric. THE one
-    /// computation behind `Ops.interference`'s clause and `Dag.conflicts`' `SlotClash` shape, so
-    /// arbitration and the fold cannot disagree about a slot.
+    /// write, the slots one writes and the other reads, either way round, and (Phase 625) the
+    /// child-list slot of each parent one structure-writes that the other reads or writes as a slot.
+    /// Two structure writes of one parent are NOT a slot clash: that pair is the same-parent rule's
+    /// (`Interference.SameParent`), reported once. Symmetric. THE one computation behind
+    /// `Ops.interference`'s clause and `Dag.conflicts`' `SlotClash` shape, so arbitration and the
+    /// fold cannot disagree about a slot.
     let slotClash (a: Footprint) (b: Footprint) : Set<string * string> =
         Set.unionMany
             [ Set.intersect a.SlotWrites b.SlotWrites
               Set.intersect a.SlotWrites b.SlotReads
-              Set.intersect a.SlotReads b.SlotWrites ]
+              Set.intersect a.SlotReads b.SlotWrites
+              Set.intersect (childListSlots a) (Set.union b.SlotWrites b.SlotReads)
+              Set.intersect (Set.union a.SlotWrites a.SlotReads) (childListSlots b) ]
 
-    /// The nodes `a` accesses through a slot that `b` touches WHOLE (Phase 340) —
-    /// `Interference.LeftSlotsRightNode`'s set, with `a` on the left: the nodes of `a.SlotWrites` that
-    /// `b` content-writes, reads or structure-writes, and the nodes of `a.SlotReads` that `b`
-    /// content-writes. `slotsAgainstNode b a` is the mirror. Shared by `Ops.interference` and
-    /// `Dag.conflicts` for the reason `slotClash` is.
+    /// The nodes `a` accesses through a slot that `b` WRITES WHOLE (Phase 340) —
+    /// `Interference.LeftSlotsRightNode`'s set, with `a` on the left: the nodes of `a.SlotWrites` and
+    /// of `a.SlotReads` that `b` content-writes. A read and a structure write of the node are not
+    /// whole-node touches here (Phase 625): the read is of the node's existence, and the structure
+    /// write is compared at the child-list slot (`slotClash`). `slotsAgainstNode b a` is the mirror.
+    /// Shared by `Ops.interference` and `Dag.conflicts` for the reason `slotClash` is.
     let slotsAgainstNode (a: Footprint) (b: Footprint) : Set<string> =
         Set.union
-            (Set.intersect (slotNodes a.SlotWrites) (Set.unionMany [ b.ContentWrites; b.Reads; b.StructureWrites ]))
+            (Set.intersect (slotNodes a.SlotWrites) b.ContentWrites)
             (Set.intersect (slotNodes a.SlotReads) b.ContentWrites)

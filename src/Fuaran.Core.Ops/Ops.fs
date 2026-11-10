@@ -1502,18 +1502,16 @@ module Ops =
     /// the right, so `interference b a` reports the same clauses with the directional cases mirrored.
     /// Total, no throws (GP4).
     let interference (a: Footprint) (b: Footprint) : Interference list =
-        let structural (f: Footprint) =
-            Set.union f.StructureWrites f.UnknownParentWrites
-
         let sameTarget = Set.intersect a.ContentWrites b.ContentWrites
         let leftWrites = Set.intersect a.ContentWrites b.Reads
         let rightWrites = Set.intersect a.Reads b.ContentWrites
         let sameParent = Set.intersect a.StructureWrites b.StructureWrites
-        let structuralA = structural a
-        let structuralB = structural b
+        let structuralA = Footprint.structural a
+        let structuralB = Footprint.structural b
         // Phase 340 — the slot clauses. A slot access is compared at the slot against another slot
-        // access, and as an access of the NODE against the other side's whole-node sets. The three
-        // sets are `Footprint`'s helpers, which `Dag.conflicts` reads too.
+        // access — a structure write as its parent's child-list slot (Phase 625) — and as an access
+        // of the NODE against the other side's content writes. The three sets are `Footprint`'s
+        // helpers, which `Dag.conflicts` reads too.
         let slotClash = Footprint.slotClash a b
         let leftSlots = Footprint.slotsAgainstNode a b
         let rightSlots = Footprint.slotsAgainstNode b a
@@ -1545,12 +1543,18 @@ module Ops =
     ///     under one parent are NOT independent (they shift the same siblings — THE pinned same-parent
     ///     rule);
     ///   - an `UnknownParentWrites` op (a remove/move, whose source parent is a tree fact) conflicts with
-    ///     *any* structural write — known or unknown — in the other script (the pinned unknown-parent
+    ///     *any* structural write — known or unknown — in the other script, and (Phase 625) with any
+    ///     access of a child-list slot (`Footprint.structural`; the pinned unknown-parent
     ///     over-approximation): a remove/move is only independent of a structure-free script;
     ///   - (Phase 340) no slot is written by one script and accessed by the other (`SlotClash`), and no
-    ///     node one script accesses through a slot is touched whole by the other (`LeftSlotsRightNode`
+    ///     node one script accesses through a slot is content-written by the other (`LeftSlotsRightNode`
     ///     / `RightSlotsLeftNode`): two writes to DIFFERENT slots of one node are independent; a
-    ///     whole-node write is a write of every slot and serialises against each.
+    ///     whole-node write is a write of every slot and serialises against each;
+    ///   - (Phase 625) a structure write of `p` is, against a slot access, a read and a write of `p`'s
+    ///     child-list slot (`Footprint.childListSlot`): it clashes with an access of that slot and
+    ///     commutes with a write of any other slot of `p`, and a read of `p` (an existence read)
+    ///     commutes with a slot write of `p` — so a restyle of a container is independent of an
+    ///     insert into it, a move into or out of it and a removal under it.
     /// `true` is a promise (they commute); `false` is always a safe answer. Total, no throws (GP4).
     ///
     /// **The unknown-parent clauses are NECESSARY over this record, not merely conservative (Phase

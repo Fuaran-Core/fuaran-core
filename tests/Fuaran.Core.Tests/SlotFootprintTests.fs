@@ -139,13 +139,14 @@ let private failedNamed (fragment: string) (results: LawResult list) =
 // ---------------------------------------------------------------------------
 
 /// Every footprint over two nodes and three slots: the three node sets a slot clause reads are
-/// each ∅ or {x}; the two slot sets are every subset of {(x,s), (x,t), (y,s)} — 512 footprints,
-/// so every overlap shape a slot clause can see occurs, at the node and at the slot.
+/// each ∅ or {x}; the two slot sets are every subset of {(x,s), (x,#children), (y,s)} — 512
+/// footprints, so every overlap shape a slot clause can see occurs, at the node and at the slot,
+/// and (Phase 625) a structure write of x meets both a slot of x and x's child-list slot.
 let private everySlotFootprint =
     let nodeSets = [ Set.empty; setOf [ "x" ] ]
 
     let slotSets =
-        let slots = [ ("x", "s"); ("x", "t"); ("y", "s") ]
+        let slots = [ ("x", "s"); ("x", Footprint.childListSlot); ("y", "s") ]
 
         [ for mask in 0..7 ->
               slots
@@ -171,16 +172,23 @@ let private everySlotFootprint =
 let private expectedSlotClauses (a: Footprint) (b: Footprint) =
     let nodes (ps: Set<string * string>) = ps |> Set.map fst
 
+    // Phase 625: a structure write of p is the slot (p, #children) against a slot access.
+    let childList (f: Footprint) =
+        f.StructureWrites |> Set.map (fun p -> p, "#children")
+
+    let accessed (f: Footprint) = Set.union f.SlotWrites f.SlotReads
+
     let clash =
         Set.unionMany
             [ Set.intersect a.SlotWrites b.SlotWrites
               Set.intersect a.SlotWrites b.SlotReads
-              Set.intersect a.SlotReads b.SlotWrites ]
+              Set.intersect a.SlotReads b.SlotWrites
+              Set.intersect (childList a) (accessed b)
+              Set.intersect (accessed a) (childList b) ]
 
+    // Phase 625: only a content write is a whole-node touch against a slot access.
     let against (p: Footprint) (q: Footprint) =
-        Set.union
-            (Set.intersect (nodes p.SlotWrites) (Set.unionMany [ q.ContentWrites; q.Reads; q.StructureWrites ]))
-            (Set.intersect (nodes p.SlotReads) q.ContentWrites)
+        Set.intersect (nodes (accessed p)) q.ContentWrites
 
     [ if not clash.IsEmpty then
           Interference.SlotClash clash
@@ -352,13 +360,16 @@ let tests =
                         [ MergeConflictShape.ConcurrentUpdate, "n" ]
                         "the fold reports it at the node: a concurrent update"
 
-                    // the other whole-node accesses Core's builders publish
-                    for name, other in
-                        [ "removeNode", Footprint.removeNode "n"
-                          "insertUnder", Footprint.insertUnder "n" "c"
-                          "reading", Footprint.reading [ "n" ]
-                          "moveTo", Footprint.moveTo "n" "p" ] do
+                    // the other whole-node writes Core's builders publish
+                    for name, other in [ "removeNode", Footprint.removeNode "n"; "moveTo", Footprint.moveTo "n" "p" ] do
                         Expect.isFalse (Ops.independent slot other) (name + " of the node refuses the slot write")
+
+                    // Phase 625 — a read of the node (its existence) and a structure write of it (its
+                    // child-list slot) are not whole-node writes: a write of another slot commutes.
+                    for name, other in
+                        [ "insertUnder", Footprint.insertUnder "n" "c"
+                          "reading", Footprint.reading [ "n" ] ] do
+                        Expect.isTrue (Ops.independent slot other) (name + " of the node commutes with the slot write")
 
                     // … and the pair does not commute, which is why the rule is kept.
                     let ab =
@@ -389,10 +400,10 @@ let tests =
                         [ Interference.LeftSlotsRightNode(setOf [ "n" ]) ]
                         "a whole-node write of the node"
 
-                    // where `reading [ n ]` depends on every slot write of the node
-                    Expect.isFalse
+                    // Phase 625 — `reading [ n ]` reads the node's existence, which no slot write changes
+                    Expect.isTrue
                         (Ops.independent (Footprint.reading [ "n" ]) (Footprint.slotEdit "n" "b"))
-                        "the whole-node read is the conservative form"
+                        "an existence read commutes with a slot write"
 
                 testCase "union carries the slot sets, so growing a footprint never frees a pair"
                 <| fun _ ->

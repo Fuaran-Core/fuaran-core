@@ -453,6 +453,14 @@ and inert_all (os:list op) : Tot bool (decreases os) =
 
 let relocating (o:op) : Tot bool = not (is_empty (op_fp o).unknown_parent_writes)
 
+(* Phase 625 — a union writes structure exactly when one side does (`structural` is a union of
+   member lists, so membership decides it). *)
+let writes_structure_union_fp (a b:footprint)
+  : Lemma (ensures writes_structure (union_fp a b) == (writes_structure a || writes_structure b))
+  = writes_structure_mem (union_fp a b);
+    writes_structure_mem a;
+    writes_structure_mem b
+
 (* Structure-free is exactly inert — the model's link between the FOOTPRINT's verdict and the
    op's shape, and what turns `independent`'s conservative clause into a case elimination. *)
 let rec structure_free_iff_inert (o:op)
@@ -464,7 +472,10 @@ and structure_free_iff_inert_all (os:list op)
   : Lemma (ensures not (writes_structure (fp_all os)) == inert_all os) (decreases os)
   = match os with
     | [] -> ()
-    | o :: r -> structure_free_iff_inert o; structure_free_iff_inert_all r
+    | o :: r ->
+      structure_free_iff_inert o;
+      structure_free_iff_inert_all r;
+      writes_structure_union_fp (op_fp o) (fp_all r)
 
 (* An inert op is the identity — nothing to thread, nothing to reject. *)
 let rec inert_is_identity (o:op) (t:tree)
@@ -2302,10 +2313,37 @@ and no_reloc_all_preserves_wf (os:list op) (t:tree)
 
 (* ---- move 1: independence descends through a union ---- *)
 
+(* Phase 625 — the slot clash distributes over a union on the left: every clause of it is an
+   intersection with one of the union's fields, the child-list slots of its structure writes
+   included. *)
+let mem_slot_clash_union_left (fo fr fb:footprint) (x:slot)
+  : Lemma (ensures mem x (slot_clash (union_fp fo fr) fb) == (mem x (slot_clash fo fb) || mem x (slot_clash fr fb)))
+  = let fu = union_fp fo fr in
+    let acc (f:footprint) = union f.slot_writes f.slot_reads in
+    (* one clause at a time, so no single query carries the whole disjunction *)
+    assert (mem x (inter fu.slot_writes fb.slot_writes)
+            == (mem x (inter fo.slot_writes fb.slot_writes) || mem x (inter fr.slot_writes fb.slot_writes)));
+    assert (mem x (inter fu.slot_writes fb.slot_reads)
+            == (mem x (inter fo.slot_writes fb.slot_reads) || mem x (inter fr.slot_writes fb.slot_reads)));
+    assert (mem x (inter fu.slot_reads fb.slot_writes)
+            == (mem x (inter fo.slot_reads fb.slot_writes) || mem x (inter fr.slot_reads fb.slot_writes)));
+    mem_child_slots x fu.structure_writes;
+    mem_child_slots x fo.structure_writes;
+    mem_child_slots x fr.structure_writes;
+    mem_child_slots x fb.structure_writes;
+    assert (mem x (inter (child_slots fu.structure_writes) (acc fb))
+            == (mem x (inter (child_slots fo.structure_writes) (acc fb))
+                || mem x (inter (child_slots fr.structure_writes) (acc fb))));
+    assert (mem x (inter (acc fu) (child_slots fb.structure_writes))
+            == (mem x (inter (acc fo) (child_slots fb.structure_writes))
+                || mem x (inter (acc fr) (child_slots fb.structure_writes))))
+
 let independent_union_left (fo fr fb:footprint)
   : Lemma (requires independent (union_fp fo fr) fb)
           (ensures independent fo fb /\ independent fr fb)
   = let fu = union_fp fo fr in
+    (* Phase 625 — the unknown-parent clause reads `structural`, which a union only grows. *)
+    writes_structure_union_fp fo fr;
     inter_nil_iff fu.content_writes fb.content_writes;
     inter_nil_iff fo.content_writes fb.content_writes;
     inter_nil_iff fr.content_writes fb.content_writes;
@@ -2320,6 +2358,13 @@ let independent_union_left (fo fr fb:footprint)
     inter_nil_iff fr.structure_writes fb.structure_writes;
     (* Phase 340 — the slot clauses descend by membership: every member of a side's slot clash or
        slots-against-node set is a member of the union's, which is empty. *)
+    (* Phase 625 — the clash's members, stated once per slot here rather than as a pattern every
+       query over a union would instantiate. *)
+    let aux (x:slot)
+      : Lemma (ensures mem x (slot_clash fu fb) == (mem x (slot_clash fo fb) || mem x (slot_clash fr fb)))
+      = mem_slot_clash_union_left fo fr fb x
+    in
+    FStar.Classical.forall_intro aux;
     nil_of_sub (slot_clash fo fb) (slot_clash fu fb);
     nil_of_sub (slot_clash fr fb) (slot_clash fu fb);
     nil_of_sub (slots_against_node fo fb) (slots_against_node fu fb);

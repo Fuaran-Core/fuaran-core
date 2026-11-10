@@ -176,10 +176,6 @@ type footprint = {
   slot_writes           : list slot
 }
 
-(* F#: `hasStructural` inside `Ops.independent`, and `writesStructure` beside `Dag.conflicts`
-   — the two are the same predicate, and the model has one name for it. *)
-let writes_structure (f:footprint) : Tot bool =
-  not (is_empty f.structure_writes) || not (is_empty f.unknown_parent_writes)
 
 (* F#: `Footprint.slotNodes` — the slots read as the nodes they belong to. *)
 let rec nodes (l:list slot) : Tot (list string) =
@@ -201,18 +197,73 @@ let rec nodes_app (l m:list slot)
     | [] -> ()
     | _ :: t -> nodes_app t m
 
-(* F#: `Footprint.slotClash` — the slots both write, and the slots one writes and the other reads,
-   either way round. The set `Interference.SlotClash` carries and `Dag.conflicts` tags `SlotClash`. *)
+(* F#: `Footprint.childListSlot` (Phase 625) — the slot name a structure write of `p` denotes: the
+   child list of `p`, compared at the slot against every slot access. *)
+let child_list_slot : string = "#children"
+
+(* F#: `Footprint.childListSlots` — `(p, child_list_slot)` for every structurally written `p`. *)
+let rec child_slots (l:list string) : Tot (list slot) =
+  match l with
+  | [] -> []
+  | p :: t -> (p, child_list_slot) :: child_slots t
+
+let rec mem_child_slots (x:slot) (l:list string)
+  : Lemma (ensures mem x (child_slots l) == (snd x = child_list_slot && mem (fst x) l))
+          [SMTPat (mem x (child_slots l))]
+  = match l with
+    | [] -> ()
+    | _ :: t -> mem_child_slots x t
+
+(* The nodes whose child-list slot a slot list names (Phase 625). *)
+let rec child_list_nodes (l:list slot) : Tot (list string) =
+  match l with
+  | [] -> []
+  | (n, s) :: t -> if s = child_list_slot then n :: child_list_nodes t else child_list_nodes t
+
+let rec mem_child_list_nodes (n:string) (l:list slot)
+  : Lemma (ensures mem n (child_list_nodes l) == mem (n, child_list_slot) l)
+          [SMTPat (mem n (child_list_nodes l))]
+  = match l with
+    | [] -> ()
+    | _ :: t -> mem_child_list_nodes n t
+
+(* F#: `Footprint.structural` — the named structure writes, the unknown-parent writes, and (Phase
+   625) every node whose child-list slot the footprint reads or writes. *)
+let structural (f:footprint) : Tot (list string) =
+  union f.structure_writes
+        (union f.unknown_parent_writes
+               (union (child_list_nodes f.slot_writes) (child_list_nodes f.slot_reads)))
+
+(* F#: `Footprint.structural` non-empty, inside `Ops.independent`, and `writesStructure` beside
+   `Dag.conflicts` — the two are the same predicate, and the model has one name for it. *)
+let writes_structure (f:footprint) : Tot bool =
+  not (is_empty (structural f))
+
+(* `writes_structure` read through `structural`'s members (Phase 625), so a union's verdict is the
+   disjunction of its sides' by membership alone. *)
+let writes_structure_mem (f:footprint)
+  : Lemma (ensures writes_structure f <==> (exists (x:string). mem x (structural f)))
+  = match structural f with
+    | [] -> ()
+    | h :: _ -> assert (mem h (structural f))
+
+(* F#: `Footprint.slotClash` — the slots both write, the slots one writes and the other reads,
+   either way round, and (Phase 625) the child-list slot of each parent one side structure-writes
+   that the other accesses as a slot. Two structure writes of one parent are the same-parent clause,
+   never a slot clash. The set `Interference.SlotClash` carries and `Dag.conflicts` tags `SlotClash`. *)
 let slot_clash (a b:footprint) : Tot (list slot) =
   union (inter a.slot_writes b.slot_writes)
         (union (inter a.slot_writes b.slot_reads)
-               (inter a.slot_reads b.slot_writes))
+               (union (inter a.slot_reads b.slot_writes)
+                      (union (inter (child_slots a.structure_writes) (union b.slot_writes b.slot_reads))
+                             (inter (union a.slot_writes a.slot_reads) (child_slots b.structure_writes)))))
 
-(* F#: `Footprint.slotsAgainstNode a b` — the nodes `a` accesses through a slot that `b` touches
-   WHOLE: a slot write of `n` against `b`'s content write, read or structure write of `n`, and a
-   slot read of `n` against `b`'s content write of `n`. A whole-node write is a write of every slot. *)
+(* F#: `Footprint.slotsAgainstNode a b` — the nodes `a` accesses through a slot that `b` writes
+   WHOLE: a slot write or a slot read of `n` against `b`'s content write of `n`. A whole-node write is
+   a write of every slot. Since Phase 625 a read of `n` (its existence) and a structure write of `n`
+   (compared at the child-list slot, in `slot_clash`) are not whole-node touches here. *)
 let slots_against_node (a b:footprint) : Tot (list string) =
-  union (inter (nodes a.slot_writes) (union b.content_writes (union b.reads b.structure_writes)))
+  union (inter (nodes a.slot_writes) b.content_writes)
         (inter (nodes a.slot_reads) b.content_writes)
 
 (* F#: `Ops.independent`, clause for clause. The slot clauses (Phase 340): no slot one side writes

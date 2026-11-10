@@ -79,9 +79,6 @@ let __proj__Mkfootprint__item__slot_writes : footprint  ->  Prims.list<slot> = (
      end))
 
 
-let writes_structure : footprint  ->  Prims.bool = (fun ( f  :  footprint ) -> ((not ((is_empty f.structure_writes))) || (not ((is_empty f.unknown_parent_writes)))))
-
-
 let rec nodes : Prims.list<slot>  ->  Prims.list<Prims.string> = (fun ( l  :  Prims.list<slot> ) -> (match (l) with
 | [] -> begin
      []
@@ -91,10 +88,42 @@ let rec nodes : Prims.list<slot>  ->  Prims.list<Prims.string> = (fun ( l  :  Pr
      end))
 
 
-let slot_clash : footprint  ->  footprint  ->  Prims.list<slot> = (fun ( a  :  footprint ) ( b  :  footprint ) -> (union (ListAlgebra.inter a.slot_writes b.slot_writes) (union (ListAlgebra.inter a.slot_writes b.slot_reads) (ListAlgebra.inter a.slot_reads b.slot_writes))))
+let child_list_slot : Prims.string = "#children"
 
 
-let slots_against_node : footprint  ->  footprint  ->  Prims.list<Prims.string> = (fun ( a  :  footprint ) ( b  :  footprint ) -> (union (ListAlgebra.inter (nodes a.slot_writes) (union b.content_writes (union b.reads b.structure_writes))) (ListAlgebra.inter (nodes a.slot_reads) b.content_writes)))
+let rec child_slots : Prims.list<Prims.string>  ->  Prims.list<slot> = (fun ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| (p)::t -> begin
+     (((p), (child_list_slot)))::(child_slots t)
+     end))
+
+
+let rec child_list_nodes : Prims.list<slot>  ->  Prims.list<Prims.string> = (fun ( l  :  Prims.list<slot> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| ((n, s))::t -> begin
+      
+if (Prims.op_Equals s child_list_slot) then begin
+     (n)::(child_list_nodes t)
+     end else begin
+     (child_list_nodes t)
+     end
+     end))
+
+
+let structural : footprint  ->  Prims.list<Prims.string> = (fun ( f  :  footprint ) -> (union f.structure_writes (union f.unknown_parent_writes (union (child_list_nodes f.slot_writes) (child_list_nodes f.slot_reads)))))
+
+
+let writes_structure : footprint  ->  Prims.bool = (fun ( f  :  footprint ) -> (not ((is_empty (structural f)))))
+
+
+let slot_clash : footprint  ->  footprint  ->  Prims.list<slot> = (fun ( a  :  footprint ) ( b  :  footprint ) -> (union (ListAlgebra.inter a.slot_writes b.slot_writes) (union (ListAlgebra.inter a.slot_writes b.slot_reads) (union (ListAlgebra.inter a.slot_reads b.slot_writes) (union (ListAlgebra.inter (child_slots a.structure_writes) (union b.slot_writes b.slot_reads)) (ListAlgebra.inter (union a.slot_writes a.slot_reads) (child_slots b.structure_writes)))))))
+
+
+let slots_against_node : footprint  ->  footprint  ->  Prims.list<Prims.string> = (fun ( a  :  footprint ) ( b  :  footprint ) -> (union (ListAlgebra.inter (nodes a.slot_writes) b.content_writes) (ListAlgebra.inter (nodes a.slot_reads) b.content_writes)))
 
 
 let independent : footprint  ->  footprint  ->  Prims.bool = (fun ( a  :  footprint ) ( b  :  footprint ) -> (((((((((disjoint a.content_writes b.content_writes) && (disjoint a.content_writes b.reads)) && (disjoint b.content_writes a.reads)) && (disjoint a.structure_writes b.structure_writes)) && (not (((not ((is_empty a.unknown_parent_writes))) && (writes_structure b))))) && (not (((not ((is_empty b.unknown_parent_writes))) && (writes_structure a))))) && (is_empty (slot_clash a b))) && (is_empty (slots_against_node a b))) && (is_empty (slots_against_node b a))))
