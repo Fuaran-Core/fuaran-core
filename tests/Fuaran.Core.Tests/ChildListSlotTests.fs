@@ -252,6 +252,39 @@ let tests =
                         (Ops.independent (Footprint.contentEdit "p") (Footprint.readingSlot "p" "style"))
                         "a whole-node write against a slot read"
 
+                testCase "the child-list slots and the structural set a footprint denotes"
+                <| fun _ ->
+                    Expect.equal
+                        (Footprint.childListSlots (Footprint.insertUnder "p" "c"))
+                        (setOf [ "p", Footprint.childListSlot ])
+                        "an insert's structure write is its parent's child-list slot"
+
+                    Expect.isEmpty
+                        (Footprint.childListSlots (Footprint.slotEdit "p" Footprint.childListSlot))
+                        "a slot write declares no structure write"
+
+                    Expect.equal
+                        (Footprint.structural (Footprint.slotEdit "p" Footprint.childListSlot))
+                        (setOf [ "p" ])
+                        "but a child-list slot access is structural"
+
+                    Expect.equal
+                        (Footprint.structural (Footprint.readingSlot "p" Footprint.childListSlot))
+                        (setOf [ "p" ])
+                        "a read of it too"
+
+                    Expect.isEmpty (Footprint.structural (Footprint.slotEdit "p" "style")) "another slot is not"
+
+                    Expect.equal
+                        (Footprint.structural (Footprint.removeNode "x"))
+                        (setOf [ "x" ])
+                        "the unknown parent is"
+
+                    // so a pure removal, whose source parent may be `p`, is ordered against a child-list access
+                    Expect.isFalse
+                        (Ops.independent (Footprint.removeNode "x") (Footprint.readingSlot "p" Footprint.childListSlot))
+                        "the unknown-parent clause meets the child-list access"
+
                 testCase "a read of a node is of its existence: a slot write of the node commutes with it"
                 <| fun _ ->
                     Expect.isTrue

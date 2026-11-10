@@ -13,7 +13,7 @@
     "asset": "proofs-kit-<version>.tar",
     "manifest": "proofs/kit/asset.json",
     "builder": "pwsh proofs/kit/build-kit-asset.ps1",
-    "sha256": "5eaf3ee27ed0c1e5dbe2278c7267621122f5c2617eb8cae9492550feeb5c64a1",
+    "sha256": "ede5d61d2af7c7cc87a1921478c098771ef9d79f1d7f77191a2fd0488ced214a",
     "url": "https://github.com/Fuaran-Core/fuaran-core/releases/download/v<version>/proofs-kit-<version>.tar"
   },
   "records": [
