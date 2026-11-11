@@ -979,7 +979,67 @@ module internal FSharpDerive =
 /// unprojected kind spec, enumeration and JSON scalar; a `Collecting<Union>` seam per generic union;
 /// and `Absent`), the generated enumeration decoders, and `collectingDecoders`, the generated value.
 /// The decoders it names are [[FSharpCodec.collectingDecl]]'s.
+///
+/// Phase 635 (DECISIONS.md D248) — beside each argument decoder a generic union's seam receives the
+/// argument's WITNESS, a value of `Instantiation<'T>`: one case per concrete argument type the
+/// vocabulary instantiates a generic union at, carrying the identity both ways between that type
+/// and `'T`, so a host's one generic decoder can build a value that depends on the instantiation
+/// without asking the runtime for a type (which Fable erases inside a generic body).
 module internal FSharpCollectingRecord =
+
+    /// The witness type's name in the generated module.
+    [<Literal>]
+    let InstantiationType = "Instantiation"
+
+    /// The case a concrete argument type is witnessed by, and that type as the collecting decoders
+    /// read it (`'Msg` pinned to `obj`): named by the type, a list or map by its element and a
+    /// generic union by its arguments. `None` for an argument that names no closed, message-free F#
+    /// type the record can carry: a type parameter (witnessed by the enclosing decoder's own
+    /// witness), anything built over one, a sentinel, a hosted slot, or a message-carrying type.
+    let rec instantiationCase (msg: Set<string>) (t: IdlType) : (string * string) option =
+        let plain (n: string) =
+            if msg.Contains n then None else Some(n, n)
+
+        match t with
+        | TStr -> Some("String", "string")
+        | TInt -> Some("Int", "int")
+        | TFloat -> Some("Float", "float")
+        | TBool -> Some("Bool", "bool")
+        | TEnum n -> Some(n, n)
+        | TRecord n
+        | TUnion(n, []) -> plain n
+        | TUnion(n, args) when not (msg.Contains n) ->
+            args
+            |> List.map (instantiationCase msg)
+            |> List.fold
+                (fun acc a ->
+                    match acc, a with
+                    | Some xs, Some x -> Some(xs @ [ x ])
+                    | _ -> None)
+                (Some [])
+            |> Option.map (fun xs ->
+                n + "Of" + (xs |> List.map fst |> String.concat "And"),
+                n + "<" + (xs |> List.map snd |> String.concat ", ") + ">")
+        | TNode when not (msg.Contains "Node") -> Some("Node", "Node")
+        | TJson -> Some("Json", "JVal")
+        | TList inner ->
+            instantiationCase msg inner
+            |> Option.map (fun (c, ty) -> c + "List", ty + " list")
+        | TMap inner ->
+            instantiationCase msg inner
+            |> Option.map (fun (c, ty) -> c + "Map", "Map<string, " + ty + ">")
+        | _ -> None
+
+    /// The witness a seam's call site passes for the argument type `t`: the enclosing decoder's own
+    /// witness for a type parameter, the argument's case with the identity both ways for a closed
+    /// type, else `Open`.
+    let witnessOf (msg: Set<string>) (t: IdlType) : string =
+        match t with
+        | TVar v -> "inst" + v
+        | _ ->
+            match instantiationCase msg t with
+            | Some(c, _) -> sprintf "%s.%s(id, id)" InstantiationType c
+            | None -> InstantiationType + ".Open"
 
     /// The record's three pieces of module text.
     type Parts =
@@ -1033,12 +1093,61 @@ module internal FSharpCollectingRecord =
 
         let seamName (u: IdlUnion) = "Collecting" + u.Name
 
+        // Phase 635 (D248) — every argument a generic union is instantiated at, anywhere a declared
+        // member's type reaches (a superset of the collecting group's call sites, so each witness a
+        // call site prints has its case). A type parameter is witnessed by the enclosing decoder's
+        // own witness; an argument no case names is witnessed by `Open`.
+        let genericNames = generic |> List.map _.Name |> Set.ofList
+
+        let rec arguments (t: IdlType) : IdlType list =
+            match t with
+            | TUnion(n, args) ->
+                (if genericNames.Contains n then args else [])
+                @ (args |> List.collect arguments)
+            | TList inner
+            | TMap inner -> arguments inner
+            | _ -> []
+
+        let instantiations =
+            [ for k in kinds do
+                  for f in k.Fields do
+                      yield! arguments f.Type
+              for u in unions do
+                  for c in u.Cases do
+                      for f in c.Fields do
+                          yield! arguments f.Type
+              for r in records do
+                  for f in r.Fields do
+                      yield! arguments f.Type
+              for f in decl.Envelope.Members do
+                  yield! arguments f.Type ]
+            |> List.filter (function
+                | TVar _ -> false
+                | _ -> true)
+
+        let instantiationCases =
+            let named = instantiations |> List.map (instantiationCase msg)
+            let cases = named |> List.choose id |> List.distinct |> List.sortBy fst
+            // `Open` where an argument has no case, and as the one case of a witness nothing names.
+            let opens =
+                if List.contains None named || List.isEmpty cases then
+                    [ "Open", "" ]
+                else
+                    []
+
+            cases @ opens
+
         // A slot's field is named by its type, so two types the record would name alike (a vocabulary
         // type named `String`, `Int`, `Float`, `Bool` or `Absent`, or two that print alike) are refused
         // at generation rather than emitted as a module that does not compile; so is a vocabulary type
         // named as a generic union's seam.
         let fieldNames =
             (slots |> List.map fst) @ (generic |> List.map _.Name) @ [ "Absent" ]
+
+        // Phase 635 — the witness type is named beside the seams.
+        let seams =
+            (generic |> List.map seamName)
+            @ (if List.isEmpty generic then [] else [ InstantiationType ])
 
         let typeNames =
             Set.ofList (
@@ -1053,15 +1162,19 @@ module internal FSharpCollectingRecord =
             match fieldNames |> List.countBy id |> List.tryFind (fun (_, n) -> n > 1) with
             | Some(name, _) -> Some(sprintf "two collecting decoders named '%s'" name)
             | None ->
-                generic
-                |> List.tryFind (fun u -> typeNames.Contains(seamName u))
-                |> Option.map (fun u ->
-                    sprintf "the collecting seam '%s' beside a vocabulary type of that name" (seamName u))
+                match seams |> List.tryFind typeNames.Contains with
+                | Some seam -> Some(sprintf "the collecting seam '%s' beside a vocabulary type of that name" seam)
+                | None ->
+                    instantiationCases
+                    |> List.countBy fst
+                    |> List.tryFind (fun (_, n) -> n > 1)
+                    |> Option.map (fun (case, _) ->
+                        sprintf "two instantiations witnessed by one case '%s.%s'" InstantiationType case)
 
         let genericSig (u: IdlUnion) =
             let decoders =
                 u.Params
-                |> List.map (fun p -> sprintf "(JVal -> Result<'%s, DecodeError list>)" p)
+                |> List.map (fun p -> sprintf "(JVal -> Result<'%s, DecodeError list>) * %s<'%s>" p InstantiationType p)
                 |> String.concat " * "
 
             sprintf
@@ -1099,6 +1212,21 @@ module internal FSharpCollectingRecord =
                        (seamName u)
                        (genericSig u))
                |> String.concat "")
+            + (if List.isEmpty generic then
+                   ""
+               else
+                   "\n\n/// Phase 635 — the witness of one instantiation of a generic union's parameter, passed beside its\n"
+                   + "/// decoder: a case per concrete type the vocabulary instantiates one at, carrying the identity both\n"
+                   + "/// ways between that type and `'T`, so a host builds a value that depends on the instantiation\n"
+                   + "/// without a runtime type test; `Open` for an argument no case names (one built over a type parameter).\n"
+                   + sprintf "and [<RequireQualifiedAccess>] %s<'T> =" InstantiationType
+                   + (instantiationCases
+                      |> List.map (fun (case, ty) ->
+                          if ty = "" then
+                              "\n    | " + case
+                          else
+                              sprintf "\n    | %s of into: (%s -> 'T) * out: ('T -> %s)" case ty ty)
+                      |> String.concat ""))
 
         // Phase 562 — each enumeration's generated collecting decoder, its short-circuiting one lifted.
         let enumDefaults =
@@ -1121,7 +1249,10 @@ module internal FSharpCollectingRecord =
                |> String.concat "\n")
             + (generic
                |> List.map (fun u ->
-                   let ps = u.Params |> List.map (fun p -> "col" + p) |> String.concat ", "
+                   let ps =
+                       u.Params
+                       |> List.collect (fun p -> [ "col" + p; "inst" + p ])
+                       |> String.concat ", "
 
                    sprintf
                        "\n      %s =\n        { new %s with\n            member _.Decode(__ov, %s, j) = col%s __ov %s j }"
@@ -1129,7 +1260,9 @@ module internal FSharpCollectingRecord =
                        (seamName u)
                        ps
                        u.Name
-                       (u.Params |> List.map (fun p -> "col" + p) |> String.concat " "))
+                       (u.Params
+                        |> List.collect (fun p -> [ "col" + p; "inst" + p ])
+                        |> String.concat " "))
                |> String.concat "")
             + "\n      Absent = colAbsent }"
 

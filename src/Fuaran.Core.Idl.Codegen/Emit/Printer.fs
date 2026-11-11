@@ -43,8 +43,9 @@ type internal SlotPrinter =
         /// A declared name's codec — a non-generic union, a record.
         Named: string -> string
         Node: string
-        /// A generic union's codec, by name, over its argument codecs.
-        Union: string -> string list -> string
+        /// A generic union's codec, by name, over its argument codecs, each beside the argument's
+        /// type (Phase 635: the collecting printer prints a per-instantiation witness from it).
+        Union: string -> (IdlType * string) list -> string
         /// A list's codec over its element codec.
         List: string -> string
         /// A string-keyed map's codec over its value codec.
@@ -91,7 +92,11 @@ module internal SlotTraversal =
         | TEnum n -> Ok(p.Enum n)
         | TVar v -> Ok(p.Var v)
         | TUnion(n, []) -> Ok(p.Named n)
-        | TUnion(n, args) -> args |> List.map (slotFn p) |> sequenceR |> Result.map (p.Union n)
+        | TUnion(n, args) ->
+            args
+            |> List.map (fun a -> slotFn p a |> Result.map (fun s -> a, s))
+            |> sequenceR
+            |> Result.map (p.Union n)
         | TNode -> Ok p.Node
         // Phase 195 — the op vocabulary is REFUSED AS DATA rather than thrown at. See
         // [[opVocabularySlot]] for why the arm exists and what it says.

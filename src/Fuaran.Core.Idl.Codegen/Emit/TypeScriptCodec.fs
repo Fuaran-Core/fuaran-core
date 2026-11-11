@@ -166,7 +166,7 @@ module internal TypeScriptCodec =
               Var = fun v -> "enc" + v
               Named = fun n -> "enc" + n
               Node = "encodeNode"
-              Union = fun n args -> "((x) => enc" + n + "(" + String.concat ", " args + ", x))"
+              Union = fun n args -> "((x) => enc" + n + "(" + String.concat ", " (List.map snd args) + ", x))"
               List = fun e -> "((xs) => '[' + xs.map(" + e + ").join(',') + ']')"
               Map =
                 fun e ->
@@ -484,7 +484,7 @@ module internal TypeScriptCodec =
           Var = fun v -> "dec" + v
           Named = fun n -> "dec" + n
           Node = "decNode"
-          Union = fun n args -> "((x) => dec" + n + "(" + String.concat ", " args + ", x))"
+          Union = fun n args -> "((x) => dec" + n + "(" + String.concat ", " (List.map snd args) + ", x))"
           List = fun d -> "dList(" + d + ")"
           Map = fun d -> "dMap(" + d + ")"
           // The value carries nothing, so it decodes to `null`; but it is READ (Phase 347): the

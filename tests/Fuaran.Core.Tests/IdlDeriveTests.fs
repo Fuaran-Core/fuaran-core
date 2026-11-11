@@ -2703,10 +2703,10 @@ module private Hooks =
             [ "let seen = System.Collections.Generic.List<string>()"
               "let bare ="
               "    { new CollectingBinding with"
-              "        member _.Decode<'T>(self: CollectingDecoders, colT: JVal -> Result<'T, DecodeError list>, j: JVal) : Result<Binding<'T>, DecodeError list> ="
+              "        member _.Decode<'T>(self: CollectingDecoders, colT: JVal -> Result<'T, DecodeError list>, instT: Instantiation<'T>, j: JVal) : Result<Binding<'T>, DecodeError list> ="
               "            seen.Add(typeof<'T>.Name)"
               "            match j with"
-              "            | JObj _ -> collectingDecoders.Binding.Decode(self, colT, j)"
+              "            | JObj _ -> collectingDecoders.Binding.Decode(self, colT, instT, j)"
               "            | _ -> colT j |> Result.map Binding.Lit }"
               "let bools = ref 0"
               "let host ="
@@ -2730,6 +2730,187 @@ module private Hooks =
               "    | NodeKind.Text s -> printfn \"text\\t%A\" s.Text"
               "    | _ -> ()"
               "| a, b -> printfn \"unexpected\\t%A\\t%A\" a b" ]
+
+    /// Phase 635 (DECISIONS.md D248) — a generic union at every kind of instantiation the witness
+    /// distinguishes: four scalars, a list of scalars, a record, an instantiation that occurs only
+    /// inside another generic union (`Pair.Two.scale`), a type parameter passed from one generic union
+    /// to another (`Pair.Two.left`) and through its own recursion (`Each`), an argument built over a
+    /// type parameter (`Pair.Two.many`, witnessed `Open`), and the envelope.
+    let witnessIdl: Idl =
+        let binding t = TUnion("Binding", [ t ])
+
+        { NullChecked.idl with
+            Unions =
+                [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                    Name = "Binding"
+                    Params = [ "T" ]
+                    Cases =
+                      [ NullChecked.case "Lit" [ NullChecked.field "value" (TVar "T") Required ]
+                        NullChecked.case "Path" [ NullChecked.field "path" TStr Required ]
+                        NullChecked.case "Each" [ NullChecked.field "items" (TList(binding (TVar "T"))) Required ] ]
+                    Annotations = Annotations.Empty
+                    Discrimination = UnionDiscrimination.Tagged }
+                  { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                    Name = "Pair"
+                    Params = [ "A" ]
+                    Cases =
+                      [ NullChecked.case
+                            "Two"
+                            [ NullChecked.field "left" (binding (TVar "A")) Required
+                              NullChecked.field "scale" (binding (TList TFloat)) Required
+                              NullChecked.field "many" (binding (TList(TVar "A"))) Required ] ]
+                    Annotations = Annotations.Empty
+                    Discrimination = UnionDiscrimination.Tagged } ]
+            Records =
+                [ { Name = "Owner"
+                    Fields = [ NullChecked.field "name" TStr Required ]
+                    Annotations = Annotations.Empty
+                    Inline = false } ]
+            Kinds =
+                [ NullChecked.kind
+                      "Text"
+                      [ NullChecked.field "text" (binding TStr) Required
+                        NullChecked.field "size" (binding TFloat) Required
+                        NullChecked.field "count" (binding TInt) Required
+                        NullChecked.field "all" (TList(binding TBool)) Required
+                        NullChecked.field "tags" (binding (TList TStr)) Required
+                        NullChecked.field "owner" (binding (TRecord "Owner")) Required
+                        NullChecked.field "pair" (TUnion("Pair", [ TInt ])) Required ] ] }
+
+    /// The host as a consuming tier writes it: a bare `"=<cell>"` is a selection whose cell is read
+    /// into the slot's own type, chosen by the WITNESS (the UI tier's `projectSelectionField<'T>`
+    /// chose by `typeof<'T>`, which Fable erases inside the seam's generic body). It records each
+    /// witness it is handed, reads each value back out through `out`, and, for the no-override law,
+    /// compares the generated record and a delegating host with the plain entry over a document and
+    /// its mutations.
+    let witnessProbe =
+        """
+let caseOf (i: Instantiation<'T>) =
+    match i with
+    | Instantiation.Bool _ -> "Bool"
+    | Instantiation.Float _ -> "Float"
+    | Instantiation.FloatList _ -> "FloatList"
+    | Instantiation.Int _ -> "Int"
+    | Instantiation.Owner _ -> "Owner"
+    | Instantiation.String _ -> "String"
+    | Instantiation.StringList _ -> "StringList"
+    | Instantiation.Open -> "Open"
+
+let roundTrips = ref 0
+
+let back (out: 'T -> 'A) (into: 'A -> 'T) (x: 'A) : 'T =
+    let v = into x
+    if out v = x then roundTrips.Value <- roundTrips.Value + 1
+    v
+
+let coerce (i: Instantiation<'T>) (colT: JVal -> Result<'T, DecodeError list>) (cell: string) : Result<'T, DecodeError list> =
+    match i with
+    | Instantiation.Float(into, out) -> Ok(back out into (System.Double.Parse(cell, System.Globalization.CultureInfo.InvariantCulture)))
+    | Instantiation.Int(into, out) -> Ok(back out into (System.Int32.Parse(cell, System.Globalization.CultureInfo.InvariantCulture)))
+    | Instantiation.Bool(into, out) -> Ok(back out into (cell = "true"))
+    | Instantiation.String(into, out) -> Ok(back out into cell)
+    | Instantiation.StringList(into, out) -> Ok(back out into (List.ofArray (cell.Split ',')))
+    | Instantiation.FloatList(into, out) -> Ok(back out into [])
+    | Instantiation.Owner(into, out) -> Ok(back out into { Name = cell })
+    | Instantiation.Open -> colT (JStr cell)
+
+let seen = System.Collections.Generic.List<string>()
+
+let host =
+    { collectingDecoders with
+        Binding =
+            { new CollectingBinding with
+                member _.Decode<'T>(self: CollectingDecoders, colT: JVal -> Result<'T, DecodeError list>, instT: Instantiation<'T>, j: JVal) : Result<Binding<'T>, DecodeError list> =
+                    seen.Add(caseOf instT)
+                    match j with
+                    | JStr s when s.StartsWith "=" -> coerce instT colT (s.Substring 1) |> Result.map Binding.Lit
+                    | _ -> collectingDecoders.Binding.Decode(self, colT, instT, j) }
+        Pair =
+            { new CollectingPair with
+                member _.Decode<'A>(self: CollectingDecoders, colA: JVal -> Result<'A, DecodeError list>, instA: Instantiation<'A>, j: JVal) : Result<Pair<'A>, DecodeError list> =
+                    seen.Add("Pair:" + caseOf instA)
+                    collectingDecoders.Pair.Decode(self, colA, instA, j) } }
+
+let delegating =
+    { collectingDecoders with
+        Binding =
+            { new CollectingBinding with
+                member _.Decode<'T>(self: CollectingDecoders, colT: JVal -> Result<'T, DecodeError list>, instT: Instantiation<'T>, j: JVal) : Result<Binding<'T>, DecodeError list> =
+                    collectingDecoders.Binding.Decode(self, colT, instT, j) }
+        Pair =
+            { new CollectingPair with
+                member _.Decode<'A>(self: CollectingDecoders, colA: JVal -> Result<'A, DecodeError list>, instA: Instantiation<'A>, j: JVal) : Result<Pair<'A>, DecodeError list> =
+                    collectingDecoders.Pair.Decode(self, colA, instA, j) } }
+
+let json (s: string) = s.Replace('\'', '"')
+
+let parse (s: string) =
+    match Decoder.parse ReadOptions.strict (json s) with
+    | Ok j -> j
+    | Error e -> failwithf "the fixture parses: %A" e
+
+let rec lits (b: Binding<'T>) : 'T list =
+    match b with
+    | Binding.Lit v -> [ v ]
+    | Binding.Path _ -> []
+    | Binding.Each xs -> xs |> List.collect lits
+
+let flag (v: bool) = if v then "true" else "false"
+let floats (xs: float list) = xs |> List.map (fun v -> v.ToString(System.Globalization.CultureInfo.InvariantCulture)) |> String.concat ","
+
+let selections =
+    "{'hidden':'=true','id':'t','kind':{'$type':'Text','text':'=abc','size':'=2.5','count':'=7','all':['=false',{'$type':'Each','items':['=true']}],'tags':'=a,b','owner':'=o','pair':{'$type':'Two','left':{'$type':'Each','items':['=3']},'scale':'=','many':{'$type':'Lit','value':[1,2]}}}}"
+
+match decodeNodeJsonAllWith host (parse selections) with
+| Ok { Kind = NodeKind.Text s; Hidden = hidden } ->
+    printfn "seen\t%s" (seen |> Seq.countBy id |> Seq.sort |> Seq.map (fun (k, c) -> sprintf "%s=%d" k c) |> String.concat ",")
+    printfn "roundTrips\t%d" roundTrips.Value
+    printfn "text\t%s" (lits s.Text |> List.map (fun v -> v + "!") |> String.concat ",")
+    printfn "size\t%s" (lits s.Size |> List.map (fun v -> v + 1.0) |> floats)
+    printfn "count\t%s" (lits s.Count |> List.map (fun v -> string (v + 1)) |> String.concat ",")
+    printfn "all\t%s" (s.All |> List.collect lits |> List.map (not >> flag) |> String.concat ",")
+    printfn "hidden\t%s" (hidden |> Option.map lits |> Option.defaultValue [] |> List.map (not >> flag) |> String.concat ",")
+    printfn "tags\t%s" (lits s.Tags |> List.map (String.concat "|") |> String.concat ",")
+    printfn "owner\t%s" (lits s.Owner |> List.map _.Name |> String.concat ",")
+    match s.Pair with
+    | Pair.Two(left, scale, many) ->
+        printfn "left\t%s" (lits left |> List.map string |> String.concat ",")
+        printfn "scale\t%s" (lits scale |> List.map floats |> String.concat "/")
+        printfn "many\t%s" (lits many |> List.map (List.map string >> String.concat ";") |> String.concat ",")
+| other -> printfn "unexpected\t%A" other
+
+let plain =
+    "{'hidden':{'$type':'Lit','value':true},'id':'t','kind':{'$type':'Text','text':{'$type':'Lit','value':'abc'},'size':{'$type':'Each','items':[{'$type':'Lit','value':2.5},{'$type':'Path','path':'p'}]},'count':{'$type':'Lit','value':7},'all':[{'$type':'Lit','value':false}],'tags':{'$type':'Lit','value':['a','b']},'owner':{'$type':'Lit','value':{'name':'o'}},'pair':{'$type':'Two','left':{'$type':'Lit','value':3},'scale':{'$type':'Lit','value':[1.5]},'many':{'$type':'Path','path':'q'}}}}"
+
+let rec mutations (j: JVal) : JVal list =
+    match j with
+    | JObj fs ->
+        [ for i in 0 .. fs.Length - 1 do
+              yield JObj(List.removeAt i fs)
+              let k, v = fs.[i]
+              for m in mutations v do
+                  yield JObj(List.updateAt i (k, m) fs) ]
+    | JArr xs ->
+        [ for i in 0 .. xs.Length - 1 do
+              for m in mutations xs.[i] do
+                  yield JArr(List.updateAt i m xs) ]
+    | JStr _ -> [ JInt 7; JStr "=1" ]
+    | JInt _ -> [ JStr "x"; JFloat 2.5 ]
+    | JFloat _ -> [ JStr "x" ]
+    | JBool _ -> [ JStr "x" ]
+
+let render (r: Result<Node, DecodeError list>) =
+    match r with
+    | Ok n -> "ok " + encodeNode n
+    | Error es -> "refused " + (es |> List.map DecodeError.render |> String.concat " | ")
+
+let pool = parse plain :: mutations (parse plain)
+let agree (decoders: CollectingDecoders) = pool |> List.filter (fun x -> render (decodeNodeJsonAllWith decoders x) = render (decodeNodeJsonAll x)) |> List.length
+printfn "pool\t%d" pool.Length
+printfn "generated\t%d" (agree collectingDecoders)
+printfn "delegating\t%d" (agree delegating)
+printfn "plainOk\t%b" ((render (decodeNodeJsonAll (parse plain))).StartsWith "ok ")
+"""
 
 [<Tests>]
 let collectingHookTests =
@@ -2795,6 +2976,11 @@ let collectingHookTests =
               let src = Overrides.emitted "Generic" Hooks.genericIdl
               Expect.stringContains src "and CollectingBinding =" "the seam"
               Expect.stringContains src "abstract Decode<'T> :" "generic in the union's parameter"
+
+              Expect.stringContains
+                  src
+                  "(JVal -> Result<'T, DecodeError list>) * Instantiation<'T> * JVal"
+                  "Phase 635: each argument decoder beside its witness"
 
               match Projected.runFsiWith Overrides.strict (Projected.scriptOf "Generic" src Hooks.genericProbe) with
               | None -> skiptest "dotnet not on PATH - the compiled probe is skipped"
@@ -2955,3 +3141,161 @@ let collectingHookTests =
               | Error(CodegenError.UnsupportedConstruct(what, _, _)) ->
                   Expect.stringContains what "CollectingBinding" "the seam's clash is named"
               | other -> failtestf "expected a refusal, got %A" (other |> Result.map ignore)) ]
+
+// ---------------------------------------------------------------------------
+// Phase 635 (DECISIONS.md D248) — a generic union's seam receives, beside each argument decoder, the
+// argument's WITNESS (`Instantiation<'T>`): a case per concrete type the vocabulary instantiates a
+// generic union at, carrying the identity both ways, so a host decoder that depends on the
+// instantiation is written without `typeof<'T>`, which Fable erases inside the seam's generic body.
+// The Fable leg of the same probe is not run here (this repository runs no Fable compiler, Phase 217);
+// D248 records its measurement, and the consuming tier's Fable gate carries it with its adoption.
+// ---------------------------------------------------------------------------
+
+[<Tests>]
+let instantiationWitnessTests =
+    testList
+        "Phase 635 - the Binding seam receives a per-instantiation witness"
+        [ testCase "the witness's cases are the concrete instantiations, passed at every call site" (fun _ ->
+              let src = Overrides.emitted "Witness" Hooks.witnessIdl
+              Expect.stringContains src "and [<RequireQualifiedAccess>] Instantiation<'T> =" "the witness type"
+
+              for case, ty in
+                  [ "Bool", "bool"
+                    "Float", "float"
+                    "FloatList", "float list"
+                    "Int", "int"
+                    "Owner", "Owner"
+                    "String", "string"
+                    "StringList", "string list" ] do
+                  Expect.stringContains
+                      src
+                      (sprintf "    | %s of into: (%s -> 'T) * out: ('T -> %s)" case ty ty)
+                      (case + ": a case carrying the identity both ways")
+
+              Expect.stringContains src "    | Open" "an argument built over a type parameter has no case"
+
+              Expect.stringContains
+                  src
+                  "__ov.Binding.Decode(__ov, (__ov.Float __ov), Instantiation.Float(id, id), __j)"
+                  "a concrete instantiation passes its case"
+
+              Expect.stringContains
+                  src
+                  "__ov.Binding.Decode(__ov, (cList (__ov.Float __ov)), Instantiation.FloatList(id, id), __j)"
+                  "an instantiation that occurs only inside another generic union"
+
+              Expect.stringContains
+                  src
+                  "__ov.Binding.Decode(__ov, colA, instA, __j)"
+                  "a type parameter passes the enclosing decoder's witness to another generic union"
+
+              Expect.stringContains src "__ov.Binding.Decode(__ov, colT, instT, __j)" "and through its own recursion"
+
+              Expect.stringContains
+                  src
+                  "__ov.Binding.Decode(__ov, (cList colA), Instantiation.Open, __j)"
+                  "an argument built over a type parameter is witnessed Open"
+
+              Expect.isFalse (src.Contains "typeof") "no runtime type is asked for"
+              Expect.isFalse (src.Contains ":?") "no type test")
+
+          testCase
+              "a host decoder that uses the witness is applied at every instantiation and depth; a host that supplies none reads as before"
+              (fun _ ->
+                  let src = Overrides.emitted "Witness" Hooks.witnessIdl
+
+                  match
+                      Projected.runFsiWith Overrides.strict (Projected.scriptOf "Witness" src Hooks.witnessProbe)
+                  with
+                  | None -> skiptest "dotnet not on PATH - the compiled probe is skipped"
+                  | Some(code, out, err) ->
+                      Expect.equal code 0 (sprintf "the emission and the probe compile: %s" err)
+
+                      let lines =
+                          out.Split('\n')
+                          |> Array.map _.TrimEnd('\r')
+                          |> Array.choose (fun l ->
+                              match l.IndexOf '\t' with
+                              | -1 -> None
+                              | i -> Some(l.Substring(0, i), l.Substring(i + 1)))
+                          |> Map.ofArray
+
+                      let expect key value what =
+                          Expect.equal (lines.TryFind key) (Some value) what
+
+                      expect
+                          "seen"
+                          "Bool=4,Float=1,FloatList=1,Int=3,Open=1,Owner=1,Pair:Int=1,String=1,StringList=1"
+                          "each witness at each depth: the envelope and the list's bool, Each's items, the int through Pair to Binding, the instantiation only Pair holds"
+
+                      expect "roundTrips" "10" "every value the host built reads back out through the witness"
+                      expect "text" "abc!" "a string"
+                      expect "size" "3.5" "a float, coerced from the cell, not the cell's text"
+                      expect "count" "8" "an int, coerced"
+                      expect "all" "true,false" "a bool in a list and beneath Each"
+                      expect "hidden" "false" "the envelope's bool"
+                      expect "tags" "a|b" "a list of strings"
+                      expect "owner" "o" "a record"
+                      expect "left" "3" "the type parameter passed from Pair, beneath Each"
+                      expect "scale" "" "the instantiation only Pair holds, the host's placeholder"
+                      expect "many" "1;2" "the Open argument read by the generated decoder"
+                      expect "plainOk" "true" "the plain document decodes"
+
+                      let pool = lines.TryFind "pool" |> Option.map int |> Option.defaultValue 0
+                      Expect.isGreaterThan pool 50 "the pool is not vacuous"
+
+                      expect "generated" (string pool) "the generated record answers the plain entry on every document"
+
+                      expect
+                          "delegating"
+                          (string pool)
+                          "a host delegating at both seams, witness passed through, answers the plain entry on every document")
+
+          testCase "a vocabulary without a generic union emits no witness" (fun _ ->
+              match DeriveIdl.generate () with
+              | Ok src -> Expect.isFalse (src.Contains "Instantiation") "the derivations vocabulary is unchanged"
+              | Error e -> failtestf "the vocabulary generates: %A" e)
+
+          testCase "a vocabulary type the witness would name twice is refused at generation" (fun _ ->
+              let refused (idl: Idl) (what: string) =
+                  match Gen.fsharpModuleDerived GenSupport.Empty [ Derivation.SpecDecoders ] "M" idl [ "Text" ] with
+                  | Error(CodegenError.UnsupportedConstruct(construct, _, _)) ->
+                      Expect.stringContains construct what (what + ": the clash is named")
+                  | other -> failtestf "%s: expected a refusal, got %A" what (other |> Result.map ignore)
+
+              // A vocabulary type named as the witness.
+              refused
+                  { Hooks.witnessIdl with
+                      Records =
+                          Hooks.witnessIdl.Records
+                          @ [ { Name = "Instantiation"
+                                Fields = []
+                                Annotations = Annotations.Empty
+                                Inline = false } ]
+                      Kinds =
+                          Hooks.witnessIdl.Kinds
+                          |> List.map (fun k ->
+                              { k with
+                                  Fields = k.Fields @ [ NullChecked.field "i" (TRecord "Instantiation") Required ] }) }
+                  "Instantiation"
+
+              // A record named as the case another instantiation prints to (`FloatList` beside `float list`).
+              refused
+                  { Hooks.witnessIdl with
+                      Records =
+                          Hooks.witnessIdl.Records
+                          @ [ { Name = "FloatList"
+                                Fields = []
+                                Annotations = Annotations.Empty
+                                Inline = false } ]
+                      Kinds =
+                          Hooks.witnessIdl.Kinds
+                          |> List.map (fun k ->
+                              { k with
+                                  Fields =
+                                      k.Fields
+                                      @ [ NullChecked.field
+                                              "list"
+                                              (TUnion("Binding", [ TRecord "FloatList" ]))
+                                              Required ] }) }
+                  "Instantiation.FloatList") ]

@@ -41,7 +41,7 @@ module internal FSharpCodec =
               Var = fun v -> "enc" + v
               Named = fun n -> "enc" + n
               Node = "encNode"
-              Union = fun n args -> "(enc" + n + " " + String.concat " " args + ")"
+              Union = fun n args -> "(enc" + n + " " + String.concat " " (List.map snd args) + ")"
               List = sprintf "(fun __xs -> JArr(List.map %s __xs))"
               Map = sprintf "(fun __m -> JObj(Map.toList __m |> List.map (fun (k, v) -> k, %s v)))"
               // A closure/opaque codec ignores its argument and emits the fixed sentinel.
@@ -487,7 +487,7 @@ let private encFloat (f: float) : JVal =
           Var = fun v -> "dec" + v
           Named = fun n -> "dec" + n
           Node = "decNode"
-          Union = fun n args -> "(dec" + n + " " + String.concat " " args + ")"
+          Union = fun n args -> "(dec" + n + " " + String.concat " " (List.map snd args) + ")"
           List = sprintf "(dList %s)"
           Map = sprintf "(dMap %s)"
           // Phase 347 — the sentinel is checked (`dSentinel`), as the interpreter checks it.
@@ -786,14 +786,28 @@ let private encFloat (f: float) : JVal =
     /// its field's generic `Decode`, handed the record and its argument decoders, so one host decoder
     /// covers every instantiation. A sentinel, a hosted slot and verbatim JSON stay leaves: each is
     /// the vocabulary's or the host's own codec already.
-    let colPrinter: SlotPrinter =
+    ///
+    /// Phase 635 (DECISIONS.md D248) — each argument decoder is followed by the argument's witness
+    /// ([[FSharpCollectingRecord.witnessOf]]), so the host's decoder can depend on the instantiation;
+    /// `msg` names the message-carrying declarations, which no witness case names.
+    let colPrinter (msg: Set<string>) : SlotPrinter =
         { SlotTraversal.collecting
               decPrinter
               (sprintf "(cLift %s)")
               { decPrinter with
                   Var = fun v -> "col" + v
                   Named = fun n -> "(__ov." + n + " __ov)"
-                  Union = fun n args -> "(fun __j -> __ov." + n + ".Decode(__ov, " + String.concat ", " args + ", __j))"
+                  Union =
+                      fun n args ->
+                          let passed =
+                              args
+                              |> List.collect (fun (t, dec) -> [ dec; FSharpCollectingRecord.witnessOf msg t ])
+
+                          "(fun __j -> __ov."
+                          + n
+                          + ".Decode(__ov, "
+                          + String.concat ", " passed
+                          + ", __j))"
                   Node = "(__ov.Node __ov)"
                   List = sprintf "(cList %s)"
                   Map = sprintf "(cMap %s)" } with
@@ -805,9 +819,9 @@ let private encFloat (f: float) : JVal =
 
     /// The F# collecting member reader: [[memberDecPrinter]]'s presence, read through
     /// [[colPrinter]].
-    let colMemberPrinter (idl: Idl) : MemberDecPrinter =
+    let colMemberPrinter (msg: Set<string>) (idl: Idl) : MemberDecPrinter =
         { memberDecPrinter idl with
-            Slot = colPrinter
+            Slot = colPrinter msg
             // Phase 562 — a declared member is read beside its holder (`__holder`, bound by every
             // holder's decoder, see [[holderBinding]]) and the object `j`, so an absent one asks the
             // record's `Absent` first.
@@ -874,9 +888,17 @@ let private encFloat (f: float) : JVal =
         : Result<string, CodegenError> =
         let msg, idl = decl.Msg, decl.Idl
 
+        // Phase 635 — each parameter's decoder, then its witness (D248).
         let colArgs =
             u.Params
-            |> List.map (fun p -> sprintf " (col%s: JVal -> Result<'%s, DecodeError list>)" p p)
+            |> List.map (fun p ->
+                sprintf
+                    " (col%s: JVal -> Result<'%s, DecodeError list>) (inst%s: %s<'%s>)"
+                    p
+                    p
+                    p
+                    FSharpCollectingRecord.InstantiationType
+                    p)
             |> String.concat ""
 
         let declArgs =
@@ -930,7 +952,7 @@ let private encFloat (f: float) : JVal =
 
         UnionTraversal.decoder
             { Read = read
-              Slot = colPrinter
+              Slot = colPrinter msg
               Arm = fun _ c members -> arm c members
               Bare =
                 fun _ c f cfn ->
@@ -1311,7 +1333,7 @@ let private encFloat (f: float) : JVal =
             + ")"
 
         let colRead =
-            MemberTraversal.colMembers (colMemberPrinter idl) (colMemberPrinter idl) id
+            MemberTraversal.colMembers (colMemberPrinter msg idl) (colMemberPrinter msg idl) id
 
         let inlineCols =
             (unions
@@ -1329,8 +1351,8 @@ let private encFloat (f: float) : JVal =
                 // Phase 562 — a leaf member is read by the collecting reader too, so a scalar's and an
                 // enumeration's go through their slots, and every declared member's absence through
                 // `Absent`; nothing is lifted.
-                { Dec = colMemberPrinter idl
-                  Col = colMemberPrinter idl
+                { Dec = colMemberPrinter msg idl
+                  Col = colMemberPrinter msg idl
                   Lift = id
                   Union = fun read u -> colUnionDecoder sup.CaseRefines decl read u
                   NodeKind = colNodeKindDecl

@@ -599,7 +599,7 @@ module internal TypeScriptDerived =
             { tsDecPrinter with
                 Var = fun v -> "col" + v
                 Named = fun n -> "col" + n
-                Union = fun n args -> "((x) => col" + n + "(" + String.concat ", " args + ", x))"
+                Union = fun n args -> "((x) => col" + n + "(" + String.concat ", " (List.map snd args) + ", x))"
                 Node = "colNode"
                 List = fun c -> "cList(" + c + ")"
                 Map = fun c -> "cMap(" + c + ")" }
