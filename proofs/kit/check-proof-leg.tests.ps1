@@ -31,6 +31,14 @@
 #   C. HOST RUN      — a host project that builds and cannot run the filter: exit non-zero, no green.
 #   D. CHECK         — a model with a type error: exit non-zero, no green.
 #
+# Since Phase 641 the kit has TWO LEGS, and the arms run per leg: a pin named in -PinFile whose `leg`
+# is `custard` runs the N arms (section N: a miniature repository, `fixtures/custard/`, through the
+# newer leg — green, held, and red on a tampered extraction, a stray oracle file, a tampered Fable
+# stand-in, a refuted plain model, a refuted Pulse model, a red Fable runner and a red .NET host);
+# a pin without one runs A-K, exactly as before. Both, in one run:
+#
+#     pwsh ./proofs/kit/check-proof-leg.tests.ps1 -PinFile proofs/fstar-pin.json,proofs/kit/fstar-pin-custard.json
+#
 # The R, M and I arms run anywhere. The rest need the pinned prover; where there is none it says NOT RUN
 # and exits 2 — never 0, because "nothing was checked" must not read as "everything held". `proofs/check.ps1` runs it after a
 # green leg, when the prover is by construction present.
@@ -38,9 +46,14 @@
 param(
     # The adopter's proofs directory: where the prover `check.ps1` installed lives.
     [string] $ProofsDir,
-    # The pinned prover declaration. Defaults to <ProofsDir>/fstar-pin.json; an adopter running the kit
-    # from its release asset passes the asset's own (Phase 536).
-    [string] $PinFile,
+    # The pinned prover declaration(s). Defaults to <ProofsDir>/fstar-pin.json; an adopter running the kit
+    # from its release asset passes the asset's own (Phase 536). Since Phase 641 there may be one per
+    # LEG: the arms of each leg named here run (the present leg's A-K, the custard leg's N), and a leg
+    # not named is not tested. The kit tests itself with both: -PinFile proofs/fstar-pin.json,proofs/kit/fstar-pin-custard.json.
+    [string[]] $PinFile,
+    # Phase 641 — the newer prover, for the N arms. Defaults to FSTAR_HOME, then
+    # <ProofsDir>/.fstar/<release>/fstar (where the leg installs it), whichever reports the pin's version.
+    [string] $CustardFStarHome,
     # The leg under test. Defaults to the engine beside this file; pointing it at an older copy is
     # how the go-red half of the acceptance is demonstrated.
     [string] $Kit,
@@ -49,6 +62,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# The caller's FSTAR_HOME, before any arm sets it for a leg (Phase 641: two legs, two provers).
+$script:callerFStarHome = $env:FSTAR_HOME
 
 if (-not $ProofsDir) { $ProofsDir = Split-Path $PSScriptRoot -Parent }
 $ProofsDir = [System.IO.Path]::GetFullPath($ProofsDir)
@@ -56,7 +71,20 @@ if (-not $Kit) { $Kit = Join-Path $PSScriptRoot 'check-proof-leg.ps1' }
 $Kit = [System.IO.Path]::GetFullPath($Kit)
 if (-not $WorkDir) { $WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "check-proof-leg-tests-$PID" }
 
-$pinFile = if ($PinFile) { [System.IO.Path]::GetFullPath($PinFile) } else { Join-Path $ProofsDir 'fstar-pin.json' }
+# The legs under test (Phase 641): each named pin's `leg` field, absent meaning the present leg. The
+# prover-free arms (R, M, I) exercise the engine, not an adopter's pin, so when no present-leg pin is
+# named they read the kit's own, which sits one directory above this file in the asset and in the tree.
+$pinFiles = @(if ($PinFile) { $PinFile | ForEach-Object { [System.IO.Path]::GetFullPath($_) } } else { Join-Path $ProofsDir 'fstar-pin.json' })
+function Get-PinLeg([string] $path) {
+    $declared = Get-Content $path -Raw | ConvertFrom-Json
+    if ($null -eq $declared.PSObject.Properties['leg']) { 'legacy' } else { [string]$declared.leg }
+}
+$legacyPinFile = @($pinFiles | Where-Object { (Get-PinLeg $_) -eq 'legacy' }) | Select-Object -First 1
+$custardPinFile = @($pinFiles | Where-Object { (Get-PinLeg $_) -eq 'custard' }) | Select-Object -First 1
+# `$pinFile` is the -PinFile parameter's own variable (PowerShell names are case-insensitive), typed [string[]];
+# it is released first, so the single pin the arms below splat is a [string], as the engine takes it.
+Remove-Variable -Name PinFile
+$pinFile = if ($legacyPinFile) { $legacyPinFile } else { Join-Path (Split-Path $PSScriptRoot -Parent) 'fstar-pin.json' }
 $pinnedVersion = (Get-Content $pinFile -Raw | ConvertFrom-Json).fstar.TrimStart('v')
 
 $script:failures = [System.Collections.Generic.List[string]]::new()
@@ -306,6 +334,207 @@ $i = Invoke-Guard
 Assert-That 'I. GUARD — a PackageReference inherited from a Directory.Build.props is refused, naming that file' ($i.Exit -ne 0 -and [bool](@($i.Lines -match 'Directory\.Build\.props:3: a PackageReference other than FSharp\.Core').Count)) "exit $($i.Exit): $($i.Text)"
 Remove-Item $guardRoot -Recurse -Force -ErrorAction SilentlyContinue
 
+# ---- running the leg the way a caller does -------------------------------------------------------
+
+# In THIS process, with `&`, which is the shape that shadowed the exit code. Every stream is
+# captured so the transcript can be searched; the exit code is read from the GLOBAL automatic
+# variable, which is the only one this script never assigns.
+# Every run writes its RUN VERDICT (Phase 522): to the arm's own -SummaryFile when it names one, to a
+# fresh file per run otherwise. The record is read back and held to the run here, once for every arm,
+# so a leg whose record and exit code disagree is red whichever arm it happened in.
+$script:legRuns = 0
+
+function Invoke-Leg([hashtable] $legArgs) {
+    $env:FSTAR_HOME = $fstarHome
+    $script:legRuns++
+    $legArgs = $legArgs.Clone()
+    if (-not $legArgs.ContainsKey('SummaryFile')) { $legArgs.SummaryFile = Join-Path $WorkDir "verdict-$($script:legRuns).json" }
+    if (Test-Path $legArgs.SummaryFile) { Remove-Item $legArgs.SummaryFile -Force }
+    Push-Location $WorkDir
+    $threw = $null
+    try {
+        $global:LASTEXITCODE = 0
+        $lines = @(& $Kit @legArgs *>&1 | ForEach-Object { [string]$_ })
+        $code = $global:LASTEXITCODE
+    }
+    catch {
+        # A terminating error is a refusal too — as `pwsh -File` it is exit 1 — but it is named,
+        # so a leg that has started THROWING where it used to exit is visible here.
+        $threw = $_.ToString()
+        $lines = @($threw)
+        $code = 1
+    }
+    finally { Pop-Location }
+    $verdict = if (Test-Path $legArgs.SummaryFile) { Get-Content $legArgs.SummaryFile -Raw | ConvertFrom-Json } else { $null }
+    $green = [bool]($lines -match '==== proofs: green')
+    Assert-That "V. VERDICT — run $($script:legRuns) ($($legArgs.Modules -join ', ')) wrote one record, its exit the leg's and its verdict green exactly when the leg was" (
+        $null -ne $verdict -and $verdict.kind -eq 'proofRunVerdict' -and $verdict.exit -eq $code -and (($verdict.verdict -eq 'green') -eq ($code -eq 0 -and $green))) "exit $code, record $(if ($verdict) { "$($verdict.verdict)/$($verdict.exit)" } else { 'absent' })"
+    [pscustomobject]@{ Exit = $code; Green = $green; Lines = $lines; Threw = $threw; Verdict = $verdict }
+}
+
+function Show-Tail($result) {
+    $verdict = @($result.Lines -match '^==== proofs: ') | Select-Object -Last 1
+    if ($result.Threw) { "threw: $($result.Threw)" } elseif ($verdict) { $verdict } else { '(no verdict line)' }
+}
+
+# How the run ends, whichever legs ran (Phase 641): red on any failure; NOT RUN (exit 2, never 0) when
+# a leg named in -PinFile had no prover to run its arms with; green otherwise.
+$script:notRun = [System.Collections.Generic.List[string]]::new()
+function Complete-LegTests {
+    Remove-Item $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
+    if ($script:failures.Count -gt 0) {
+        Write-Host "==== leg-tests: RED — $($script:failures.Count) of $script:cases assertion(s) failed; the leg reported a step it could not run as green" -ForegroundColor Red
+        exit 1
+    }
+    if ($script:notRun.Count -gt 0) {
+        Write-Host "==== leg-tests: NOT RUN — $($script:notRun -join '; '). $script:cases assertions held, but a leg named in -PinFile was not exercised." -ForegroundColor Yellow
+        exit 2
+    }
+    Write-Host "==== leg-tests: $script:cases assertions held — every step's failure is REFUSED, not merely printed" -ForegroundColor Green
+    exit 0
+}
+
+# ---- N. THE CUSTARD LEG (Phase 641) -----------------------------------------------------------------
+#
+# Run when a custard pin is among -PinFile. The miniature repository is `fixtures/custard/` beside this
+# file: two models (LegCustard, first-order with a record and a theorem; LegPulse, a Pulse box), a .NET
+# host referencing the project Custard generates, a Fable oracle whose runner is run under Node, and a
+# tool manifest naming `fable`. Nothing generated is committed in it: N1 extracts, N2 holds what N1
+# wrote. Then every way the leg must go red, each by its EXIT CODE: drift, a stray oracle file, a
+# tampered Fable stand-in, a refuted plain model, a refuted Pulse model, a red Fable runner and a red
+# .NET host. The refusals of a misdeclared leg (NR) need no prover and run first.
+function Invoke-Refusal([hashtable] $legArgs) {
+    Push-Location $WorkDir
+    try {
+        $global:LASTEXITCODE = 0
+        $lines = @(& $Kit @legArgs *>&1 | ForEach-Object { [string]$_ })
+        $code = $global:LASTEXITCODE
+    }
+    catch { $lines = @($_.ToString()); $code = 1 }
+    finally { Pop-Location }
+    [pscustomobject]@{ Exit = $code; Text = ($lines -join ' ') }
+}
+
+# A copy of the leg arguments with some replaced: `+` refuses a key both hashtables hold.
+function Merge-LegArgs([hashtable] $legArgs, [hashtable] $over) {
+    $merged = $legArgs.Clone()
+    foreach ($key in $over.Keys) { $merged[$key] = $over[$key] }
+    $merged
+}
+
+function Invoke-CustardArms {
+    $custardPin = Get-Content $custardPinFile -Raw | ConvertFrom-Json
+    $refusals = Join-Path $WorkDir 'custard-refusals'
+    New-Item -ItemType Directory -Force $refusals | Out-Null
+    foreach ($os in 'windows', 'linux') {
+        $r = Invoke-Refusal @{ Modules = @('Resolve'); ProofsDir = $refusals; PinFile = $custardPinFile; ResolveOnly = $true; Platform = $os }
+        Assert-That "NR. RESOLVE — the custard pin resolves '$os' to its own entry" ($r.Exit -eq 0 -and $r.Text.Contains($custardPin.$os.asset)) "exit $($r.Exit): $($r.Text)"
+    }
+    $otherLeg = Join-Path $refusals 'other-leg.json'
+    $copy = $custardPin.PSObject.Copy(); $copy.leg = 'printer'
+    $copy | ConvertTo-Json -Depth 4 | Set-Content $otherLeg
+    $r = Invoke-Refusal @{ Modules = @('Resolve'); ProofsDir = $refusals; PinFile = $otherLeg; ResolveOnly = $true }
+    Assert-That 'NR. REFUSE — a pin naming a leg the kit does not run is refused, exit 2, naming it' ($r.Exit -eq 2 -and $r.Text.Contains("names leg 'printer'")) "exit $($r.Exit): $($r.Text)"
+    $r = Invoke-Refusal @{ Modules = @('Resolve'); ProofsDir = $refusals; PinFile = $custardPinFile; ResolveOnly = $true; FloorDir = $refusals }
+    Assert-That 'NR. REFUSE — the custard leg refuses a hand-written floor (-FloorDir), exit 2' ($r.Exit -eq 2 -and $r.Text.Contains('no hand-written runtime floor')) "exit $($r.Exit): $($r.Text)"
+    $r = Invoke-Refusal @{ Modules = @('Resolve'); ProofsDir = $refusals; PinFile = $pinFile; ResolveOnly = $true; FableOracle = $refusals }
+    Assert-That 'NR. REFUSE — the present leg refuses -FableOracle, the custard leg''s option, exit 2' ($r.Exit -eq 2 -and $r.Text.Contains('custard leg''s option')) "exit $($r.Exit): $($r.Text)"
+
+    # The newer prover: the first candidate that reports the pin's version.
+    $wanted = "F* $($custardPin.fstar.TrimStart('v'))"
+    $candidates = @($CustardFStarHome, $script:callerFStarHome, (Join-Path $ProofsDir ".fstar/$($custardPin.fstar)/fstar")) | Where-Object { $_ }
+    $fstarHome = $candidates | Where-Object {
+        $exe = Join-Path $_ 'bin/fstar.exe'
+        (Test-Path $exe) -and ((& $exe --version 2>&1 | Select-Object -First 1) -eq $wanted)
+    } | Select-Object -First 1
+    if (-not $fstarHome) {
+        $script:notRun.Add("the custard leg's prover arms: no $wanted among $($candidates -join ', ') (pass -CustardFStarHome, or run a custard leg once to install it)")
+        return
+    }
+
+    $repo = Join-Path $WorkDir 'custard'
+    Copy-Item (Join-Path $PSScriptRoot 'fixtures/custard') $repo -Recurse
+    Push-Location $repo
+    try { $restore = @(& dotnet tool restore 2>&1); $restoreExit = $LASTEXITCODE } finally { Pop-Location }
+    Assert-That 'N. FIXTURE — the miniature repository''s tool manifest restores (fable, for the Fable side)' ($restoreExit -eq 0) "exit ${restoreExit}: $(($restore | Select-Object -Last 2) -join ' ')"
+
+    $proofs = Join-Path $repo 'proofs'
+    $oracle = Join-Path $proofs 'oracle'
+    $fable = Join-Path $repo 'fable'
+    $custard = @{
+        Modules = @('LegCustard', 'LegPulse'); ProofsDir = $proofs; RepoRoot = $repo; PinFile = $custardPinFile; Runs = 1
+        HostProject = 'host'; HostProjectFile = 'host/LegHost.fsproj'; FableOracle = $fable
+        HostFilters = @(@{ Filter = 'Leg.Oracle'; Failure = 'the fixture''s .NET host is RED' })
+    }
+
+    $n1 = Invoke-Leg (Merge-LegArgs $custard @{ Extract = $true })
+    Assert-That 'N1. GREEN — the custard leg checks both models, extracts them in one run, builds the generated project, and runs both hosts: exit 0' (
+        $n1.Exit -eq 0 -and $n1.Green -and [bool](@($n1.Lines -match 'wrote the fresh Custard extraction').Count) -and
+        [bool](@($n1.Lines -match 'Custard\.fsproj builds as generated').Count) -and [bool](@($n1.Lines -match 'dotnet oracle: green').Count) -and
+        [bool](@($n1.Lines -match 'Fable oracle runs green under Node').Count)) "exit $($n1.Exit): $(Show-Tail $n1)"
+    if ($n1.Exit -ne 0) {
+        Write-Host '==== leg-tests: the custard GREEN CONTROL is red, so the custard arms below would prove nothing. Skipping them.' -ForegroundColor Red
+        return
+    }
+    Assert-That 'N1. PULSE — the Pulse model verified on the custard leg' ([bool](@($n1.Lines -match 'LegPulse\.fst verified').Count)) (Show-Tail $n1)
+
+    $n2 = Invoke-Leg $custard
+    Assert-That 'N2. HELD — without -Extract the committed oracle and the Fable stand-in are held byte for byte: exit 0' (
+        $n2.Exit -eq 0 -and $n2.Green -and [bool](@($n2.Lines -match 'oracle/LegPulse\.fs is byte-identical').Count) -and
+        [bool](@($n2.Lines -match 'the Fable stand-in, cut from Prims\) is byte-identical').Count)) "exit $($n2.Exit): $(Show-Tail $n2)"
+
+    # Each tamper is undone after its arm, so the next arm starts from the held oracle.
+    function Invoke-Tampered([string] $path, [string] $append, [hashtable] $legArgs) {
+        $before = [System.IO.File]::ReadAllBytes($path)
+        [System.IO.File]::AppendAllText($path, $append)
+        try { Invoke-Leg $legArgs } finally { [System.IO.File]::WriteAllBytes($path, $before) }
+    }
+    $n3 = Invoke-Tampered (Join-Path $oracle 'LegCustard.fs') "`nlet tampered = 1`n" $custard
+    Assert-That 'N3. DRIFT — a committed extraction that is not the prover''s output is refused' ($n3.Exit -ne 0 -and -not $n3.Green -and [bool](@($n3.Lines -match 'oracle drift').Count)) "exit $($n3.Exit): $(Show-Tail $n3)"
+
+    $stray = Join-Path $oracle 'Stray.fs'
+    Set-Content $stray "module Stray`n"
+    $n4 = Invoke-Leg $custard
+    Remove-Item $stray -Force
+    Assert-That 'N4. LISTING — a file in the oracle directory Custard did not write is refused' ($n4.Exit -ne 0 -and -not $n4.Green -and [bool](@($n4.Lines -match 'Stray\.fs is committed but Custard did not write it').Count)) "exit $($n4.Exit): $(Show-Tail $n4)"
+
+    $n5 = Invoke-Tampered (Join-Path $fable 'FStarCustard.fs') "`nlet forked = 1`n" $custard
+    Assert-That 'N5. STAND-IN — a Fable stand-in that is not the cut of the generated library is refused' ($n5.Exit -ne 0 -and -not $n5.Green -and [bool](@($n5.Lines -match 'oracle drift').Count)) "exit $($n5.Exit): $(Show-Tail $n5)"
+
+    Set-Content (Join-Path $proofs 'LegCustardBad.fst') "module LegCustardBad`n`nlet minus_one : nat = -1`n"
+    $n6 = Invoke-Leg (Merge-LegArgs $custard @{ Modules = @('LegCustardBad'); HostFilters = @(); FableOracle = $null })
+    Assert-That 'N6. BROKEN MODEL — a refuted model on the custard leg is red, recorded as refuted' (
+        $n6.Exit -ne 0 -and -not $n6.Green -and $n6.Verdict.verdict -eq 'refuted' -and [bool](@($n6.Lines -match 'LegCustardBad\.fst did NOT verify').Count)) "exit $($n6.Exit): $(Show-Tail $n6)"
+
+    $pulse = Get-Content (Join-Path $proofs 'LegPulse.fst') -Raw
+    Set-Content (Join-Path $proofs 'LegPulseBad.fst') ($pulse.Replace('module LegPulse', 'module LegPulseBad').Replace('ensures pure (m == n + 2)', 'ensures pure (m == n + 3)')) -NoNewline
+    $n7 = Invoke-Leg (Merge-LegArgs $custard @{ Modules = @('LegPulseBad'); HostFilters = @(); FableOracle = $null })
+    Assert-That 'N7. BROKEN PULSE — a Pulse model whose postcondition is false is red, recorded as refuted' (
+        $n7.Exit -ne 0 -and -not $n7.Green -and $n7.Verdict.verdict -eq 'refuted' -and [bool](@($n7.Lines -match 'LegPulseBad\.fst did NOT verify').Count)) "exit $($n7.Exit): $(Show-Tail $n7)"
+
+    $main = Join-Path $fable 'Main.fs'
+    $mainBefore = Get-Content $main -Raw
+    Set-Content $main $mainBefore.Replace('= 42I)', '= 43I)') -NoNewline
+    $n8 = Invoke-Leg $custard
+    Set-Content $main $mainBefore -NoNewline
+    Assert-That 'N8. FABLE RED — a Fable runner whose expectation fails under Node is red' ($n8.Exit -ne 0 -and -not $n8.Green -and [bool](@($n8.Lines -match 'runner is RED under Node').Count)) "exit $($n8.Exit): $(Show-Tail $n8)"
+
+    $program = Join-Path $repo 'host/Program.fs'
+    $programBefore = Get-Content $program -Raw
+    Set-Content $program $programBefore.Replace('= 42I)', '= 43I)') -NoNewline
+    $n9 = Invoke-Leg $custard
+    Set-Content $program $programBefore -NoNewline
+    Assert-That 'N9. HOST RED — a .NET host that disagrees with the extraction is red' ($n9.Exit -ne 0 -and -not $n9.Green -and [bool](@($n9.Lines -match 'the fixture''s \.NET host is RED').Count)) "exit $($n9.Exit): $(Show-Tail $n9)"
+
+    Remove-Item $repo -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+if ($custardPinFile) {
+    Invoke-CustardArms
+    $env:FSTAR_HOME = $script:callerFStarHome
+}
+if (-not $legacyPinFile) { Complete-LegTests }
+
 # The prover, resolved the way the leg resolves it, WITHOUT the leg's download: a test that fetched
 # a 100 MB release as a side effect would be a surprise, and `check.ps1` has already fetched it.
 $fstarHome = $null
@@ -351,49 +580,6 @@ New-Item -ItemType Directory -Force $hostDir | Out-Null
 Set-Content (Join-Path $hostDir 'Host.proj') '<Project><Target Name="Restore" /><Target Name="Build" /></Project>'
 
 $hostFilters = @(@{ Filter = 'Leg.Host'; Failure = 'the scratch host is RED' })
-
-# ---- running the leg the way a caller does -------------------------------------------------------
-
-# In THIS process, with `&`, which is the shape that shadowed the exit code. Every stream is
-# captured so the transcript can be searched; the exit code is read from the GLOBAL automatic
-# variable, which is the only one this script never assigns.
-# Every run writes its RUN VERDICT (Phase 522): to the arm's own -SummaryFile when it names one, to a
-# fresh file per run otherwise. The record is read back and held to the run here, once for every arm,
-# so a leg whose record and exit code disagree is red whichever arm it happened in.
-$script:legRuns = 0
-
-function Invoke-Leg([hashtable] $legArgs) {
-    $env:FSTAR_HOME = $fstarHome
-    $script:legRuns++
-    $legArgs = $legArgs.Clone()
-    if (-not $legArgs.ContainsKey('SummaryFile')) { $legArgs.SummaryFile = Join-Path $WorkDir "verdict-$($script:legRuns).json" }
-    if (Test-Path $legArgs.SummaryFile) { Remove-Item $legArgs.SummaryFile -Force }
-    Push-Location $WorkDir
-    $threw = $null
-    try {
-        $global:LASTEXITCODE = 0
-        $lines = @(& $Kit @legArgs *>&1 | ForEach-Object { [string]$_ })
-        $code = $global:LASTEXITCODE
-    }
-    catch {
-        # A terminating error is a refusal too — as `pwsh -File` it is exit 1 — but it is named,
-        # so a leg that has started THROWING where it used to exit is visible here.
-        $threw = $_.ToString()
-        $lines = @($threw)
-        $code = 1
-    }
-    finally { Pop-Location }
-    $verdict = if (Test-Path $legArgs.SummaryFile) { Get-Content $legArgs.SummaryFile -Raw | ConvertFrom-Json } else { $null }
-    $green = [bool]($lines -match '==== proofs: green')
-    Assert-That "V. VERDICT — run $($script:legRuns) ($($legArgs.Modules -join ', ')) wrote one record, its exit the leg's and its verdict green exactly when the leg was" (
-        $null -ne $verdict -and $verdict.kind -eq 'proofRunVerdict' -and $verdict.exit -eq $code -and (($verdict.verdict -eq 'green') -eq ($code -eq 0 -and $green))) "exit $code, record $(if ($verdict) { "$($verdict.verdict)/$($verdict.exit)" } else { 'absent' })"
-    [pscustomobject]@{ Exit = $code; Green = $green; Lines = $lines; Threw = $threw; Verdict = $verdict }
-}
-
-function Show-Tail($result) {
-    $verdict = @($result.Lines -match '^==== proofs: ') | Select-Object -Last 1
-    if ($result.Threw) { "threw: $($result.Threw)" } elseif ($verdict) { $verdict } else { '(no verdict line)' }
-}
 
 $base = @{ ProofsDir = $scratch; RepoRoot = $WorkDir; Runs = 1 }
 
@@ -762,11 +948,4 @@ $k4 = Invoke-Leg ($kitBase + @{ OracleDir = $kitOracle; FloorDir = $kitFloor })
 Assert-That 'K4. FLOOR FORKED — a committed runtime floor that is not the kit''s is refused' (
     $k4.Exit -ne 0 -and -not $k4.Green -and [bool](@($k4.Lines -match 'oracle/Prims\.fs is not the kit''s runtime floor').Count)) "exit $($k4.Exit): $(Show-Tail $k4)"
 
-Remove-Item $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
-
-if ($script:failures.Count -gt 0) {
-    Write-Host "==== leg-tests: RED — $($script:failures.Count) of $script:cases assertion(s) failed; the leg reported a step it could not run as green" -ForegroundColor Red
-    exit 1
-}
-Write-Host "==== leg-tests: $script:cases assertions held — every step's failure is REFUSED, not merely printed" -ForegroundColor Green
-exit 0
+Complete-LegTests

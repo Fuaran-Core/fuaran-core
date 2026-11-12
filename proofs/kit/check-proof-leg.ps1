@@ -162,6 +162,29 @@
 # CI runner or local machine, the OS, processor count, total memory, a CI runner's name — and never
 # a local host name: a record may be committed to a public repository.
 #
+# THE TWO LEGS (Phase 641). The prover's later releases have no legacy printer: extraction is
+# Custard's backend, in one whole-program run, with a generated support library. So the kit runs two
+# legs, and the PIN selects one by its `leg` field — never an environment variable:
+#
+#   legacy  — no `leg` field (`fstar-pin.json`). Everything above, unchanged: per-module extraction
+#             through the legacy printer, the post-pass, `<OracleDir>/<Module>.fs` diffed one by one,
+#             the hand-written runtime floor held by -FloorDir. Prover under <ProofsDir>/.fstar/.
+#   custard — `leg: custard` (`fstar-pin-custard.json`). The CHECK step is the same code with the
+#             same guards — `--report_assumes error`, -Quake, -ZRlimit, -Runs from a cold cache, the
+#             three verdict classes (a prover that dies with no diagnostic is an ABORT, a killed
+#             prover, never a refutation), the budgets, the cached-read gate and the cache
+#             provenance. EXTRACT is one Custard run over every extracted model (section 4c), and
+#             -OracleDir then holds exactly what that run writes — the modules, `FStarCustard.fs`
+#             and `Custard.fsproj`, which IS the oracle project — byte for byte and both ways by
+#             listing; the leg builds that project as generated. There is no floor (-FloorDir is
+#             refused): the support library is the prover's output. A Pulse model is an ordinary
+#             roster entry: the release puts the Pulse library on its own include path. -FableOracle
+#             (section 4d) adds the Fable side: a stand-in for the support library cut from the
+#             generated one and byte-held, the Fable project built, transpiled and its runner run
+#             under Node. Prover under <ProofsDir>/.fstar/<release>/, so both can be installed.
+#
+# Both legs share the guard (4b), the twins' coverage (2c), the host step (5) and the verdicts.
+#
 # Every prover invocation's whole output is also TEED to <WorkDir>/logs/, so a post-mortem reads
 # the classification's own evidence rather than a scrollback. And every run prints a PRE-FLIGHT
 # line — concurrent fstar process count, free physical memory — so a contended machine can be told
@@ -262,7 +285,14 @@ param(
     # Every `*.fs` there must be byte-identical (LF-normalised) to the file of the same name in
     # -OracleDir: the adopter commits the floor beside its extractions, and this holds it to the kit.
     # Under -Extract a drifted floor file is rewritten from here instead. Omitted, nothing is compared.
-    [string] $FloorDir
+    # The present leg's only: the newer leg has no hand-written floor, and refuses one (Phase 641).
+    [string] $FloorDir,
+    # Phase 641 — THE FABLE-SIDE ORACLE, the newer leg's option (header, "THE TWO LEGS"): a directory
+    # holding ONE project that compiles the derived support stand-in (`FStarCustard.fs`, which the leg
+    # writes and byte-holds there), the committed extractions it chooses, and LAST a runner of the
+    # repository's own. The leg builds it on .NET, transpiles it with the repository's `fable` tool and
+    # runs the runner under Node; the runner's exit code is the verdict. Omitted, there is no Fable side.
+    [string] $FableOracle
 )
 
 $ErrorActionPreference = 'Stop'
@@ -423,6 +453,24 @@ if (-not (Test-Path $PinFile)) { Fail "the pin file '$PinFile' is missing — it
 $pin = Get-Content $PinFile -Raw | ConvertFrom-Json
 $pinnedVersion = $pin.fstar.TrimStart('v')
 
+# THE LEG (Phase 641) is a field of the pin, never an environment variable: a pin with no `leg` is
+# the present leg, `custard` is the newer one, and anything else is refused before anything runs.
+# The options only one leg has are refused on the other here too, so a misdeclared caller fails in a
+# second, naming the option, rather than after a cold check of every model.
+$leg = if ($null -eq $pin.PSObject.Properties['leg']) { 'legacy' } else { [string]$pin.leg }
+if ($leg -cnotin 'legacy', 'custard') {
+    Fail "$(Split-Path $PinFile -Leaf) names leg '$leg'; the kit runs two: 'legacy' (or no leg field) and 'custard'" 2
+}
+if ($leg -eq 'custard' -and $FloorDir) {
+    Fail 'the custard leg has no hand-written runtime floor — its support library is generated with the extraction and byte-held with it; drop -FloorDir' 2
+}
+if ($leg -eq 'legacy' -and $FableOracle) {
+    Fail '-FableOracle is the custard leg''s option: the present leg''s floor has no Fable stand-in. Select the custard leg in the pin, or drop -FableOracle' 2
+}
+# Where the download path installs this leg's prover. The present leg's path is unchanged; the newer
+# leg's is per release, so a repository can hold both provers at once.
+$proverDir = if ($leg -eq 'custard') { Join-Path $ProofsDir ".fstar/$($pin.fstar)" } else { Join-Path $ProofsDir '.fstar' }
+
 # ---- 1. resolve the prover ---------------------------------------------------------------------
 
 # The OS this run resolves a pin entry for (Phase 393): -Platform when named, else the host's.
@@ -537,7 +585,7 @@ function Get-PinnedArchive($entry, [string] $archive) {
 
 if ($FetchOnly) {
     $entry = Resolve-PinEntry
-    $dir = Join-Path $ProofsDir '.fstar'
+    $dir = $proverDir
     New-Item -ItemType Directory -Force $dir | Out-Null
     Get-PinnedArchive $entry (Join-Path $dir $entry.asset)
     Write-Host "==== proofs: fetched $($entry.asset) into $dir" -ForegroundColor Green
@@ -634,13 +682,17 @@ function Get-FSharpCode([string] $text) {
     $sb.ToString()
 }
 
-function Test-OracleIndependence([string] $oracleDir, [string[]] $extractedModules) {
+function Test-OracleIndependence([string] $oracleDir, [string[]] $extractedModules, [string[]] $sharedDirs = @(), [string[]] $proverWritten = @()) {
     $findings = [System.Collections.Generic.List[string]]::new()
     if (-not (Test-Path $oracleDir)) {
         Write-Host "==== proofs: oracle independence — there is no oracle directory ($oracleDir), so there is nothing to guard" -ForegroundColor Cyan
         return $findings
     }
     $oracleFull = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($oracleDir).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+    # A SECOND host of the oracle (Phase 641: the Fable side) compiles the committed extractions from
+    # the oracle directory beside its own sources; those directories are its own, and nothing else is.
+    $sharedFull = @($sharedDirs | ForEach-Object { $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($_).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar) })
+    $allowedDirs = @($oracleFull) + $sharedFull
 
     # 1. the project, evaluated.
     $projects = @(Get-ChildItem $oracleDir -Filter '*.fsproj' -File)
@@ -664,7 +716,7 @@ function Test-OracleIndependence([string] $oracleDir, [string[]] $extractedModul
         foreach ($item in @($items.Compile)) {
             if (-not $item) { continue }
             $itemDir = [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetFullPath($item.FullPath))
-            if ($itemDir -ne $oracleFull) { $offending.Add(@($item, 'a Compile item outside the oracle directory — source the oracle did not extract')) }
+            if ($allowedDirs -notcontains $itemDir) { $offending.Add(@($item, 'a Compile item outside the oracle directory — source the oracle did not extract')) }
         }
         foreach ($pair in $offending) {
             $item, $why = $pair
@@ -684,7 +736,7 @@ function Test-OracleIndependence([string] $oracleDir, [string[]] $extractedModul
     # 2. the sources.
     $sources = @(Get-ChildItem $oracleDir -Filter '*.fs' -File)
     $own = [System.Collections.Generic.HashSet[string]]::new()
-    foreach ($source in $sources) {
+    foreach ($source in @($sources) + @($sharedFull | ForEach-Object { Get-ChildItem $_ -Filter '*.fs' -File -ErrorAction SilentlyContinue })) {
         $null = $own.Add($source.BaseName)
         $declared = [regex]::Match((Get-Content -LiteralPath $source.FullName -Raw), '(?m)^\s*module\s+(?:rec\s+)?([A-Za-z_][\w.]*)\s*$')
         if ($declared.Success) { $null = $own.Add(($declared.Groups[1].Value -split '\.')[0]) }
@@ -693,6 +745,11 @@ function Test-OracleIndependence([string] $oracleDir, [string[]] $extractedModul
     $openPattern = [regex]::new('^\s*open\s+(?:type\s+)?(``[^`]+``|[A-Za-z_][\w'']*)((?:\s*\.\s*[\w`'']+)*)')
     $aliasPattern = [regex]::new('^\s*module\s+[\w'']+\s*=\s*(``[^`]+``|[A-Za-z_][\w'']*)((?:\s*\.\s*[\w`'']+)*)')
     foreach ($source in $sources) {
+        # A file the leg holds byte for byte to the PROVER's output (Phase 641: the custard leg's generated
+        # support library and the Fable stand-in cut from it) is not authored here, so it cannot have been
+        # written to reach production; it names FSharp.Core's own modules (`List`, `Seq`) and `System`
+        # namespaces, which is what it realises the primitives as. The project half above still applies.
+        if ($proverWritten -contains $source.Name) { continue }
         $floor = $extractedModules -notcontains $source.BaseName
         $raw = (Get-Content -LiteralPath $source.FullName -Raw).Replace("`r`n", "`n")
         $code = (Get-FSharpCode $raw) -split "`n"
@@ -741,9 +798,10 @@ function Test-OracleIndependence([string] $oracleDir, [string[]] $extractedModul
     return $findings
 }
 
-function Assert-OracleIndependence {
+function Assert-OracleIndependence([string] $dir = $OracleDir, [string[]] $sharedDirs = @()) {
+    $proverWritten = if ($leg -eq 'custard') { @('FStarCustard.fs') } else { @() }
     $extracted = @($Modules | Where-Object { $ProofOnly -notcontains $_ })
-    $findings = Test-OracleIndependence $OracleDir $extracted
+    $findings = Test-OracleIndependence $dir $extracted $sharedDirs $proverWritten
     if ($findings.Count -gt 0) {
         Write-Host "==== proofs: the ORACLE is NOT INDEPENDENT of production — $($findings.Count) offending line(s):" -ForegroundColor Red
         foreach ($f in $findings) { Write-Host "     $f" -ForegroundColor Red }
@@ -751,7 +809,7 @@ function Assert-OracleIndependence {
         Write-Host '     The oracle may reference FSharp.Core alone and name only Prims, FStar modules and its own modules (see kit/README.md).' -ForegroundColor Red
         Fail 'oracle independence'
     }
-    $count = @(Get-ChildItem $OracleDir -Filter '*.fs' -File -ErrorAction SilentlyContinue).Count
+    $count = @(Get-ChildItem $dir -Filter '*.fs' -File -ErrorAction SilentlyContinue).Count
     Write-Host "==== proofs: oracle independence — the oracle project and its $count source file(s) reach nothing but FSharp.Core, Prims, FStar and their own modules" -ForegroundColor Green
 }
 
@@ -769,12 +827,12 @@ function Resolve-FStar {
 
     # Every release, on every OS, lays the prover out as fstar/bin/fstar.exe (the release's own
     # packaging adds that top-level directory), so one local path serves both entries.
-    $local = Join-Path $ProofsDir '.fstar/fstar/bin/fstar.exe'
+    $local = Join-Path $proverDir 'fstar/bin/fstar.exe'
     if (Test-Path $local) { return $local }
 
     $entry = Resolve-PinEntry
     $asset = $entry.asset
-    $dir = Join-Path $ProofsDir '.fstar'
+    $dir = $proverDir
     New-Item -ItemType Directory -Force $dir | Out-Null
     $archive = Join-Path $dir $asset
 
@@ -1594,7 +1652,228 @@ for ($run = 1; $run -le $Runs; $run++) {
 if (Test-Path $out) { Remove-Item $out -Recurse -Force }
 New-Item -ItemType Directory -Force $out | Out-Null
 
-foreach ($module in $Modules) {
+# A FAILED EXTRACTION IS NOT ALWAYS A NON-ZERO EXIT, and finding that out is most of what this
+# function is for (Phase 166, measured against the pinned prover). Staging Phase 155's incident —
+# removing a dependency's `.checked` underneath the extraction — makes F* print `* Error 317:
+# Cross-module inlining expects all modules to be checked first` and `1 error was reported`,
+# and then EXIT 0. The pre-166 code asked only about the exit code, so the fault fell past it
+# and surfaced two lines later as `extraction produced no PMain.fs under <obj/out>` — a true
+# sentence that names the symptom and not one thing about the cause. So the failure is decided
+# by "the prover failed OR the file is not there", and only then classified. Both legs call it
+# (Phase 641): `$subject` names what was extracted, `$absent` the file that is not there, if any.
+function Assert-ExtractionClean($extracted, [string] $subject, [string] $absent) {
+    $extractionFailed = ($extracted.ExitCode -ne 0) -or [bool]$absent
+
+    if ($extractionFailed) {
+        # APPARATUS — the leg's own machinery, not the model. Read as a proof failure, this costs a
+        # session the whole log before it can establish that nothing was refuted. Named, so the next
+        # reader starts from the file rather than from the model.
+        $missing = Get-MissingCheckedDependency $extracted.Lines
+        if ($missing) {
+            Fail ("extraction of $subject hit an APPARATUS fault, not a proof failure: the checked-module file it needs is missing — $missing. " +
+                'The model is not implicated and nothing was refuted. The cache is per invocation and this script owns it, so something removed it ' +
+                "underneath this run: check for another check.ps1 against this worktree, or a cleaner over $WorkDir. Transcript: $($extracted.LogPath)") $ExitApparatus
+        }
+
+        # An extraction that died with nothing to say is the same ABORT class as a check that did:
+        # a killed prover, not a failed proof. It is NOT retried — the retry is the check step's,
+        # where the module is expensive and the cache is still whole; here the thing extraction
+        # needs may be exactly what went away, so a second attempt asks the same broken apparatus
+        # the same question.
+        if (-not (Test-ProverDiagnostic $extracted.Lines)) {
+            Fail ("extraction of $subject ABORTED (no diagnostic) — exit $($extracted.ExitCode), and the prover printed nothing about an undischarged query. " +
+                "Nothing was refuted. Transcript: $($extracted.LogPath)") $ExitAbort
+        }
+
+        if ($extracted.ExitCode -ne 0) {
+            Fail "extraction of $subject to F# failed" (Get-RefutationExitCode $extracted.ExitCode) -Verdict refuted
+        }
+
+        Fail "extraction produced no $absent under $out"
+    }
+
+    # A file on disk and an exit of 0 are still not a clean extraction when the prover reported an
+    # error beside them (recorded 2026-09-25): the diff below would compare a file the prover
+    # itself said is wrong.
+    if (Test-ProverDiagnostic $extracted.Lines) {
+        Fail "extraction of $subject to F# failed — the prover exited 0 but reported an error. Transcript: $($extracted.LogPath)"
+    }
+}
+
+# ---- 4c. the custard leg's extraction (Phase 641) --------------------------------------------------
+#
+# ONE whole-program run of Custard's F# backend over every extracted model, rooted per module, from
+# the cache the check step populated (Custard refuses an unchecked module, Error 317, which is why it
+# is a second invocation). `--ext fly_deps=0` is what lets one run take more than one source;
+# `--custard_split` writes one F# module per F* module under its own name, the support library
+# `FStarCustard.fs` and `Custard.fsproj` listing them in compile order. The sources go on the command
+# line in ROSTER ORDER, and that order is load-bearing for the bytes: Custard orders the files it
+# writes by it and moves declarations between files by it, so reordering the roster moves bytes the
+# diff below holds. The run carries the check step's guards (`--report_assumes error`, the pinned
+# resource limit), as the present leg's extraction carries the cache.
+#
+# THE ONE EDIT (a repository already on this prover learned it): Custard heads every module with a
+# `#nowarn` line naming FS0025, which would switch the incomplete-match check off for the whole
+# file. The token is removed and nothing else, so a match F* left incomplete (it erased the
+# refinement that made it total) is a warning the build shows rather than a suppression the diff
+# holds; it is the MODEL's to complete, by a respelling that changes no theorem. Any other spelling
+# of the suppression is refused rather than held.
+#
+# THE COMMITTED ORACLE IS EXACTLY WHAT CUSTARD WRITES: every file of the run, and nothing else, in
+# -OracleDir, compared LF-normalised (as the present leg compares) and BOTH WAYS by listing — a
+# model that came to reach a ulib definition makes Custard write a module no fixed list names. Its
+# project is the oracle project: built here as generated, so a layout the compiler refuses fails by
+# name, and referenced by the repository's hosts directly.
+#
+# THE FABLE SIDE (-FableOracle). Custard's support library does not transpile under Fable (128-bit
+# integers, console writers, `exit`, a strict UTF-8 decoder). An extraction reaches it only through
+# its nested modules (`Prims`, `FStar_List_Tot_Base`, ...), so the Fable side's stand-in is CUT from
+# the generated file: `module FStarCustard`, then each nested module the Fable project's extractions
+# name — always `Prims` — verbatim, closed over the names those blocks reach in turn. It is derived on
+# every run and byte-held in the Fable directory, so it cannot drift from the library it stands in for.
+function Invoke-CustardExtraction {
+    $extractedModules = @($Modules | Where-Object { $ProofOnly -notcontains $_ })
+    foreach ($module in @($Modules | Where-Object { $ProofOnly -contains $_ })) {
+        Write-Host "==== proofs: $module is checked, not extracted — no oracle runs it (see `$proofOnly)" -ForegroundColor Cyan
+    }
+    if ($extractedModules.Count -eq 0) {
+        Write-Host '==== proofs: no model is extracted on this leg, so there is no Custard run and no oracle to hold' -ForegroundColor Cyan
+        return
+    }
+    $fresh = Join-Path $out 'custard'
+    New-Item -ItemType Directory -Force $fresh | Out-Null
+    $roots = @($extractedModules | ForEach-Object { '--custard_entry_module', $_ })
+    $extracted = Invoke-Prover (@(
+            '--cache_checked_modules', '--cache_dir', $cache, '--report_assumes', 'error', '--z3rlimit', $ZRlimit,
+            '--ext', 'fly_deps=0', '--codegen', 'FSharp', '--custard_split', '--odir', $fresh) + $includeArgs + $roots +
+        @($extractedModules | ForEach-Object { Resolve-ModelSource $_ })
+    ) (Join-Path $logsDir 'custard.extract.log')
+    $expected = @('FStarCustard.fs', 'Custard.fsproj') + @($extractedModules | ForEach-Object { "$_.fs" })
+    $absent = @($expected | Where-Object { -not (Test-Path (Join-Path $fresh $_)) })
+    Assert-ExtractionClean $extracted "the whole program ($($extractedModules -join ', '))" ($absent -join ', ')
+
+    foreach ($module in $extractedModules) {
+        $path = Join-Path $fresh "$module.fs"
+        $text = [System.IO.File]::ReadAllText($path)
+        $text = [regex]::Replace($text, '(?m)^(#nowarn(?:[ \t]+"[0-9]+")*?)[ \t]+"25"(?=[ \t"]|$)', '$1')
+        if ([regex]::IsMatch($text, '(?m)^[ \t]*#nowarn\b.*(?<![0-9A-Za-z])"?(FS0*)?25"?(?![0-9])')) {
+            Fail "Custard's $module.fs still suppresses FS0025 after the one edit the leg makes — a #nowarn shape it does not know. Teach the leg the shape; never suppress the check."
+        }
+        [System.IO.File]::WriteAllText($path, $text, [System.Text.UTF8Encoding]::new($false))
+    }
+
+    # The held pairs: every generated file against -OracleDir, and the Fable stand-in, when declared.
+    $pairs = [System.Collections.Generic.List[object]]::new()
+    $freshNames = @(Get-ChildItem $fresh -File | ForEach-Object { $_.Name } | Sort-Object)
+    $committedNames = @(if (Test-Path $OracleDir) { Get-ChildItem $OracleDir -File | ForEach-Object { $_.Name } | Sort-Object })
+    foreach ($name in $freshNames) { $pairs.Add(@((Join-Path $fresh $name), (Join-Path $OracleDir $name), "oracle/$name")) }
+
+    if ($FableOracle) {
+        $support = [System.IO.File]::ReadAllLines((Join-Path $fresh 'FStarCustard.fs'))
+        $blocks = [ordered]@{}
+        for ($k = 0; $k -lt $support.Length; $k++) {
+            $head = [regex]::Match($support[$k], '^module ([A-Za-z_]\w*) =\s*$')
+            if (-not $head.Success) { continue }
+            $end = $k + 1
+            while ($end -lt $support.Length -and ($support[$end] -match '^\s' -or $support[$end] -eq '')) { $end++ }
+            while ($end -gt $k + 1 -and $support[$end - 1] -eq '') { $end-- }
+            $blocks[$head.Groups[1].Value] = @($support[$k..($end - 1)])
+        }
+        $fableProject = @(Get-ChildItem $FableOracle -Filter '*.fsproj' -File -ErrorAction SilentlyContinue)
+        if ($fableProject.Count -ne 1) { Fail "the Fable oracle directory '$FableOracle' (-FableOracle) holds $($fableProject.Count) project(s), not one" }
+        if (-not $blocks.Contains('Prims')) { Fail 'the generated FStarCustard.fs has no "module Prims =" block to cut the Fable stand-in from' }
+        $fableSources = @(Get-FableCompileItems $fableProject[0].FullName | Where-Object { [System.IO.Path]::GetDirectoryName($_) -eq ([System.IO.Path]::GetFullPath($OracleDir).TrimEnd('\', '/')) })
+        # The closure: the extractions' texts first, then each block taken, until nothing new is named.
+        $wanted = [System.Collections.Generic.List[string]]::new()
+        $wanted.Add('Prims')
+        $texts = [System.Collections.Generic.Queue[string]]::new()
+        foreach ($source in $fableSources) {
+            $generated = Join-Path $fresh ([System.IO.Path]::GetFileName($source))
+            if (Test-Path $generated) { $texts.Enqueue([System.IO.File]::ReadAllText($generated)) }
+        }
+        $texts.Enqueue($blocks['Prims'] -join "`n")
+        while ($texts.Count -gt 0) {
+            foreach ($m in [regex]::Matches($texts.Dequeue(), '(?<![\w.])(Prims|FStar_\w+)\s*\.')) {
+                $name = $m.Groups[1].Value
+                if ($blocks.Contains($name) -and -not $wanted.Contains($name)) {
+                    $wanted.Add($name)
+                    $texts.Enqueue($blocks[$name] -join "`n")
+                }
+            }
+        }
+        $standIn = [System.Collections.Generic.List[string]]::new()
+        $standIn.AddRange([string[]]@(
+                '// Derived by the proof kit (check-proof-leg.ps1) from the FStarCustard.fs Custard wrote beside the',
+                '// extractions. Do not edit: the leg re-derives and byte-holds it.',
+                '//',
+                '// The Fable side''s stand-in for Custard''s F# support library, which does not transpile. It is the',
+                '// nested modules the extractions this project compiles name, each verbatim, and nothing else: an',
+                '// extraction that came to need another name fails to compile here, naming it.',
+                'module FStarCustard',
+                ''))
+        foreach ($name in $blocks.Keys) {
+            if ($wanted.Contains($name)) { $standIn.AddRange([string[]]$blocks[$name]); $standIn.Add('') }
+        }
+        $derived = Join-Path $out 'custard-fable'
+        New-Item -ItemType Directory -Force $derived | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $derived 'FStarCustard.fs'), ($standIn -join "`n"), [System.Text.UTF8Encoding]::new($false))
+        $pairs.Add(@((Join-Path $derived 'FStarCustard.fs'), (Join-Path $FableOracle 'FStarCustard.fs'), "$(Split-Path $FableOracle -Leaf)/FStarCustard.fs (the Fable stand-in, cut from $($wanted -join ', '))"))
+    }
+
+    if ($Extract) {
+        New-Item -ItemType Directory -Force $OracleDir | Out-Null
+        foreach ($name in $committedNames) {
+            if ($freshNames -notcontains $name) {
+                Remove-Item (Join-Path $OracleDir $name) -Force
+                Write-Host "==== proofs: removed oracle/$name — Custard no longer writes it; commit the removal" -ForegroundColor Yellow
+            }
+        }
+        foreach ($pair in $pairs) {
+            $text = ([System.IO.File]::ReadAllText($pair[0])).Replace("`r`n", "`n")
+            [System.IO.File]::WriteAllText($pair[1], $text, [System.Text.UTF8Encoding]::new($false))
+        }
+        Write-Host "==== proofs: wrote the fresh Custard extraction ($($pairs.Count) file(s)) to the committed oracle — commit it" -ForegroundColor Yellow
+    }
+    else {
+        foreach ($name in $freshNames) {
+            if ($committedNames -notcontains $name) { Fail "Custard wrote $name, which has no committed copy in oracle/. If a model now reaches a definition outside the roster, re-extract with -Extract and commit it" }
+        }
+        foreach ($name in $committedNames) {
+            if ($freshNames -notcontains $name) { Fail "oracle/$name is committed but Custard did not write it. The oracle directory holds exactly what Custard writes; remove it with the change that made it unreachable, or move a file of your own out of oracle/" }
+        }
+        foreach ($pair in $pairs) {
+            $freshText = ([System.IO.File]::ReadAllText($pair[0])).Replace("`r`n", "`n")
+            $committedText = if (Test-Path $pair[1]) { ([System.IO.File]::ReadAllText($pair[1])).Replace("`r`n", "`n") } else { $null }
+            if ($freshText -ne $committedText) {
+                Write-Host "==== proofs: the committed $($pair[2]) is NOT what the prover produced$(if ($null -eq $committedText) { ' (it is missing)' })." -ForegroundColor Red
+                Write-Host "     Fresh: $($pair[0])" -ForegroundColor Red
+                Write-Host '     Re-extract with: pwsh ./proofs/check.ps1 -Extract   (then commit the result)' -ForegroundColor Red
+                Fail 'oracle drift'
+            }
+            Write-Host "==== proofs: $($pair[2]) is byte-identical to a fresh extraction" -ForegroundColor Green
+        }
+    }
+
+    # The oracle project, as generated.
+    $global:LASTEXITCODE = 0
+    dotnet build (Join-Path $OracleDir 'Custard.fsproj') --nologo -v q
+    if ($LASTEXITCODE -ne 0) { Fail "the project Custard generated does not build as generated — oracle/Custard.fsproj, exit $LASTEXITCODE" $LASTEXITCODE }
+    Write-Host '==== proofs: oracle/Custard.fsproj builds as generated' -ForegroundColor Green
+}
+
+# The Compile items of a project as MSBuild evaluates them, as full paths in compile order.
+function Get-FableCompileItems([string] $project) {
+    $global:LASTEXITCODE = 0
+    $json = & dotnet msbuild $project -nologo '-getItem:Compile' 2>&1
+    if ($LASTEXITCODE -ne 0) { Fail "MSBuild could not evaluate $project (exit $LASTEXITCODE): $(($json | Select-Object -Last 3) -join ' ')" }
+    @(($json -join "`n" | ConvertFrom-Json).Items.Compile | Where-Object { $_ } | ForEach-Object { [System.IO.Path]::GetFullPath($_.FullPath) })
+}
+
+if ($leg -eq 'custard') { Invoke-CustardExtraction }
+
+# The present leg extracts per module; on the custard leg the run above has done it, so this loop is empty.
+$legacyModules = if ($leg -eq 'legacy') { $Modules } else { @() }
+foreach ($module in $legacyModules) {
     if ($ProofOnly -contains $module) {
         Write-Host "==== proofs: $module is checked, not extracted — no oracle runs it (see `$proofOnly)" -ForegroundColor Cyan
         continue
@@ -1608,49 +1887,7 @@ foreach ($module in $Modules) {
     $fresh = Join-Path $out "$module.fs"
     $committed = Join-Path $OracleDir "$module.fs"
 
-    # A FAILED EXTRACTION IS NOT ALWAYS A NON-ZERO EXIT, and finding that out is most of what this
-    # block is for (Phase 166, measured against the pinned prover). Staging Phase 155's incident —
-    # removing a dependency's `.checked` underneath the extraction — makes F* print `* Error 317:
-    # Cross-module inlining expects all modules to be checked first` and `1 error was reported`,
-    # and then EXIT 0. The pre-166 code asked only about the exit code, so the fault fell past it
-    # and surfaced two lines later as `extraction produced no PMain.fs under <obj/out>` — a true
-    # sentence that names the symptom and not one thing about the cause. So the failure is decided
-    # by "the prover failed OR the file is not there", and only then classified.
-    $extractionFailed = ($extracted.ExitCode -ne 0) -or (-not (Test-Path $fresh))
-
-    if ($extractionFailed) {
-        # APPARATUS — the leg's own machinery, not the model. Read as a proof failure, this costs a
-        # session the whole log before it can establish that nothing was refuted. Named, so the next
-        # reader starts from the file rather than from the model.
-        $missing = Get-MissingCheckedDependency $extracted.Lines
-        if ($missing) {
-            Fail ("extraction of $module hit an APPARATUS fault, not a proof failure: the checked-module file it needs is missing — $missing. " +
-                'The model is not implicated and nothing was refuted. The cache is per invocation and this script owns it, so something removed it ' +
-                "underneath this run: check for another check.ps1 against this worktree, or a cleaner over $WorkDir. Transcript: $($extracted.LogPath)") $ExitApparatus
-        }
-
-        # An extraction that died with nothing to say is the same ABORT class as a check that did.
-        # It is NOT retried — the retry is the check step's, where the module is expensive and the
-        # cache is still whole; here the thing extraction needs may be exactly what went away, so a
-        # second attempt asks the same broken apparatus the same question.
-        if (-not (Test-ProverDiagnostic $extracted.Lines)) {
-            Fail ("extraction of $module ABORTED (no diagnostic) — exit $($extracted.ExitCode), and the prover printed nothing about an undischarged query. " +
-                "Nothing was refuted. Transcript: $($extracted.LogPath)") $ExitAbort
-        }
-
-        if ($extracted.ExitCode -ne 0) {
-            Fail "extraction of $module to F# failed" (Get-RefutationExitCode $extracted.ExitCode) -Verdict refuted
-        }
-
-        Fail "extraction produced no $module.fs under $out"
-    }
-
-    # A file on disk and an exit of 0 are still not a clean extraction when the prover reported an
-    # error beside them (recorded 2026-09-25): the diff below would compare a file the prover
-    # itself said is wrong.
-    if (Test-ProverDiagnostic $extracted.Lines) {
-        Fail "extraction of $module to F# failed — the prover exited 0 but reported an error. Transcript: $($extracted.LogPath)"
-    }
+    Assert-ExtractionClean $extracted $module $(if (-not (Test-Path $fresh)) { "$module.fs" })
 
     # Compare LF-normalised: the extractor writes LF and the repository pins LF, but a checkout
     # with autocrlf on would otherwise fail this for a reason that is not the model.
@@ -1721,6 +1958,55 @@ if ($FloorDir) {
 # could be comparing production with itself. The guard and its argument are defined above, beside
 # -GuardOnly.
 Assert-OracleIndependence
+
+# ---- 4d. the Fable side (Phase 641; the custard leg's option) --------------------------------------
+#
+# The Fable oracle is a second host of the SAME committed extractions, so it is held to the same
+# guard (its own directory and the oracle directory are its sources; nothing else is), built on .NET,
+# transpiled with the repository's `fable` tool into the work directory, and its LAST compiled file —
+# the repository's runner, never an extraction or the stand-in — is run under Node. The runner's exit
+# code is the verdict: an expectation it raises (an uncaught exception, under Node) is a red leg.
+# -SkipOracleHost skips the run, as it skips the .NET host, and says so; the build and the
+# transpilation still happen, because "the extractions transpile" is a claim about the oracle.
+if ($FableOracle) {
+    Write-Host "==== proofs: the Fable side — $FableOracle" -ForegroundColor Cyan
+    Assert-OracleIndependence $FableOracle @($OracleDir)
+    $fableProject = (Get-ChildItem $FableOracle -Filter '*.fsproj' -File)[0].FullName
+    $runner = @(Get-FableCompileItems $fableProject)[-1]
+    if ([System.IO.Path]::GetDirectoryName($runner) -ne [System.IO.Path]::GetFullPath($FableOracle).TrimEnd('\', '/') -or
+        [System.IO.Path]::GetFileName($runner) -eq 'FStarCustard.fs') {
+        Fail "the Fable oracle's last compiled file is $runner; it must be the repository's runner, in $FableOracle — not an extraction and not the stand-in"
+    }
+    $global:LASTEXITCODE = 0
+    dotnet build $fableProject --nologo -v q
+    if ($LASTEXITCODE -ne 0) { Fail "the Fable oracle does not build on .NET — $fableProject, exit $LASTEXITCODE" $LASTEXITCODE }
+    $fableOut = Join-Path $WorkDir 'fable-out'
+    if (Test-Path $fableOut) { Remove-Item $fableOut -Recurse -Force }
+    Push-Location $RepoRoot
+    try {
+        $global:LASTEXITCODE = 0
+        dotnet tool run fable -- $fableProject -o $fableOut --noCache
+        $code = $LASTEXITCODE
+    }
+    finally { Pop-Location }
+    if ($code -ne 0) {
+        Fail ("Fable could not transpile the Fable oracle (exit $code). The extractions it compiles, the stand-in and the runner must all transpile; " +
+            "``fable`` must be on the repository's tool manifest (dotnet tool restore). Project: $fableProject") $code
+    }
+    Write-Host '==== proofs: the Fable oracle transpiles' -ForegroundColor Green
+    if ($SkipOracleHost) {
+        Write-Host '==== proofs: the Fable oracle''s runner did NOT run (-SkipOracleHost) — this green covers its build and its transpilation only' -ForegroundColor Yellow
+    }
+    else {
+        $node = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($null -eq $node) { Fail 'the Fable oracle''s runner needs Node, and there is no node on PATH' }
+        $runnerJs = Join-Path $fableOut ([System.IO.Path]::ChangeExtension([System.IO.Path]::GetRelativePath((Split-Path $fableProject -Parent), $runner), '.js'))
+        $global:LASTEXITCODE = 0
+        & $node.Source $runnerJs
+        if ($LASTEXITCODE -ne 0) { Fail "the Fable oracle's runner is RED under Node — an extracted model disagreed with its expectation, exit $LASTEXITCODE ($runnerJs)" $LASTEXITCODE }
+        Write-Host '==== proofs: the Fable oracle runs green under Node' -ForegroundColor Green
+    }
+}
 
 # ---- 5. the oracle host --------------------------------------------------------------------------
 

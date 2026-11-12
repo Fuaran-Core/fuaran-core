@@ -1,0 +1,9 @@
+{
+  "kind": "proofModules",
+  "subject": "Custard-Leg-Fixture",
+  "$comment": "The custard-leg fixture's roster and budgets (Phase 641), in the shape templates/modules.json gives an adopter, so the fixture is also a working adopter on that leg. Each model checks in about a second on the newer prover; the budgets are a smoke detector, never a gate.",
+  "modules": [
+    { "module": "LegCustard", "kind": "extracted", "opens": [], "budgetSeconds": 60, "fastestSeconds": 0 },
+    { "module": "LegPulse", "kind": "extracted", "opens": [], "budgetSeconds": 60, "fastestSeconds": 0 }
+  ]
+}

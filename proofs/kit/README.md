@@ -49,6 +49,8 @@ domain's own algebra a fill-in-the-holes act with exactly one hole that is an ob
 | `extraction-post-pass.tests.ps1` | Its go-red proof: four arms, two of which need the pinned prover and `dotnet` and are reported NOT RUN where either is absent. Also the machinery that answers the retirement condition. | runs it from the asset |
 | `check-proof-leg.tests.ps1` | **The engine's refusals, held to their exit codes** (Phase 221). Runs the engine the way a caller does (`&`, in process) over a scratch proofs directory: a green control, then a missing host project, a host filter that cannot run and a refuted model, each of which must exit non-zero and never print `proofs: green`. Needs only the pin and the prover, never your models; `templates/check.ps1` calls it after a green leg. Its pin-resolution, mirror and oracle-guard arms (`R`, `M`, `I`) need no prover and run first; the rest report NOT RUN (exit 2) where there is no prover. | runs it from the asset |
 | `templates/MutualTypes.fst` | The post-pass's fixture — the smallest model that makes the backend emit a mutual type group. **Not a template to instantiate**, and not to be registered in `$modules`: it earns no committed oracle. | runs it from the asset |
+| `fstar-pin-custard.json` | **The custard leg's prover pin** (Phase 641): `leg: custard`, the first release with no legacy printer, hash-pinned per OS. See "The two legs" below. | its `check.ps1` hands it to the engine when its kit pin says `leg: custard` |
+| `fixtures/custard/` | **The custard leg's miniature repository** (Phase 641): a first-order model, a Pulse model, a .NET host, a Fable oracle and a tool manifest naming `fable`. Run through the newer leg by `check-proof-leg.tests.ps1`; a working example of an adopter on that leg. | reads it |
 | `asset.json` | **The asset's contents** (Phase 536): every file the release asset carries, where it sits in the archive, and its role. The builder reads it and nothing else. | reads it |
 | `build-kit-asset.ps1` | **The builder** (Phase 536): the archive, reproducibly — fixed order, epoch timestamps, mode 0644, owner 0:0, LF, uncompressed ustar — so its sha256 is a function of the kit's bytes alone. `-Check` holds the build to `copies.json`'s `proofsKit.sha256`; `-Update` rewrites it. The suite, the publish workflow and an adopter's offline path all call it. Since Phase 606 it also builds a **second producer's** asset from that producer's own declaration (`-Manifest`, `-ShaFile`, `-ShaPath`; see "A second producer" below). | builds an offline asset with it |
 
@@ -56,6 +58,7 @@ The asset also carries what used to be copied beside the kit, from `../`:
 
 | In the asset | From | What an adopter does with it |
 |---|---|---|
+| `fstar-pin-custard.json` | `proofs/kit/fstar-pin-custard.json` | Nothing: its `check.ps1` hands it to the engine when its kit pin says `leg: custard` (Phase 641). |
 | `fstar-pin.json` | `proofs/fstar-pin.json` | Nothing: its `check.ps1` hands it to the engine. The kit version determines the prover, so a host's leg runs the prover this repository's leg ran. |
 | `oracle/Prims.fs`, `oracle/FStar_Pervasives_Native.fs` | `proofs/oracle/` | **Commits** them in its own oracle directory (an oracle project compiles nothing outside it, Phase 399) — and the engine holds the committed files to the asset's bytes (`-FloorDir`), red on any difference, rewritten under `-Extract`. A floor is never a fork. |
 | `models/<Model>.fst` | `proofs/<Model>.fst` | **Opens** them: the engine checks them read-only from the asset (`-ModelDirs`), extracts the ones its roster extracts into its own oracle like any model, and refuses a kit model's name found in the adopter's own tree. |
@@ -447,6 +450,103 @@ repository's `check.ps1` writes every run's to `proofs/obj/last-run.json` and re
 full run's as the empty cone's baseline, and its scheduled strict workflow summarises the run from it.
 The refusal tests hold every arm's record to the leg's exit code. Pass it from your own `check.ps1`
 (the caller template does).
+
+## The two legs (Phase 641)
+
+The prover's later releases have no legacy printer. From `v2026.10.11` extraction is the Custard
+backend: `--codegen FSharp` names its F# backend, `--extract` and the legacy printer are gone, and one
+run extracts the whole program and writes a generated support library beside it. So the kit runs two
+legs, and a repository picks one.
+
+**Selecting a leg.** It is a field of the pin, never an environment variable. The adopter's kit pin,
+`proofs/proofs-kit.json`, may carry `"leg": "custard"`. Absent (or `"legacy"`) is the present leg, and
+a repository on the present leg changes nothing: its pin, its `check.ps1` copy, its committed oracle and
+its floor all stand as they are. The template's `check.ps1` maps the field to one of the asset's two
+prover pins, and each pin declares its own leg, so the engine reads the leg from the pin it was handed:
+
+| `leg` | prover pin in the asset | prover | installed under |
+|---|---|---|---|
+| absent / `legacy` | `fstar-pin.json` | `v2026.09.06` | `proofs/.fstar/` |
+| `custard` | `fstar-pin-custard.json` | `v2026.10.11` | `proofs/.fstar/v2026.10.11/` |
+
+A pin naming any other leg is refused (exit 2) before anything runs.
+
+**What the two legs share.** The engine is one script, and everything up to extraction is the same code:
+the hash-pinned prover per operating system, `--report_assumes error`, `--quake`, the pinned
+`--z3rlimit`, `-Runs` from a per-invocation cold cache, the three verdict classes (a prover that dies
+with no diagnostic is an ABORT, a killed prover, and is never reported as a failed proof), the budgets,
+the cached-read gate, the cache provenance, the twins' coverage, the oracle-independence guard, the
+host step and the run verdict. Both legs read the same roster (`modules.json`), the same `-ModelDirs`
+and the same host declarations.
+
+**Where they differ.**
+
+| | present leg | custard leg |
+|---|---|---|
+| extraction | one legacy-printer run per model, then the post-pass | ONE Custard run over every extracted model (`--ext fly_deps=0 --codegen FSharp --custard_split`), each a root (`--custard_entry_module`), sources in roster order |
+| `proofs/oracle/` holds | `<Module>.fs` per model, the hand-written floor, your oracle project | exactly what the run writes: `<Module>.fs` per model, `FStarCustard.fs` and `Custard.fsproj`, and nothing else |
+| the oracle project | yours, from `templates/oracle.fsproj.template` | `Custard.fsproj` as generated; the leg builds it, and your hosts reference it |
+| held how | each extraction byte for byte; the floor to the asset (`-FloorDir`) | every generated file byte for byte, and the directory listing both ways; `-FloorDir` is refused |
+| the edit the leg makes | the post-pass (a mutual type group's `and`) | FS0025 dropped from each module's `#nowarn` line, so an incomplete match warns |
+| Pulse | not available | an ordinary roster entry: the release puts the Pulse library on its own include path |
+| Fable | none | `-FableOracle`, below |
+
+Two consequences of the custard leg are worth knowing before adopting it. **The roster's order is part
+of the bytes**: Custard orders the files it writes by the command line, and moves declarations between
+them by it, so reordering `modules.json` changes the committed oracle. And **a match F\* left incomplete
+because it erased a refinement** (a list match whose refinement excludes `[]`) now warns in the oracle
+build; it is the model's to complete, by a respelling that changes no theorem, never by suppressing the
+warning.
+
+**The Fable side.** The custard leg can also build and run the extracted oracle under Fable, as an
+option the repository declares (`$fableOracle` in the template, `-FableOracle` on the engine). Custard's
+support library does not transpile (128-bit integers, console writers, `exit`, a strict UTF-8 decoder),
+but an extraction reaches it only through its nested modules, so the leg CUTS a stand-in from the
+generated file: `module FStarCustard`, then each nested module the Fable project's extractions name
+(always `Prims`, then whatever they and the blocks taken reach), verbatim. It writes the stand-in to the
+Fable directory and holds it byte for byte, so it cannot drift from the library it stands in for. The
+Fable directory holds one project compiling the stand-in, the committed extractions it chooses and,
+LAST, a runner of the repository's own. The leg guards it as it guards the oracle, builds it on .NET,
+transpiles it with the repository's `fable` tool (it must be on the tool manifest) and runs the runner
+under Node, where an expectation that fails is an uncaught exception and a red leg. `-SkipOracleHost`
+skips the run, as it skips the .NET host, and says so.
+
+**What a repository copies.** On either leg: the templates, once, edited, never tracked as copies. On
+the present leg: the runtime floor, committed in `proofs/oracle/` and held to the asset by the engine.
+On the custard leg: nothing; the support library is the prover's output and is committed as such.
+`copies.json` declares this per leg under `proofsKit.legs`, and an adopter declares NO copy of any kit
+file in its own `copies.json` on either leg.
+
+**What the asset carries for each.** One asset carries both legs: the engine and its tests, both prover
+pins, the templates, the present leg's floor and models, and the custard leg's fixture
+(`kit/fixtures/custard/`), the miniature repository the kit's own tests run through the newer leg. The
+kit's models are measured on the present prover only; a custard-leg repository that opens one is the
+first to check it on the newer prover, and says so in its findings.
+
+**The kit tests both legs.** `check-proof-leg.tests.ps1` runs the arms of every leg whose pin it is
+handed (`-PinFile` takes several). The custard arms (N) run the fixture green, then hold it, then make
+it red seven ways: a tampered extraction, a stray file in the oracle directory, a tampered Fable
+stand-in, a refuted plain model, a refuted Pulse model, a red Fable runner and a red .NET host. The
+exit code carries every verdict, and a leg whose prover is missing is NOT RUN (exit 2), never green:
+
+```powershell
+pwsh ./proofs/kit/check-proof-leg.tests.ps1 -PinFile proofs/fstar-pin.json,proofs/kit/fstar-pin-custard.json
+```
+
+**What a repository already on the newer prover learned, and the kit now carries.** One whole-program
+run needs `--ext fly_deps=0`, without which the prover takes one file. `--custard_split --odir` writes
+one F# module per F\* module under its own name, so a cross-module reference is `Ring.push`, not
+a mangled global. The shapes change against the legacy printer, and every host bridge has to follow
+them: an inductive with one constructor and named fields becomes an F# record, a record with one field
+collapses to that field, a definition the legacy printer thunked for the value restriction is
+eta-expanded over its argument, `Prims.int` is `bigint` (a JavaScript BigInt under Fable), and no
+`uu___is_*` or `__proj__*` projector is emitted. A Pulse `vec` extracts to a .NET array, a `box` to an
+F# `ref` cell and `SizeT` to `uint64`.
+
+**Moving the present leg is not this.** Core's own models stay on the present leg; moving them is its own
+programme. A repository moves from one leg to the other by changing `leg`, re-extracting with
+`-Extract`, replacing its oracle project with the generated one and following the shape changes above
+in its host bridges.
 
 ## A second producer (Phase 606)
 

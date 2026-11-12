@@ -8,7 +8,11 @@
 #   the cache key       hashes proofs-kit.json, the kit pin (Phase 536): the kit version determines
 #                       the prover, so moving the pin invalidates the cache and the next run downloads
 #                       what the new kit pins. That is the whole mechanism: the pin moves in one place
-#                       and CI follows it with no second edit.
+#                       and CI follows it with no second edit. The pin's `leg` (Phase 641) is in
+#                       that hash too, and the custard leg installs its prover under
+#                       proofs/.fstar/<release>/, inside the cached path. A Fable side needs Node and
+#                       the `fable` tool: the runner images carry Node, and the job's
+#                       `dotnet tool restore` restores the tool from your manifest.
 #   -Runs 3             three cold-cache verifications of every model, which is the reproducibility
 #                       claim made literal. Not a timeout: a timeout says a run died and nothing
 #                       about which module. The per-module budgets do that, in modules.json.
@@ -25,6 +29,8 @@ proofs:
     - uses: actions/setup-dotnet@v4
       with:
         global-json-file: global.json
+    # The repository's local tools; the custard leg's Fable side runs `fable` from them (Phase 641).
+    - run: dotnet tool restore
     - name: Cache the pinned F* release
       uses: actions/cache@v4
       with:

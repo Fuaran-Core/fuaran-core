@@ -1,0 +1,16 @@
+{
+  "$comment": "Phase 641 — the pinned prover of the kit's NEWER LEG. `leg: custard` is what selects it: the engine reads this field and runs the leg it names, and a pin without the field is the present leg (`fstar-pin.json` beside the kit's models). The release is the first one with no legacy printer: extraction is Custard's F# backend (`--codegen FSharp` names it on this release), run ONCE over the whole program with `--custard_split`, which writes one F# module per F* module, a generated support library (`FStarCustard.fs`) and a project (`Custard.fsproj`) listing them in compile order. It ships the Pulse library on the prover's own include path, so a Pulse model checks with the flags every other model uses. Measured for this phase: a plain model and a Pulse model check under `--quake 3 --report_assumes error`, extract in one run and build as generated on .NET 10, and the extractions transpile under Fable 5 and run under Node. The shape is the present pin's: one entry per operating system, each the same release; each sha256 is the digest GitHub publishes for that release asset, and the Windows one was also recomputed over the downloaded archive by a repository already on this release. There is no `mirror` yet: the mirror is a release of this repository holding the same asset, and it is cut with the kit release that first carries this pin. The local install is `<proofs>/.fstar/v2026.10.11/`, beside the present leg's `<proofs>/.fstar/fstar/`, so a repository can hold both.",
+  "leg": "custard",
+  "fstar": "v2026.10.11",
+  "z3": "4.13.3",
+  "windows": {
+    "asset": "fstar-v2026.10.11-Windows_NT-x86_64.zip",
+    "url": "https://github.com/FStarLang/FStar/releases/download/v2026.10.11/fstar-v2026.10.11-Windows_NT-x86_64.zip",
+    "sha256": "de1f0bfc4039bc9ed65643627ce33d15a915229d7fcf3211051a3832454d7b85"
+  },
+  "linux": {
+    "asset": "fstar-v2026.10.11-Linux-x86_64.tar.gz",
+    "url": "https://github.com/FStarLang/FStar/releases/download/v2026.10.11/fstar-v2026.10.11-Linux-x86_64.tar.gz",
+    "sha256": "af19079af6fb8c654e70f1fe752e6428f9cae570bbc391850c663c61e282e588"
+  }
+}

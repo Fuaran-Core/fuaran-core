@@ -7,6 +7,8 @@
 # proofs/.kit/ (or takes the local file -KitAsset / FUARAN_PROOFS_KIT_ASSET names: the offline path),
 # REFUSES it unless its sha256 is the pin's, unpacks it fresh, and runs the engine from it with the
 # asset's prover pin, its read-only models and its runtime floor. Nothing of the kit is copied here.
+# Its optional `leg` field (Phase 641) selects the prover: absent is the present leg, `custard` the
+# newer one (kit/README.md, "The two legs").
 #
 # THE ENGINE IS `kit/check-proof-leg.ps1` in the asset and this file is the caller: it hands the kit what
 # THIS repository has — the models (read from modules.json), where the oracle host lives, which
@@ -68,6 +70,14 @@ $hostFilters = @(
 $hostProject = 'tests/<Your>.Tests'
 $hostProjectFile = 'tests/<Your>.Tests/<Your>.Tests.fsproj'
 
+# ---- DECLARATION 3: the Fable side (the custard leg only, Phase 641) ------------------------------
+# A directory, relative to the repository root, holding ONE project that compiles FStarCustard.fs (the
+# stand-in the kit derives and holds there), the committed extractions it chooses from proofs/oracle/,
+# and LAST a runner of your own, which the kit runs under Node: its exit code is the verdict. $null is
+# no Fable side. It needs `fable` on the repository's tool manifest. The kit's own fixture,
+# kit/fixtures/custard/fable/ in the asset, is a working example.
+$fableOracle = $null
+
 # ---- nothing below here is per-repository ----------------------------------------------------------
 
 # ---- the kit: the pinned release asset, verified before anything runs ------------------------------
@@ -75,6 +85,14 @@ $kitPinFile = Join-Path $PSScriptRoot 'proofs-kit.json'
 $kitPin = if (Test-Path $kitPinFile) { Get-Content $kitPinFile -Raw | ConvertFrom-Json } else { $null }
 if ($null -eq $kitPin -or $kitPin.kind -ne 'proofsKitPin' -or -not $kitPin.asset -or -not $kitPin.url -or $kitPin.sha256 -notmatch '^[0-9a-f]{64}$') {
     Write-Host "==== proofs: $kitPinFile is not a kit pin (kind proofsKitPin, kit, asset, url, a 64-hex sha256)" -ForegroundColor Red
+    exit 2
+}
+# THE LEG is a field of the kit pin (Phase 641): no `leg`, or `legacy`, is the present leg and the
+# asset's fstar-pin.json; `custard` is the newer leg and the asset's fstar-pin-custard.json.
+$kitLeg = if ($null -eq $kitPin.PSObject.Properties['leg']) { 'legacy' } else { [string]$kitPin.leg }
+$legPin = @{ legacy = 'fstar-pin.json'; custard = 'fstar-pin-custard.json' }[$kitLeg]
+if (-not $legPin) {
+    Write-Host "==== proofs: $kitPinFile names leg '$kitLeg'; the kit runs 'legacy' (or no leg field) and 'custard'" -ForegroundColor Red
     exit 2
 }
 $kitRoot = Join-Path $PSScriptRoot '.kit'
@@ -120,10 +138,13 @@ $legArgs = @{
     HostProjectFile = $hostProjectFile
     HostFilters     = $hostFilters
     Runs            = $Runs
-    PinFile         = Join-Path $kit 'fstar-pin.json'
+    PinFile         = Join-Path $kit $legPin
     ModelDirs       = @(Join-Path $kit 'models')
-    FloorDir        = Join-Path $kit 'oracle'
 }
+# The present leg holds its hand-written runtime floor to the asset's; the custard leg has none (its
+# support library is generated with the extraction) and is the only leg with a Fable side.
+if ($kitLeg -eq 'legacy') { $legArgs.FloorDir = Join-Path $kit 'oracle' }
+elseif ($fableOracle) { $legArgs.FableOracle = Join-Path (Split-Path $PSScriptRoot -Parent) $fableOracle }
 if ($Extract) { $legArgs.Extract = $true }
 if ($SkipOracleHost) { $legArgs.SkipOracleHost = $true }
 if ($Strict) { $legArgs.Strict = $true }
@@ -144,7 +165,7 @@ if ($LASTEXITCODE -ne 0) { Remove-Item $kit -Recurse -Force -ErrorAction Silentl
 # build, a host filter that cannot run and a refuted model must each exit non-zero, beside a green
 # control. A few seconds, and after the leg so the prover is already installed. Needs nothing from
 # this file's declarations — keep it as it is.
-& (Join-Path $kit 'kit/check-proof-leg.tests.ps1') -ProofsDir $PSScriptRoot -PinFile (Join-Path $kit 'fstar-pin.json')
+& (Join-Path $kit 'kit/check-proof-leg.tests.ps1') -ProofsDir $PSScriptRoot -PinFile (Join-Path $kit $legPin)
 $testsExit = $LASTEXITCODE
 Remove-Item $kit -Recurse -Force -ErrorAction SilentlyContinue
 exit $testsExit

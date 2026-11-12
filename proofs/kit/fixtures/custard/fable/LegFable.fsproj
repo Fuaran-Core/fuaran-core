@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The custard-leg fixture's Fable oracle (Phase 641). FStarCustard.fs is the stand-in the leg
+       derives and byte-holds here; the two extractions are the committed ones; Main.fs, LAST, is the
+       runner the leg runs under Node. Never packed. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <Nullable>disable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="FStarCustard.fs" />
+    <Compile Include="../proofs/oracle/LegCustard.fs" />
+    <Compile Include="../proofs/oracle/LegPulse.fs" />
+    <Compile Include="Main.fs" />
+  </ItemGroup>
+</Project>
