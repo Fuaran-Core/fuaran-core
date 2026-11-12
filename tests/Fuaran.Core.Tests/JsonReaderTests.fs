@@ -350,7 +350,8 @@ let private generatedInputs: string list =
     [ for seed in 1..4000 do
           yield! variants seed (document seed) ]
 
-let private pool: string list = corpusInputs @ benchInputs @ generatedInputs
+/// The reader's differential pool, read by the lossless document's differential too (Phase 640).
+let pool: string list = corpusInputs @ benchInputs @ generatedInputs
 
 /// Every disagreement between `reader` and `spec` over `inputs`, labelled, and the spec's tallies.
 let private compare (name: string) (reader: string -> string) (spec: string -> string) (inputs: string list) =

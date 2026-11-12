@@ -1626,6 +1626,73 @@
           "Reader.readNull"
         ]
       }
+    },    {
+      "id": "lossless-reader-rebuilds-the-parse",
+      "level": "proved",
+      "statement": "THE LOSSLESS READER REBUILDS THE PARSE. `JDoc.read` reads a document through `Reader`'s token surface — a `null` by `Reader.readNull`, a number by `Reader.numberText` (the scanner's token scan and the JSON number grammar, and no reading of a value), a container by the scanner's own member and item loops, a string or a literal by the scanner's own arms — and `JDoc.toJVal` converts the document, reading each number text by the scanner's own classification. The reading is modelled as `lossless_value` and its group over `JsonParse`'s alphabet, scans and messages, and `lossless_reader_rebuilds_the_parse` says that on EVERY input, under every limits record, byte verdict and depth budget, the lossless reading then the conversion answers exactly the value `parse_limited` under `RejectNull` accepts the input with, and nothing where `parse_limited` refuses it: the strict parse accepts exactly the documents whose lossless reading converts. The corollary `lossless_refusal_is_a_parse_refusal` is the one-grammar statement: a document the lossless reader refuses — by the grammar, a bound, or trailing input — the strict parse refuses too. `scan_number_flag` ties the float flag the conversion recomputes from a number text (`Json.isFloatToken`) to the one the scanner records while it scans the token, and the accumulator lemmas (`rev_fields`, `poisoned_members`, ...) carry the equality through the loops.",
+      "boundary": "Within the model; the correspondence to production is the differential's (`lossless-reader-differential`) and the extractor's (premise `extractor-and-compiler-trusted`). Value for value and refusal for refusal on what the parse accepts; where both refuse, the two refusals are not claimed equal by the theorem (the strict parse stops at the first null or number past `JVal`, the lossless reading reads on) — `JsonDocumentTests.fs` holds them identical wherever the strict refusal is the grammar's or a bound's. NOT modelled, as in `reader-rebuilds-the-parse`: the breach's path and the re-scan after a shape mismatch, which admits the numbers a reading read as text — both held by the tests. The writer and `JDoc.ofJVal` are held by the round-trip tests, not modelled.",
+      "phase": "fuaran-core#640",
+      "evidence": {
+        "theorem": "lossless_reader_rebuilds_the_parse",
+        "model": "proofs/JsonDocument.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [
+          "lossless_is_parse_value",
+          "lossless_is_parse_members",
+          "lossless_is_parse_items",
+          "lossless_refusal_is_a_parse_refusal",
+          "scan_number_flag",
+          "rev_fields",
+          "rev_items",
+          "poisoned_members",
+          "poisoned_items"
+        ],
+        "operations": [
+          "Reader.numberText",
+          "JDoc.read",
+          "JDoc.reading",
+          "JDoc.toJVal"
+        ]
+      }
+    },
+    {
+      "id": "document-decodes-soundly-through-the-layer",
+      "level": "proved",
+      "statement": "A SOUND DECODER READS A DOCUMENT SOUNDLY. `DecodeLayer.fst` is parametric in its two NUMERIC carriers over a value with no null, not in its value type, so a document reaches it through the conversion: `lower` is `JDoc.toJVal` over the decode layer's value, a null refused `NotAdmitted`, a number the host's reading cannot hold `OutOfRange` and a repeated member name `NotAdmitted` at the repeated member, each AT ITS PATH, the first in document order; `of_decoder` is `JDocDecoder.ofDecoder`. `of_decoder_is_sound` says that every decoder the decode layer proves `sound` (`decode-layer-refusals-resolve`) — so every decoder a domain composes from its blocks — refuses a document only at a path that resolves IN THE DOCUMENT, or that names a member a resolving object of it lacks, and never with `InvalidJson`: the conversion's own refusals resolve at the value they name (`lower_refusal_resolves`), and a path that resolves in the lowered value resolves in the document to a value that lowers to it (`resolve_lowers`, through the first member of each name, which the repeated-name refusal makes the member meant).",
+      "boundary": "For decoders run through `ofDecoder`. `JDocDecoder`'s own combinators over a document are the shared `DecodeOver` code whose `JVal` instance `DecodeLayer.fst` models; their document instance is held to the `JVal` one by `JsonDocumentTests.fs` (`JDocDecoder is Decoder's algebra`), not proved. Within the model; premise `extractor-and-compiler-trusted`.",
+      "phase": "fuaran-core#640",
+      "evidence": {
+        "theorem": "of_decoder_is_sound",
+        "model": "proofs/JsonDocument.fst",
+        "prover": "proofs/fstar-pin.json",
+        "supporting": [
+          "lower_refusal_resolves",
+          "resolve_lowers",
+          "memb_lowers",
+          "item_lowers",
+          "lowers_to_object"
+        ],
+        "operations": [
+          "JDocDecoder.ofDecoder"
+        ]
+      }
+    },
+    {
+      "id": "lossless-reader-differential",
+      "level": "tested",
+      "statement": "The extracted lossless reader agrees with the shipped one. Over the reader's differential pool (the parser corpus, the wire benchmark corpora and the generated documents with their truncations, cuts and splices) and the same pool with nulls written in, `JDoc.read` and the extracted `read_lossless` answer the same document, or the same refusal at the same position with the same sentence, or the same breach; the theorem is evaluated on the extracted model (its conversion beside its own `parse_limited`); and the extracted `lower` refuses a document's null, its first number past the carrier and its first repeated name at production's codes and paths. The go-red is the BLIND bridge that hides the two container characters from the model, which loses on every structured input and on no scalar.",
+      "boundary": "Agreement over the pool only, never over all inputs; the lowering is compared with the host's number reading supplied by production.",
+      "phase": "fuaran-core#640",
+      "evidence": {
+        "family": "Proofs.Oracle",
+        "model": "proofs/JsonDocument.fst",
+        "cases": [
+          "the lossless-document oracle reads what JDoc.read reads over the pool, refusal for refusal",
+          "the extracted lossless reading converts to the extracted strict parse over the pool - the theorem, evaluated",
+          "the extracted lowering refuses at toJVal's codes and paths",
+          "a lossless model shown no containers disagrees on every structured input - the blind bridge"
+        ]
+      }
     },
     {
       "id": "parser-limit-never-reported-as-malformed",

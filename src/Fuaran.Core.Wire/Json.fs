@@ -707,6 +707,115 @@ module Json =
     /// reader holds a bare literal to.
     let isJsonNumber (tok: string) : bool = JsonSyntax.isNumber tok
 
+    /// What a number token of the grammar reads as (Phase 640): the `JInt` reading, the `JFloat`
+    /// reading, or the refusal and its sentence. A struct, so the scanner's typed reads build no
+    /// value per token.
+    [<Struct>]
+    type internal NumberReading =
+        | ReadsInt of intValue: int
+        | ReadsFloat of floatValue: float
+        | Refused of message: string
+
+    /// THE reading of a number token the grammar admits (Phase 640: out of the scanner, unchanged, so
+    /// the document model's conversion to `JVal` reads a number's text by the rule `Json.read` reads
+    /// the token by, and there is no second copy of it). `isFloat` says the token carries a point or
+    /// an exponent.
+    let internal readNumberToken (tok: string) (isFloat: bool) : NumberReading =
+        let asFloat () =
+            match
+                System.Double.TryParse(
+                    tok,
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture
+                )
+            with
+            // Finiteness gate: a syntactically-valid float token whose magnitude
+            // exceeds the double range (e.g. "1e400") TryParses to ±Infinity on
+            // .NET Core — but the Fuaran wire model has no non-finite float (the
+            // same posture as "no null", enforced at encode by `tryRender`).
+            // Admitting it here would let an un-renderable value in through the
+            // one entry point built for untrusted wire data, breaking
+            // `render ∘ parse = id`. Reject it as a named MalformedNumber.
+            // (NaN cannot arise from a valid JSON number token; guarded anyway.)
+            | true, v when System.Double.IsNaN v || System.Double.IsInfinity v ->
+                Refused(
+                    "number outside the finite double range; it cannot round-trip on the wire: "
+                    + tok
+                )
+            | true, v -> ReadsFloat v
+            | _ -> Refused("malformed number: " + tok)
+
+        if isFloat then
+            asFloat ()
+        else
+            // Integer literal (no '.' / 'e'). Fits JInt in the Int32 range; an
+            // integer beyond Int32 is representable EXACTLY as a double only within
+            // the int53 safe-integer range (|n| ≤ 2^53 — the range both a .NET double
+            // and a JS Number reproduce without loss). BEYOND 2^53, silent float
+            // coercion drops digits AND diverges cross-host (a 19-digit id becomes a
+            // different id), so reject it as a named MalformedNumber rather than
+            // corrupt it — unless it is the canonical layout of a double (Phase 253,
+            // below), which no reading can corrupt. (Fable-clean: Int32.TryParse +
+            // Double.TryParse + the shared `FloatLayout` only.)
+            match readInt32 tok with
+            | Some v -> ReadsInt v
+            | None ->
+                // Safety is judged on the TOKEN, not on a parsed double: 2^53 + 1
+                // rounds to 2^53 as a double, so a range check on the value would
+                // wrongly accept it. An integer is int53-safe iff |value| ≤ 2^53 =
+                // 9007199254740992 (16 digits). Compare the digit string lexically —
+                // the grammar above refuses a leading zero, so for equal length that IS
+                // the numeric order. Fable-clean (string + Double.TryParse only, no Int64).
+                let digits = if tok[0] = '-' then tok.Substring 1 else tok
+
+                let int53Safe =
+                    digits.Length < 16
+                    || (digits.Length = 16
+                        && System.String.CompareOrdinal(digits, "9007199254740992") <= 0)
+
+                if int53Safe then
+                    match
+                        System.Double.TryParse(
+                            tok,
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture
+                        )
+                    with
+                    | true, v -> ReadsFloat v
+                    | _ -> Refused("malformed number: " + tok)
+                else
+                    // Phase 253 — past 2^53 the token is admitted EXACTLY when it is the
+                    // canonical float layout (`FloatLayout.finite`) of the double it reads as.
+                    // The float layout writes every finite double whose base-10 exponent is 15
+                    // or 16 in fixed point (WIRE_FORMAT §2 rule 5), so 1e16 is the integer-shaped
+                    // `10000000000000000`; refusing it left a document Core wrote unreadable by
+                    // Core. Such a token survives parse-then-render byte for byte, which is the
+                    // property the refusal below is named for; every other token past 2^53 —
+                    // 2^53 + 1, a 19-digit id — still fails it, and is refused as before.
+                    // (DECISIONS: "an integer token past 2^53 is read when it is a canonical float".)
+                    match
+                        System.Double.TryParse(
+                            tok,
+                            System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture
+                        )
+                    with
+                    | true, v when
+                        not (System.Double.IsNaN v || System.Double.IsInfinity v)
+                        && FloatLayout.finite v = tok
+                        ->
+                        ReadsFloat v
+                    | _ ->
+                        Refused(
+                            "integer literal outside the int53 safe range (|n| > 2^53); it cannot round-trip without precision loss: "
+                            + tok
+                        )
+
+    /// True where a number token of the grammar is a FLOAT token — it carries a point or an exponent
+    /// — which is what the scanner's flag records while it scans one (Phase 640).
+    let internal isFloatToken (tok: string) : bool =
+        tok.IndexOf '.' >= 0 || tok.IndexOf 'e' >= 0 || tok.IndexOf 'E' >= 0
+
     /// Internal signal for the recursive-descent parser; never escapes the parse entry points.
     /// Carries the classified kind, the message, and the position captured at the raise site.
     exception private JsonParseError of JsonErrorKind * string * int
@@ -868,14 +977,15 @@ module Json =
         // The token is SCANNED as it always was — an optional sign, then digits, point, digits,
         // exponent, each optional — so a refusal reports the token and position it always did; it
         // is then held to the JSON number grammar (`isJsonNumber`) before anything reads it.
-        // The number reader returns the double and records, in `numIsInt` / `numInt`, whether the
-        // token is the integer `parse` reads as `JInt` (Phase 368: so `Reader` takes a number into a
-        // typed buffer through this same routine, with no `JVal` case built).
+        // `scanNumberText` stops there, answering the token and whether it is a float token (Phase
+        // 640: the text `Reader.numberText` reads, with no value read from it). The number reader
+        // then reads it (`readNumberToken`), returns the double and records, in `numIsInt` /
+        // `numInt`, whether the token is the integer `parse` reads as `JInt` (Phase 368: so `Reader`
+        // takes a number into a typed buffer through this same routine, with no `JVal` case built).
         let mutable numIsInt = false
         let mutable numInt = 0
 
-        let scanNumber () : float =
-            numIsInt <- false
+        let scanNumberText () : struct (string * bool) =
             let start = i
             let mutable isFloat = false
 
@@ -907,98 +1017,20 @@ module Json =
             if not (isJsonNumber tok) then
                 fail MalformedNumber ("malformed number: " + tok)
 
-            let asFloat () =
-                match
-                    System.Double.TryParse(
-                        tok,
-                        System.Globalization.NumberStyles.Float,
-                        System.Globalization.CultureInfo.InvariantCulture
-                    )
-                with
-                // Finiteness gate: a syntactically-valid float token whose magnitude
-                // exceeds the double range (e.g. "1e400") TryParses to ±Infinity on
-                // .NET Core — but the Fuaran wire model has no non-finite float (the
-                // same posture as "no null", enforced at encode by `tryRender`).
-                // Admitting it here would let an un-renderable value in through the
-                // one entry point built for untrusted wire data, breaking
-                // `render ∘ parse = id`. Reject it as a named MalformedNumber.
-                // (NaN cannot arise from a valid JSON number token; guarded anyway.)
-                | true, v when System.Double.IsNaN v || System.Double.IsInfinity v ->
-                    fail
-                        MalformedNumber
-                        ("number outside the finite double range; it cannot round-trip on the wire: "
-                         + tok)
-                | true, v -> v
-                | _ -> fail MalformedNumber ("malformed number: " + tok)
+            struct (tok, isFloat)
 
-            if isFloat then
-                asFloat ()
-            else
-                // Integer literal (no '.' / 'e'). Fits JInt in the Int32 range; an
-                // integer beyond Int32 is representable EXACTLY as a double only within
-                // the int53 safe-integer range (|n| ≤ 2^53 — the range both a .NET double
-                // and a JS Number reproduce without loss). BEYOND 2^53, silent float
-                // coercion drops digits AND diverges cross-host (a 19-digit id becomes a
-                // different id), so reject it as a named MalformedNumber rather than
-                // corrupt it — unless it is the canonical layout of a double (Phase 253,
-                // below), which no reading can corrupt. (Fable-clean: Int32.TryParse +
-                // Double.TryParse + the shared `FloatLayout` only.)
-                match readInt32 tok with
-                | Some v ->
-                    numIsInt <- true
-                    numInt <- v
-                    float v
-                | None ->
-                    // Safety is judged on the TOKEN, not on a parsed double: 2^53 + 1
-                    // rounds to 2^53 as a double, so a range check on the value would
-                    // wrongly accept it. An integer is int53-safe iff |value| ≤ 2^53 =
-                    // 9007199254740992 (16 digits). Compare the digit string lexically —
-                    // the grammar above refuses a leading zero, so for equal length that IS
-                    // the numeric order. Fable-clean (string + Double.TryParse only, no Int64).
-                    let digits = if tok[0] = '-' then tok.Substring 1 else tok
+        // Both refusals fire AFTER the token scan, at the end of the token, as they always have.
+        let scanNumber () : float =
+            numIsInt <- false
+            let struct (tok, isFloat) = scanNumberText ()
 
-                    let int53Safe =
-                        digits.Length < 16
-                        || (digits.Length = 16
-                            && System.String.CompareOrdinal(digits, "9007199254740992") <= 0)
-
-                    if int53Safe then
-                        match
-                            System.Double.TryParse(
-                                tok,
-                                System.Globalization.NumberStyles.Float,
-                                System.Globalization.CultureInfo.InvariantCulture
-                            )
-                        with
-                        | true, v -> v
-                        | _ -> fail MalformedNumber ("malformed number: " + tok)
-                    else
-                        // Phase 253 — past 2^53 the token is admitted EXACTLY when it is the
-                        // canonical float layout (`FloatLayout.finite`) of the double it reads as.
-                        // The float layout writes every finite double whose base-10 exponent is 15
-                        // or 16 in fixed point (WIRE_FORMAT §2 rule 5), so 1e16 is the integer-shaped
-                        // `10000000000000000`; refusing it left a document Core wrote unreadable by
-                        // Core. Such a token survives parse-then-render byte for byte, which is the
-                        // property the refusal below is named for; every other token past 2^53 —
-                        // 2^53 + 1, a 19-digit id — still fails it, and is refused as before.
-                        // (DECISIONS: "an integer token past 2^53 is read when it is a canonical float".)
-                        match
-                            System.Double.TryParse(
-                                tok,
-                                System.Globalization.NumberStyles.Float,
-                                System.Globalization.CultureInfo.InvariantCulture
-                            )
-                        with
-                        | true, v when
-                            not (System.Double.IsNaN v || System.Double.IsInfinity v)
-                            && FloatLayout.finite v = tok
-                            ->
-                            v
-                        | _ ->
-                            fail
-                                MalformedNumber
-                                ("integer literal outside the int53 safe range (|n| > 2^53); it cannot round-trip without precision loss: "
-                                 + tok)
+            match readNumberToken tok isFloat with
+            | ReadsInt v ->
+                numIsInt <- true
+                numInt <- v
+                float v
+            | ReadsFloat v -> v
+            | Refused message -> fail MalformedNumber message
 
         let parseNumber () : JVal =
             let v = scanNumber ()
@@ -1155,6 +1187,18 @@ module Json =
                 // in as is never read, since the re-scan's tree is discarded and only its refusal
                 // is kept — and every null the reading did NOT reach is still the policy's.
                 parseLiteral "null" (JBool true)
+            | c when
+                (c = '-' || (c >= '0' && c <= '9'))
+                && admitted.Length > 0
+                && Array.contains i admitted
+                ->
+                // A number a `Reader` reading already read as TEXT (`Reader.numberText`, Phase 640),
+                // at this exact position: the same re-scan, the same rule. The token is held to the
+                // grammar, as the reading held it, and no value is read from it, so a token the
+                // `JVal` reading would refuse (an integer past 2^53, a magnitude past the double
+                // range) is not the document's refusal: the reading read it as written.
+                let struct (_, _) = scanNumberText ()
+                JBool true
             | 'n' ->
                 // Under `EraseMemberNull` a member-position null never reaches here — `parseObject`
                 // absorbs it before calling `parseValue` — so a null arriving at this arm under the
@@ -1238,6 +1282,13 @@ module Json =
         member _.Number() : float = scanNumber ()
         member _.NumberIsInt = numIsInt
         member _.NumberInt = numInt
+
+        /// The number token at the value position as its text, held to the grammar and read as no
+        /// value (Phase 640).
+        member _.NumberText() : string =
+            let struct (tok, _) = scanNumberText ()
+            tok
+
         member _.Value(depth: int) : JVal = parseValue depth
         member _.Token() : JsonToken = token ()
         member _.Null() : unit = nullToken ()

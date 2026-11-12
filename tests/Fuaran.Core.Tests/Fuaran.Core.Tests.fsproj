@@ -428,6 +428,11 @@
          corpus (reads RefusalVectorTests.fs), the wire benchmark corpora (reads WireBench/Corpus.fs)
          and a generated pool. Appended (append-only). -->
     <Compile Include="JsonReaderTests.fs" />
+    <!-- Phase 640 — the lossless document model (JDoc): its reader held to Decoder.parse over the reader's pool
+         (reads JsonReaderTests.fs), its writer, conversions and decode algebra; then the Proofs.Oracle
+         differential for proofs/JsonDocument.fst over the same pool. Appended (append-only). -->
+    <Compile Include="JsonDocumentTests.fs" />
+    <Compile Include="ProofOracle.JsonDocumentTests.fs" />
     <!-- Phase 369 — the op-stream line decoder reads by runs: every public route to
          Jsonl.decodeString pinned against the pre-369 one-unit decoder, each skipString fault
          and its position at run boundaries, and a go-red. Depends on nothing here. Appended

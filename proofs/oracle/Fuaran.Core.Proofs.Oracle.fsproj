@@ -74,6 +74,7 @@
     <Compile Include="DecodeLayer.fs" />
     <Compile Include="OpStreamLoad.fs" />
     <Compile Include="DagPrimitives.fs" />
+    <Compile Include="JsonDocument.fs" />
     <!-- roster:end -->
   </ItemGroup>
   <ItemGroup>

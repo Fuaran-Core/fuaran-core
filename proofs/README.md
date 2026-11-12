@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 406 claims — 295 proved (294 across 37 models, 1 a host's own proof), 65 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
+**The ladder, counted:** 409 claims — 297 proved (296 across 38 models, 1 a host's own proof), 66 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -407,8 +407,8 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Tree` | 48 | 12 | 8 | 0 | 0 | 0 | 0 | 28 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 64 | 0 | 25 | 3 | 0 | 0 | 0 | 36 |
-| `Fuaran.Core.Wire` | 144 | 67 | 11 | 3 | 4 | 0 | 0 | 59 |
-| **Total** | 1338 | 333 | 431 | 38 | 15 | 0 | 3 | 518 |
+| `Fuaran.Core.Wire` | 193 | 72 | 11 | 3 | 4 | 0 | 0 | 59 |
+| **Total** | 1387 | 338 | 431 | 38 | 15 | 0 | 3 | 518 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -4335,6 +4335,58 @@ under fuel), `after`, the uncovered-node refusal, the side parents and the band.
 **Rests on, or is bounded by:** [`dag-outside-the-model`](#row-dag-outside-the-model) (assumed), [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed).
 
 **Inherited through the models it opens:** [`sets-are-lists`](#row-sets-are-lists) (assumed), [`node-ids-distinct`](#row-node-ids-distinct) (assumed).
+
+### `JsonDocument`
+
+[`JsonDocument.fst`](JsonDocument.fst) — checked, extracted to the oracle and run beside production by `Proofs.Oracle`. Opens `WireDecode`, `JsonParse`, `DecodeLayer`.
+
+> JsonDocument — an F\* model of Fuaran.Core's lossless document model (`JDoc`, fuaran-core
+> Phase 640): its reader over the scanner's token surface, proved to rebuild the strict parse, and
+> its conversion to the decode layer's value, proved to carry every sound decoder over to the
+> document.
+
+**What is modelled.** 
+- `src/Fuaran.Core.Wire/Document.fs` — the `JDoc` type (section 1, parametric in the carrier of
+a string and of a number text); `JDoc.reading` / `JDoc.read`, the lossless reading over
+`Reader`'s token surface (section 2): a `null` read by `Reader.readNull`, a number by
+`Reader.numberText` (the scanner's token scan and the grammar, and NO reading of a value), a
+container by the scanner's own member and item loops, a string or a literal by the scanner's
+own arms; `JDoc.toJVal`'s number arm, which reads a number text by the scanner's own
+classification (`Json.readNumberToken`, `classify_number` in `JsonParse.fst`), and the
+conversion as a whole (section 3, over the parser's value; section 5, over the decode
+layer's, with its refusals at their paths); `JDocDecoder.ofDecoder` (section 5).
+- `Json.isFloatToken` — the flag the conversion recomputes from a number text, proved to be the
+flag the scanner records while it scans the token (section 3).
+
+**Proved** (2)
+
+- <a id="row-lossless-reader-rebuilds-the-parse"></a>**`lossless-reader-rebuilds-the-parse`** — `lossless_reader_rebuilds_the_parse` · fuaran-core#640
+
+  THE LOSSLESS READER REBUILDS THE PARSE. `JDoc.read` reads a document through `Reader`'s token surface — a `null` by `Reader.readNull`, a number by `Reader.numberText` (the scanner's token scan and the JSON number grammar, and no reading of a value), a container by the scanner's own member and item loops, a string or a literal by the scanner's own arms — and `JDoc.toJVal` converts the document, reading each number text by the scanner's own classification. The reading is modelled as `lossless_value` and its group over `JsonParse`'s alphabet, scans and messages, and `lossless_reader_rebuilds_the_parse` says that on EVERY input, under every limits record, byte verdict and depth budget, the lossless reading then the conversion answers exactly the value `parse_limited` under `RejectNull` accepts the input with, and nothing where `parse_limited` refuses it: the strict parse accepts exactly the documents whose lossless reading converts. The corollary `lossless_refusal_is_a_parse_refusal` is the one-grammar statement: a document the lossless reader refuses — by the grammar, a bound, or trailing input — the strict parse refuses too. `scan_number_flag` ties the float flag the conversion recomputes from a number text (`Json.isFloatToken`) to the one the scanner records while it scans the token, and the accumulator lemmas (`rev_fields`, `poisoned_members`, ...) carry the equality through the loops.
+
+  _With:_ `lossless_is_parse_value`, `lossless_is_parse_members`, `lossless_is_parse_items`, `lossless_refusal_is_a_parse_refusal`, `scan_number_flag`, `rev_fields`, `rev_items`, `poisoned_members`, `poisoned_items`.
+
+  _Boundary:_ Within the model; the correspondence to production is the differential's (`lossless-reader-differential`) and the extractor's (premise `extractor-and-compiler-trusted`). Value for value and refusal for refusal on what the parse accepts; where both refuse, the two refusals are not claimed equal by the theorem (the strict parse stops at the first null or number past `JVal`, the lossless reading reads on) — `JsonDocumentTests.fs` holds them identical wherever the strict refusal is the grammar's or a bound's. NOT modelled, as in `reader-rebuilds-the-parse`: the breach's path and the re-scan after a shape mismatch, which admits the numbers a reading read as text — both held by the tests. The writer and `JDoc.ofJVal` are held by the round-trip tests, not modelled.
+
+- <a id="row-document-decodes-soundly-through-the-layer"></a>**`document-decodes-soundly-through-the-layer`** — `of_decoder_is_sound` · fuaran-core#640
+
+  A SOUND DECODER READS A DOCUMENT SOUNDLY. `DecodeLayer.fst` is parametric in its two NUMERIC carriers over a value with no null, not in its value type, so a document reaches it through the conversion: `lower` is `JDoc.toJVal` over the decode layer's value, a null refused `NotAdmitted`, a number the host's reading cannot hold `OutOfRange` and a repeated member name `NotAdmitted` at the repeated member, each AT ITS PATH, the first in document order; `of_decoder` is `JDocDecoder.ofDecoder`. `of_decoder_is_sound` says that every decoder the decode layer proves `sound` (`decode-layer-refusals-resolve`) — so every decoder a domain composes from its blocks — refuses a document only at a path that resolves IN THE DOCUMENT, or that names a member a resolving object of it lacks, and never with `InvalidJson`: the conversion's own refusals resolve at the value they name (`lower_refusal_resolves`), and a path that resolves in the lowered value resolves in the document to a value that lowers to it (`resolve_lowers`, through the first member of each name, which the repeated-name refusal makes the member meant).
+
+  _With:_ `lower_refusal_resolves`, `resolve_lowers`, `memb_lowers`, `item_lowers`, `lowers_to_object`.
+
+  _Boundary:_ For decoders run through `ofDecoder`. `JDocDecoder`'s own combinators over a document are the shared `DecodeOver` code whose `JVal` instance `DecodeLayer.fst` models; their document instance is held to the `JVal` one by `JsonDocumentTests.fs` (`JDocDecoder is Decoder's algebra`), not proved. Within the model; premise `extractor-and-compiler-trusted`.
+
+**Tested** (1)
+
+- <a id="row-lossless-reader-differential"></a>**`lossless-reader-differential`** — `Proofs.Oracle`, 4 cases · fuaran-core#640
+
+  The extracted lossless reader agrees with the shipped one. Over the reader's differential pool (the parser corpus, the wire benchmark corpora and the generated documents with their truncations, cuts and splices) and the same pool with nulls written in, `JDoc.read` and the extracted `read_lossless` answer the same document, or the same refusal at the same position with the same sentence, or the same breach; the theorem is evaluated on the extracted model (its conversion beside its own `parse_limited`); and the extracted `lower` refuses a document's null, its first number past the carrier and its first repeated name at production's codes and paths. The go-red is the BLIND bridge that hides the two container characters from the model, which loses on every structured input and on no scalar.
+
+  _Boundary:_ Agreement over the pool only, never over all inputs; the lowering is compared with the host's number reading supplied by production.
+
+**Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed).
+
+**Inherited through the models it opens:** [`parser-float-readback-opaque`](#row-parser-float-readback-opaque) (assumed), [`parser-alphabet-bridge`](#row-parser-alphabet-bridge) (assumed), [`decode-layer-round-trip-premises`](#row-decode-layer-round-trip-premises) (assumed), [`decode-layer-refusal-premises`](#row-decode-layer-refusal-premises) (assumed), [`decode-layer-model-bridge`](#row-decode-layer-model-bridge) (assumed).
 
 ### Assumed, policy, and tested beyond a model
 

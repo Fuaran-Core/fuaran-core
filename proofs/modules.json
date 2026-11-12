@@ -651,6 +651,18 @@
       "fastestPhase": "fuaran-core#457",
       "phase": "fuaran-core#457",
       "note": "Phase 457 - the lane DAG's remaining boundaries, in a sibling of DagFold so that DagFold's own cost does not move: `deepest` and `Dag.mergeBase` as Phase 388 computes them, `Dag.commonBase` over N heads, the reachability index's own `mergeBase` / `commonBase` / `between` / `tryTopoOrder` over section 20's slots, and `cut` with `forwardFrom` under fuel. Opens DagFold and adds no file-wide option; the heaviest proofs carry a SCOPED `--z3rlimit` of 100 to 200 and no lemma carries an `SMTPat`. SEEDED BY PHASE 457 from one cold observation under the leg's flags (`--z3rlimit 40 --quake 3 --report_assumes error`): 24s in the kit's `-Modules DagFold,DagPrimitives -Extract` run on a 12-processor Windows dev machine with 1.0 GB of physical memory free (DagFold beside it took 117s against its recorded 178s, so the machine was not slower than the records). By the seeding rule the budget is twice the slowest observed, 2 x 24 = 48, rounded up to 50."
+    },
+    {
+      "module": "JsonDocument",
+      "kind": "extracted",
+      "opens": [ "Twin", "ListAlgebra", "JsonParse", "WireDecode", "DecodeLayer" ],
+      "packages": [ "Fuaran.Core.Wire" ],
+      "budgetSeconds": 70,
+      "measuredSeconds": 35,
+      "fastestSeconds": 19,
+      "fastestPhase": "fuaran-core#640",
+      "phase": "fuaran-core#640",
+      "note": "Phase 640 - the lossless document model (`JDoc`): its reading over `Reader`'s token surface (`readNull`, `numberText`, the scanner's loops), proved with the conversion to be the strict parse (`lossless_reader_rebuilds_the_parse`), and the conversion to the decode layer's value with its refusals at their paths, proved to carry every sound decoder over to the document (`of_decoder_is_sound`). In a module of its own, opening `JsonParse`, `WireDecode` and `DecodeLayer`, so that `JsonParse`'s cost does not move and the new theorems check against its checked file. Default fuel, no scoped option. SEEDED BY PHASE 640 from six cold checks under the leg's flags (`--z3rlimit 40 --quake 3 --report_assumes error`, its three dependencies checked ahead of it in the same cone) on a Windows dev machine with one prover running: 35s, 26s and 22s in three `-Modules JsonDocument -Extract` legs (contention x0.40, x0.43 and unreported), then 22s, 24s and 19s in the `-Modules JsonParse,WireDecode,DecodeLayer,JsonDocument -Runs 3` leg (x0.29, x0.29, x0.31: ordinary passes). By the seeding rule the budget is twice the slowest, 2 x 35 = 70; the fastest genuine cold check is 19s."
     }
   ]
 }

@@ -4,21 +4,29 @@ namespace Fuaran.Core
 /// string-error twin.
 type Decoder<'T> = JVal -> Result<'T, DecodeError>
 
-/// The typed decode combinators (Phase 310). Each returns `Result<_, DecodeError>`; a refusal
-/// leaving a member or an item gains that step, so the path a caller reads is the path from the
-/// value the outermost decoder was handed. Fable-clean, like the rest of the package.
-///
-/// Optional members are three-valued and the third value is a refusal: `optField` reads an ABSENT
-/// member as `Ok None` and a PRESENT member its decoder refuses as that refusal — never as absence,
-/// which is how an ill-typed member went silently unread in every hand-rolled optional reader this
-/// layer replaced.
-[<RequireQualifiedAccess>]
-module Decoder =
+/// The view the decode algebra reads a value carrier through (Phase 640): the kind a value is, and
+/// its members, its items and its text where it has them. The algebra is written ONCE over it
+/// (`DecodeOver`): `Decoder` is its instance over `JVal`, and `JDocDecoder` its instance over the
+/// lossless document model, so a document decodes through the same combinators, with the same
+/// refusals at the same paths.
+[<NoEquality; NoComparison>]
+type internal DecodeCarrier<'V> =
+    {
+        /// The JSON kind a value is, as a refusal names it.
+        KindName: 'V -> string
+        /// An object's members in authored order, or `ValueNone` for any other kind.
+        Members: 'V -> (string * 'V) list voption
+        /// An array's items, or `ValueNone` for any other kind.
+        Items: 'V -> 'V list voption
+        /// A string's text, or `ValueNone` for any other kind.
+        Text: 'V -> string voption
+    }
 
-    /// A decoder that answers `v` whatever it is handed.
-    let succeed (v: 'T) : Decoder<'T> = fun _ -> Ok v
+/// The decode algebra over a carrier (Phase 640) — every combinator of `Decoder` that is not about
+/// one carrier's own scalars, written once. The doc comments are `Decoder`'s, which is its
+/// instance over `JVal`.
+module internal DecodeOver =
 
-    /// The `DecodeCode` a root code names (Phase 443).
     let private rootCode (code: RootDecodeCode) : DecodeCode =
         match code with
         | RootDecodeCode.WrongKind -> DecodeCode.WrongKind
@@ -29,23 +37,309 @@ module Decoder =
         | RootDecodeCode.NotAdmitted -> DecodeCode.NotAdmitted
         | RootDecodeCode.SchemaFault -> DecodeCode.SchemaFault
 
+    let fail (code: RootDecodeCode) (expected: string) (detail: string) : 'V -> Result<'T, DecodeError> =
+        fun _ -> Error(DecodeError.make (rootCode code) expected detail)
+
+    let map (f: 'T -> 'U) (d: 'V -> Result<'T, DecodeError>) : 'V -> Result<'U, DecodeError> =
+        fun el -> d el |> Result.map f
+
+    let bind
+        (f: 'T -> 'V -> Result<'U, DecodeError>)
+        (d: 'V -> Result<'T, DecodeError>)
+        : 'V -> Result<'U, DecodeError> =
+        fun el ->
+            match d el with
+            | Ok v -> f v el
+            | Error e -> Error e
+
+    let andThen
+        (f: 'T -> Result<'U, RootDecodeCode * string * string>)
+        (d: 'V -> Result<'T, DecodeError>)
+        : 'V -> Result<'U, DecodeError> =
+        fun el ->
+            match d el with
+            | Ok v ->
+                match f v with
+                | Ok u -> Ok u
+                | Error(code, expected, detail) -> fail code expected detail el
+            | Error e -> Error e
+
+    let wrongKind (c: DecodeCarrier<'V>) (expected: string) (found: 'V) : DecodeError =
+        DecodeError.make DecodeCode.WrongKind expected (c.KindName found)
+
+    let missing (name: string) : DecodeError =
+        DecodeError.make DecodeCode.MissingField ("a member '" + name + "'") name
+        |> DecodeError.under (PathSegment.Key name)
+
+    let tryMember (c: DecodeCarrier<'V>) (name: string) (el: 'V) : 'V option =
+        match c.Members el with
+        | ValueSome fields -> fields |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd
+        | ValueNone -> None
+
+    let private quoteAll (xs: string list) : string =
+        xs |> List.map (fun x -> "'" + x + "'") |> String.concat ", "
+
+    let text (c: DecodeCarrier<'V>) : 'V -> Result<string, DecodeError> =
+        fun el ->
+            match c.Text el with
+            | ValueSome s -> Ok s
+            | ValueNone -> Error(wrongKind c "string" el)
+
+    let items (c: DecodeCarrier<'V>) : 'V -> Result<'V list, DecodeError> =
+        fun el ->
+            match c.Items el with
+            | ValueSome xs -> Ok xs
+            | ValueNone -> Error(wrongKind c "array" el)
+
+    let members (c: DecodeCarrier<'V>) : 'V -> Result<(string * 'V) list, DecodeError> =
+        fun el ->
+            match c.Members el with
+            | ValueSome fields -> Ok fields
+            | ValueNone -> Error(wrongKind c "object" el)
+
+    let field (c: DecodeCarrier<'V>) (name: string) (d: 'V -> Result<'T, DecodeError>) : 'V -> Result<'T, DecodeError> =
+        fun el ->
+            match c.Members el with
+            | ValueSome _ ->
+                match tryMember c name el with
+                | Some v -> d v |> Result.mapError (DecodeError.under (PathSegment.Key name))
+                | None -> Error(missing name)
+            | ValueNone -> Error(wrongKind c "object" el)
+
+    let optField
+        (c: DecodeCarrier<'V>)
+        (name: string)
+        (d: 'V -> Result<'T, DecodeError>)
+        : 'V -> Result<'T option, DecodeError> =
+        fun el ->
+            match c.Members el with
+            | ValueSome _ ->
+                match tryMember c name el with
+                | Some v ->
+                    d v
+                    |> Result.map Some
+                    |> Result.mapError (DecodeError.under (PathSegment.Key name))
+                | None -> Ok None
+            | ValueNone -> Error(wrongKind c "object" el)
+
+    let at
+        (c: DecodeCarrier<'V>)
+        (path: PathSegment list)
+        (d: 'V -> Result<'T, DecodeError>)
+        : 'V -> Result<'T, DecodeError> =
+        fun el ->
+            let rec go (doneRev: PathSegment list) (rest: PathSegment list) (v: 'V) =
+                let here () = List.rev doneRev
+
+                match rest with
+                | [] -> d v |> Result.mapError (DecodeError.within (here ()))
+                | (PathSegment.Key k as s) :: tail ->
+                    match c.Members v with
+                    | ValueSome _ ->
+                        match tryMember c k v with
+                        | Some x -> go (s :: doneRev) tail x
+                        | None -> Error(DecodeError.within (here ()) (missing k))
+                    | ValueNone -> Error(DecodeError.within (here ()) (wrongKind c "object" v))
+                | (PathSegment.Index i as s) :: tail ->
+                    match c.Items v with
+                    | ValueSome xs ->
+                        match (if i >= 0 then List.tryItem i xs else None) with
+                        | Some x -> go (s :: doneRev) tail x
+                        | None ->
+                            let n = List.length xs
+
+                            Error(
+                                DecodeError.within
+                                    (here ())
+                                    (DecodeError.make
+                                        DecodeCode.OutOfRange
+                                        ("an index below " + string n)
+                                        ("item " + string i))
+                            )
+                    | ValueNone -> Error(DecodeError.within (here ()) (wrongKind c "array" v))
+
+            go [] path el
+
+    let mapListIndexed
+        (c: DecodeCarrier<'V>)
+        (f: int -> 'V -> Result<'T, DecodeError>)
+        : 'V -> Result<'T list, DecodeError> =
+        fun el ->
+            match c.Items el with
+            | ValueSome xs ->
+                let rec go i acc =
+                    function
+                    | [] -> Ok(List.rev acc)
+                    | x :: rest ->
+                        match f i x with
+                        | Ok v -> go (i + 1) (v :: acc) rest
+                        | Error e -> Error(DecodeError.under (PathSegment.Index i) e)
+
+                go 0 [] xs
+            | ValueNone -> Error(wrongKind c "array" el)
+
+    let boundedList
+        (c: DecodeCarrier<'V>)
+        (maxItems: int)
+        (d: 'V -> Result<'T, DecodeError>)
+        : 'V -> Result<'T list, DecodeError> =
+        fun el ->
+            match c.Items el with
+            | ValueSome xs when List.length xs > maxItems ->
+                Error(
+                    DecodeError.make
+                        DecodeCode.LimitExceeded
+                        ("at most " + string maxItems + " items")
+                        ("an array of " + string (List.length xs) + " items")
+                )
+            | _ -> mapListIndexed c (fun _ -> d) el
+
+    let private errorsAndOks (results: Result<'T, DecodeError> list) : Result<'T list, DecodeError list> =
+        match
+            results
+            |> List.choose (function
+                | Error e -> Some e
+                | Ok _ -> None)
+        with
+        | [] ->
+            Ok(
+                results
+                |> List.choose (function
+                    | Ok v -> Some v
+                    | Error _ -> None)
+            )
+        | errors -> Error errors
+
+    let listAll (c: DecodeCarrier<'V>) (d: 'V -> Result<'T, DecodeError>) (el: 'V) : Result<'T list, DecodeError list> =
+        match c.Items el with
+        | ValueSome xs ->
+            xs
+            |> List.mapi (fun i x -> d x |> Result.mapError (DecodeError.under (PathSegment.Index i)))
+            |> errorsAndOks
+        | ValueNone -> Error [ wrongKind c "array" el ]
+
+    let sequence (ds: ('V -> Result<'T, DecodeError>) list) : 'V -> Result<'T list, DecodeError> =
+        fun el ->
+            let rec go acc =
+                function
+                | [] -> Ok(List.rev acc)
+                | (d: 'V -> Result<'T, DecodeError>) :: rest ->
+                    match d el with
+                    | Ok v -> go (v :: acc) rest
+                    | Error e -> Error e
+
+            go [] ds
+
+    let all (ds: ('V -> Result<'T, DecodeError>) list) (el: 'V) : Result<'T list, DecodeError list> =
+        ds |> List.map (fun d -> d el) |> errorsAndOks
+
+    let oneOf (c: DecodeCarrier<'V>) (cases: (string * 'T) list) : 'V -> Result<'T, DecodeError> =
+        fun el ->
+            match c.Text el with
+            | ValueSome s ->
+                match cases |> List.tryFind (fun (k, _) -> k = s) with
+                | Some(_, v) -> Ok v
+                | None ->
+                    let known = cases |> List.map fst
+
+                    Error(DecodeError.make DecodeCode.UnknownTag ("one of " + quoteAll known) ("value '" + s + "'"))
+            | ValueNone -> Error(wrongKind c "string" el)
+
+    let tagDispatch
+        (c: DecodeCarrier<'V>)
+        (key: string)
+        (cases: (string * ('V -> Result<'T, DecodeError>)) list)
+        : 'V -> Result<'T, DecodeError> =
+        fun el ->
+            match field c key (text c) el with
+            | Error e -> Error e
+            | Ok t ->
+                match cases |> List.tryFind (fun (k, _) -> k = t) with
+                | Some(_, d) -> d el
+                | None ->
+                    let known = cases |> List.map fst
+
+                    Error(
+                        DecodeError.under
+                            (PathSegment.Key key)
+                            (DecodeError.make DecodeCode.UnknownTag ("one of " + quoteAll known) (key + " '" + t + "'"))
+                    )
+
+    let private undeclaredError (known: string list) (k: string) : DecodeError =
+        let sorted = List.sort known
+
+        DecodeError.under
+            (PathSegment.Key k)
+            (DecodeError.make
+                DecodeCode.UndeclaredMember
+                (if List.isEmpty sorted then
+                     "no members"
+                 else
+                     "one of the members " + quoteAll sorted)
+                ("'" + k + "'"))
+
+    let undeclared (c: DecodeCarrier<'V>) (known: string list) (el: 'V) : DecodeError list =
+        match c.Members el with
+        | ValueSome fields ->
+            fields
+            |> List.filter (fun (k, _) -> not (List.contains k known))
+            |> List.map (fun (k, _) -> undeclaredError known k)
+        | ValueNone -> []
+
+    let membersOnly (c: DecodeCarrier<'V>) (known: string list) : 'V -> Result<unit, DecodeError> =
+        fun el ->
+            match undeclared c known el with
+            | [] -> Ok()
+            | e :: _ -> Error e
+
+/// The typed decode combinators (Phase 310). Each returns `Result<_, DecodeError>`; a refusal
+/// leaving a member or an item gains that step, so the path a caller reads is the path from the
+/// value the outermost decoder was handed. Fable-clean, like the rest of the package.
+///
+/// Optional members are three-valued and the third value is a refusal: `optField` reads an ABSENT
+/// member as `Ok None` and a PRESENT member its decoder refuses as that refusal — never as absence,
+/// which is how an ill-typed member went silently unread in every hand-rolled optional reader this
+/// layer replaced.
+///
+/// Since Phase 640 every combinator here that is not about `JVal`'s own scalars is `DecodeOver`'s,
+/// instantiated over `JVal`; `JDocDecoder` is the same algebra over the lossless document model. Each
+/// is written over the value it reads (`fun el -> ...`), so its compiled method keeps the arity a
+/// compiled consumer calls it with.
+[<RequireQualifiedAccess>]
+module Decoder =
+
+    /// The `JVal` carrier the algebra reads through (Phase 640).
+    let internal carrier: DecodeCarrier<JVal> =
+        { KindName = JVal.kindName
+          Members =
+            function
+            | JObj fields -> ValueSome fields
+            | _ -> ValueNone
+          Items =
+            function
+            | JArr xs -> ValueSome xs
+            | _ -> ValueNone
+          Text =
+            function
+            | JStr s -> ValueSome s
+            | _ -> ValueNone }
+
+    /// A decoder that answers `v` whatever it is handed.
+    let succeed (v: 'T) : Decoder<'T> = fun _ -> Ok v
+
     /// A decoder that refuses whatever it is handed, at the value itself. Its code is a
     /// `RootDecodeCode` (Phase 443): a refusal at the value cannot be a `MissingField` (raise one
     /// through `field`, which names the member) or an `InvalidJson` (the parse entry points' code), so
     /// every refusal `fail` answers resolves in the value it was handed. `detail` is what was found
     /// there; the sentence is `DecodeError.sentence`'s (Phase 520).
     let fail (code: RootDecodeCode) (expected: string) (detail: string) : Decoder<'T> =
-        fun _ -> Error(DecodeError.make (rootCode code) expected detail)
+        fun el -> DecodeOver.fail code expected detail el
 
     /// Convert the answer; a refusal passes through untouched, its path included.
-    let map (f: 'T -> 'U) (d: Decoder<'T>) : Decoder<'U> = fun el -> d el |> Result.map f
+    let map (f: 'T -> 'U) (d: Decoder<'T>) : Decoder<'U> = fun el -> DecodeOver.map f d el
 
     /// Decode, then decode the SAME value with a decoder chosen by the first answer.
-    let bind (f: 'T -> Decoder<'U>) (d: Decoder<'T>) : Decoder<'U> =
-        fun el ->
-            match d el with
-            | Ok v -> f v el
-            | Error e -> Error e
+    let bind (f: 'T -> Decoder<'U>) (d: Decoder<'T>) : Decoder<'U> = fun el -> DecodeOver.bind f d el
 
     /// Two decoders over the SAME value, their answers combined by `f` (Phase 509): `a` reads first,
     /// and its refusal is answered without running `b`. The two-member read every case of a tagged
@@ -58,13 +352,7 @@ module Decoder =
     /// that must point INSIDE the value (an item, a member) is `bind` to `at <path> (fail ...)`,
     /// which walks the path in the document rather than trusting it.
     let andThen (f: 'T -> Result<'U, RootDecodeCode * string * string>) (d: Decoder<'T>) : Decoder<'U> =
-        fun el ->
-            match d el with
-            | Ok v ->
-                match f v with
-                | Ok u -> Ok u
-                | Error(code, expected, detail) -> fail code expected detail el
-            | Error e -> Error e
+        fun el -> DecodeOver.andThen f d el
 
     /// The string-error reading of a decoder — its refusal's sentence. The bridge a codec whose
     /// published error is a `string` returns through.
@@ -73,22 +361,14 @@ module Decoder =
 
     /// The refusal of a value of the wrong kind: `expected <kind>, got <kind>`.
     let wrongKind (expected: string) (found: JVal) : DecodeError =
-        DecodeError.make DecodeCode.WrongKind expected (JVal.kindName found)
+        DecodeOver.wrongKind carrier expected found
 
     /// The refusal of an absent required member, its path naming the member: `missing property: <name>`.
-    let missing (name: string) : DecodeError =
-        DecodeError.make DecodeCode.MissingField ("a member '" + name + "'") name
-        |> DecodeError.under (PathSegment.Key name)
+    let missing (name: string) : DecodeError = DecodeOver.missing name
 
     /// The member `name` of an object — the FIRST, where a foreign document repeats a key — or
     /// `None` where it has none or `el` is not an object.
-    let tryMember (name: string) (el: JVal) : JVal option =
-        match el with
-        | JObj fields -> fields |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd
-        | _ -> None
-
-    let private quoteAll (xs: string list) : string =
-        xs |> List.map (fun x -> "'" + x + "'") |> String.concat ", "
+    let tryMember (name: string) (el: JVal) : JVal option = DecodeOver.tryMember carrier name el
 
     // ---- the six kinds ----
 
@@ -96,10 +376,7 @@ module Decoder =
     let json: Decoder<JVal> = Ok
 
     /// A `JStr`; any other kind is `WrongKind` — no number or bool is turned into text.
-    let str: Decoder<string> =
-        function
-        | JStr s -> Ok s
-        | other -> Error(wrongKind "string" other)
+    let str: Decoder<string> = fun el -> DecodeOver.text carrier el
 
     /// A `JInt` only — the strict integer read. A float token (`2.0`, `1e3`) and an integer past
     /// Int32 both parse as `JFloat` and are refused as `WrongKind`; `float` is the lenient read.
@@ -122,41 +399,20 @@ module Decoder =
         | other -> Error(wrongKind "bool" other)
 
     /// An array's items, undecoded.
-    let items: Decoder<JVal list> =
-        function
-        | JArr xs -> Ok xs
-        | other -> Error(wrongKind "array" other)
+    let items: Decoder<JVal list> = fun el -> DecodeOver.items carrier el
 
     /// An object's members, in authored order, undecoded.
-    let obj: Decoder<(string * JVal) list> =
-        function
-        | JObj fields -> Ok fields
-        | other -> Error(wrongKind "object" other)
+    let obj: Decoder<(string * JVal) list> = fun el -> DecodeOver.members carrier el
 
     // ---- members ----
 
     /// The member `name`, decoded with `d`; absent is `MissingField`, a non-object `WrongKind`.
     let field (name: string) (d: Decoder<'T>) : Decoder<'T> =
-        fun el ->
-            match el with
-            | JObj _ ->
-                match tryMember name el with
-                | Some v -> d v |> Result.mapError (DecodeError.under (PathSegment.Key name))
-                | None -> Error(missing name)
-            | other -> Error(wrongKind "object" other)
+        fun el -> DecodeOver.field carrier name d el
 
     /// The member `name` if present: absent is `Ok None`, present-and-refused is the refusal.
     let optField (name: string) (d: Decoder<'T>) : Decoder<'T option> =
-        fun el ->
-            match el with
-            | JObj _ ->
-                match tryMember name el with
-                | Some v ->
-                    d v
-                    |> Result.map Some
-                    |> Result.mapError (DecodeError.under (PathSegment.Key name))
-                | None -> Ok None
-            | other -> Error(wrongKind "object" other)
+        fun el -> DecodeOver.optField carrier name d el
 
     /// The member `name`, or `fallback` where it is ABSENT; present-and-refused is the refusal.
     let fieldOr (name: string) (fallback: 'T) (d: Decoder<'T>) : Decoder<'T> =
@@ -166,57 +422,14 @@ module Decoder =
     /// where it fails: an absent member as `MissingField`, an item past an array's end as
     /// `OutOfRange` at the array, a step into the wrong kind as `WrongKind` at that value.
     let at (path: PathSegment list) (d: Decoder<'T>) : Decoder<'T> =
-        fun el ->
-            let rec go (doneRev: PathSegment list) (rest: PathSegment list) (v: JVal) =
-                let here () = List.rev doneRev
-
-                match rest with
-                | [] -> d v |> Result.mapError (DecodeError.within (here ()))
-                | (PathSegment.Key k as s) :: tail ->
-                    match v with
-                    | JObj _ ->
-                        match tryMember k v with
-                        | Some x -> go (s :: doneRev) tail x
-                        | None -> Error(DecodeError.within (here ()) (missing k))
-                    | other -> Error(DecodeError.within (here ()) (wrongKind "object" other))
-                | (PathSegment.Index i as s) :: tail ->
-                    match v with
-                    | JArr xs ->
-                        match (if i >= 0 then List.tryItem i xs else None) with
-                        | Some x -> go (s :: doneRev) tail x
-                        | None ->
-                            let n = List.length xs
-
-                            Error(
-                                DecodeError.within
-                                    (here ())
-                                    (DecodeError.make
-                                        DecodeCode.OutOfRange
-                                        ("an index below " + string n)
-                                        ("item " + string i))
-                            )
-                    | other -> Error(DecodeError.within (here ()) (wrongKind "array" other))
-
-            go [] path el
+        fun el -> DecodeOver.at carrier path d el
 
     // ---- arrays ----
 
     /// Every item of an array, each with the decoder `f` builds from its index; the first refusal,
     /// under its item's index.
     let mapListIndexed (f: int -> Decoder<'T>) : Decoder<'T list> =
-        fun el ->
-            match el with
-            | JArr xs ->
-                let rec go i acc =
-                    function
-                    | [] -> Ok(List.rev acc)
-                    | x :: rest ->
-                        match f i x with
-                        | Ok v -> go (i + 1) (v :: acc) rest
-                        | Error e -> Error(DecodeError.under (PathSegment.Index i) e)
-
-                go 0 [] xs
-            | other -> Error(wrongKind "array" other)
+        fun el -> DecodeOver.mapListIndexed carrier f el
 
     /// Every item of an array decoded with `d`; the first refusal, under its item's index.
     let list (d: Decoder<'T>) : Decoder<'T list> = mapListIndexed (fun _ -> d)
@@ -228,109 +441,31 @@ module Decoder =
     /// `list` with an item bound: more than `maxItems` items is `LimitExceeded` at the array,
     /// before any item is read.
     let boundedList (maxItems: int) (d: Decoder<'T>) : Decoder<'T list> =
-        fun el ->
-            match el with
-            | JArr xs when List.length xs > maxItems ->
-                Error(
-                    DecodeError.make
-                        DecodeCode.LimitExceeded
-                        ("at most " + string maxItems + " items")
-                        ("an array of " + string (List.length xs) + " items")
-                )
-            | _ -> list d el
+        fun el -> DecodeOver.boundedList carrier maxItems d el
 
     /// Every item of an array decoded with `d`, answering EVERY refusal rather than the first.
-    let listAll (d: Decoder<'T>) (el: JVal) : Result<'T list, DecodeError list> =
-        match el with
-        | JArr xs ->
-            let results =
-                xs
-                |> List.mapi (fun i x -> d x |> Result.mapError (DecodeError.under (PathSegment.Index i)))
-
-            match
-                results
-                |> List.choose (function
-                    | Error e -> Some e
-                    | Ok _ -> None)
-            with
-            | [] ->
-                Ok(
-                    results
-                    |> List.choose (function
-                        | Ok v -> Some v
-                        | Error _ -> None)
-                )
-            | errors -> Error errors
-        | other -> Error [ wrongKind "array" other ]
+    let listAll (d: Decoder<'T>) (el: JVal) : Result<'T list, DecodeError list> = DecodeOver.listAll carrier d el
 
     // ---- several decoders over one value ----
 
     /// Each decoder over the same value, in order; the first refusal.
-    let sequence (ds: Decoder<'T> list) : Decoder<'T list> =
-        fun el ->
-            let rec go acc =
-                function
-                | [] -> Ok(List.rev acc)
-                | (d: Decoder<'T>) :: rest ->
-                    match d el with
-                    | Ok v -> go (v :: acc) rest
-                    | Error e -> Error e
-
-            go [] ds
+    let sequence (ds: Decoder<'T> list) : Decoder<'T list> = fun el -> DecodeOver.sequence ds el
 
     /// Each decoder over the same value, answering EVERY refusal — `sequence`'s accumulating twin,
     /// for a reader that reports all of a document's independent faults at once.
-    let all (ds: Decoder<'T> list) (el: JVal) : Result<'T list, DecodeError list> =
-        let results = ds |> List.map (fun d -> d el)
-
-        match
-            results
-            |> List.choose (function
-                | Error e -> Some e
-                | Ok _ -> None)
-        with
-        | [] ->
-            Ok(
-                results
-                |> List.choose (function
-                    | Ok v -> Some v
-                    | Error _ -> None)
-            )
-        | errors -> Error errors
+    let all (ds: Decoder<'T> list) (el: JVal) : Result<'T list, DecodeError list> = DecodeOver.all ds el
 
     // ---- tags and enumerations ----
 
     /// A string from a closed set: a miss is `UnknownTag`, naming every known spelling.
     let oneOf (cases: (string * 'T) list) : Decoder<'T> =
-        fun el ->
-            match el with
-            | JStr s ->
-                match cases |> List.tryFind (fun (k, _) -> k = s) with
-                | Some(_, v) -> Ok v
-                | None ->
-                    let known = cases |> List.map fst
-
-                    Error(DecodeError.make DecodeCode.UnknownTag ("one of " + quoteAll known) ("value '" + s + "'"))
-            | other -> Error(wrongKind "string" other)
+        fun el -> DecodeOver.oneOf carrier cases el
 
     /// Dispatch on the string under the discriminator `key`: the case's decoder reads the SAME
     /// object. An absent or non-string discriminator is refused as such; an unknown tag is
     /// `UnknownTag` at the discriminator, naming every known tag.
     let tagDispatch (key: string) (cases: (string * Decoder<'T>) list) : Decoder<'T> =
-        fun el ->
-            match field key str el with
-            | Error e -> Error e
-            | Ok t ->
-                match cases |> List.tryFind (fun (k, _) -> k = t) with
-                | Some(_, d) -> d el
-                | None ->
-                    let known = cases |> List.map fst
-
-                    Error(
-                        DecodeError.under
-                            (PathSegment.Key key)
-                            (DecodeError.make DecodeCode.UnknownTag ("one of " + quoteAll known) (key + " '" + t + "'"))
-                    )
+        fun el -> DecodeOver.tagDispatch carrier key cases el
 
     /// `tagDispatch` under the `"kind"` discriminator.
     let kindDispatch (cases: (string * Decoder<'T>) list) : Decoder<'T> = tagDispatch "kind" cases
@@ -353,37 +488,15 @@ module Decoder =
 
     // ---- the strict member policy ----
 
-    let private undeclaredError (known: string list) (k: string) : DecodeError =
-        let sorted = List.sort known
-
-        DecodeError.under
-            (PathSegment.Key k)
-            (DecodeError.make
-                DecodeCode.UndeclaredMember
-                (if List.isEmpty sorted then
-                     "no members"
-                 else
-                     "one of the members " + quoteAll sorted)
-                ("'" + k + "'"))
-
     /// Every member of an object outside `known`, in authored order — one `UndeclaredMember` each.
     /// A non-object has no members to refuse.
-    let undeclared (known: string list) (el: JVal) : DecodeError list =
-        match el with
-        | JObj fields ->
-            fields
-            |> List.filter (fun (k, _) -> not (List.contains k known))
-            |> List.map (fun (k, _) -> undeclaredError known k)
-        | _ -> []
+    let undeclared (known: string list) (el: JVal) : DecodeError list = DecodeOver.undeclared carrier known el
 
     /// The strict policy (Phase 251's `ReadPolicy.Strict`, generalised): the first member outside
     /// `known` is `UndeclaredMember`, naming the members that WOULD be read. A non-object passes —
     /// the decoder that reads it refuses its kind.
     let members (known: string list) : Decoder<unit> =
-        fun el ->
-            match undeclared known el with
-            | [] -> Ok()
-            | e :: _ -> Error e
+        fun el -> DecodeOver.membersOnly carrier known el
 
     /// `d` under the strict policy: the members check first, then the read.
     let closed (known: string list) (d: Decoder<'T>) : Decoder<'T> = members known |> bind (fun () -> d)
@@ -406,8 +519,9 @@ module Decoder =
 type Reader internal (scan: Json.Scanner) =
     let mutable due = true
     let mutable depth = 0
-    // The positions of the `null` tokens the reading read on its own rule (`Reader.readNull`,
-    // Phase 467), in reading order — what the re-scan after a shape mismatch admits.
+    // The positions of the tokens the reading read on its own rule — the `null` tokens
+    // (`Reader.readNull`, Phase 467) and the numbers read as text (`Reader.numberText`, Phase 640) —
+    // in reading order: what the re-scan after a shape mismatch admits.
     let admitted = ResizeArray<int>()
     member internal _.Scan = scan
     member internal _.Admitted = admitted
@@ -437,7 +551,10 @@ type Reader internal (scan: Json.Scanner) =
 /// Since Phase 467 it also has a TOKEN surface — `peek`, `path` and `readNull` — through which a
 /// reading meets a `null` token where it stands and answers it by its own rule, the one thing a
 /// `NullPolicy` cannot say; a host whose value type carries a null reads its whole tree through
-/// the surface and `Json.read`'s grammar, under its own limits, with no parser of its own.
+/// the surface and `Json.read`'s grammar, under its own limits, with no parser of its own. Since
+/// Phase 640 the surface reads a number as its token text too (`numberText`), so a host whose
+/// numbers keep their digits and scale reads them through the same grammar; the lossless document
+/// model (`JDoc.reading`) is that reading.
 [<RequireQualifiedAccess>]
 module Reader =
     /// Internal signal for a shape mismatch: the path to the value, the shape expected there, and
@@ -529,6 +646,23 @@ module Reader =
 
         r.Admitted.Add s.Pos
         s.Null()
+
+    /// The number token where one is due, as its TEXT (Phase 640): scanned and held to the number
+    /// grammar by the scanner `Json.read` runs, under the read's limits, and read as no value — so a
+    /// token the `JVal` reading refuses (an integer past 2^53 that is not a double's canonical
+    /// layout, a magnitude past the finite double range) is read here as written, digits and scale
+    /// intact. Any other token is a mismatch at this value's path (`WrongKind`, expecting a number);
+    /// a token outside the grammar (`01`, `1.`) is the grammar's own refusal, as `value` names it.
+    let numberText (r: Reader) : string =
+        take r
+        let s = r.Scan
+        let c = s.ValueStart()
+
+        if not (c = '-' || (c >= '0' && c <= '9')) then
+            mismatch s s.Pos "a number"
+
+        r.Admitted.Add s.Pos
+        s.NumberText()
 
     /// An array of strings, into a `string[]`.
     let strings (r: Reader) : string[] =
