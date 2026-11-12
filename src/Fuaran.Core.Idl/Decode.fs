@@ -159,12 +159,107 @@ module Decode =
                     | Error e -> Error e
 
             go 0 [] xs
+        // Phase 639 (D251) — the wider data universe. A reader admits only the one canonical spelling.
+        | WireForm.Text scalar, JStr s when ScalarText.admits scalar s -> Ok(VStr s)
+        | WireForm.Text scalar, JStr s ->
+            err DecodeCode.OutOfRange ("a canonical '" + ScalarText.name scalar + "' string") ("'" + s + "'")
+        | WireForm.Tuple components, JArr xs when List.length xs = List.length components ->
+            decodeItems idl (List.zip components xs) |> Result.map VList
+        | WireForm.Tuple components, JArr xs ->
+            err
+                DecodeCode.OutOfRange
+                (sprintf "an array of %d items" (List.length components))
+                (sprintf "an array of %d items" (List.length xs))
+        | WireForm.Set element, JArr xs ->
+            decodeItems idl (xs |> List.map (fun x -> element, x))
+            |> Result.bind (fun vs ->
+                canonicalOrder idl (vs |> List.mapi (fun i v -> [ PathSegment.Index i ], element, v))
+                |> Result.map (fun () -> VList vs))
+        | WireForm.KeyedMap(key, value), JArr xs ->
+            let rec go i acc =
+                function
+                | [] -> Ok(List.rev acc)
+                | JArr [ kj; vj ] :: rest ->
+                    match
+                        decodeValue idl key kj
+                        |> under (PathSegment.Index 0)
+                        |> under (PathSegment.Index i)
+                    with
+                    | Error e -> Error e
+                    | Ok k ->
+                        match
+                            decodeValue idl value vj
+                            |> under (PathSegment.Index 1)
+                            |> under (PathSegment.Index i)
+                        with
+                        | Error e -> Error e
+                        | Ok v -> go (i + 1) ((k, v) :: acc) rest
+                | JArr entry :: _ ->
+                    err
+                        DecodeCode.OutOfRange
+                        "a [key, value] array of 2 items"
+                        (sprintf "an array of %d items" (List.length entry))
+                    |> under (PathSegment.Index i)
+                | other :: _ -> Error(Decoder.wrongKind "array" other) |> under (PathSegment.Index i)
+
+            go 0 [] xs
+            |> Result.bind (fun entries ->
+                canonicalOrder
+                    idl
+                    (entries
+                     |> List.mapi (fun i (k, _) -> [ PathSegment.Index i; PathSegment.Index 0 ], key, k))
+                |> Result.map (fun () -> VList(entries |> List.map (fun (k, v) -> VList [ k; v ]))))
         | form, _ ->
             // A sentinel position given a string that is not its sentinel holds the right KIND and
             // the wrong value; every other fall-through is a kind the type does not take.
             match form, j with
             | WireForm.Sentinel _, JStr s -> err DecodeCode.OutOfRange (WireForm.jsonKind form) ("'" + s + "'")
             | _ -> Error(Decoder.wrongKind (WireForm.jsonKind form) j)
+
+    /// Each JSON item at its type, refusals under the item's index (Phase 639).
+    and private decodeItems (idl: Idl) (typed: (IdlType * JVal) list) : Result<IdlValue list, DecodeError> =
+        let rec go i acc =
+            function
+            | [] -> Ok(List.rev acc)
+            | (t, j) :: rest ->
+                match decodeValue idl t j |> under (PathSegment.Index i) with
+                | Ok v -> go (i + 1) (v :: acc) rest
+                | Error e -> Error e
+
+        go 0 [] typed
+
+    /// Phase 639 (D251) — decoded set elements or map keys, each with its path, must be STRICTLY
+    /// ascending in canonical order: each one's canonical text ([[Encode.valueJson]] rendered) above
+    /// the one before it. An equal text is the duplicate refusal and a lower one the order refusal,
+    /// both `OutOfRange` at the later item, so a document has one spelling and a reader no choice.
+    and private canonicalOrder
+        (idl: Idl)
+        (items: (PathSegment list * IdlType * IdlValue) list)
+        : Result<unit, DecodeError> =
+        let texts =
+            items
+            |> List.map (fun (path, t, v) ->
+                path,
+                Encode.valueJson idl t v
+                |> Result.map (Canonical.write Rendering.CrossHost)
+                |> Result.defaultValue "")
+
+        let at (path: PathSegment list) (r: Result<unit, DecodeError>) = List.foldBack under path r
+
+        let rec go =
+            function
+            | (_, a) :: ((path, b) :: _ as rest) ->
+                let c = ScalarText.compare a b
+
+                if c = 0 then
+                    err DecodeCode.OutOfRange "a distinct element" ("a repeat of " + b) |> at path
+                elif c > 0 then
+                    err DecodeCode.OutOfRange ("an element ordered after " + a) b |> at path
+                else
+                    go rest
+            | _ -> Ok()
+
+        go texts
 
     /// A tagged object read by its discriminator (Phase 520: `Decoder.tagDispatch` under the DECLARED
     /// key, Phase 108): each case reads the SAME object's declared fields, and its value is the tag
@@ -374,6 +469,30 @@ module Decode =
             fs
             |> List.fold
                 (fun acc (k, v) -> acc |> Result.bind (fun () -> strictValue idl vt v |> under (PathSegment.Key k)))
+                (Ok())
+        // Phase 639 — a tuple's components and a keyed map's values may be objects; a set's elements
+        // and a keyed map's keys are orderable, so never one.
+        | WireForm.Tuple components, JArr xs when List.length xs = List.length components ->
+            List.zip components xs
+            |> List.indexed
+            |> List.fold
+                (fun acc (i, (c, x)) ->
+                    acc
+                    |> Result.bind (fun () -> strictValue idl c x |> under (PathSegment.Index i)))
+                (Ok())
+        | WireForm.KeyedMap(_, vt), JArr xs ->
+            xs
+            |> List.indexed
+            |> List.fold
+                (fun acc (i, x) ->
+                    match x with
+                    | JArr [ _; v ] ->
+                        acc
+                        |> Result.bind (fun () ->
+                            strictValue idl vt v
+                            |> under (PathSegment.Index 1)
+                            |> under (PathSegment.Index i))
+                    | _ -> acc)
                 (Ok())
         | _ -> Ok()
 

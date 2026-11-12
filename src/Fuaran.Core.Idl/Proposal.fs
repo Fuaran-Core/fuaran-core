@@ -249,6 +249,14 @@ module Proposal =
         | TOp -> refused "op"
         | TList inner -> hostSurface (at @ [ PathSegment.Key "of" ]) inner
         | TMap inner -> hostSurface (at @ [ PathSegment.Key "values" ]) inner
+        | TSet inner -> hostSurface (at @ [ PathSegment.Key "of" ]) inner
+        | TKeyedMap(k, v) ->
+            hostSurface (at @ [ PathSegment.Key "keys" ]) k
+            @ hostSurface (at @ [ PathSegment.Key "values" ]) v
+        | TTuple components ->
+            components
+            |> List.mapi (fun i c -> hostSurface (at @ [ PathSegment.Key "of"; PathSegment.Index i ]) c)
+            |> List.concat
         | TUnion(_, args) ->
             args
             |> List.mapi (fun i a -> hostSurface (at @ [ PathSegment.Key "args"; PathSegment.Index i ]) a)
@@ -261,7 +269,12 @@ module Proposal =
         | TRecord _
         | TNode
         | TKind
-        | TJson -> []
+        | TJson
+        | TInt64
+        | TDecimal
+        | TBytes
+        | TTimeOfDay
+        | TDuration -> []
 
     /// A default the proposal may declare: scalars and enum cases only — the set the F# generator
     /// can emit a default expression for, so a proposal cannot declare a default the generated

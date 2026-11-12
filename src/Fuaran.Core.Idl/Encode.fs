@@ -45,6 +45,19 @@ module Encode =
     let private sameCanonical (idl: Idl) (a: JVal) (b: JVal) : bool =
         Canonical.write (rendering idl) a = Canonical.write (rendering idl) b
 
+    /// Phase 639 (D251) — items in CANONICAL ORDER: ascending by their keys' canonical texts compared
+    /// by code point ([[ScalarText.compare]]), a key written twice refused by name. Each item is its
+    /// key (an element, or a map entry's key) with what is written for it.
+    let private inCanonicalOrder (what: string) (items: (JVal * JVal) list) : Result<JVal list, string> =
+        let keyed =
+            items
+            |> List.map (fun (k, item) -> Canonical.write Rendering.CrossHost k, item)
+            |> List.sortWith (fun (a, _) (b, _) -> ScalarText.compare a b)
+
+        match keyed |> List.pairwise |> List.tryFind (fun ((a, _), (b, _)) -> a = b) with
+        | Some((a, _), _) -> Error(sprintf "duplicate %s %s" what a)
+        | None -> Ok(keyed |> List.map snd)
+
     let rec private encodeValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<JVal, string> =
         // Phase 513 — the type's wire form is decided once, by [[WireForm.ofType]]; this arm list only
         // writes it.
@@ -149,8 +162,47 @@ module Encode =
                     | Error m -> Error m
 
             go [] xs
+        // Phase 639 (D251) — the wider data universe. A string-borne scalar is authored as its one
+        // canonical spelling, so the encoder checks it and never normalises: a value has one text.
+        | WireForm.Text scalar, VStr s when ScalarText.admits scalar s -> Ok(JStr s)
+        | WireForm.Text scalar, VStr s ->
+            Error(sprintf "'%s' is not the canonical spelling of a %s" s (ScalarText.name scalar))
+        | WireForm.Tuple components, VList xs when List.length xs = List.length components ->
+            encodeAll idl (List.zip components xs) |> Result.map JArr
+        | WireForm.Tuple components, VList xs ->
+            Error(sprintf "a tuple of %d components given %d items" (List.length components) (List.length xs))
+        // A set and a keyed map are authored in any order; the encoder writes them in canonical order
+        // and refuses a repeated element or key, so two equal values give one byte string.
+        | WireForm.Set element, VList xs ->
+            encodeAll idl (xs |> List.map (fun x -> element, x))
+            |> Result.bind (fun js -> inCanonicalOrder "set element" (js |> List.map (fun j -> j, j)))
+            |> Result.map JArr
+        | WireForm.KeyedMap(key, value), VList pairs ->
+            let rec go acc =
+                function
+                | [] -> Ok(List.rev acc)
+                | VList [ k; v ] :: rest ->
+                    match encodeValue idl key k, encodeValue idl value v with
+                    | Ok kj, Ok vj -> go ((kj, JArr [ kj; vj ]) :: acc) rest
+                    | Error m, _
+                    | _, Error m -> Error m
+                | _ -> Error "a keyed map entry is a two-item list, its key then its value"
+
+            go [] pairs |> Result.bind (inCanonicalOrder "keyed map key") |> Result.map JArr
         | _, VAbsent -> Error "absent value reached the encoder (should be omitted at the field level)"
         | _ -> Error(sprintf "authored value does not match IDL type %A" t)
+
+    /// Each value at its type, in order (Phase 639).
+    and private encodeAll (idl: Idl) (typed: (IdlType * IdlValue) list) : Result<JVal list, string> =
+        let rec go acc =
+            function
+            | [] -> Ok(List.rev acc)
+            | (t, v) :: rest ->
+                match encodeValue idl t v with
+                | Ok j -> go (j :: acc) rest
+                | Error m -> Error m
+
+        go [] typed
 
     /// Phase 474 — a presence-keyed case's members as an object: its own members and the members it
     /// synthesises, in the union's roster order ([[WireForm.keyedRoster]]). The object is never on

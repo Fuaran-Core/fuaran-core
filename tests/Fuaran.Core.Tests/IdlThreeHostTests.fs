@@ -97,6 +97,21 @@ let rec valueKey (idl: Idl) (t: IdlType) (v: IdlValue) : string =
         | None -> sprintf "?tag %s" tag
     | TNode, VNode(id, tag, fs) -> nodeKey idl id [] tag fs
     | TNode, VNodeEnv(id, env, tag, fs) -> nodeKey idl id env tag fs
+    // Phase 639 — a string-borne scalar is its canonical text; a set and a keyed map are their
+    // element (entry) keys SORTED, since a host's set or map holds no order of its own.
+    | (TInt64 | TDecimal | TBytes | TTimeOfDay | TDuration), VStr s -> "x" + s
+    | TTuple cs, VList xs when List.length cs = List.length xs ->
+        "(" + (List.map2 (valueKey idl) cs xs |> String.concat ",") + ")"
+    | TSet e, VList xs -> "S{" + (xs |> List.map (valueKey idl e) |> List.sort |> String.concat ",") + "}"
+    | TKeyedMap(k, vt), VList pairs ->
+        "M{"
+        + (pairs
+           |> List.map (function
+               | VList [ kv; vv ] -> valueKey idl k kv + ":" + valueKey idl vt vv
+               | other -> sprintf "?entry %A" other)
+           |> List.sort
+           |> String.concat ",")
+        + "}"
     | _ -> sprintf "?%A=%A" t v
 
 and private fieldsKey
@@ -216,6 +231,17 @@ let rec private toIdl (hosted: Map<string, obj -> JVal>) (idl: Idl) (t: IdlType)
         match env with
         | [] -> VNode(id, k.Tag, fields)
         | _ -> VNodeEnv(id, env, k.Tag, fields)
+    // Phase 639 — the F# host's shapes of the wider data universe.
+    | TInt64 -> VStr(string (unbox<int64> o))
+    | TDecimal
+    | TTimeOfDay
+    | TDuration -> VStr(unbox<string> o)
+    | TBytes -> VStr(Convert.ToBase64String(unbox<byte[]> o))
+    | TTuple cs -> VList(List.map2 recur cs (FSharpValue.GetTupleFields o |> List.ofArray))
+    | TSet e -> VList [ for x in (o :?> Collections.IEnumerable) -> recur e x ]
+    | TKeyedMap(k, vt) ->
+        VList
+            [ for kv in (o :?> Collections.IEnumerable) -> VList [ recur k (prop kv "Key"); recur vt (prop kv "Value") ] ]
     | TKind
     | TOp
     | TVar _ -> failwithf "no compiled value of %A" t
@@ -1170,7 +1196,7 @@ let private codeLines (file: string) : (int * string) list =
 /// A match arm on a declared `IdlType` case: what the lowering exists to decide once.
 let private idlTypeArm =
     Text.RegularExpressions.Regex
-        @"^\s*\|\s*\(?T(Str|Int|Bool|Float|Enum|Union|Var|Node|List|Closure|Fn|Opaque|Json|Hosted|Record|Map|Kind|Op)\b"
+        @"^\s*\|\s*\(?T(Str|Int|Bool|Float|Enum|Union|Var|Node|List|Closure|Fn|Opaque|Json|Hosted|Record|Map|Kind|Op|Int64|Decimal|Bytes|TimeOfDay|Duration|Tuple|Set|KeyedMap)\b"
 
 /// The findings the guard reports over `files`: an `IdlType` arm in a reader, and a sentinel
 /// spelled outside the lowering.

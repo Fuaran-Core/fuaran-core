@@ -22,6 +22,9 @@
   <ItemGroup>
     <Compile Include="Idl.fs" />
     <Compile Include="HostedFormat.fs" />
+    <!-- Phase 639 (DECISIONS.md D251) — the canonical spellings of the wider data universe's
+         string-borne scalars, and the canonical order of a set's elements and a keyed map's keys. -->
+    <Compile Include="ScalarText.fs" />
     <Compile Include="TypeParams.fs" />
     <Compile Include="SourceLit.fs" />
     <Compile Include="TransparentUnion.fs" />

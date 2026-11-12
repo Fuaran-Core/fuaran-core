@@ -72,6 +72,14 @@ let rec private typeCases (t: IdlType) : string list =
     | TOpaque -> [ "TOpaque" ]
     | TJson -> [ "TJson" ]
     | THosted _ -> [ "THosted" ]
+    | TInt64 -> [ "TInt64" ]
+    | TDecimal -> [ "TDecimal" ]
+    | TBytes -> [ "TBytes" ]
+    | TTimeOfDay -> [ "TTimeOfDay" ]
+    | TDuration -> [ "TDuration" ]
+    | TTuple cs -> "TTuple" :: (cs |> List.collect typeCases)
+    | TSet e -> "TSet" :: typeCases e
+    | TKeyedMap(k, v) -> "TKeyedMap" :: (typeCases k @ typeCases v)
 
 let private optCase (o: Optionality) =
     match o with
@@ -105,7 +113,16 @@ let private everyTypeCase =
       "TFn"
       "TOpaque"
       "TJson"
-      "THosted" ]
+      "THosted"
+      // Phase 639 — the wider data universe, reached by the reference vocabulary's `Tally`.
+      "TInt64"
+      "TDecimal"
+      "TBytes"
+      "TTimeOfDay"
+      "TDuration"
+      "TTuple"
+      "TSet"
+      "TKeyedMap" ]
 
 [<Tests>]
 let coverage =
@@ -1409,6 +1426,15 @@ let rec private drawValue
         | TVar _ -> VStr "var", r
         | TKind -> VUnion("Missing", []), r
         | TOp -> VUnion("Missing", []), r
+        // Phase 639 — a canonical spelling of each string-borne scalar, and empty composites.
+        | TInt64 -> VStr "0", r
+        | TDecimal -> VStr "0", r
+        | TBytes -> VStr "", r
+        | TTimeOfDay -> VStr "00:00:00", r
+        | TDuration -> VStr "0s", r
+        | TTuple _
+        | TSet _
+        | TKeyedMap _ -> VList [], r
 
 /// Plant `d` as the declared default of the field at `index`, counted in EXACTLY the order
 /// `allFields` above lists them (kinds, ops, union cases, records, node fields), leaving every

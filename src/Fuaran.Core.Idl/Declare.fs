@@ -178,8 +178,12 @@ module Declare =
             | WireForm.Bool
             | WireForm.Float
             | WireForm.Enum _
+            | WireForm.Text _
             | WireForm.Record _ -> None
             | WireForm.Union u -> u.Args |> List.tryPick readable
+            | WireForm.Tuple components -> components |> List.tryPick readable
+            | WireForm.Set inner -> readable inner
+            | WireForm.KeyedMap(k, v) -> [ k; v ] |> List.tryPick readable
             | WireForm.Undeclared(Undeclared.Enum n | Undeclared.Record n | Undeclared.Union(n, _)) ->
                 Some(sprintf "names '%s', which the vocabulary does not declare" n)
             | WireForm.List inner
@@ -190,8 +194,11 @@ module Declare =
             match t with
             | THosted h -> [ h ]
             | TList inner
-            | TMap inner -> hostedIn inner
-            | TUnion(_, args) -> args |> List.collect hostedIn
+            | TMap inner
+            | TSet inner -> hostedIn inner
+            | TUnion(_, args)
+            | TTuple args -> args |> List.collect hostedIn
+            | TKeyedMap(k, v) -> hostedIn k @ hostedIn v
             | _ -> []
 
         let fieldSets =
@@ -258,8 +265,11 @@ module Declare =
         let rec nested (t: IdlType) : IdlType list =
             match t with
             | TList i
-            | TMap i -> i :: nested i
-            | TUnion(_, args) -> args @ (args |> List.collect nested)
+            | TMap i
+            | TSet i -> i :: nested i
+            | TUnion(_, args)
+            | TTuple args -> args @ (args |> List.collect nested)
+            | TKeyedMap(k, v) -> [ k; v ] @ nested k @ nested v
             | THosted { Wire = Some w } -> w :: nested w
             | _ -> []
 
@@ -700,8 +710,38 @@ module Declare =
             match t with
             | TVar _ -> true
             | TList inner
-            | TMap inner -> mentionsVar inner
-            | TUnion(_, args) -> args |> List.exists mentionsVar
+            | TMap inner
+            | TSet inner -> mentionsVar inner
+            | TUnion(_, args)
+            | TTuple args -> args |> List.exists mentionsVar
+            | TKeyedMap(k, v) -> mentionsVar k || mentionsVar v
+            | _ -> false
+
+        // Phase 639 — whether a value of `t` can hold a node, a bare kind or a tree op at any depth,
+        // through the records and unions it names (`seen` breaks declaration cycles).
+        let rec holdsTree (seen: Set<string>) (t: IdlType) : bool =
+            match t with
+            | TNode
+            | TKind
+            | TOp -> true
+            | TList i
+            | TMap i
+            | TSet i -> holdsTree seen i
+            | TTuple args -> args |> List.exists (holdsTree seen)
+            | TKeyedMap(k, v) -> holdsTree seen k || holdsTree seen v
+            | THosted { Wire = Some w } -> holdsTree seen w
+            | TRecord n when not (Set.contains ("r:" + n) seen) ->
+                match IdlLookup.tryRecord idl n with
+                | Some r -> r.Fields |> List.exists (fun f -> holdsTree (Set.add ("r:" + n) seen) f.Type)
+                | None -> false
+            | TUnion(n, args) when not (Set.contains ("u:" + n) seen) ->
+                args |> List.exists (holdsTree seen)
+                || (match IdlLookup.tryUnion idl n with
+                    | Some u ->
+                        u.Cases
+                        |> List.exists (fun c ->
+                            c.Fields |> List.exists (fun f -> holdsTree (Set.add ("u:" + n) seen) f.Type))
+                    | None -> false)
             | _ -> false
 
         let rec typeErrors
@@ -751,6 +791,49 @@ module Declare =
                 [ fault path (sprintf "%s: type variable '%s' is not a parameter of the union declaring it" at v) ]
             | WireForm.List inner
             | WireForm.Map inner -> typeErrors path at pars inner
+            // Phase 639 (D251) — a tuple has at least two components, and a set's element and a keyed
+            // map's key are ORDERABLE (a type variable is not: its order would depend on the
+            // instantiation). A map keyed by strings is `map`, so a keyed map's key is never a string.
+            | WireForm.Tuple components when components |> List.exists (holdsTree Set.empty) ->
+                [ fault
+                      path
+                      (sprintf
+                          "%s: a tuple holds data, never a node, a bare kind or a tree op at any depth; a tree is held by a list, a record or a union, which every traversal walks"
+                          at) ]
+            | WireForm.Tuple components ->
+                [ if List.length components < 2 then
+                      fault
+                          path
+                          (sprintf
+                              "%s: a tuple declares at least two components; this one declares %d"
+                              at
+                              components.Length) ]
+                @ (components |> List.collect (typeErrors path at pars))
+            | WireForm.Set element ->
+                [ if not (WireForm.orderable idl element) then
+                      fault
+                          path
+                          (sprintf
+                              "%s: a set's element type must be orderable (a string, integer, boolean, enum, decimal, bytes, time of day, duration or a tuple of those); %A is not"
+                              at
+                              element) ]
+                @ typeErrors path at pars element
+            | WireForm.KeyedMap(k, v) ->
+                [ if
+                      (match WireForm.ofType idl k with
+                       | WireForm.Str -> true
+                       | _ -> false)
+                  then
+                      fault path (sprintf "%s: a map keyed by strings is declared `map` (TMap), never a keyed map" at)
+                  elif not (WireForm.orderable idl k) then
+                      fault
+                          path
+                          (sprintf
+                              "%s: a keyed map's key type must be orderable (an integer, boolean, enum, decimal, bytes, time of day, duration or a tuple of orderable types); %A is not"
+                              at
+                              k) ]
+                @ typeErrors path at pars k
+                @ typeErrors path at pars v
             | _ -> []
 
         let annotationErrors (path: PathSegment list) (at: string) (a: Annotations) : VocabularyFault list =

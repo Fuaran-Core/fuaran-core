@@ -161,6 +161,48 @@ module Sample =
               "123e4567-e89b-12d3-a456-426614174000"
               "f81d4fae-7dec-11d0-a765-00a0c91e6bf6" ]
 
+    /// Canonical spellings of the string-borne scalars (Phase 639, D251) at the boundaries a codec
+    /// most often gets wrong: each type's range ends, an integer above 2^53 (where a JavaScript
+    /// number stops being exact), a decimal no host decimal type holds, the seventh fraction digit,
+    /// a padded and an unpadded base64 tail, and texts whose canonical order is not numeric order.
+    let private textPool (scalar: TextScalar) : string list =
+        match scalar with
+        | TextScalar.Int64 ->
+            [ "0"
+              "1"
+              "-1"
+              "9"
+              "10"
+              "9007199254740993"
+              "9223372036854775807"
+              "-9223372036854775808" ]
+        | TextScalar.Decimal ->
+            [ "0"
+              "1"
+              "-0.5"
+              "12.25"
+              "0.0000000000000000000000000001"
+              "79228162514264337593543950336" ]
+        | TextScalar.Bytes -> [ ""; "AA=="; "AAE="; "/+8="; "AAECAwQ="; "SGVsbG8gd29ybGQ=" ]
+        | TextScalar.TimeOfDay -> [ "00:00:00"; "23:59:59.9999999"; "12:30:00"; "09:05:01.5"; "00:00:00.0000001" ]
+        | TextScalar.Duration ->
+            [ "0s"
+              "1s"
+              "-1.5s"
+              "0.0000001s"
+              "90s"
+              "922337203685.4775807s"
+              "-922337203685.4775808s" ]
+
+    /// Items whose keys (`key` of each, a value at `t`) are distinct by canonical text, the first of
+    /// each kept (Phase 639). A key the encoder cannot write is kept, so the encoder names it.
+    let private distinctBy (idl: Idl) (t: IdlType) (key: 'a -> IdlValue) (items: 'a list) : 'a list =
+        items
+        |> List.distinctBy (fun item ->
+            match Encode.valueJson idl t (key item) with
+            | Ok j -> Canonical.write Rendering.CrossHost j
+            | Error m -> "!" + m)
+
     /// The kinds (or ops) a node (or op) may take AT THE DEPTH FLOOR: those whose required fields
     /// reach no further node ([[WireForm.requiredReachesNode]]), so the recursion stops there. Falls
     /// back to all of them when none qualifies — the sampler must still produce a node for a
@@ -222,6 +264,21 @@ module Sample =
         | WireForm.Map vt ->
             let n = if depth <= 0 then 0 else intBelow r 3
             VMap [ for i in 1..n -> (sprintf "k%d" i), sampleType idl r (depth - 1) vt ]
+        // Phase 639 (D251) — the wider data universe. A string-borne scalar is drawn from its pool of
+        // canonical spellings; a set and a keyed map are drawn in the order DRAWN, which the encoder
+        // puts in canonical order, a repeat dropped here (the encoder would refuse it).
+        | WireForm.Text scalar -> VStr(pick r (textPool scalar))
+        | WireForm.Tuple components -> VList [ for c in components -> sampleType idl r (depth - 1) c ]
+        | WireForm.Set element ->
+            let n = if depth <= 0 then 0 else intBelow r 4
+            VList(distinctBy idl element id [ for _ in 1..n -> sampleType idl r (depth - 1) element ])
+        | WireForm.KeyedMap(k, v) ->
+            let n = if depth <= 0 then 0 else intBelow r 4
+
+            [ for _ in 1..n -> sampleType idl r (depth - 1) k, sampleType idl r (depth - 1) v ]
+            |> distinctBy idl k fst
+            |> List.map (fun (kv, vv) -> VList [ kv; vv ])
+            |> VList
         | WireForm.Record rc -> VRecord(sampleFields idl r (depth - 1) rc.Fields)
         | WireForm.Undeclared(Undeclared.Record name) ->
             refuse ("record '" + name + "'") "the vocabulary does not declare it"

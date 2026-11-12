@@ -512,6 +512,10 @@
          re-minted through ContentAddress.ofValue, the relations the rule names, and the tie to the
          vocabulary's own canonical bytes. Appended (append-only). -->
     <Compile Include="IdentityRuleTests.fs" />
+    <!-- Phase 639 - the IDL's wider data universe: its idl.json reading, its canonical spellings and
+         order, its declaration rules, its differ classes, and its conformance vectors on every host.
+         Appended (append-only). -->
+    <Compile Include="IdlWiderUniverseTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

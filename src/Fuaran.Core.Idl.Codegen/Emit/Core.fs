@@ -505,3 +505,22 @@ module internal Core =
         | THosted h -> Ok h.FSharp
         | TRecord n -> Ok(applied n [])
         | TMap vt -> fsType vt |> Result.map (fun s -> "Map<string, " + s + ">")
+        // Phase 639 (D251) — the wider data universe. The exact text-borne types bind to their
+        // canonical text, as Core's own decimal cell does: no host type holds every decimal, and
+        // under Fable a time or a duration is a millisecond float.
+        | TInt64 -> Ok "int64"
+        | TDecimal
+        | TTimeOfDay
+        | TDuration -> Ok "string"
+        | TBytes -> Ok "byte[]"
+        | TTuple components ->
+            components
+            |> List.map fsType
+            |> sequenceR
+            |> Result.map (fun cs -> "(" + String.concat " * " cs + ")")
+        | TSet element -> fsType element |> Result.map (fun s -> "Set<" + s + ">")
+        | TKeyedMap(k, v) ->
+            match fsType k, fsType v with
+            | Ok ks, Ok vs -> Ok("Map<" + ks + ", " + vs + ">")
+            | Error e, _
+            | _, Error e -> Error e

@@ -89,6 +89,16 @@ module internal DiffSnapshot =
             match field "hostSurface" v |> Option.bind (str "fsharp") with
             | Some h -> sprintf "hosted(%s)" h
             | None -> "hosted"
+        // Phase 639 (D251) — the wider data universe's composites; its scalars label as their tag.
+        | "tuple" -> sprintf "tuple<%s>" (arr "of" v |> List.map typeLabel |> String.concat ", ")
+        | "set" ->
+            match field "of" v with
+            | Some inner -> sprintf "set<%s>" (typeLabel inner)
+            | None -> "set<?>"
+        | "keyedMap" ->
+            match field "keys" v, field "values" v with
+            | Some k, Some vt -> sprintf "map<%s, %s>" (typeLabel k) (typeLabel vt)
+            | _ -> "map<?, ?>"
         | other -> other
 
     /// The member-ordered, number-normalised form of a JSON value: its canonical text, read back

@@ -59,6 +59,39 @@ module internal TypeScriptDeclarations =
                     | TBool, VBool b -> Some(Ok(if b then "true" else "false"))
                     | TFloat, VFloat f -> Some(Ok(invariantFloat f))
                     | TFloat, VInt i -> Some(Ok(string i))
+                    // Phase 639 (D251) — the wider data universe, in this host's shapes: a `bigint`, a
+                    // `Uint8Array`, the canonical text, and arrays (a keyed map's entries as pairs).
+                    | TInt64, VStr s when ScalarText.isInt64 s -> Some(Ok(s + "n"))
+                    | TBytes, VStr s when ScalarText.isBytes s ->
+                        Some(
+                            Ok(
+                                "new Uint8Array(["
+                                + (System.Convert.FromBase64String s |> Array.map string |> String.concat ", ")
+                                + "])"
+                            )
+                        )
+                    | TDecimal, VStr s when ScalarText.isDecimal s -> Some(Ok(SourceLit.tsString s))
+                    | TTimeOfDay, VStr s when ScalarText.isTimeOfDay s -> Some(Ok(SourceLit.tsString s))
+                    | TDuration, VStr s when ScalarText.isDuration s -> Some(Ok(SourceLit.tsString s))
+                    | TTuple cs, VList xs when List.length cs = List.length xs ->
+                        List.map2 walk.Value cs xs
+                        |> sequenceR
+                        |> Result.map (fun items -> "[" + String.concat ", " items + "]")
+                        |> Some
+                    | TSet e, VList xs ->
+                        xs
+                        |> List.map (walk.Value e)
+                        |> sequenceR
+                        |> Result.map (fun items -> "[" + String.concat ", " items + "]")
+                        |> Some
+                    | TKeyedMap(k, vt), VList pairs ->
+                        pairs
+                        |> List.map (function
+                            | VList [ kv; vv ] -> walk.Value (TTuple [ k; vt ]) (VList [ kv; vv ])
+                            | _ -> Error(mismatchOf "a keyed map entry that is not a [key, value] pair"))
+                        |> sequenceR
+                        |> Result.map (fun items -> "[" + String.concat ", " items + "]")
+                        |> Some
                     | TMap vt, VMap entries ->
                         entries
                         |> List.map (fun (k, ev) -> walk.Value vt ev |> Result.map (fun e -> SourceLit.tsString k, e))
@@ -206,6 +239,21 @@ module internal TypeScriptDeclarations =
         | TOpaque -> Ok "unknown"
         | TKind
         | TOp -> Error(opVocabularySlot "the TypeScript declaration backend" t)
+        // Phase 639 (D251) — the wider data universe: a 64-bit integer is a `bigint` (a `number` holds
+        // an integer exactly only to 2^53), bytes a `Uint8Array`, the exact text-borne types their
+        // canonical text, a tuple a tuple, and a set and a keyed map arrays in canonical order.
+        | TInt64 -> Ok "bigint"
+        | TDecimal
+        | TTimeOfDay
+        | TDuration -> Ok "string"
+        | TBytes -> Ok "Uint8Array"
+        | TTuple cs -> cs |> List.map tsDeclType |> concatR ", " |> Result.map (fun s -> "[" + s + "]")
+        | TSet e -> tsDeclType e |> Result.map (fun s -> "Array<" + s + ">")
+        | TKeyedMap(k, v) ->
+            match tsDeclType k, tsDeclType v with
+            | Ok ks, Ok vs -> Ok("Array<[" + ks + ", " + vs + "]>")
+            | Error e, _
+            | _, Error e -> Error e
 
     /// Phase 252 — TypeScript TYPE DECLARATIONS for the module [[typescriptModule]] emits
     /// over the same kinds: one declaration per enum, record, union and kind spec the

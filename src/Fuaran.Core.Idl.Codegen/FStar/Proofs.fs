@@ -32,6 +32,8 @@ module internal FStarProofs =
         // strings — mentions `num` and `flt` only inside its own statement, so nothing at the
         // call site determines them and F* reports an unresolved implicit rather than guessing.
         | SEnum _
+        | SText _
+        | STuple _
         | SRecord _
         | SUnion _
         | SNode -> Some(sprintf "rt_%s #num #flt %s" (slotName s) v)
@@ -718,6 +720,34 @@ module internal FStarProofs =
                         tn
                         tn
                         tn
+                )
+
+            // Phase 639 (D251) — the wider data universe's leaves: a string-borne scalar's round trip
+            // holds by its refinement, and a tuple's by its components'.
+            for s in widerLeaves c.Order do
+                let tn = slotName s
+
+                let body =
+                    match s with
+                    | STuple cs ->
+                        let xs = cs |> List.mapi (fun i _ -> sprintf "x%d" i)
+
+                        let calls = List.map2 (fun c x -> memberLemma c x) cs xs |> List.choose id
+
+                        sprintf
+                            "match x with | (%s) -> %s"
+                            (String.concat ", " xs)
+                            (String.concat "; " (calls @ [ "()" ]))
+                    | _ -> "()"
+
+                line (
+                    sprintf
+                        "let rt_%s (#num #flt: eqtype) (x: %s) : Lemma (ensures dec_%s #num #flt (enc_%s #num #flt x) == Ok x) = %s"
+                        tn
+                        (slotType s)
+                        tn
+                        tn
+                        body
                 )
 
             line ""

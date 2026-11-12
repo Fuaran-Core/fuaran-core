@@ -11,6 +11,7 @@ attribute Fuaran.Core.Idl.HostedRefusal RequireQualifiedAccess
 attribute Fuaran.Core.Idl.KeyOrder RequireQualifiedAccess
 attribute Fuaran.Core.Idl.NodeEnvelopeShape RequireQualifiedAccess
 attribute Fuaran.Core.Idl.ProposalModule RequireQualifiedAccess
+attribute Fuaran.Core.Idl.ScalarText RequireQualifiedAccess
 attribute Fuaran.Core.Idl.SourceLit RequireQualifiedAccess
 attribute Fuaran.Core.Idl.TypeParams RequireQualifiedAccess
 attribute Fuaran.Core.Idl.UnionDiscrimination RequireQualifiedAccess
@@ -45,13 +46,18 @@ field Fuaran.Core.Idl.HostedFormat+Tags.Uuid : System.Int32 (literal)
 field Fuaran.Core.Idl.HostedRefusal+Tags.Sentence : System.Int32 (literal)
 field Fuaran.Core.Idl.HostedRefusal+Tags.Typed : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TBool : System.Int32 (literal)
+field Fuaran.Core.Idl.IdlType+Tags.TBytes : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TClosure : System.Int32 (literal)
+field Fuaran.Core.Idl.IdlType+Tags.TDecimal : System.Int32 (literal)
+field Fuaran.Core.Idl.IdlType+Tags.TDuration : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TEnum : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TFloat : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TFn : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.THosted : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TInt : System.Int32 (literal)
+field Fuaran.Core.Idl.IdlType+Tags.TInt64 : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TJson : System.Int32 (literal)
+field Fuaran.Core.Idl.IdlType+Tags.TKeyedMap : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TKind : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TList : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TMap : System.Int32 (literal)
@@ -59,7 +65,10 @@ field Fuaran.Core.Idl.IdlType+Tags.TNode : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TOp : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TOpaque : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TRecord : System.Int32 (literal)
+field Fuaran.Core.Idl.IdlType+Tags.TSet : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TStr : System.Int32 (literal)
+field Fuaran.Core.Idl.IdlType+Tags.TTimeOfDay : System.Int32 (literal)
+field Fuaran.Core.Idl.IdlType+Tags.TTuple : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TUnion : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlType+Tags.TVar : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlValue+Tags.VAbsent : System.Int32 (literal)
@@ -159,6 +168,12 @@ method Fuaran.Core.Idl.Sanitize.sanitizeAttributes(Microsoft.FSharp.Collections.
 method Fuaran.Core.Idl.Sanitize.sanitizeUrl(System.String) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Idl.Sanitize.sanitizeUrlOrBlank(System.String) : System.String
 method Fuaran.Core.Idl.Sanitize.scrubMarkdown(System.String) : System.String
+method Fuaran.Core.Idl.ScalarText.compare(System.String, System.String) : System.Int32
+method Fuaran.Core.Idl.ScalarText.isBytes(System.String) : System.Boolean
+method Fuaran.Core.Idl.ScalarText.isDecimal(System.String) : System.Boolean
+method Fuaran.Core.Idl.ScalarText.isDuration(System.String) : System.Boolean
+method Fuaran.Core.Idl.ScalarText.isInt64(System.String) : System.Boolean
+method Fuaran.Core.Idl.ScalarText.isTimeOfDay(System.String) : System.Boolean
 method Fuaran.Core.Idl.SourceLit.fsAttribute(System.String) : System.String
 method Fuaran.Core.Idl.SourceLit.fsDocLines(System.String) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.Idl.SourceLit.fsDocXml(System.String) : System.String
@@ -313,9 +328,12 @@ type Fuaran.Core.Idl.IdlType (union)
 type Fuaran.Core.Idl.IdlType+TEnum (type)
 type Fuaran.Core.Idl.IdlType+TFn (type)
 type Fuaran.Core.Idl.IdlType+THosted (type)
+type Fuaran.Core.Idl.IdlType+TKeyedMap (type)
 type Fuaran.Core.Idl.IdlType+TList (type)
 type Fuaran.Core.Idl.IdlType+TMap (type)
 type Fuaran.Core.Idl.IdlType+TRecord (type)
+type Fuaran.Core.Idl.IdlType+TSet (type)
+type Fuaran.Core.Idl.IdlType+TTuple (type)
 type Fuaran.Core.Idl.IdlType+TUnion (type)
 type Fuaran.Core.Idl.IdlType+TVar (type)
 type Fuaran.Core.Idl.IdlType+Tags (type)
@@ -368,6 +386,7 @@ type Fuaran.Core.Idl.ProposalOwner+Tags (type)
 type Fuaran.Core.Idl.Sample (module)
 type Fuaran.Core.Idl.Sample+SampleFault (record)
 type Fuaran.Core.Idl.Sanitize (module)
+type Fuaran.Core.Idl.ScalarText (module)
 type Fuaran.Core.Idl.SourceLit (module)
 type Fuaran.Core.Idl.TransparentUnion (module)
 type Fuaran.Core.Idl.TypeParams (module)
@@ -387,21 +406,29 @@ union-case Fuaran.Core.Idl.HostedRefusal.Typed #1()
 union-case Fuaran.Core.Idl.IdlType.NewTEnum #4(enumName: System.String)
 union-case Fuaran.Core.Idl.IdlType.NewTFn #10(Item: Fuaran.Core.Idl.ClosureSig)
 union-case Fuaran.Core.Idl.IdlType.NewTHosted #13(Item: Fuaran.Core.Idl.HostedCodec)
+union-case Fuaran.Core.Idl.IdlType.NewTKeyedMap #22(key: Fuaran.Core.Idl.IdlType, value: Fuaran.Core.Idl.IdlType)
 union-case Fuaran.Core.Idl.IdlType.NewTList #8(Item: Fuaran.Core.Idl.IdlType)
 union-case Fuaran.Core.Idl.IdlType.NewTMap #15(valueType: Fuaran.Core.Idl.IdlType)
 union-case Fuaran.Core.Idl.IdlType.NewTRecord #14(recordName: System.String)
+union-case Fuaran.Core.Idl.IdlType.NewTSet #23(element: Fuaran.Core.Idl.IdlType)
+union-case Fuaran.Core.Idl.IdlType.NewTTuple #21(components: Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlType>)
 union-case Fuaran.Core.Idl.IdlType.NewTUnion #5(unionName: System.String, args: Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlType>)
 union-case Fuaran.Core.Idl.IdlType.NewTVar #6(paramName: System.String)
 union-case Fuaran.Core.Idl.IdlType.TBool #2()
+union-case Fuaran.Core.Idl.IdlType.TBytes #20()
 union-case Fuaran.Core.Idl.IdlType.TClosure #9()
+union-case Fuaran.Core.Idl.IdlType.TDecimal #19()
+union-case Fuaran.Core.Idl.IdlType.TDuration #25()
 union-case Fuaran.Core.Idl.IdlType.TFloat #3()
 union-case Fuaran.Core.Idl.IdlType.TInt #1()
+union-case Fuaran.Core.Idl.IdlType.TInt64 #18()
 union-case Fuaran.Core.Idl.IdlType.TJson #12()
 union-case Fuaran.Core.Idl.IdlType.TKind #16()
 union-case Fuaran.Core.Idl.IdlType.TNode #7()
 union-case Fuaran.Core.Idl.IdlType.TOp #17()
 union-case Fuaran.Core.Idl.IdlType.TOpaque #11()
 union-case Fuaran.Core.Idl.IdlType.TStr #0()
+union-case Fuaran.Core.Idl.IdlType.TTimeOfDay #24()
 union-case Fuaran.Core.Idl.IdlValue.NewVBool #2(Item: System.Boolean)
 union-case Fuaran.Core.Idl.IdlValue.NewVEnum #4(Item: System.String)
 union-case Fuaran.Core.Idl.IdlValue.NewVFloat #3(Item: System.Double)

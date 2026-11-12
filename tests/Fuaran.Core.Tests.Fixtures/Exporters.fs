@@ -197,6 +197,14 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
         Write = None
         SharedIndexes = fun _ -> []
         Freshness = Bytes }
+      // Phase 639 (DECISIONS.md D251) — the IDL's wider data universe, beside the IDL's schema.
+      { Family = "idl"
+        Root = OwnedConformance.root
+        Files = fun dir -> [ WiderUniverseCorpus.path dir, WiderUniverseCorpus.render () ]
+        FilesAt = None
+        Write = None
+        SharedIndexes = fun _ -> []
+        Freshness = Bytes }
       // Phase 549 — the four structural families over the skeleton witness (`chain`, `dag`, `merge`,
       // `diff`), one row each: a vector file and its self-enumerated manifest, held byte for byte.
       for f in StructuralVectorExport.families do

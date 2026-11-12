@@ -87,6 +87,27 @@ module internal FSharpCodecOnly =
         | TVar v -> "strict" + v
         | TList inner -> "(sList " + walker inner + ")"
         | TMap inner -> "(sMap " + walker inner + ")"
+        // Phase 639 — a tuple's components and a keyed map's values may hold objects (a set's
+        // elements and a map's keys are orderable, never one). Printed inline, so the strict helpers
+        // every other module carries stay as they are.
+        | TTuple cs when cs |> List.exists (fun c -> walker c <> "sNone") ->
+            let n = List.length cs
+            let binders = List.init n (sprintf "__s%d") |> String.concat "; "
+
+            let walks =
+                cs
+                |> List.mapi (fun i c -> sprintf "%s __s%d |> dUnder (PathSegment.Index %d)" (walker c) i i)
+                |> String.concat " |> Result.bind (fun () -> "
+
+            sprintf
+                "(fun (__j: JVal) -> match __j with | JArr [ %s ] -> %s%s | _ -> Ok())"
+                binders
+                walks
+                (String.replicate (n - 1) ")")
+        | TKeyedMap(_, v) when walker v <> "sNone" ->
+            sprintf
+                "(sList (fun (__e: JVal) -> match __e with | JArr [ _; __v ] -> %s __v |> dUnder (PathSegment.Index 1) | _ -> Ok()))"
+                (walker v)
         | _ -> "sNone"
 
     /// The walks of an object's fields after its members check, bound in declared order.
@@ -360,12 +381,14 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                            |> String.concat "\n") ]
                       decl.Enums |> List.map enumEncoder
                       [ encodeHelpers idl ]
+                      (if Decl.reachesWider idl then [ widerEncodeHelpers ] else [])
                       (if List.isEmpty encs then [] else [ recGroup encs ])
                       (sup.AccessorSplice |> Option.toList)
                       [ decodeHelpers
                             idl.Wire.Discriminator
                             (decl.Hosted || declaresHostedCase decl)
                             (not sup.CaseRefines.IsEmpty) ]
+                      (if Decl.reachesWider idl then [ widerDecodeHelpers ] else [])
                       (if decl.HostedFormat then [ fsFormatHelper ] else [])
                       (if declaresCanonicalFormAnywhere idl then
                            [ canonicalFormHelpers ]

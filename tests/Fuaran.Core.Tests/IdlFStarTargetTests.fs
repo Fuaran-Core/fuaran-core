@@ -766,7 +766,7 @@ let idlFStarTargetTests =
               // it: over the reference vocabulary the rule keeps one kind of five.
               Expect.equal
                   (FStarTarget.proofKinds ReferenceIdl.refIdl)
-                  [ "Group" ]
+                  [ "Group"; "Tally" ]
                   "`proofKinds`, the UI-scale cost control, would keep one reference kind — which is why the committed model does not use it"
 
               // The same boundary, and only that boundary, is what the third-domain sample
@@ -1155,8 +1155,8 @@ let idlFStarTargetTests =
               // not need.
               Expect.equal
                   (lookupLemmas proofs |> List.length)
-                  11
-                  "the reference vocabulary reaches the split twice: the envelope's two conditional members (four lookups) plus `id` and `kind` sorted after `hidden` (two), and `Embed`'s two plus the always-emitted `moduleId` (five)"
+                  21
+                  "the reference vocabulary reaches the split three times: the envelope's two conditional members (four lookups) plus `id` and `kind` sorted after `hidden` (two), `Embed`'s two plus the always-emitted `moduleId` (five), and (Phase 639) `Tally`'s two (`at`, `digest`) plus the six always-emitted members sorted after `at` (ten)"
 
               Expect.equal
                   (lookupLemmas proofs |> List.length)
@@ -1549,7 +1549,9 @@ let idlFStarTargetTests =
 
               let heads =
                   lemmaHeads proofs
-                  |> List.filter (fun (_, name) -> not (name.StartsWith "rt_e_"))
+                  // Phase 639 — an enum's, a string-borne scalar's and a tuple's round trips are top-level: their codecs sit above the family.
+                  |> List.filter (fun (_, name) ->
+                      not (name.StartsWith "rt_e_" || name.StartsWith "rt_t_" || name.StartsWith "rt_tp"))
 
               for kw, name in heads do
                   Expect.isTrue (kw = "let rec" || kw = "and") (sprintf "%s is in the one mutual family" name)

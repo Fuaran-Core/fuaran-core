@@ -1,0 +1,34 @@
+// Phase 639 — the canonical order of a set's elements and a keyed map's keys: their canonical
+// texts compared by code point (the order of their UTF-8 bytes). UTF-16 code-unit order agrees
+// except between a surrogate and a unit at or above U+E000, which the remap puts right.
+let private canonicalCompare (a: string) (b: string) : int =
+    let point (c: char) : int =
+        let n = int c
+        if n >= 0xD800 && n <= 0xDFFF then n + 0x2000
+        elif n >= 0xE000 then n - 0x800
+        else n
+
+    let rec go (i: int) : int =
+        if i >= a.Length || i >= b.Length then compare a.Length b.Length
+        elif a[i] = b[i] then go (i + 1)
+        else compare (point a[i]) (point b[i])
+
+    go 0
+
+// Items in the canonical order of their keys, each written as its second member.
+let private encOrdered (items: (JVal * JVal) list) : JVal =
+    items
+    |> List.map (fun (k, item) -> Canonical.write Rendering.CrossHost k, item)
+    |> List.sortWith (fun (a, _) (b, _) -> canonicalCompare a b)
+    |> List.map snd
+    |> JArr
+
+let private encInt64 (i: int64) : JVal = JStr(string i)
+
+let private encBytes (b: byte[]) : JVal = JStr(System.Convert.ToBase64String b)
+
+let private encSet (enc: 'T -> JVal) (s: Set<'T>) : JVal =
+    encOrdered (Set.toList s |> List.map (fun x -> let j = enc x in j, j))
+
+let private encKeyedMap (encK: 'K -> JVal) (encV: 'V -> JVal) (m: Map<'K, 'V>) : JVal =
+    encOrdered (Map.toList m |> List.map (fun (k, v) -> let kj = encK k in kj, JArr [ kj; encV v ]))

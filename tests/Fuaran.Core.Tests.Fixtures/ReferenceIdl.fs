@@ -135,7 +135,23 @@ let refIdl: Idl =
                 // omitted at its identity default. `level` beside it carries the ENUM default, so
                 // the two omit-at-default classes are certified side by side on one kind.
                 omit "value" (TUnion("Slot", [ TFloat ])) (VUnion("Fixed", [ "value", VFloat 0.0 ])) ]
-          kind "Note" "content" [ req "body" (TUnion("Text", [])) ] ]
+          kind "Note" "content" [ req "body" (TUnion("Text", [])) ]
+          // Phase 639 (DECISIONS.md D251) — the wider data universe, every type of it on one kind: a
+          // 64-bit integer, a decimal, bytes, a time of day, a duration, tuples (one nested), a set,
+          // and keyed maps whose keys are a tuple and an enum. The certification legs (the three hosts,
+          // the schema, the F* model and its round-trip theorems) reach each through this kind.
+          kind
+              "Tally"
+              "data"
+              [ req "amount" TDecimal
+                opt "at" TTimeOfDay
+                req "count" TInt64
+                opt "digest" TBytes
+                req "grid" (TKeyedMap(TTuple [ TInt; TBool ], TStr))
+                req "levels" (TKeyedMap(TEnum "Level", TDuration))
+                req "pair" (TTuple [ TInt64; TTuple [ TStr; TFloat ] ])
+                req "span" TDuration
+                req "tags" (TSet TStr) ] ]
       Unions =
         [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
             Name = "Slot"

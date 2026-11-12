@@ -59,6 +59,10 @@ type internal SlotPrinter =
         /// A verbatim-JSON slot's codec.
         Json: string
         Hosted: HostedCodec -> HostedSlot
+        /// Phase 639 (DECISIONS.md D251) — the codec for a type of the wider data universe (`TInt64`,
+        /// `TDecimal`, `TBytes`, `TTimeOfDay`, `TDuration`, `TTuple`, `TSet`, `TKeyedMap`), given the
+        /// traversal that prints a component type's codec.
+        Wider: IdlType -> (IdlType -> Result<string, CodegenError>) -> Result<string, CodegenError>
     }
 
 /// What a backend prints for an encoder APPLIED to a value, beside its point-free forms.
@@ -115,6 +119,14 @@ module internal SlotTraversal =
             | HostedSlot.Refused e -> Error e
         | TRecord n -> Ok(p.Named n)
         | TMap vt -> slotFn p vt |> Result.map p.Map
+        | TInt64
+        | TDecimal
+        | TBytes
+        | TTimeOfDay
+        | TDuration
+        | TTuple _
+        | TSet _
+        | TKeyedMap _ -> p.Wider t (slotFn p)
 
     /// The encoder applied to the value `var` of type `t`.
     let encApplied (p: AppliedPrinter) (var: string) (t: IdlType) : Result<string, CodegenError> =
@@ -159,6 +171,7 @@ module internal SlotTraversal =
             Fn = fun s -> leaf (dec.Fn s)
             Opaque = leaf dec.Opaque
             Json = leaf dec.Json
+            Wider = fun t _ -> slotFn dec t |> Result.map leaf
             Hosted =
                 fun h ->
                     match slotFn dec (THosted h) with

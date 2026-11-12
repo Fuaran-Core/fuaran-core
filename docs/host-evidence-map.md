@@ -154,6 +154,7 @@ Certified against the reference implementation alone, so a host passing one offe
 | `skeletonDiff` | [`conformance/diff/skeleton-diff.json`](../conformance/diff/skeleton-diff.json) | 14 |
 | `encodingProfile` | [`conformance/encoding/encoding-profiles.json`](../conformance/encoding/encoding-profiles.json) | 47 |
 | `identity` | [`conformance/identity/identity.json`](../conformance/identity/identity.json) | 9 |
+| `idlWiderUniverse` | [`conformance/idl/wider-universe.json`](../conformance/idl/wider-universe.json) | 49 |
 | `canonicalFormLaws` | [`conformance/laws/canonical-form-laws.json`](../conformance/laws/canonical-form-laws.json) | 20 |
 | `premiseFloatDigits` | [`conformance/premises/float-digits.json`](../conformance/premises/float-digits.json) | 163 |
 | `premiseSha256` | [`conformance/premises/sha256.json`](../conformance/premises/sha256.json) | 17 |

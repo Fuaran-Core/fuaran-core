@@ -93,6 +93,15 @@ type internal WireForm =
     | Kind
     /// A tree op, tagged against the vocabulary's ops (`TOp`).
     | Op
+    /// A JSON string holding the one canonical spelling of a string-borne scalar of the wider data
+    /// universe (Phase 639: `TInt64`, `TDecimal`, `TBytes`, `TTimeOfDay`, `TDuration`).
+    | Text of TextScalar
+    /// A JSON array of exactly one value per component, in order (`TTuple`).
+    | Tuple of components: IdlType list
+    /// A JSON array of distinct elements in canonical order (`TSet`).
+    | Set of element: IdlType
+    /// A JSON array of `[key, value]` pairs, keys distinct and in canonical order (`TKeyedMap`).
+    | KeyedMap of key: IdlType * value: IdlType
     /// A type variable no instantiation bound (`TVar`): it has no wire form.
     | Unbound of name: string
     /// A reference to a name the vocabulary does not declare.
@@ -159,6 +168,31 @@ module internal WireForm =
         | TMap valueType -> WireForm.Map valueType
         | TKind -> WireForm.Kind
         | TOp -> WireForm.Op
+        | TInt64 -> WireForm.Text TextScalar.Int64
+        | TDecimal -> WireForm.Text TextScalar.Decimal
+        | TBytes -> WireForm.Text TextScalar.Bytes
+        | TTimeOfDay -> WireForm.Text TextScalar.TimeOfDay
+        | TDuration -> WireForm.Text TextScalar.Duration
+        | TTuple components -> WireForm.Tuple components
+        | TSet element -> WireForm.Set element
+        | TKeyedMap(key, value) -> WireForm.KeyedMap(key, value)
+
+    /// **Whether `t` is ORDERABLE (Phase 639, DECISIONS.md D251)** — admitted as a set's element or
+    /// a keyed map's key. An orderable type's canonical JSON text is a function of its value with an
+    /// inverse (each value has exactly one spelling, and the decoder reads it back), so comparing the
+    /// texts ([[ScalarText.compare]]) is a strict total order on its values. A string, a 32-bit or
+    /// 64-bit integer, a boolean, a declared enum, a decimal, bytes, a time of day, a duration, and a
+    /// tuple of orderable types. A float is not: `NaN` equals nothing, itself included. An object is
+    /// not: its text depends on a key order the vocabulary chooses.
+    let rec orderable (idl: Idl) (t: IdlType) : bool =
+        match ofType idl t with
+        | WireForm.Str
+        | WireForm.Int
+        | WireForm.Bool
+        | WireForm.Enum _
+        | WireForm.Text _ -> true
+        | WireForm.Tuple components -> components |> List.forall (orderable idl)
+        | _ -> false
 
     /// A union case's fields at an instantiation: each field's type with the binding's arguments
     /// substituted for the union's parameters.
@@ -174,11 +208,15 @@ module internal WireForm =
         | WireForm.Str
         | WireForm.Enum _
         | WireForm.Undeclared(Undeclared.Enum _)
-        | WireForm.Sentinel _ -> "string"
+        | WireForm.Sentinel _
+        | WireForm.Text _ -> "string"
         | WireForm.Int -> "int"
         | WireForm.Bool -> "bool"
         | WireForm.Float -> "number"
-        | WireForm.List _ -> "array"
+        | WireForm.List _
+        | WireForm.Tuple _
+        | WireForm.Set _
+        | WireForm.KeyedMap _ -> "array"
         | WireForm.Record _
         | WireForm.Map _
         | WireForm.Node
@@ -214,6 +252,10 @@ module internal WireForm =
         | WireForm.Undeclared(Undeclared.Enum _)
         | WireForm.Sentinel _
         | WireForm.List _
+        | WireForm.Text _
+        | WireForm.Tuple _
+        | WireForm.Set _
+        | WireForm.KeyedMap _
         | WireForm.Unbound _ -> false
 
     /// **The sampler's depth floor, read off the lowering** — whether sampling a value of `t` AT the
@@ -254,6 +296,9 @@ module internal WireForm =
             || candidates |> List.exists (fun c -> requiredReachesNode idl seen' c.Fields)
         | WireForm.Undeclared(Undeclared.Union(name, args)) when not (Set.contains ("u:" + name) seen) ->
             args |> List.exists (reachesNodeAtFloor idl (Set.add ("u:" + name) seen))
+        // Phase 639 — a tuple draws every component, so it reaches what any of them reaches; a set and
+        // a keyed map are drawn empty at the floor, as a list and a map are.
+        | WireForm.Tuple components -> components |> List.exists (reachesNodeAtFloor idl seen)
         | _ -> false
 
     /// Whether a REQUIRED one of `fields` reaches a node at the depth floor — the fields an owner

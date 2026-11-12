@@ -124,6 +124,14 @@ module internal FStarVectors =
             | _ -> unmodellable ("the union " + n) where
         | SNode, VNode(id, tag, fs) -> nodeTerm idl m q where id [] tag fs
         | SNode, VNodeEnv(id, env, tag, fs) -> nodeTerm idl m q where id env tag fs
+        // Phase 639 — a string-borne exact value is refused: its model type is a string refined by its
+        // spelling, which a normaliser fact over a literal does not discharge. A tuple of other leaves is
+        // the F* tuple of their terms.
+        | SText n, _ -> unmodellable (sprintf "a '%s' value, whose refinement the facts do not discharge" n) where
+        | STuple cs, VList xs when List.length cs = List.length xs ->
+            List.map2 (valueTerm idl m q where) cs xs
+            |> seqR
+            |> Result.map (fun ts -> "(" + String.concat ", " ts + ")")
         | _ -> unmodellable (sprintf "a value that does not fit its slot: %A" v) where
 
     /// The constructor applied to `lead` and then each member in declared KEY ORDER, from the
@@ -229,7 +237,11 @@ module internal FStarVectors =
         | SFloat, JInt i -> floatCarrier where (float i) |> Result.map (fun l -> "(JFloat " + l + ")")
         | SFloat, JFloat f -> floatCarrier where f |> Result.map (fun l -> "(JFloat " + l + ")")
         | SJson, _ -> jsonTerm where j
-        | (SStr | SSentinel _ | SEnum _), JStr t -> strLit where t |> Result.map (fun l -> "(JStr " + l + ")")
+        | (SStr | SSentinel _ | SEnum _ | SText _), JStr t -> strLit where t |> Result.map (fun l -> "(JStr " + l + ")")
+        | STuple cs, JArr xs when List.length cs = List.length xs ->
+            List.map2 (wireTerm idl m where) cs xs
+            |> seqR
+            |> Result.map (fun ts -> "(JArr [" + String.concat "; " ts + "])")
         | SInt, JInt i -> Ok("(JInt " + intLit i + ")")
         | SBool, JBool b -> Ok(if b then "(JBool true)" else "(JBool false)")
         | SList inner, JArr xs ->

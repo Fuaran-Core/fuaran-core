@@ -400,9 +400,17 @@ module internal Decl =
             | TJson
             | TClosure
             | TOpaque
-            | TVar _ -> true
+            | TVar _
+            | TInt64
+            | TDecimal
+            | TBytes
+            | TTimeOfDay
+            | TDuration -> true
             | TList inner
-            | TMap inner -> capable granted visiting inner
+            | TMap inner
+            | TSet inner -> capable granted visiting inner
+            | TTuple args -> args |> List.forall (capable granted visiting)
+            | TKeyedMap(k, v) -> capable granted visiting k && capable granted visiting v
             | TRecord n -> declCapable granted visiting ("R:" + n)
             | TNode -> declCapable granted visiting "Node"
             | TUnion(n, args) ->
@@ -531,6 +539,14 @@ module internal Decl =
         | TList inner -> "list_" + wireKey inner
         | TMap vt -> "map_" + wireKey vt
         | TUnion(n, args) -> "union_" + n + "(" + (args |> List.map wireKey |> String.concat ",") + ")"
+        | TInt64 -> "int64"
+        | TDecimal -> "decimal"
+        | TBytes -> "bytes"
+        | TTimeOfDay -> "timeOfDay"
+        | TDuration -> "duration"
+        | TTuple args -> "tuple(" + (args |> List.map wireKey |> String.concat ",") + ")"
+        | TSet inner -> "set_" + wireKey inner
+        | TKeyedMap(k, v) -> "keyedMap(" + wireKey k + "," + wireKey v + ")"
 
     let private wireReach (idl: Idl) (kinds: IdlKind list) : WireReach =
         let order = ResizeArray<IdlType>()
@@ -545,9 +561,28 @@ module internal Decl =
                 if not (enums.Contains n) then
                     enums.Add n
             | TList inner
-            | TMap inner ->
+            | TMap inner
+            | TSet inner ->
                 if seen.Add(wireKey t) then
                     visit inner
+                    order.Add t
+            // Phase 639 — a tuple and a keyed map after what they hold; a text-borne scalar once, so
+            // the F* model declares its canonical-spelling predicate where a member first reaches it.
+            | TTuple args ->
+                if seen.Add(wireKey t) then
+                    args |> List.iter visit
+                    order.Add t
+            | TKeyedMap(k, v) ->
+                if seen.Add(wireKey t) then
+                    visit k
+                    visit v
+                    order.Add t
+            | TInt64
+            | TDecimal
+            | TBytes
+            | TTimeOfDay
+            | TDuration ->
+                if seen.Add(wireKey t) then
                     order.Add t
             | TNode ->
                 if seen.Add "node" then
@@ -606,6 +641,28 @@ module internal Decl =
           for r in idl.Records do
               yield "record '" + r.Name + "'", r.Fields
           yield "the node envelope", idl.NodeFields ]
+
+    /// Whether any declared type in the vocabulary is of the wider data universe.
+    let rec private widerType (t: IdlType) : bool =
+        match t with
+        | TInt64
+        | TDecimal
+        | TBytes
+        | TTimeOfDay
+        | TDuration
+        | TTuple _
+        | TSet _
+        | TKeyedMap _ -> true
+        | TList i
+        | TMap i -> widerType i
+        | TUnion(_, args) -> args |> List.exists widerType
+        | THosted { Wire = Some w } -> widerType w
+        | _ -> false
+
+    /// Whether the vocabulary declares a type of the wider data universe anywhere.
+    let reachesWider (idl: Idl) : bool =
+        fieldOwners idl
+        |> List.exists (fun (_, fields) -> fields |> List.exists (fun f -> widerType f.Type))
 
     /// Each alias or presence condition the vocabulary declares, as a phrase naming it — `[]` for a
     /// vocabulary that declares none.
@@ -900,6 +957,14 @@ module internal Decl =
         | TMap vt -> "map_" + instName vt
         | TUnion(n, []) -> n
         | TUnion(n, args) -> n + "_" + (args |> List.map instName |> String.concat "_")
+        | TInt64 -> "int64"
+        | TDecimal -> "decimal"
+        | TBytes -> "bytes"
+        | TTimeOfDay -> "timeOfDay"
+        | TDuration -> "duration"
+        | TTuple args -> "tuple_" + (args |> List.map instName |> String.concat "_")
+        | TSet inner -> "set_" + instName inner
+        | TKeyedMap(k, v) -> "keyedMap_" + instName k + "_" + instName v
 
     /// Every instantiation of a generic union the vocabulary names on the wire, keyed and ordered
     /// by instance name. A worklist over the wire fields of every declaration (an instantiation's
@@ -923,6 +988,11 @@ module internal Decl =
             match t with
             | TList inner -> discover inner
             | TMap vt -> discover vt
+            | TSet inner -> discover inner
+            | TTuple args -> args |> List.iter discover
+            | TKeyedMap(k, v) ->
+                discover k
+                discover v
             | TUnion(n, args) when not (List.isEmpty args) ->
                 args |> List.iter discover
                 let key = instName t

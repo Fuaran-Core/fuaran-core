@@ -530,6 +530,25 @@ module Artifact =
                 | other -> Error [ DecodeError.make DecodeCode.WrongKind "\"json\" or a type" (JVal.kindName other) ]
           Schema = JObj [ "oneOf", JArr [ JObj [ "const", JStr "json" ]; idlType.Schema ] ] }
 
+    /// **A date and time without an offset is refused, with its reason (Phase 639, DECISIONS.md D251)**
+    /// — not merely as an unknown `$type`, because it is the type a vocabulary most often reaches for
+    /// and the one the wider data universe deliberately leaves out: a reader cannot know which instant
+    /// it means. The refusal is `NotAdmitted` at the `$type`, naming the two declarations that say
+    /// what is meant.
+    let private withoutLocalDateTime (c: Codec<IdlType>) : Codec<IdlType> =
+        { c with
+            ReadAll =
+                fun j ->
+                    match j with
+                    | JObj fs when fs |> List.exists (fun (k, v) -> k = "$type" && v = JStr "localDateTime") ->
+                        Error
+                            [ DecodeError.make
+                                  DecodeCode.NotAdmitted
+                                  "an instant ('hosted' with format 'date-time', whose offset is required) or a record of a 'date' and a 'timeOfDay'"
+                                  "a date and time without an offset, which no reader can place on the time line"
+                              |> DecodeError.under (PathSegment.Key "$type") ]
+                    | _ -> c.ReadAll j }
+
     /// The structural type of a field. `$type` carries the [[IdlType]] case; the `wire` member,
     /// where present, states the FIXED wire form a third party will see for that case, so a
     /// sentinel is never mistaken for authored content — or, on a hosted slot, its DECLARED wire
@@ -639,8 +658,40 @@ module Artifact =
                       (Codec.record (fun (surface: HostedCodec) w fmt -> { surface with Wire = w; Format = fmt })
                        |> Codec.field "hostSurface" id hostedSurface
                        |> lenient "wire" None _.Wire (hostedWire self)
-                       |> Codec.optField "format" _.Format hostedFormat) ]
-            |> declared "type")
+                       |> Codec.optField "format" _.Format hostedFormat)
+                  // Phase 639 (D251) — the wider data universe.
+                  bare "int64" TInt64
+                  bare "decimal" TDecimal
+                  bare "bytes" TBytes
+                  bare "timeOfDay" TTimeOfDay
+                  bare "duration" TDuration
+                  single
+                      "tuple"
+                      "of"
+                      (function
+                      | TTuple cs -> Some cs
+                      | _ -> None)
+                      TTuple
+                      (Codec.list self)
+                  single
+                      "set"
+                      "of"
+                      (function
+                      | TSet t -> Some t
+                      | _ -> None)
+                      TSet
+                      self
+                  Codec.case
+                      "keyedMap"
+                      (function
+                      | TKeyedMap(k, v) -> Some(k, v)
+                      | _ -> None)
+                      TKeyedMap
+                      (Codec.record (fun k v -> k, v)
+                       |> Codec.field "keys" fst self
+                       |> Codec.field "values" snd self) ]
+            |> declared "type"
+            |> withoutLocalDateTime)
 
     /// An authored float — a field default's, or a nested part of one. Phase 303: a NON-FINITE
     /// float is written as WIRE_FORMAT §7's quoted token (`Rendering.CrossHost` spells a

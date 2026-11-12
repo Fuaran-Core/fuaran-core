@@ -55,6 +55,16 @@ module internal FStarModel =
         | SMap of Slot
         /// `TNode` — the vocabulary's own recursion.
         | SNode
+        /// Phase 639 (D251) — a string-borne exact scalar (`TInt64`, `TDecimal`, `TBytes`,
+        /// `TTimeOfDay`, `TDuration`), by its `idl.json` name: a `JStr` whose model type is the string
+        /// REFINED by the canonical-spelling predicate the model declares, so the decoder refuses
+        /// what every host refuses and the round trip holds by the refinement.
+        | SText of scalar: string
+        /// Phase 639 — a tuple of LEAF slots (a scalar, an enum, a string-borne scalar or a tuple of
+        /// those): a `JArr` of one item per component, modelled as an F* tuple. A component that is a
+        /// declared type would put the tuple inside the recursive family, which the model does not do;
+        /// it is refused by name.
+        | STuple of Slot list
 
     /// A member of the model: one declared field with its resolved slot. A host-only field
     /// has no wire projection and never becomes a member — the model is of the WIRE.
@@ -90,6 +100,19 @@ module internal FStarModel =
     /// model's string carries no format predicate and a model that ignored it would accept what
     /// every host refuses. One that declares no wire form is carried verbatim, the known
     /// disagreement D109.5 names.
+    /// Phase 639 — whether a slot may be a tuple's component: a scalar, an enum, a string-borne
+    /// scalar or a tuple of those, whose codec sits outside the recursive family.
+    let rec tupleLeaf (s: Slot) : bool =
+        match s with
+        | SStr
+        | SInt
+        | SBool
+        | SFloat
+        | SEnum _
+        | SText _ -> true
+        | STuple cs -> List.forall tupleLeaf cs
+        | _ -> false
+
     let rec private slotOf (where: string) (t: IdlType) : Result<Slot, CodegenError> =
         match t with
         | TStr -> Ok SStr
@@ -132,6 +155,31 @@ module internal FStarModel =
         | TOpaque -> Ok(SSentinel "<opaque>")
         | TKind -> unmodellable "a bare kind slot" where
         | TOp -> unmodellable "a tree-op slot" where
+        // Phase 639 (D251) — the wider data universe. A set is its wire array and a keyed map its
+        // array of `[key, value]` tuples: the model carries the items in the encoder's order, and the
+        // canonical order and the distinctness over canonical bytes are the hosts' rule, which a model
+        // whose numbers are opaque cannot compute (the boundary a `TMap`'s key order already states).
+        | TInt64 -> Ok(SText "int64")
+        | TDecimal -> Ok(SText "decimal")
+        | TBytes -> Ok(SText "bytes")
+        | TTimeOfDay -> Ok(SText "timeOfDay")
+        | TDuration -> Ok(SText "duration")
+        | TTuple cs ->
+            let rec go acc rest =
+                match rest with
+                | [] -> Ok(STuple(List.rev acc))
+                | c :: tail ->
+                    match slotOf where c with
+                    | Error e -> Error e
+                    | Ok s when tupleLeaf s -> go (s :: acc) tail
+                    | Ok _ ->
+                        unmodellable
+                            (sprintf "a tuple component that is not a scalar, an enum or a tuple of those (%A)" c)
+                            where
+
+            go [] cs
+        | TSet e -> slotOf where e |> Result.map SList
+        | TKeyedMap(k, v) -> slotOf where (TTuple [ k; v ]) |> Result.map SList
 
     // -----------------------------------------------------------------------
     // 3. Naming. Every emitted identifier is a pure function of the IDL, so the
@@ -173,6 +221,9 @@ module internal FStarModel =
         | SList inner -> "l_" + slotName inner
         | SMap inner -> "m_" + slotName inner
         | SNode -> "node"
+        | SText n -> "t_" + snake n
+        // The arity leads, so a nested tuple's name reads one way (a prefix code over the names).
+        | STuple cs -> sprintf "tp%d_" cs.Length + (cs |> List.map slotName |> String.concat "_")
 
     /// The F* TYPE EXPRESSION of a slot. Every declared type is parameterised by the two
     /// opaque numeric carriers, because `jval` is — see `WireDecode`'s header on opacity.
@@ -190,6 +241,8 @@ module internal FStarModel =
         | SNode -> slotName s + " num flt"
         | SList inner -> "list (" + slotType inner + ")"
         | SMap inner -> "list (string & " + slotType inner + ")"
+        | SText _ -> slotName s
+        | STuple cs -> "(" + (cs |> List.map slotType |> String.concat " & ") + ")"
 
     /// An F* string literal — [[SourceLit.fstarString]] (Phase 292), the F* policy of the one
     /// escaper every emitter splices IDL-authored text through.
@@ -298,6 +351,31 @@ module internal FStarModel =
 
     /// Whether a slot is one the emitted module DECLARES a type for (and therefore one the
     /// mutual recursion has to carry), as opposed to a structural spelling over others.
+    /// Phase 639 — the string-borne scalars and the tuples `order` reaches at any depth, components
+    /// before the tuples holding them and each once: the codecs the model declares above its
+    /// recursive family, beside the enums.
+    let widerLeaves (order: Slot list) : Slot list =
+        let out = ResizeArray<Slot>()
+        let seen = System.Collections.Generic.HashSet<string>()
+
+        let rec visit (s: Slot) =
+            match s with
+            | SText _ ->
+                if seen.Add(slotName s) then
+                    out.Add s
+            | STuple cs ->
+                List.iter visit cs
+
+                if seen.Add(slotName s) then
+                    out.Add s
+            | SList inner
+            | SMap inner -> visit inner
+            | SUnion(_, args) -> List.iter visit args
+            | _ -> ()
+
+        List.iter visit order
+        List.ofSeq out
+
     let declares (s: Slot) =
         match s with
         | SRecord _
@@ -632,7 +710,10 @@ module internal FStarModel =
                         | Error e -> Error e
                         | Ok s -> slots (s :: acc) tail
 
-                slots [] (reach.FromEnvelope @ reach.FromKinds))
+                slots [] (reach.FromEnvelope @ reach.FromKinds)
+                // Phase 639 — a set is modelled as a list, so a set and a list of one element type
+                // are one slot, declared once.
+                |> Result.map (List.distinctBy slotName))
 
         match translated with
         | Error e -> Error e

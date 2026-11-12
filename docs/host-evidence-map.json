@@ -439,6 +439,7 @@
     {"family":"skeletonDiff","file":"conformance/diff/skeleton-diff.json","cases":14},
     {"family":"encodingProfile","file":"conformance/encoding/encoding-profiles.json","cases":47},
     {"family":"identity","file":"conformance/identity/identity.json","cases":9},
+    {"family":"idlWiderUniverse","file":"conformance/idl/wider-universe.json","cases":49},
     {"family":"canonicalFormLaws","file":"conformance/laws/canonical-form-laws.json","cases":20},
     {"family":"premiseFloatDigits","file":"conformance/premises/float-digits.json","cases":163},
     {"family":"premiseSha256","file":"conformance/premises/sha256.json","cases":17}

@@ -188,7 +188,30 @@ module internal TypeScriptCodec =
                         match hostedWireRefusal backend h with
                         | Some e -> HostedSlot.Refused e
                         | None -> HostedSlot.Through(wire, id)
-                    | None -> HostedSlot.Verbatim "encJson" }
+                    | None -> HostedSlot.Verbatim "encJson"
+              // Phase 639 (D251) — the wider data universe (`ts-wider-helpers.js`).
+              Wider =
+                fun t slot ->
+                    match t with
+                    | TInt64 -> Ok "encInt64"
+                    | TBytes -> Ok "encBytes"
+                    | TTuple cs ->
+                        cs
+                        |> List.map slot
+                        |> sequenceR
+                        |> Result.map (fun es ->
+                            "((t) => '[' + "
+                            + (es
+                               |> List.mapi (fun i e -> sprintf "%s(t[%d])" e i)
+                               |> String.concat " + ',' + ")
+                            + " + ']')")
+                    | TSet e -> slot e |> Result.map (fun ee -> "encSet(" + ee + ")")
+                    | TKeyedMap(k, v) ->
+                        match slot k, slot v with
+                        | Ok ek, Ok ev -> Ok("encKeyedMap(" + ek + ", " + ev + ")")
+                        | Error x, _
+                        | _, Error x -> Error x
+                    | _ -> Ok "encStr" }
           Apply = fun e var -> e + "(" + var + ")"
           ListApplied = fun e var -> "'[' + " + var + ".map(" + e + ").join(',') + ']'"
           NodeApplied = fun var -> "encodeNode(" + var + ")"
@@ -518,7 +541,38 @@ module internal TypeScriptCodec =
                                     + "(x)))"
                                 | None -> d
                         )
-                | None -> HostedSlot.Verbatim "((x) => x)" }
+                | None -> HostedSlot.Verbatim "((x) => x)"
+          // Phase 639 (D251) — the wider data universe (`ts-wider-helpers.js`). A set and a keyed map
+          // are handed their element's (key's) encoder too: the canonical order is checked over each
+          // decoded item's canonical encoding, as the interpreter checks it.
+          Wider =
+            fun t slot ->
+                let enc (x: IdlType) =
+                    SlotTraversal.slotFn tsEncPrinter.Slot x
+
+                match t with
+                | TInt64 -> Ok "dInt64"
+                | TDecimal -> Ok "dText('decimal', isDecimalText)"
+                | TBytes -> Ok "dBytes"
+                | TTimeOfDay -> Ok "dText('timeOfDay', isTimeOfDayText)"
+                | TDuration -> Ok "dText('duration', isDurationText)"
+                | TTuple cs ->
+                    cs
+                    |> List.map slot
+                    |> sequenceR
+                    |> Result.map (fun ds -> "dTuple([" + String.concat ", " ds + "])")
+                | TSet e ->
+                    match enc e, slot e with
+                    | Ok ee, Ok de -> Ok("dSet(" + ee + ", " + de + ")")
+                    | Error x, _
+                    | _, Error x -> Error x
+                | TKeyedMap(k, v) ->
+                    match enc k, slot k, slot v with
+                    | Ok ek, Ok dk, Ok dv -> Ok("dKeyedMap(" + ek + ", " + dk + ", " + dv + ")")
+                    | Error x, _, _
+                    | _, Error x, _
+                    | _, _, Error x -> Error x
+                | other -> Error(opVocabularySlot backend other) }
 
     /// The TS literal for an omit-when-default value, in its WIRE representation —
     /// refilled on decode so the encoder's omit test fires again and the bytes match.
@@ -1063,6 +1117,10 @@ const plain = (pairs) =>
           [ kindDispatch ]
           Ok(tsDecodePrelude disc)
           :: (if decl.HostedFormat then [ Ok tsFormatHelper ] else [])
+          @ (if Decl.reachesWider idl then
+                 [ Ok(Template.text "ts-wider-helpers.js") ]
+             else
+                 [])
           enums |> List.map (tsEnumDecoder >> Ok)
           records |> List.map (tsRecordDecoder idl disc)
           unions |> List.map (tsUnionDecoder decl disc)

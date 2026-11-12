@@ -32,8 +32,107 @@ module internal JsonSchema =
     /// from the two disagreeing.
     let defName (t: IdlType) : string = Decl.instName t
 
+    // -----------------------------------------------------------------------
+    // Phase 639 (DECISIONS.md D251) — the string-borne scalars' canonical spellings as ECMA-262
+    // patterns, each EXACT: a string matches exactly when every reader admits it, range included.
+    // What JSON Schema cannot state is a set's and a keyed map's canonical ORDER (it has no
+    // vocabulary for an order over items); `uniqueItems` states a set's distinctness, and the order
+    // is each reader's to check.
+    // -----------------------------------------------------------------------
+
+    let private digitClass (lo: int) (hi: int) : string =
+        if lo = hi then string lo else sprintf "[%d-%d]" lo hi
+
+    let private digitAt (s: string) (i: int) : int = int s[i] - int '0'
+
+    /// A pattern alternation matching the canonical naturals (no leading zero) at most `bound`,
+    /// zero included when `zero`.
+    let private naturalAtMost (bound: string) (zero: bool) : string =
+        let n = bound.Length
+
+        [ if zero then
+              "0"
+          if n >= 2 then
+              sprintf "[1-9][0-9]{0,%d}" (n - 2)
+          for i in 0 .. n - 1 do
+              let lo = if i = 0 then 1 else 0
+              let hi = digitAt bound i - 1
+
+              if hi >= lo then
+                  bound.Substring(0, i)
+                  + digitClass lo hi
+                  + (if n - i - 1 > 0 then
+                         sprintf "[0-9]{%d}" (n - i - 1)
+                     else
+                         "")
+          bound ]
+        |> String.concat "|"
+
+    /// A pattern alternation matching the canonical fractions (one to `bound.Length` digits, the last
+    /// not zero) whose digits padded with zeros to `bound.Length` are at most `bound`.
+    let private fractionAtMost (bound: string) : string =
+        [ for n in 1 .. bound.Length do
+              let p = bound.Substring(0, n)
+
+              for i in 0 .. n - 1 do
+                  let rest = n - i - 1
+                  let lo = if rest = 0 then 1 else 0
+                  let hi = digitAt p i - 1
+
+                  if hi >= lo then
+                      p.Substring(0, i)
+                      + digitClass lo hi
+                      + (if rest = 0 then ""
+                         elif rest = 1 then "[1-9]"
+                         else sprintf "[0-9]{%d}[1-9]" (rest - 1))
+
+              if p[n - 1] <> '0' then
+                  p ]
+        |> String.concat "|"
+
+    /// The exact pattern of each string-borne scalar's canonical spelling.
+    let internal textPattern (t: IdlType) : string option =
+        let fraction7 = @"\.[0-9]{0,6}[1-9]"
+
+        let duration (fractionBound: string) =
+            sprintf
+                "(?:(?:%s)(?:%s)?|922337203685(?:\\.(?:%s))?)s"
+                (naturalAtMost "922337203684" true)
+                fraction7
+                (fractionAtMost fractionBound)
+
+        match t with
+        | TInt64 ->
+            Some(
+                sprintf
+                    "^(?:%s|-(?:%s))$"
+                    (naturalAtMost "9223372036854775807" true)
+                    (naturalAtMost "9223372036854775808" false)
+            )
+        | TDecimal -> Some @"^(?!-0$)-?(?:0|[1-9][0-9]*)(?:\.[0-9]*[1-9])?$"
+        | TBytes -> Some @"^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/][AQgw]==|[A-Za-z0-9+/]{2}[AEIMQUYcgkosw048]=)?$"
+        | TTimeOfDay -> Some(@"^(?:[01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:" + fraction7 + ")?$")
+        | TDuration -> Some(sprintf "^(?!-0s$)(?:%s|-%s)$" (duration "4775807") (duration "4775808"))
+        | _ -> None
+
     let rec schemaOf (t: IdlType) : JVal =
         match t with
+        | TInt64
+        | TDecimal
+        | TBytes
+        | TTimeOfDay
+        | TDuration ->
+            JObj
+                [ "type", JStr "string"
+                  "pattern", JStr(textPattern t |> Option.defaultValue "") ]
+        | TTuple components ->
+            JObj
+                [ "type", JStr "array"
+                  "prefixItems", JArr(components |> List.map schemaOf)
+                  "minItems", JInt components.Length
+                  "maxItems", JInt components.Length ]
+        | TSet element -> JObj [ "type", JStr "array"; "items", schemaOf element; "uniqueItems", JBool true ]
+        | TKeyedMap(k, v) -> JObj [ "type", JStr "array"; "items", schemaOf (TTuple [ k; v ]) ]
         | TStr -> JObj [ "type", JStr "string" ]
         | TInt -> JObj [ "type", JStr "integer" ]
         | TBool -> JObj [ "type", JStr "boolean" ]

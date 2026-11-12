@@ -1,0 +1,140 @@
+// Phase 639 — the canonical spellings, read strictly: a reader admits the one spelling of a value.
+let private isDigitText (s: string) : bool = s |> Seq.forall (fun c -> c >= '0' && c <= '9')
+
+let private isNaturalText (s: string) : bool =
+    s.Length > 0 && isDigitText s && (s = "0" || s[0] <> '0')
+
+let private isFractionText (most: int) (s: string) : bool =
+    s.Length >= 1 && s.Length <= most && isDigitText s && s[s.Length - 1] <> '0'
+
+let private atMostText (bound: string) (digits: string) : bool =
+    digits.Length < bound.Length
+    || (digits.Length = bound.Length && System.String.CompareOrdinal(digits, bound) <= 0)
+
+let private isInt64Text (s: string) : bool =
+    let negative = s.StartsWith('-')
+    let body = if negative then s.Substring 1 else s
+
+    isNaturalText body
+    && not (negative && body = "0")
+    && atMostText (if negative then "9223372036854775808" else "9223372036854775807") body
+
+let private isDecimalText (s: string) : bool =
+    let negative = s.StartsWith('-')
+    let body = if negative then s.Substring 1 else s
+    let dot = body.IndexOf '.'
+
+    if dot < 0 then
+        isNaturalText body && not (negative && body = "0")
+    else
+        isNaturalText (body.Substring(0, dot))
+        && isFractionText System.Int32.MaxValue (body.Substring(dot + 1))
+
+let private isBytesText (s: string) : bool =
+    let alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    let pad = if s.EndsWith("==", System.StringComparison.Ordinal) then 2 elif s.EndsWith('=') then 1 else 0
+    let data = s.Length - pad
+
+    s.Length % 4 = 0
+    && Seq.forall (fun (c: char) -> alphabet.IndexOf c >= 0) (s.Substring(0, data))
+    && (pad = 0
+        || (let last = alphabet.IndexOf s[data - 1]
+            (pad = 2 && last % 16 = 0) || (pad = 1 && last % 4 = 0)))
+
+let private isTimeOfDayText (s: string) : bool =
+    let two (at: int) (most: int) =
+        s[at] >= '0' && s[at] <= '9' && s[at + 1] >= '0' && s[at + 1] <= '9'
+        && (int s[at] - int '0') * 10 + (int s[at + 1] - int '0') <= most
+
+    s.Length >= 8
+    && s[2] = ':'
+    && s[5] = ':'
+    && two 0 23
+    && two 3 59
+    && two 6 59
+    && (s.Length = 8 || (s[8] = '.' && isFractionText 7 (s.Substring 9)))
+
+let private isDurationText (s: string) : bool =
+    s.EndsWith('s')
+    && (let negative = s.StartsWith('-')
+        let body = s.Substring((if negative then 1 else 0), s.Length - 1 - (if negative then 1 else 0))
+        let dot = body.IndexOf '.'
+        let whole = if dot < 0 then body else body.Substring(0, dot)
+        let fraction = if dot < 0 then "" else body.Substring(dot + 1)
+
+        isNaturalText whole
+        && (dot < 0 || isFractionText 7 fraction)
+        && not (negative && whole = "0" && dot < 0)
+        && atMostText
+            (if negative then "9223372036854775808" else "9223372036854775807")
+            ((whole + fraction.PadRight(7, '0')).TrimStart '0'))
+
+// A string-borne scalar in its canonical spelling; another string is `OutOfRange`, another kind `WrongKind`.
+let private dText (name: string) (admits: string -> bool) (j: JVal) : Result<string, DecodeError> =
+    match j with
+    | JStr s when admits s -> Ok s
+    | JStr s -> dFail DecodeCode.OutOfRange ("a canonical '" + name + "' string") ("'" + s + "'")
+    | other -> Error(Decoder.wrongKind "string" other)
+
+let private dInt64 (j: JVal) : Result<int64, DecodeError> =
+    dText "int64" isInt64Text j
+    |> Result.map (fun s -> System.Int64.Parse(s, System.Globalization.CultureInfo.InvariantCulture))
+
+let private dBytes (j: JVal) : Result<byte[], DecodeError> =
+    dText "bytes" isBytesText j |> Result.map System.Convert.FromBase64String
+
+// Decoded items, each with its path and its canonical encoding, strictly ascending in canonical
+// order: an equal text is the duplicate refusal and a lower one the order refusal, at the later item.
+let private dOrdered (items: (PathSegment list * JVal) list) : Result<unit, DecodeError> =
+    let rec go (rest: (PathSegment list * string) list) =
+        match rest with
+        | (_, a) :: ((path, b) :: _ as tail) ->
+            let c = canonicalCompare a b
+
+            if c = 0 then
+                List.foldBack dUnder path (dFail DecodeCode.OutOfRange "a distinct element" ("a repeat of " + b))
+            elif c > 0 then
+                List.foldBack dUnder path (dFail DecodeCode.OutOfRange ("an element ordered after " + a) b)
+            else
+                go tail
+        | _ -> Ok()
+
+    go (items |> List.map (fun (p, j) -> p, Canonical.write Rendering.CrossHost j))
+
+let private dSet (enc: 'T -> JVal) (dec: JVal -> Result<'T, DecodeError>) (j: JVal) : Result<Set<'T>, DecodeError> =
+    dList dec j
+    |> Result.bind (fun xs ->
+        dOrdered (xs |> List.mapi (fun i x -> [ PathSegment.Index i ], enc x))
+        |> Result.map (fun () -> Set.ofList xs))
+
+let private dKeyedMap
+    (encK: 'K -> JVal)
+    (decK: JVal -> Result<'K, DecodeError>)
+    (decV: JVal -> Result<'V, DecodeError>)
+    (j: JVal)
+    : Result<Map<'K, 'V>, DecodeError> =
+    match j with
+    | JArr xs ->
+        let rec go (i: int) (acc: ('K * 'V) list) (rest: JVal list) =
+            match rest with
+            | [] -> Ok(List.rev acc)
+            | JArr [ kj; vj ] :: tail ->
+                match decK kj |> dUnder (PathSegment.Index 0) |> dUnder (PathSegment.Index i) with
+                | Error e -> Error e
+                | Ok k ->
+                    match decV vj |> dUnder (PathSegment.Index 1) |> dUnder (PathSegment.Index i) with
+                    | Error e -> Error e
+                    | Ok v -> go (i + 1) ((k, v) :: acc) tail
+            | JArr entry :: _ ->
+                dFail
+                    DecodeCode.OutOfRange
+                    "a [key, value] array of 2 items"
+                    (sprintf "an array of %d items" (List.length entry))
+                |> dUnder (PathSegment.Index i)
+            | other :: _ -> Error(Decoder.wrongKind "array" other) |> dUnder (PathSegment.Index i)
+
+        go 0 [] xs
+        |> Result.bind (fun entries ->
+            dOrdered (entries |> List.mapi (fun i (k, _) -> [ PathSegment.Index i; PathSegment.Index 0 ], encK k))
+            |> Result.map (fun () -> Map.ofList entries))
+    | other -> Error(Decoder.wrongKind "array" other)

@@ -80,7 +80,9 @@ module internal Scaffold =
           // literal, FS0001 at a float slot), and its string literal is the [[SourceLit.fsString]]
           // every other F# literal is.
           Leaf =
-            fun _ t v ->
+            fun walk t v ->
+                let walkValue = walk.Value
+
                 match t, v with
                 | TStr, VStr _
                 | TInt, VInt _
@@ -90,6 +92,40 @@ module internal Scaffold =
                         fsDefaultLit idl t v
                         |> Result.mapError (fun _ -> valueMismatch "a non-finite float, which has no F# literal")
                     )
+                // Phase 639 (D251) — the wider data universe, in the F# host's shapes.
+                | TInt64, VStr s when ScalarText.isInt64 s -> Some(Ok(s + "L"))
+                | TBytes, VStr s when ScalarText.isBytes s ->
+                    Some(
+                        Ok(
+                            "[| "
+                            + (System.Convert.FromBase64String s
+                               |> Array.map (fun b -> string b + "uy")
+                               |> String.concat "; ")
+                            + " |]"
+                        )
+                    )
+                | TDecimal, VStr s when ScalarText.isDecimal s -> Some(Ok(SourceLit.fsString s))
+                | TTimeOfDay, VStr s when ScalarText.isTimeOfDay s -> Some(Ok(SourceLit.fsString s))
+                | TDuration, VStr s when ScalarText.isDuration s -> Some(Ok(SourceLit.fsString s))
+                | TTuple cs, VList xs when List.length cs = List.length xs ->
+                    List.map2 walkValue cs xs
+                    |> sequenceR
+                    |> Result.map (fun items -> "(" + String.concat ", " items + ")")
+                    |> Some
+                | TSet e, VList xs ->
+                    xs
+                    |> List.map (walkValue e)
+                    |> sequenceR
+                    |> Result.map (fun items -> "(Set.ofList [ " + String.concat "; " items + " ])")
+                    |> Some
+                | TKeyedMap(k, vt), VList pairs ->
+                    pairs
+                    |> List.map (function
+                        | VList [ kv; vv ] -> walkValue (TTuple [ k; vt ]) (VList [ kv; vv ])
+                        | _ -> Error(valueMismatch "a keyed map entry that is not a [key, value] pair"))
+                    |> sequenceR
+                    |> Result.map (fun items -> "(Map.ofList [ " + String.concat "; " items + " ])")
+                    |> Some
                 // Phase 252 — a hosted slot that DECLARES its wire form is scaffolded through its
                 // own codec: the wire value (checked against the form first) is emitted as an
                 // escaped `JVal` literal and handed to the slot's `Decode` expression, so the host

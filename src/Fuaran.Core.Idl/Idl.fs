@@ -141,6 +141,41 @@ type IdlType =
     /// exactly one wire position: `TreeOp.Batch`'s `ops` list. Resolves against
     /// [[Idl]]'s `Ops`, the way [[TNode]] resolves against `Kinds`.
     | TOp
+    /// A 64-bit signed integer (Phase 639, DECISIONS.md D251), written as a JSON STRING of its
+    /// decimal digits (`"-42"`), because a JSON number read by a JavaScript host is a double,
+    /// which holds an integer exactly only to 2^53. One spelling: no `+`, no leading zero, no
+    /// `-0`. The authored value is that text, in [[VStr]].
+    | TInt64
+    /// An exact decimal (Phase 639), written as a JSON string of decimal text in `DecimalText`'s
+    /// canonical form: no leading zero, no trailing fraction zero, no point where the fraction is
+    /// zero, no sign on zero, no exponent. Arbitrary precision. The authored value is that text.
+    | TDecimal
+    /// Bytes (Phase 639), written as a JSON string in RFC 4648 §4 base64 with its padding and
+    /// every unused bit zero, so a byte sequence has exactly one spelling. The authored value is
+    /// that text.
+    | TBytes
+    /// A fixed-arity tuple (Phase 639): a JSON array whose item `i` is a value of the `i`th
+    /// component; at least two components.
+    | TTuple of components: IdlType list
+    /// A map whose keys are not strings (Phase 639): a JSON array of `[key, value]` pairs in
+    /// CANONICAL ORDER (ascending by the key's canonical text compared by code point, which is
+    /// the order of its UTF-8 bytes), a repeated key refused. The key type is ORDERABLE
+    /// ([[Declare.errors]]); a string-keyed map is [[TMap]], never this. The authored value is a
+    /// [[VList]] of two-item [[VList]]s, in any order.
+    | TKeyedMap of key: IdlType * value: IdlType
+    /// A set (Phase 639): a JSON array of distinct elements in the canonical order a
+    /// [[TKeyedMap]]'s keys take, a duplicate refused. The element type is ORDERABLE. The
+    /// authored value is a [[VList]], in any order.
+    | TSet of element: IdlType
+    /// A time of day with no offset (Phase 639): `HH:MM:SS`, 24-hour, a fraction of one to seven
+    /// digits only where it is not zero and no trailing fraction zero. The authored value is that
+    /// text.
+    | TTimeOfDay
+    /// A duration (Phase 639): exact elapsed time in seconds, `-?S(.F)?s` (`"90s"`, `"1.5s"`),
+    /// with no calendar unit, a fraction of one to seven digits (the 100 ns tick) only where it is
+    /// not zero, no leading zero, no `-0s`, and a magnitude a signed 64-bit count of ticks holds.
+    /// The authored value is that text.
+    | TDuration
 
 /// The host codec of a [[THosted]] slot (Phase 692 gap-closure) — a wire-visible
 /// field whose value is a HOST type with its own canonical codec, spliced into the

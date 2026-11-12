@@ -58,6 +58,8 @@
     <Compile Include="StructuralVectorExport.fs" />
     <Compile Include="PremiseProbeExport.fs" />
     <Compile Include="FamiliesExport.fs" />
+    <!-- Phase 639 (DECISIONS.md D251) — the IDL's wider data universe as conformance vectors. -->
+    <Compile Include="WiderUniverseCorpus.fs" />
     <Compile Include="Exporters.fs" />
     <Compile Include="ProofLadder.fs" />
     <Compile Include="ProofCone.fs" />

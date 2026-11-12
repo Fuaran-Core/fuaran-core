@@ -22,6 +22,37 @@ module internal FSharpCodec =
     // that the generator — not just the interpreter — covers the whole surface.
     // -----------------------------------------------------------------------
 
+    /// The F# codec of a tuple, by its component codecs: an encoder over the host tuple, or a decoder
+    /// reading an array of exactly that many items, each refusal under its index.
+    let tupleCodec (encode: bool) (parts: string list) : string =
+        let n = List.length parts
+        let names prefix = List.init n (sprintf "%s%d" prefix)
+
+        if encode then
+            sprintf
+                "(fun (%s) -> JArr [ %s ])"
+                (names "__t" |> String.concat ", ")
+                (List.map2 (fun e x -> sprintf "%s %s" e x) parts (names "__t")
+                 |> String.concat "; ")
+        else
+            let rec bind (i: int) (rest: string list) =
+                match rest with
+                | [] -> sprintf "Ok(%s)" (names "__v" |> String.concat ", ")
+                | d :: tail ->
+                    sprintf
+                        "%s __x%d |> dUnder (PathSegment.Index %d) |> Result.bind (fun __v%d -> %s)"
+                        d
+                        i
+                        i
+                        i
+                        (bind (i + 1) tail)
+
+            sprintf
+                "(fun (__j: JVal) -> match __j with | JArr [ %s ] -> %s | JArr __xs -> dFail DecodeCode.OutOfRange \"an array of %d items\" (sprintf \"an array of %%d items\" (List.length __xs)) | __other -> Error(Decoder.wrongKind \"array\" __other))"
+                (names "__x" |> String.concat "; ")
+                (bind 0 parts)
+                n
+
     /// Phase 524 — the F# ENCODER printer over the one slot traversal ([[SlotTraversal]]): `JVal`
     /// constructors and `enc<Name>` functions.
     let encPrinter: AppliedPrinter =
@@ -53,7 +84,22 @@ module internal FSharpCodec =
               Json = "id"
               // The named host encode expression, verbatim ('host -> JVal). Canonicality is
               // inherited: the host codec builds a JVal that renders through the same renderer.
-              Hosted = fun h -> HostedSlot.Verbatim h.Encode }
+              Hosted = fun h -> HostedSlot.Verbatim h.Encode
+              // Phase 639 (D251) — the wider data universe ([[widerEncodeHelpers]]). A text-borne
+              // exact type is its canonical text, written as it is held.
+              Wider =
+                fun t slot ->
+                    match t with
+                    | TInt64 -> Ok "encInt64"
+                    | TBytes -> Ok "encBytes"
+                    | TTuple cs -> cs |> List.map slot |> sequenceR |> Result.map (fun ps -> tupleCodec true ps)
+                    | TSet e -> slot e |> Result.map (sprintf "(encSet %s)")
+                    | TKeyedMap(k, v) ->
+                        match slot k, slot v with
+                        | Ok ek, Ok ev -> Ok(sprintf "(encKeyedMap %s %s)" ek ev)
+                        | Error e, _
+                        | _, Error e -> Error e
+                    | _ -> Ok "JStr" }
           Apply = sprintf "%s %s"
           ListApplied = sprintf "JArr(List.map %s %s)"
           NodeApplied = sprintf "encNode %s"
@@ -544,7 +590,33 @@ let private encFloat (f: float) : JVal =
                                     wd
                                     format
                                     (hostedRead h "__j")
-                        ) }
+                        )
+          // Phase 639 (D251) — the wider data universe ([[widerDecodeHelpers]]). A set and a keyed
+          // map are handed their element's (key's) ENCODER too: the canonical order is checked over
+          // each decoded item's canonical encoding, as the interpreter checks it.
+          Wider =
+            fun t slot ->
+                let enc (x: IdlType) = SlotTraversal.slotFn encPrinter.Slot x
+
+                match t with
+                | TInt64 -> Ok "dInt64"
+                | TDecimal -> Ok "(dText \"decimal\" isDecimalText)"
+                | TBytes -> Ok "dBytes"
+                | TTimeOfDay -> Ok "(dText \"timeOfDay\" isTimeOfDayText)"
+                | TDuration -> Ok "(dText \"duration\" isDurationText)"
+                | TTuple cs -> cs |> List.map slot |> sequenceR |> Result.map (tupleCodec false)
+                | TSet e ->
+                    match enc e, slot e with
+                    | Ok ee, Ok de -> Ok(sprintf "(dSet %s %s)" ee de)
+                    | Error x, _
+                    | _, Error x -> Error x
+                | TKeyedMap(k, v) ->
+                    match enc k, slot k, slot v with
+                    | Ok ek, Ok dk, Ok dv -> Ok(sprintf "(dKeyedMap %s %s %s)" ek dk dv)
+                    | Error x, _, _
+                    | _, Error x, _
+                    | _, _, Error x -> Error x
+                | other -> Error(opVocabularySlot backend other) }
 
     /// Phase 524 — the F# printer of a member READ back out ([[MemberTraversal.decMember]]): a
     /// sentinel slot decodes to `()` or its `TFn` placeholder, a host-only member to its declared
@@ -1014,6 +1086,21 @@ let private encFloat (f: float) : JVal =
     // its case with `dPick` and checks each synthesised member with `dSynth`, the interpreter's
     // reading (`Idl.Decode`) defect for defect.
     // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // Phase 639 (DECISIONS.md D251) — the wider data universe's helpers, emitted only when the
+    // vocabulary reaches one of its types, so every other module's bytes are unchanged. The
+    // canonical-spelling predicates and the code-point comparison are the interpreter's
+    // (`ScalarText`) written for a module that references only Fuaran.Core; the conformance vectors
+    // under `conformance/idl/` hold the two to one reading.
+    // -----------------------------------------------------------------------
+
+    /// The encode-side helpers of the wider data universe.
+    let widerEncodeHelpers: string = Template.text "fs-wider-encode.fs.txt"
+
+    /// The decode-side helpers of the wider data universe (after [[decodeHelpers]], whose `dFail`,
+    /// `dUnder` and `dList` they read; `canonicalCompare` is [[widerEncodeHelpers]]'s).
+    let widerDecodeHelpers: string = Template.text "fs-wider-decode.fs.txt"
 
     /// The decode helpers a presence-keyed union's reading needs, emitted only when one is reached:
     /// `dPick` picks the case (the candidates whose key is present, less those whose key another
@@ -1733,6 +1820,7 @@ let private encFloat (f: float) : JVal =
               [ typeGroup ]
               enums |> List.map (fun e -> doc ("enc:" + e.Name) "" + enumEncoder e)
               [ encodeHelpers idl ]
+              (if Decl.reachesWider idl then [ widerEncodeHelpers ] else [])
               [ recGroup ]
               [ sprintf
                     "let encodeNode (n: Node%s) : string = %s (encNode n)"
@@ -1766,6 +1854,7 @@ let private encFloat (f: float) : JVal =
                      [ keyedHelpers ]
                  else
                      [])
+              @ (if Decl.reachesWider idl then [ widerDecodeHelpers ] else [])
               enums |> List.map (fun e -> doc ("dec:" + e.Name) "" + enumDecoder e)
               [ decGroup ]
               // Phase 337 — the parser's refusal through `Decoder.parse` (under `ReadOptions.strict`

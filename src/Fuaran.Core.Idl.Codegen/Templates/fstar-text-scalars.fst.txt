@@ -1,0 +1,117 @@
+(* Phase 639 — the canonical spellings of the string-borne exact scalars (fuaran-core D251), read off
+   a string's characters: the grammar every host reads, so the model's decoder refuses what theirs
+   refuse. Each predicate is total and decides one spelling per value. *)
+let txt_digit (c: FStar.Char.char) : bool =
+  let n = FStar.Char.int_of_char c in
+  48 <= n && n <= 57
+
+let rec txt_all_digits (l: list FStar.Char.char) : bool =
+  match l with
+  | [] -> true
+  | c :: t -> txt_digit c && txt_all_digits t
+
+let txt_natural (l: list FStar.Char.char) : bool =
+  match l with
+  | [] -> false
+  | [c] -> txt_digit c
+  | c :: t -> txt_digit c && FStar.Char.int_of_char c <> 48 && txt_all_digits t
+
+let rec txt_value (acc: nat) (l: list FStar.Char.char) : Tot nat (decreases l) =
+  match l with
+  | [] -> acc
+  | c :: t ->
+    let n = FStar.Char.int_of_char c in
+    txt_value (acc * 10 + (if 48 <= n && n <= 57 then n - 48 else 0)) t
+
+let rec txt_last_nonzero (l: list FStar.Char.char) : bool =
+  match l with
+  | [] -> false
+  | [c] -> txt_digit c && FStar.Char.int_of_char c <> 48
+  | _ :: t -> txt_last_nonzero t
+
+let txt_fraction (most: nat) (l: list FStar.Char.char) : bool =
+  List.Tot.length l <= most && txt_all_digits l && txt_last_nonzero l
+
+let rec txt_split (l: list FStar.Char.char) : Tot (list FStar.Char.char & option (list FStar.Char.char)) =
+  match l with
+  | [] -> ([], None)
+  | c :: t ->
+    if FStar.Char.int_of_char c = 46 then ([], Some t)
+    else (let (a, b) = txt_split t in (c :: a, b))
+
+let txt_unsigned (l: list FStar.Char.char) : Tot (bool & list FStar.Char.char) =
+  match l with
+  | c :: t -> if FStar.Char.int_of_char c = 45 then (true, t) else (false, l)
+  | [] -> (false, [])
+
+let rec txt_pow10 (n: int) : Tot nat (decreases (if n <= 0 then 0 else n)) =
+  if n <= 0 then 1 else 10 * txt_pow10 (n - 1)
+
+let txt_bound (negative: bool) : nat =
+  if negative then 9223372036854775808 else 9223372036854775807
+
+let is_t_int64 (s: string) : bool =
+  let (neg, body) = txt_unsigned (FStar.String.list_of_string s) in
+  txt_natural body && not (neg && txt_value 0 body = 0) && txt_value 0 body <= txt_bound neg
+
+let is_t_decimal (s: string) : bool =
+  let (neg, body) = txt_unsigned (FStar.String.list_of_string s) in
+  match txt_split body with
+  | (ip, None) -> txt_natural ip && not (neg && txt_value 0 ip = 0)
+  | (ip, Some fp) -> txt_natural ip && txt_all_digits fp && txt_last_nonzero fp
+
+let txt_b64 (c: FStar.Char.char) : int =
+  let n = FStar.Char.int_of_char c in
+  if 65 <= n && n <= 90 then n - 65
+  else if 97 <= n && n <= 122 then n - 71
+  else if 48 <= n && n <= 57 then n + 4
+  else if n = 43 then 62
+  else if n = 47 then 63
+  else -1
+
+let txt_pad (c: FStar.Char.char) : bool = FStar.Char.int_of_char c = 61
+
+let rec txt_base64 (l: list FStar.Char.char) : bool =
+  match l with
+  | [] -> true
+  | [a; b; c; d] ->
+    txt_b64 a >= 0 && txt_b64 b >= 0
+    && (if txt_pad c then txt_pad d && txt_b64 b % 16 = 0
+        else txt_b64 c >= 0 && (if txt_pad d then txt_b64 c % 4 = 0 else txt_b64 d >= 0))
+  | a :: b :: c :: d :: rest ->
+    txt_b64 a >= 0 && txt_b64 b >= 0 && txt_b64 c >= 0 && txt_b64 d >= 0 && txt_base64 rest
+  | _ -> false
+
+let is_t_bytes (s: string) : bool = txt_base64 (FStar.String.list_of_string s)
+
+let txt_two (a b: FStar.Char.char) (most: int) : bool =
+  txt_digit a && txt_digit b
+  && (FStar.Char.int_of_char a - 48) * 10 + (FStar.Char.int_of_char b - 48) <= most
+
+let is_t_time_of_day (s: string) : bool =
+  match FStar.String.list_of_string s with
+  | h1 :: h2 :: c1 :: m1 :: m2 :: c2 :: s1 :: s2 :: rest ->
+    FStar.Char.int_of_char c1 = 58 && FStar.Char.int_of_char c2 = 58
+    && txt_two h1 h2 23 && txt_two m1 m2 59 && txt_two s1 s2 59
+    && (match rest with
+        | [] -> true
+        | d :: fp -> FStar.Char.int_of_char d = 46 && txt_fraction 7 fp)
+  | _ -> false
+
+let txt_strip_s (l: list FStar.Char.char) : option (list FStar.Char.char) =
+  match List.Tot.rev l with
+  | c :: t -> if FStar.Char.int_of_char c = 115 then Some (List.Tot.rev t) else None
+  | [] -> None
+
+let is_t_duration (s: string) : bool =
+  match txt_strip_s (FStar.String.list_of_string s) with
+  | None -> false
+  | Some l ->
+    let (neg, body) = txt_unsigned l in
+    (match txt_split body with
+     | (ip, None) ->
+       txt_natural ip && not (neg && txt_value 0 ip = 0) && txt_value 0 ip * 10000000 <= txt_bound neg
+     | (ip, Some fp) ->
+       txt_natural ip && txt_fraction 7 fp
+       && txt_value 0 ip * 10000000 + txt_value 0 fp * txt_pow10 (7 - List.Tot.length fp) <= txt_bound neg)
+

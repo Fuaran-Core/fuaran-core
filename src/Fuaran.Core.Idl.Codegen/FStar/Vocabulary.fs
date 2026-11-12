@@ -85,6 +85,8 @@ module internal FStarVocabulary =
         | SJson -> e
         | SSentinel sent -> "JStr " + lit sent
         | SEnum _
+        | SText _
+        | STuple _
         | SRecord _
         | SUnion _
         | SNode -> "enc_" + slotName s + " " + e
@@ -115,7 +117,9 @@ module internal FStarVocabulary =
         | SFloat
         | SJson
         | SSentinel _
-        | SEnum _ -> true
+        | SEnum _
+        | SText _
+        | STuple _ -> true
         | SRecord _
         | SUnion _
         | SNode
@@ -318,6 +322,8 @@ module internal FStarVocabulary =
             // encoder writes, which the model's round trip has no need to state.
             | SSentinel _ -> sprintf "(let _ = %s in let w = () in %s)" v (k "w")
             | SEnum _
+            | SText _
+            | STuple _
             | SRecord _
             | SUnion _
             | SNode -> sprintf "(match dec_%s %s with | Error e -> Error e | Ok w -> %s)" (slotName m.Slot) v (k "w")
@@ -575,6 +581,97 @@ module internal FStarVocabulary =
 
                     line (sprintf "    Error (%s ^ s)" (lit (sprintf "unknown %s: " name)))
                     line ""
+
+            // Phase 639 (D251) — the string-borne exact scalars and the tuples of leaf slots, declared
+            // beside the enums: each is decoded without calling the recursive family.
+            let leaves = widerLeaves c.Order
+
+            if not (List.isEmpty leaves) then
+                line "(* ======================================================================================"
+                line "   1b. The wider data universe's leaves — a string-borne exact scalar (its string refined"
+                line "       by its one canonical spelling) and a tuple of leaf slots (a JSON array). A set is"
+                line "       its wire array and a keyed map its array of [key, value] tuples: the model carries"
+                line "       the items in the encoder's order, and their canonical order over canonical bytes is"
+                line "       the hosts' rule, which a model whose numbers are opaque cannot compute."
+                line "   ====================================================================================== *)"
+                line ""
+
+                if leaves |> List.exists (fun s -> s.IsSText) then
+                    out.Append((Template.text "fstar-text-scalars.fst.txt").Replace("\r\n", "\n").Replace("\n", nl))
+                    |> ignore
+
+                let leafRead (s: Slot) (v: string) =
+                    match s with
+                    | SStr -> "as_string " + v
+                    | SInt -> "as_int " + v
+                    | SBool -> "as_bool " + v
+                    | SFloat ->
+                        sprintf
+                            "(match %s with | JFloat w -> Ok w | other -> Error (\"expected float, got \" ^ kind_name other))"
+                            v
+                    | _ -> sprintf "dec_%s %s" (slotName s) v
+
+                for s in leaves do
+                    let tn = slotName s
+                    let ty = slotType s
+
+                    match s with
+                    | SText _ ->
+                        line (sprintf "type %s = s:string{is_%s s}" tn tn)
+                        line ""
+                        line (sprintf "let enc_%s (#num #flt: eqtype) (x: %s) : Tot (jval num flt) = JStr x" tn tn)
+                        line ""
+                        line (sprintf "let dec_%s (#num #flt: eqtype) (el: jval num flt) : Tot (outcome %s) =" tn tn)
+                        line "  match as_string el with"
+                        line "  | Error e -> Error e"
+
+                        line (
+                            sprintf
+                                "  | Ok s -> if is_%s s then Ok s else Error (%s ^ s)"
+                                tn
+                                (lit ("not a canonical " + tn + ": "))
+                        )
+
+                        line ""
+                    | STuple cs ->
+                        let xs = cs |> List.mapi (fun i _ -> sprintf "x%d" i)
+                        let ys = cs |> List.mapi (fun i _ -> sprintf "y%d" i)
+
+                        line (sprintf "let enc_%s (#num #flt: eqtype) (x: %s) : Tot (jval num flt) =" tn ty)
+                        line (sprintf "  match x with")
+
+                        line (
+                            sprintf
+                                "  | (%s) -> JArr [%s]"
+                                (String.concat ", " xs)
+                                (List.map2 encApplied cs xs |> String.concat "; ")
+                        )
+
+                        line ""
+                        line (sprintf "let dec_%s (#num #flt: eqtype) (el: jval num flt) : Tot (outcome %s) =" tn ty)
+                        line "  match el with"
+
+                        let rec reads (i: int) (rest: Slot list) =
+                            match rest with
+                            | [] ->
+                                sprintf "Ok (%s)" (cs |> List.mapi (fun j _ -> sprintf "w%d" j) |> String.concat ", ")
+                            | c :: tail ->
+                                sprintf
+                                    "(match %s with | Error e -> Error e | Ok w%d -> %s)"
+                                    (leafRead c (sprintf "y%d" i))
+                                    i
+                                    (reads (i + 1) tail)
+
+                        line (sprintf "  | JArr [%s] -> %s" (String.concat "; " ys) (reads 0 cs))
+
+                        line (
+                            sprintf
+                                "  | other -> Error (%s ^ kind_name other)"
+                                (lit (sprintf "expected an array of %d items, got " cs.Length))
+                        )
+
+                        line ""
+                    | _ -> ()
 
             line "(* ======================================================================================"
             line "   2. The vocabulary's types — one mutual group, because a record may hold a union, a"
@@ -1169,6 +1266,8 @@ module internal FStarVocabulary =
                         | SJson -> "Ok y"
                         | SSentinel _ -> "Ok ()"
                         | SEnum _
+                        | SText _
+                        | STuple _
                         | SRecord _
                         | SUnion _
                         | SNode -> sprintf "dec_%s y" (slotName inner)
@@ -1213,6 +1312,8 @@ module internal FStarVocabulary =
                         | SJson -> "Ok v"
                         | SSentinel _ -> "Ok ()"
                         | SEnum _
+                        | SText _
+                        | STuple _
                         | SRecord _
                         | SUnion _
                         | SNode -> sprintf "dec_%s v" (slotName inner)

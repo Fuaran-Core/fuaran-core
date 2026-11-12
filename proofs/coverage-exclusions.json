@@ -101,6 +101,19 @@
     },
     {
       "members": [
+        "Idl.ScalarText.isInt64",
+        "Idl.ScalarText.isDecimal",
+        "Idl.ScalarText.isBytes",
+        "Idl.ScalarText.isTimeOfDay",
+        "Idl.ScalarText.isDuration",
+        "Idl.ScalarText.compare"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Phase 639 (D251): the canonical spellings of the wider data universe's string-borne scalars and the canonical order of a set's elements and a keyed map's keys; the stand-in holds each grammar to its admitted and refused spellings and to the JSON Schema patterns, the order's laws over sampled texts and its agreement with UTF-8 byte order, and the conformance vectors on the three hosts.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlWiderUniverseTests.fs"
+    },
+    {
+      "members": [
         "Idl.IdlUnion.WireTagOf",
         "Idl.IdlUnion.CaseByWireTag",
         "Idl.UnionTagRule.Apply"
