@@ -186,6 +186,20 @@ module internal PolicySeamLaws =
                                 else
                                     verdict }
 
+                let fnCtxReg =
+                    build
+                        FunctionRegistry.register
+                        FunctionRegistry.empty
+                        (ids |> List.map (fun id -> FunctionRegistry.entry "doc" (capOf id)))
+                    |> FunctionRegistry.withGate
+                        { Policy = gateName
+                          Decide =
+                            fun (trusted: bool) c _ ->
+                                if trusted || c.Id <> target then
+                                    PolicyDecision.Allow
+                                else
+                                    verdict }
+
                 let liftedReg =
                     build CapabilityRegistry.register CapabilityRegistry.empty (ids |> List.map capOf)
                     |> CapabilityRegistry.withGate (PolicyGate.ignoringContext gateName (fun c _ -> decideFor c.Id))
@@ -213,6 +227,14 @@ module internal PolicySeamLaws =
                     && CapabilityRegistry.decide (CapabilityRegistry.under false ctxReg) () None target cargs = verdict
                     && CapabilityRegistry.decide (CapabilityRegistry.under true ctxReg) () None target cargs = PolicyDecision.Allow
                     && CapabilityRegistry.decide liftedReg true None target cargs = verdict
+                    && FunctionRegistry.decide (FunctionRegistry.under false fnCtxReg) () None target cargs = FunctionRegistry.decide
+                        fnCtxReg
+                        false
+                        None
+                        target
+                        cargs
+                    && FunctionRegistry.decide fnCtxReg false None target cargs = verdict
+                    && FunctionRegistry.decide fnCtxReg true None target cargs = PolicyDecision.Allow
                     && CapabilityRegistry.decide liftedReg false None target cargs = verdict
                     && CapabilityRegistry.decide liftedReg false None target cargs = CapabilityRegistry.decide
                         capReg

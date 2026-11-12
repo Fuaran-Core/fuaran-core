@@ -3000,7 +3000,8 @@
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Capability.invocationPreimage",
-          "Capability.grant"
+          "Capability.grant",
+          "Grant.ofInvocation"
         ]
       }
     },
@@ -3016,7 +3017,8 @@
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "CapabilityRegistry.dispatch",
-          "PolicyDecision.lifted"
+          "PolicyDecision.lifted",
+          "Grant.covers"
         ]
       }
     },

@@ -14,13 +14,13 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## Summary
 
-396 rows: 229 offered, 1 a host's own proof, 166 uncovered (proved 97, tested 28, assumed 39, policy 2).
+406 rows: 239 offered, 1 a host's own proof, 166 uncovered (proved 97, tested 28, assumed 39, policy 2).
 
 ## Offers, by model
 
 | Model | Rows | Families (cases) | Oracle functions |
 |---|---|---|---|
-| `Capability` | 34 | `capabilityLaws` (72), `seamRefusals` (55) | — |
+| `Capability` | 44 | `capabilityLaws` (72), `seamRefusals` (55) | — |
 | `Chain` | 27 | `skeletonChain` (16), `skeletonDag` (4) | `chain.verify` |
 | `DagClosure` | 26 | `skeletonMerge` (12) | — |
 | `DagFold` | 4 | — | `dag.fold` |
