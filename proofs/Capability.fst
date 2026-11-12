@@ -29,6 +29,12 @@
      - the CODECS (section 16): `CapabilityCodec` for a signature and a capability and the
        pipeline's codec for a node, with `SpaceCodec` and `EffectCodec`, at the `JVal`.
 
+   And since Phase 642 the capability's DECLARED RESULT (`Returns`, here `answer`): the field, the
+   admission gate's check of it, its wire member, the pipeline's check of a node's declared output
+   against it (`PipelineOutputContradicts`), and the function registry entry whose result kind is
+   derived from it, with the index a query narrows through (`FunctionEntry`, `FunctionRegistry`'s
+   `indexed`).
+
    Two things are PARAMETERS rather than clauses, exactly as Phase 135 made `float i` a parameter
    and Phase 176 made the pipeline evaluator one. The WITNESS (`ArtifactWitness`'s `Holes`,
    `Effect`, `Bind`, the tree witness's `KindTag`, and `Tree.preorder` over it) is a record of
@@ -402,6 +408,8 @@ type decl_fault =
   | NonFiniteBound    : addr:string -> decl_fault
   | DuplicateHoleAddr : addr:string -> decl_fault
   | HoleUnderSlot     : node:string -> decl_fault
+  | EmptyResult       : space:value_space -> decl_fault
+  | NonFiniteResult   : decl_fault
 
 (* F#: `ApplyError`. *)
 type apply_error =
@@ -726,17 +734,25 @@ type placement =
   | ClientIsland : island_kind -> placement
   | Precomputed
 
+(* F#: `Returns` (Phase 642) — what a capability answers: nothing, or a value in a space. "Returns
+   nothing" has this one constructor. *)
+type answer =
+  | RNothing : answer
+  | RValue   : space:value_space -> answer
+
 (* F#: `Capability`. *)
 type capability = {
   c_id: string;
   c_signature: signature;
+  c_result: answer;
   c_determinism: determinism_source;
   c_placement: placement
 }
 
-(* F#: `Capability.create` — `Determinism` derived from the signature, never disagreeing with it. *)
-let create (id:string) (sg:signature) (p:placement) : Tot capability =
-  { c_id = id; c_signature = sg; c_determinism = sg.sg_effect.determinism; c_placement = p }
+(* F#: `Capability.create` — `Determinism` derived from the signature, never disagreeing with it;
+   the result declared (Phase 642), so there is no capability without one. *)
+let create (id:string) (sg:signature) (p:placement) (r:answer) : Tot capability =
+  { c_id = id; c_signature = sg; c_result = r; c_determinism = sg.sg_effect.determinism; c_placement = p }
 
 (* F#: `Capability.determinismTag`. *)
 let determinism_tag_of (c:capability) : Tot string = determinism_tag c.c_determinism
@@ -855,9 +871,21 @@ let rec non_total_addrs (holes:list sig_entry) : Tot (list string) =
   | [] -> []
   | e :: t -> if entry_total e then non_total_addrs t else e.s_addr :: non_total_addrs t
 
+(* F#: `Capability.resultFault` (Phase 642) — the declared result held to the well-formedness a
+   hole's space is held to, and named apart from the hole faults. *)
+let result_fault (rd:readers) (res:answer) : Tot (option decl_fault) =
+  match res with
+  | RNothing -> None
+  | RValue sp ->
+    (match space_wf rd sp with
+     | Some SEmpty -> Some (EmptyResult sp)
+     | Some SNonFinite -> Some NonFiniteResult
+     | None -> None)
+
 (* F#: `CapabilityRegistry.register` — additive, no silent overwrite, and (Phase 295) only a total
    capability: a non-total one is refused `NonTotalCapability`, naming its non-total entries; and
-   (Phase 307) only a well-formed one: `IllFormedCapability` with `Signature.validate`'s fault. *)
+   (Phase 307) only a well-formed one: `IllFormedCapability` with `Signature.validate`'s fault, then
+   (Phase 642) with the declared result's. *)
 let register (rd:readers) (c:capability) (r:registry) : Tot (outcome registry invoke_error) =
   match find_cap c.c_id r.capabilities with
   | Some _ -> Error (DuplicateCapability c.c_id)
@@ -866,7 +894,10 @@ let register (rd:readers) (c:capability) (r:registry) : Tot (outcome registry in
     else
       match validate_signature rd c.c_signature with
       | Some f -> Error (IllFormedCapability c.c_id f)
-      | None -> Ok { capabilities = c :: r.capabilities }
+      | None ->
+        match result_fault rd c.c_result with
+        | Some f -> Error (IllFormedCapability c.c_id f)
+        | None -> Ok { capabilities = c :: r.capabilities }
 
 (* F#: `CapabilityRegistry.tryFind`. *)
 let try_find_cap (id:string) (r:registry) : Tot (option capability) = find_cap id r.capabilities
@@ -1209,7 +1240,7 @@ let register_refuses_duplicate (rd:readers) (c:capability) (r:registry)
 
 let register_extends (rd:readers) (c:capability) (r:registry)
   : Lemma (requires not (mem c.c_id (ids (enumerate r))) /\ is_total c.c_signature /\
-                    None? (validate_signature rd c.c_signature))
+                    None? (validate_signature rd c.c_signature) /\ None? (result_fault rd c.c_result))
           (ensures register rd c r == Ok { capabilities = c :: r.capabilities } /\
                    (forall (id:string). mem id (ids (c :: r.capabilities)) <==> (id = c.c_id \/ mem id (ids (enumerate r)))))
   = find_cap_mem c.c_id r.capabilities
@@ -1259,6 +1290,26 @@ let register_refuses_ill_formed (rd:readers) (c:capability) (r:registry)
 let register_admits_well_formed (rd:readers) (c:capability) (r r':registry)
   : Lemma (requires register rd c r == Ok r')
           (ensures None? (validate_signature rd c.c_signature))
+  = ()
+
+(* Phase 642 — the declared result is held to the same gate. A fresh, total capability with a
+   well-formed signature whose declared result ranges over a space `Space.wellFormed` refuses is
+   `IllFormedCapability` with the result's fault (`EmptyResult`, `NonFiniteResult`), and every
+   capability `register` admits declares a result that answers nothing or ranges over a space that
+   admits a value and has finite bounds. A capability with NO declared result is not a value of
+   `capability`: the field is not optional, so it is refused before any registry sees it. *)
+let register_refuses_ill_formed_result (rd:readers) (c:capability) (r:registry)
+  : Lemma (requires not (mem c.c_id (ids (enumerate r))) /\ is_total c.c_signature /\
+                    None? (validate_signature rd c.c_signature) /\ Some? (result_fault rd c.c_result))
+          (ensures register rd c r == Error (IllFormedCapability c.c_id (Some?.v (result_fault rd c.c_result))) /\
+                   (match Some?.v (result_fault rd c.c_result) with
+                    | EmptyResult _ | NonFiniteResult -> True
+                    | _ -> False))
+  = find_cap_mem c.c_id r.capabilities
+
+let register_admits_well_formed_result (rd:readers) (c:capability) (r r':registry)
+  : Lemma (requires register rd c r == Ok r')
+          (ensures None? (result_fault rd c.c_result))
   = ()
 
 (* ======================================================================================
@@ -2273,10 +2324,10 @@ let rec open_slot_shape (#node:Type) (w:witness node) (l:args node)
    `ValueOutOfSpace`, `SlotKindMismatch`, `NonTotal`, `SlotArgOpen`, `BindFailed` — and that a
    hole beneath a slot (`HoleUnderSlot`) surfaces as the witness's `BindFailed` is the witness
    contract's, which this model leaves abstract. *)
-let wf_holes (#node:Type) (rd:readers) (w:witness node) (id name:string) (p:placement)
+let wf_holes (#node:Type) (rd:readers) (w:witness node) (id name:string) (p:placement) (r:answer)
              (tree:string -> node) (a:invocation) (n:node)
   : Lemma (requires distinct (map addr_of (w.holes n)) /\
-                    validate_args rd (create id (signature_of w name n) p) a == Ok ())
+                    validate_args rd (create id (signature_of w name n) p r) a == Ok ())
           (ensures distinct (map addr_of (data_holes w n)) /\
                    (match apply rd w (lifted tree (signature_of w name n).sg_holes a) n with
                     | Error (NotASlot _) -> False
@@ -2757,6 +2808,8 @@ type pipeline_error =
   | PipelineCycle           : at:string -> cycle:list string -> pipeline_error
   | EdgeTypeMismatch        : at:string -> addr:string -> producer:string -> consumer:string -> pipeline_error
   | PipelineForwardEdge     : at:string -> addr:string -> upstream:string -> pipeline_error
+  | PipelineOutputContradicts : at:string -> cap:string -> declared:value_space -> result:answer ->
+                                pipeline_error
 
 (* F#: `PipelineArg<'v>`. *)
 type pipeline_arg (v:Type) =
@@ -2977,16 +3030,27 @@ let rec unbound_keys (holes:list sig_entry) (ks:list string) : Tot (list string)
     if h.s_required && not (mem h.s_addr ks) then h.s_addr :: unbound_keys t ks
     else unbound_keys t ks
 
+(* F#: `CapabilityPipeline.outputStates` (Phase 642) — a node's declared output states what its
+   capability answers: it admits every value of the declared result (THE space relation), and a
+   capability that answers nothing has no output to declare. *)
+let output_states (fr:feed_readers) (rd:readers) (declared:value_space) (res:answer) : Tot bool =
+  match res with
+  | RValue answered -> subsumes fr rd declared answered
+  | RNothing -> false
+
 (* F#: one step of `typeCheck`'s local `go` — the refusal a node earns, or none. *)
 let node_fault (fr:feed_readers) (rd:readers) (lk:capability_lookup) (ns:list pipeline_node)
                (all_ids:list string) (n:pipeline_node)
   : Tot (option pipeline_error) =
   match n with
   | Source _ _ _ -> None
-  | Invoke nid cap_id _ a ->
+  | Invoke nid cap_id out a ->
     match lk.lk_find cap_id with
     | None -> Some (PipelineNoSuchCapability cap_id lk.lk_known)
     | Some cap ->
+      if not (output_states fr rd out cap.c_result)
+      then Some (PipelineOutputContradicts nid cap_id out cap.c_result)
+      else
       let holes = cap.c_signature.sg_holes in
       let declared = entry_addrs holes in
       match repeated [] (keys a) with
@@ -3437,6 +3501,119 @@ let typecheck_topological (fr:feed_readers) (rd:readers) (lk:capability_lookup) 
   = FStar.Classical.move_requires (typecheck_ordered fr rd lk) p;
     FStar.Classical.move_requires (typecheck_order_independent fr rd lk p) p';
     FStar.Classical.move_requires (typecheck_order_independent fr rd lk p') p
+
+(* A CALL IS MADE AT ITS CAPABILITY'S DECLARED RESULT (Phase 642), `typecheck_invokes_at_declared_result`.
+   F#: `CapabilityPipeline.typeCheck`. Every `Invoke` node of a pipeline `typeCheck` accepts resolves to
+   a capability that ANSWERS A VALUE (`RValue`, never `RNothing`), and the node's declared output admits
+   every value of that result under THE space relation. So the output every downstream edge is checked
+   against holds what the capability answers: a node cannot state a result its capability does not
+   declare, and a capability that answers nothing is invoked by no accepted pipeline. *)
+let typecheck_invokes_at_declared_result (fr:feed_readers) (rd:readers) (lk:capability_lookup)
+                                         (p:pipeline) (n:pipeline_node)
+  : Lemma (requires type_check fr rd lk p == Ok () /\ memp n p.p_nodes /\ Invoke? n)
+          (ensures (match lk.lk_find (Invoke?.capability_id n) with
+                    | Some c -> RValue? c.c_result /\
+                                subsumes fr rd (Invoke?.output_type n) (RValue?.space c.c_result)
+                    | None -> False))
+  = go_check_all_none fr rd lk p.p_nodes (node_ids p.p_nodes) p.p_nodes n
+
+(* AND A CONTRADICTION IS REFUSED BY NAME: a node whose declared output does not state its resolved
+   capability's result earns `PipelineOutputContradicts`, carrying the node, the capability, the
+   declared output and the declared result — before any argument of it is read. *)
+let output_contradiction_refused (fr:feed_readers) (rd:readers) (lk:capability_lookup)
+                                 (ns:list pipeline_node) (all_ids:list string) (nid cid:string)
+                                 (out:value_space) (a:list (string & arg_source)) (c:capability)
+  : Lemma (requires lk.lk_find cid == Some c /\ not (output_states fr rd out c.c_result))
+          (ensures node_fault fr rd lk ns all_ids (Invoke nid cid out a) ==
+                   Some (PipelineOutputContradicts nid cid out c.c_result))
+  = ()
+
+(* ---- the function registry's result (Phase 642) ---- *)
+
+(* F#: `FunctionEntry` — the capability alone. Until Phase 642 the entry carried a result kind of its
+   own beside a capability that declared none; now what it produces is its capability's. *)
+type function_entry = { fe_capability: capability }
+
+(* F#: `FunctionEntry.ResultType` — the kind of the tree the capability answers, derived. *)
+let result_kind (res:answer) : Tot (option string) =
+  match res with
+  | RValue (SlotTree (Some k)) -> Some k
+  | _ -> None
+
+let entry_result_type (e:function_entry) : Tot (option string) = result_kind e.fe_capability.c_result
+
+(* F#: `matchesQuery`'s `resultMatches`: a query naming no kind matches every entry. *)
+let result_matches (q:option string) (e:function_entry) : Tot bool =
+  match q with
+  | None -> true
+  | Some t -> entry_result_type e = Some t
+
+(* F#: the `ByResult` index, kind to ids: an association list, a kind's ids a list. *)
+type result_index = list (string & list string)
+
+let rec idx_get (k:string) (idx:result_index) : Tot (list string) =
+  match idx with
+  | [] -> []
+  | (k', ids) :: t -> if k' = k then ids else idx_get k t
+
+let rec idx_put (k:string) (ids:list string) (idx:result_index) : Tot result_index =
+  match idx with
+  | [] -> [(k, ids)]
+  | (k', v) :: t -> if k' = k then (k, ids) :: t else (k', v) :: idx_put k ids t
+
+let rec idx_get_put (k k':string) (ids:list string) (idx:result_index)
+  : Lemma (idx_get k (idx_put k' ids idx) == (if k = k' then ids else idx_get k idx))
+  = match idx with
+    | [] -> ()
+    | _ :: t -> idx_get_put k k' ids t
+
+(* F#: `FunctionRegistry.indexed` — an id filed under the kind its entry produces, when it produces a
+   named tree; `register` runs it on the entry it admits, `ofEntries` folds it over every entry. *)
+let indexed (id:string) (e:function_entry) (idx:result_index) : Tot result_index =
+  match entry_result_type e with
+  | Some k -> idx_put k (id :: idx_get k idx) idx
+  | None -> idx
+
+(* F#: `ofEntries`'s fold, over the entries in any order. *)
+let rec index_of_entries (es:list function_entry) : Tot result_index =
+  match es with
+  | [] -> []
+  | e :: t -> indexed e.fe_capability.c_id e (index_of_entries t)
+
+(* Some entry among `es` is registered under `id` and its capability answers a tree of kind `k`. *)
+let rec produced_by (k id:string) (es:list function_entry) : Tot bool =
+  match es with
+  | [] -> false
+  | e :: t -> (e.fe_capability.c_id = id && entry_result_type e = Some k) || produced_by k id t
+
+(* The derived kind is exactly the capability's declared result. *)
+let result_kind_exact (k:string) (res:answer)
+  : Lemma (result_kind res = Some k <==> res == RValue (SlotTree (Some k)))
+  = match res with
+    | RValue (SlotTree (Some _)) -> ()
+    | _ -> ()
+
+let rec index_of_entries_exact (k id:string) (es:list function_entry)
+  : Lemma (mem id (idx_get k (index_of_entries es)) == produced_by k id es)
+  = match es with
+    | [] -> ()
+    | e :: t ->
+      index_of_entries_exact k id t;
+      (match entry_result_type e with
+       | Some k' -> idx_get_put k k' (e.fe_capability.c_id :: idx_get k' (index_of_entries t)) (index_of_entries t)
+       | None -> ())
+
+(* THE ENTRY'S RESULT IS ITS CAPABILITY'S (Phase 642), `registry_result_is_capability_result`.
+   F#: `FunctionEntry.ResultType`, `findBySignature`'s result match and the `ByResult` index. An entry
+   carries no result of its own, so the theorem is about what reads one: a query naming kind `k`
+   matches an entry exactly when its capability declares a tree of kind `k`, and the index the query
+   narrows through files an id under `k` exactly when an entry registered under that id has a
+   capability declaring a tree of kind `k`. *)
+let registry_result_is_capability_result (k id:string) (e:function_entry) (es:list function_entry)
+  : Lemma ((result_matches (Some k) e <==> e.fe_capability.c_result == RValue (SlotTree (Some k))) /\
+           (mem id (idx_get k (index_of_entries es)) == produced_by k id es))
+  = result_kind_exact k e.fe_capability.c_result;
+    index_of_entries_exact k id es
 
 (* ---- what the evaluators compute ---- *)
 
@@ -4089,9 +4266,30 @@ let placement_of_j (el:jval) : Tot (outcome placement decode_error) =
        | Ok k -> Ok (ClientIsland k))
     else Error (under (Key "$type") (refuse UnknownTag))
 
+(* F#: `CapabilityCodec.resultJson` (Phase 642) — a value's space as the space document itself, and
+   "returns nothing" as the one document `{"$type":"nothing"}`, a tag no space uses. *)
+let result_json (r:answer) : Tot jval =
+  match r with
+  | RNothing -> JObj [("$type", JStr "nothing")]
+  | RValue sp -> space_json sp
+
+(* F#: `CapabilityCodec.resultOf` — `Decoder.tagDispatch` under `"$type"` over the space tags and
+   `nothing`: `nothing` reads as `RNothing`, and every other tag is the space reader's to read (an
+   unknown one `UnknownTag` at `$type`, as the space reader refuses it). *)
+let result_of_j (cr:codec_readers) (el:jval) : Tot (outcome answer decode_error) =
+  match field "$type" d_str el with
+  | Error e -> Error e
+  | Ok t ->
+    if t = "nothing" then Ok RNothing
+    else
+      (match space_of_j cr el with
+       | Error e -> Error e
+       | Ok sp -> Ok (RValue sp))
+
 (* F#: `CapabilityCodec.encodeJson`. *)
 let capability_json (c:capability) : Tot jval =
   JObj [("$type", JStr "capability"); ("id", JStr c.c_id); ("signature", signature_json c.c_signature);
+        ("result", result_json c.c_result);
         ("determinism", JStr (determinism_tag c.c_determinism)); ("placement", placement_json c.c_placement)]
 
 (* F#: `tagged "not a capability declaration: " [ "capability", () ]`. *)
@@ -4123,13 +4321,21 @@ let capability_of_j (rd:readers) (cr:codec_readers) (el:jval) : Tot (outcome cap
      refused `OutOfRange` at `signature.holes`, where `register` refuses it `NonTotalCapability`. *)
   if not (is_total sg) then Error ({ d_code = OutOfRange; d_path = [Key "signature"; Key "holes"] })
   else
+  (* Phase 642: the declared result is REQUIRED (`MissingField` at `result` names an undeclared one),
+     and held to the gate's well-formedness, refused `OutOfRange` at `result`. *)
+  match field "result" (result_of_j cr) el with
+  | Error e -> Error e
+  | Ok res ->
+  if Some? (result_fault rd res) then Error ({ d_code = OutOfRange; d_path = [Key "result"] })
+  else
   match field "determinism" (det_agrees_j (determinism_tag sg.sg_effect.determinism)) el with
   | Error e -> Error e
   | Ok () ->
   match field "placement" placement_of_j el with
   | Error e -> Error e
   | Ok pl ->
-    Ok ({ c_id = id; c_signature = sg; c_determinism = sg.sg_effect.determinism; c_placement = pl })
+    Ok ({ c_id = id; c_signature = sg; c_result = res; c_determinism = sg.sg_effect.determinism;
+          c_placement = pl })
 
 (* ---- the pipeline node: `CapabilityPipeline`'s codec ---- *)
 
@@ -4318,8 +4524,15 @@ let signature_decoded_wf (rd:readers) (cr:codec_readers) (el:jval) (sg:signature
    derives — which production's `Capability` cannot disagree with (the axis is a derived member since
    Phase 295) and the model's record, which still carries it, can. *)
 let wf_capability (rd:readers) (c:capability) : Tot bool =
-  wf_signature rd c.c_signature && is_total c.c_signature &&
+  wf_signature rd c.c_signature && is_total c.c_signature && None? (result_fault rd c.c_result) &&
   c.c_determinism = c.c_signature.sg_effect.determinism
+
+(* The declared result reads back as itself (Phase 642): `nothing` as `RNothing`, and a space through
+   the space reader, whose tags are never `nothing`. *)
+let result_roundtrip (cr:codec_readers) (r:answer) : Lemma (result_of_j cr (result_json r) == Ok r) =
+  match r with
+  | RNothing -> ()
+  | RValue sp -> space_roundtrip cr sp
 
 (* THE SIXTEENTH THEOREM (Phase 354), `capability_roundtrip`. F#: `CapabilityCodec.decodeJson` after
    `encodeJson`. DECODE AFTER ENCODE, EXACTLY, for every capability: the signature's refusal, under
@@ -4336,10 +4549,13 @@ let capability_roundtrip (rd:readers) (cr:codec_readers) (c:capability)
             | Ok sg ->
               if not (is_total sg)
               then Error ({ d_code = OutOfRange; d_path = [Key "signature"; Key "holes"] })
+              else if Some? (result_fault rd c.c_result)
+              then Error ({ d_code = OutOfRange; d_path = [Key "result"] })
               else if c.c_determinism = c.c_signature.sg_effect.determinism
               then Ok ({ c with c_signature = sg })
               else Error ({ d_code = OutOfRange; d_path = [Key "determinism"] })))
   = signature_roundtrip rd cr c.c_signature;
+    result_roundtrip cr c.c_result;
     placement_roundtrip c.c_placement;
     (if determinism_tag c.c_determinism = determinism_tag c.c_signature.sg_effect.determinism
      then det_tag_injective c.c_determinism c.c_signature.sg_effect.determinism
@@ -4429,6 +4645,10 @@ let pipeline_roundtrip (rd:readers) (cr:codec_readers) (p:pipeline)
    ====================================================================================== *)
 
 let twins : list twin = [
+  { tname = "a-tree-result-names-its-kind";
+    tholds = (fun () -> result_kind (RValue (SlotTree (Some "doc"))) = Some "doc") };
+  { tname = "a-result-of-nothing-names-no-kind";
+    tholds = (fun () -> result_kind RNothing = None && result_kind (RValue AnyString) = None) };
   { tname = "determinism-tag-of-clock-and-network";
     tholds = (fun () ->
       determinism_tag ({ has_clock = true; has_random = false; has_network = true }) = "clock+network") };
@@ -5398,10 +5618,25 @@ let signature_has_holes (rd:readers) (cr:codec_readers) (x:jval)
 (* `capability_refusals_resolve`: every refusal the declaration reader answers over a document
    resolves in it — including the admission refusals the reader raises itself, at `signature.holes`
    and at `determinism`, which name members it has just read. *)
+(* The declared result's reader is sound: its refusals are the tag's or the space reader's. *)
+let result_good (cr:codec_readers) (x:jval) : Lemma (good_res x (result_of_j cr x)) =
+  str_sound (); field_good "$type" d_str x; space_good cr x
+
+let result_sound (cr:codec_readers) : Lemma (sound (result_of_j cr)) =
+  sound_intro (result_of_j cr) (fun x -> result_good cr x)
+
+(* A member a reader accepted is a member of the object it read. *)
+let field_ok_present (#a:Type) (name:string) (d:decoder a) (x:jval)
+  : Lemma (match field name d x with
+           | Ok _ -> (match x with JObj fs -> Some? (assoc name fs) | _ -> False)
+           | Error _ -> True)
+  = ()
+
 let capability_good (rd:readers) (cr:codec_readers) (x:jval) : Lemma (good_res x (capability_of_j rd cr x)) =
-  str_sound (); doc_tag_sound (); signature_sound rd cr; placement_sound ();
+  str_sound (); doc_tag_sound (); signature_sound rd cr; placement_sound (); result_sound cr;
   field_good "$type" doc_tag_of_j x; field_good "id" d_str x;
   field_good "signature" (signature_of_j rd cr) x; field_good "placement" placement_of_j x;
+  field_good "result" (result_of_j cr) x; field_ok_present "result" (result_of_j cr) x;
   match x with
   | JObj fs ->
     (match assoc "signature" fs with
@@ -5602,6 +5837,8 @@ let fault_json (f:decl_fault) : Tot jval =
   | NonFiniteBound addr -> JObj [("$type", JStr "nonFiniteBound"); ("addr", JStr addr)]
   | DuplicateHoleAddr addr -> JObj [("$type", JStr "duplicateHoleAddr"); ("addr", JStr addr)]
   | HoleUnderSlot node -> JObj [("$type", JStr "holeUnderSlot"); ("node", JStr node)]
+  | EmptyResult sp -> JObj [("$type", JStr "emptyResult"); ("space", space_json sp)]
+  | NonFiniteResult -> JObj [("$type", JStr "nonFiniteResult")]
 
 (* F#: a required string member — the derived reader's `dReq name fs dStr`. *)
 let str_f (name:string) : decoder string = field name d_str
@@ -5613,7 +5850,9 @@ let fault_cases (cr:codec_readers) : list (string & decoder decl_fault) =
   [("emptySpace", both (str_f "addr") (field "space" (space_of_j cr)) (fun a sp -> EmptySpace a sp));
    ("nonFiniteBound", d_map NonFiniteBound (str_f "addr"));
    ("duplicateHoleAddr", d_map DuplicateHoleAddr (str_f "addr"));
-   ("holeUnderSlot", d_map HoleUnderSlot (str_f "node"))]
+   ("holeUnderSlot", d_map HoleUnderSlot (str_f "node"));
+   ("emptyResult", d_map EmptyResult (field "space" (space_of_j cr)));
+   ("nonFiniteResult", d_succeed NonFiniteResult)]
 
 (* F#: `CapabilitySeamCodec.decodeDeclarationFault`. *)
 let fault_of_j (cr:codec_readers) : decoder decl_fault = tag_dispatch (fault_cases cr)
@@ -5667,10 +5906,13 @@ let invoke_error_cases (cr:codec_readers) : list (string & decoder gated_error) 
    dropped). Each case reads its members in declaration order, the order the nested `both` does. *)
 let invoke_error_of_j (cr:codec_readers) : decoder gated_error = tag_dispatch (invoke_error_cases cr)
 
+#push-options "--fuel 7 --ifuel 1"
 let fault_roundtrip (cr:codec_readers) (f:decl_fault) : Lemma (fault_of_j cr (fault_json f) == Ok f) =
   match f with
   | EmptySpace _ sp -> space_roundtrip cr sp
+  | EmptyResult sp -> space_roundtrip cr sp
   | _ -> ()
+#pop-options
 
 (* THE REFUSAL ROUND TRIP (Phase 455), `invoke_error_roundtrip`: every `InvokeError` — the twelve
    cases, a declaration fault and a value space inside them — reads back as itself. *)
@@ -5699,6 +5941,8 @@ let fault_refusals_resolve (cr:codec_readers) : Lemma (sound (fault_of_j cr)) =
   map_sound NonFiniteBound (str_f "addr");
   map_sound DuplicateHoleAddr (str_f "addr");
   map_sound HoleUnderSlot (str_f "node");
+  map_sound EmptyResult (field "space" (space_of_j cr));
+  succeed_sound NonFiniteResult;
   tag_dispatch_sound (fault_cases cr)
 
 (* Every refusal the invoke-error reader answers resolves in the document it read. *)

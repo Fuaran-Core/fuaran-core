@@ -24,7 +24,7 @@ let private packBaseSig: Signature =
       Effect = Effect.pureDeterministic }
 
 let private packBaseEntry () : FunctionEntry =
-    FunctionRegistry.entry "doc" (Capability.create "doc-fn" packBaseSig BuildTime)
+    FunctionRegistry.entry (Capability.create "doc-fn" packBaseSig BuildTime (Returns.Value(SlotTree(Some "doc"))))
 
 let private packBaseReg () : FunctionRegistry<unit> =
     FunctionRegistry.empty
@@ -284,7 +284,7 @@ let tests =
                       { Host = ReadsHost
                         Determinism = Set.ofList [ ClockFactor; RandomFactor ] } }
 
-              let cap = Capability.create "f" sg Server
+              let cap = Capability.create "f" sg Server (Returns.Value AnyString)
               let wire = CapabilityCodec.encode cap
               Expect.stringContains wire "\"determinism\":\"clock+random\"" "the set is written as its canonical label"
 
@@ -314,7 +314,7 @@ let tests =
                       { Host = ReadsHost
                         Determinism = Effect.network } }
 
-              let cap = Capability.create "score" sg Server
+              let cap = Capability.create "score" sg Server (Returns.Value AnyString)
               Expect.equal cap.Determinism Effect.network "determinism mirrors the signature effect"
               Expect.equal (Capability.determinismTag cap) "network" "tag matches the Phase 27 label"
 
@@ -333,7 +333,7 @@ let tests =
                           Required = false } ]
                     Effect = Effect.pureDeterministic }
 
-              let cap = Capability.create "f" sg ClientDeclarative
+              let cap = Capability.create "f" sg ClientDeclarative (Returns.Value AnyString)
               Expect.equal (Capability.validateArgs cap [ "n", "3" ]) (Ok()) "in-space accepted"
 
               match Capability.validateArgs cap [ "n", "9" ] with
@@ -363,7 +363,7 @@ let tests =
               Expect.equal slot.Space (Some(SlotTree(Some "para"))) "the slot is entered with its tree space"
               Expect.isTrue slot.Required "and stays required"
 
-              let cap = Capability.create "tpl-cap" sg Server
+              let cap = Capability.create "tpl-cap" sg Server (Returns.Value AnyString)
 
               let reg =
                   match CapabilityRegistry.register cap CapabilityRegistry.empty with
@@ -421,7 +421,7 @@ let tests =
                   "the literal pre-229 tool schema"
 
               let enc sg =
-                  CapabilityCodec.encode (Capability.create "tpl-cap" sg Server)
+                  CapabilityCodec.encode (Capability.create "tpl-cap" sg Server (Returns.Value AnyString))
 
               Expect.isFalse ((enc derived).Contains "slotTree") "the derived space is not written"
 
@@ -451,7 +451,7 @@ let tests =
                     Holes = []
                     Effect = Effect.pureDeterministic }
 
-              let cap = Capability.create "k" sg Server
+              let cap = Capability.create "k" sg Server (Returns.Value AnyString)
               let k1 = Capability.invocationKey cap [ "a", "1"; "b", "2" ]
               let k2 = Capability.invocationKey cap [ "b", "2"; "a", "1" ]
               let k3 = Capability.invocationKey cap [ "a", "1"; "b", "3" ]
@@ -467,6 +467,7 @@ let tests =
                         Holes = []
                         Effect = Effect.pureDeterministic }
                       Server
+                      (Returns.Value AnyString)
 
               let reg =
                   CapabilityRegistry.empty
@@ -520,7 +521,8 @@ let tests =
                       { Host = ReadsHost
                         Determinism = Effect.random } }
 
-              let cap = Capability.create "predict" sg (ClientIsland Pyodide)
+              let cap =
+                  Capability.create "predict" sg (ClientIsland Pyodide) (Returns.Value AnyString)
 
               match CapabilityCodec.decode (CapabilityCodec.encode cap) with
               | Ok c2 -> Expect.equal c2 cap "capability declaration round-trips"
@@ -541,7 +543,7 @@ let tests =
                       { Host = ReadsHost
                         Determinism = Effect.random } }
 
-              let cap = Capability.create "f" sg Server
+              let cap = Capability.create "f" sg Server (Returns.Value AnyString)
               let wire = CapabilityCodec.encode cap
               // the honest wire carries a top-level "determinism":"random" (the capability object leads
               // with $type:capability); tamper only that one, leaving the nested signature effect intact
@@ -718,7 +720,7 @@ let actionHoleTests =
           testCase "an action-bearing signature round-trips through the capability codec"
           <| fun _ ->
               let sg = Function.signature artw "btn" (buttonTpl ())
-              let cap = Capability.create "btn" sg Server
+              let cap = Capability.create "btn" sg Server (Returns.Value AnyString)
 
               match CapabilityCodec.decode (CapabilityCodec.encode cap) with
               | Ok c2 -> Expect.equal c2 cap "action-bearing capability declaration round-trips"
@@ -1204,8 +1206,14 @@ let memoTests =
 
               let reg =
                   CapabilityRegistry.empty
-                  |> CapabilityRegistry.register (Capability.create "prod" prodSig BuildTime)
-                  |> Result.bind (CapabilityRegistry.register (Capability.create "cons" consSig BuildTime))
+                  |> CapabilityRegistry.register (
+                      Capability.create "prod" prodSig BuildTime (Returns.Value(IntRange(0, 100)))
+                  )
+                  |> Result.bind (
+                      CapabilityRegistry.register (
+                          Capability.create "cons" consSig BuildTime (Returns.Value(IntRange(0, 100)))
+                      )
+                  )
                   |> function
                       | Ok r -> CapabilityLookup.ofRegistry r
                       | Error e -> failtestf "registry build failed: %A" e
@@ -1252,8 +1260,8 @@ let memoTests =
 
               Expect.equal
                   (List.length results)
-                  7
-                  "type-check + round-trip + replay + space relation + soundness + order + checked-first reported"
+                  8
+                  "type-check + round-trip + replay + space relation + soundness + order + checked-first + the call's declared output against its capability's result (Phase 642) reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =
@@ -1278,6 +1286,7 @@ let memoTests =
                               Required = true } ]
                         Effect = Effect.pureDeterministic }
                       Server
+                      (Returns.Value(IntRange(0, 1000)))
 
               let lookup =
                   CapabilityRegistry.empty
@@ -1501,6 +1510,7 @@ let private intEntry (addr: string) (sp: ValueSpace) : SigEntry =
       Kind = ValueHole sp
       Required = true }
 
+/// A capability over `holes`, answering an integer in the range its pipelines declare (Phase 642).
 let private capOver (id: string) (holes: SigEntry list) : Capability =
     Capability.create
         id
@@ -1508,6 +1518,7 @@ let private capOver (id: string) (holes: SigEntry list) : Capability =
           Holes = holes
           Effect = Effect.pureDeterministic }
         Server
+        (Returns.Value(IntRange(0, 100)))
 
 [<Tests>]
 let convergenceTests =
@@ -1554,7 +1565,7 @@ let convergenceTests =
               | Error(RequiredHolesUnbound [ _ ]) -> ()
               | other -> failtestf "strict apply should demand the repeat, got %A" other
 
-              match Capability.validateArgs (Capability.create "rep" sg Server) [] with
+              match Capability.validateArgs (Capability.create "rep" sg Server (Returns.Value AnyString)) [] with
               | Error(RequiredArgsUnbound [ _ ]) -> ()
               | other -> failtestf "validateArgs should demand the repeat, got %A" other
 
@@ -1563,13 +1574,20 @@ let convergenceTests =
               let unbounded =
                   RNode.node "root" "doc" [ RNode.hole "r" "region" "rep" (RepeatHole AnyString) ]
 
-              let cap = Capability.create "u" (Function.signature artw "u" unbounded) Server
+              let cap =
+                  Capability.create "u" (Function.signature artw "u" unbounded) Server (Returns.Value AnyString)
 
               match CapabilityRegistry.register cap CapabilityRegistry.empty with
               | Error(NonTotalCapability("u", [ _ ])) -> ()
               | other -> failtestf "expected NonTotalCapability, got %A" other
 
-              match FunctionRegistry.register (FunctionRegistry.entry "doc" cap) FunctionRegistry.empty with
+              match
+                  FunctionRegistry.register
+                      (FunctionRegistry.entry
+                          { cap with
+                              Result = Returns.Value(SlotTree(Some "doc")) })
+                      FunctionRegistry.empty
+              with
               | Error(NonTotalCapability("u", _)) -> ()
               | other -> failtestf "the function registry should refuse it too, got %A" other
 
@@ -1598,6 +1616,7 @@ let convergenceTests =
               let c =
                   { Id = "clocked"
                     Signature = sg
+                    Result = Returns.Nothing
                     Placement = Server }
 
               Expect.equal c.Determinism Effect.clock "derived from the signature"
@@ -1727,7 +1746,7 @@ let convergenceTests =
 
               let lookup =
                   FunctionRegistry.empty
-                  |> FunctionRegistry.register (FunctionRegistry.entry "n" cons)
+                  |> FunctionRegistry.register (FunctionRegistry.entry cons)
                   |> function
                       | Ok r -> CapabilityLookup.ofFunctionRegistry r
                       | Error e -> failtestf "register failed: %A" e
@@ -1816,12 +1835,14 @@ let private sig307 holes : Signature =
       Effect = Effect.pureDeterministic }
 
 let private register307 (holes: SigEntry list) : Result<unit, InvokeError> =
-    CapabilityRegistry.register (Capability.create "c" (sig307 holes) Server) CapabilityRegistry.empty
+    CapabilityRegistry.register
+        (Capability.create "c" (sig307 holes) Server (Returns.Value AnyString))
+        CapabilityRegistry.empty
     |> Result.map ignore
 
 let private registerFn307 (holes: SigEntry list) : Result<unit, InvokeError> =
     FunctionRegistry.register
-        (FunctionRegistry.entry "t" (Capability.create "c" (sig307 holes) Server))
+        (FunctionRegistry.entry (Capability.create "c" (sig307 holes) Server (Returns.Value(SlotTree(Some "t")))))
         FunctionRegistry.empty
     |> Result.map ignore
 
@@ -1850,7 +1871,11 @@ let private probes307: (string * SigEntry list * InvokeError) list =
 
 /// A capability over one integer hole, for the reader and duplicate checks.
 let private intCap307 =
-    Capability.create "n" (sig307 [ entry307 "n" (ValueHole(IntRange(-10, 10))) ]) Server
+    Capability.create
+        "n"
+        (sig307 [ entry307 "n" (ValueHole(IntRange(-10, 10))) ])
+        Server
+        (Returns.Value(IntRange(-10, 10)))
 
 [<Tests>]
 let validatedDeclarationTests =
@@ -1937,11 +1962,15 @@ let validatedDeclarationTests =
               Expect.isOk (register307 sg.Holes) "it registers"
               Expect.isOk (Canonical.tryWrite Rendering.CrossHost (Function.toJsonSchema sg)) "and its schema renders"
 
-              let cap = Capability.create "c" sg Server
+              let cap = Capability.create "c" sg Server (Returns.Value AnyString)
               Expect.equal (CapabilityCodec.tryEncode cap) (Ok(CapabilityCodec.encode cap)) "tryEncode is encode"
 
               let bad =
-                  Capability.create "c" (sig307 [ entry307 "x" (ValueHole(FloatRange(0.0, infinity))) ]) Server
+                  Capability.create
+                      "c"
+                      (sig307 [ entry307 "x" (ValueHole(FloatRange(0.0, infinity))) ])
+                      Server
+                      (Returns.Value AnyString)
 
               Expect.isError (CapabilityCodec.tryEncode bad) "a non-finite bound is refused by the guarded encode"
 
@@ -1994,7 +2023,7 @@ let validatedDeclarationTests =
           <| fun _ ->
               let slot = entry307 "s" (SlotHole(Some "para"))
 
-              let c = Capability.create "c" (sig307 [ slot ]) Server
+              let c = Capability.create "c" (sig307 [ slot ]) Server (Returns.Value AnyString)
               Expect.equal (Capability.validateArgs c [ "s", """{"kind":"para"}""" ]) (Ok()) "a tree of its kind"
 
               Expect.equal
@@ -2005,7 +2034,11 @@ let validatedDeclarationTests =
           testCase "the capability decoder checks its $type and refuses an ill-formed signature"
           <| fun _ ->
               let good =
-                  Capability.create "c" (sig307 [ entry307 "n" (ValueHole(IntRange(0, 3))) ]) Server
+                  Capability.create
+                      "c"
+                      (sig307 [ entry307 "n" (ValueHole(IntRange(0, 3))) ])
+                      Server
+                      (Returns.Value AnyString)
 
               let text = CapabilityCodec.encode good
               Expect.equal (CapabilityCodec.decode text) (Ok good) "round trip"
@@ -2073,7 +2106,7 @@ let validatedDeclarationTests =
                     Holes = []
                     Effect = Effect.pureDeterministic }
 
-              let cap = Capability.create "k" sg Server
+              let cap = Capability.create "k" sg Server (Returns.Value AnyString)
 
               Expect.equal
                   (Capability.invocationKey cap [ "b", "2"; "a", "x\u0001y\u0010" ])
@@ -2152,10 +2185,14 @@ let validatedDeclarationTests =
 
           testCase "evalFrom refuses a reordered pipeline exactly as eval does"
           <| fun _ ->
-              let up = Capability.create "up" (sig307 []) Server
+              let up = Capability.create "up" (sig307 []) Server (Returns.Value AnyString)
 
               let down =
-                  Capability.create "down" (sig307 [ entry307 "x" (ValueHole AnyString) ]) Server
+                  Capability.create
+                      "down"
+                      (sig307 [ entry307 "x" (ValueHole AnyString) ])
+                      Server
+                      (Returns.Value AnyString)
 
               let lookup =
                   [ up; down ]
@@ -2215,7 +2252,11 @@ let readerAdmissionTests =
               // the reader, and the reader answers exactly the sentence `register` answers.
               let read =
                   [ for name, holes, expected in probes307 do
-                        match CapabilityCodec.tryEncode (Capability.create "c" (sig307 holes) Server) with
+                        match
+                            CapabilityCodec.tryEncode (
+                                Capability.create "c" (sig307 holes) Server (Returns.Value AnyString)
+                            )
+                        with
                         | Error _ -> ()
                         | Ok text ->
                             Expect.equal (register307 holes) (Error expected) (name + ": the registry's refusal")
@@ -2252,7 +2293,9 @@ let readerAdmissionTests =
           testCase "a non-total declaration is NonTotalCapability at the reader, not a well-formedness refusal"
           <| fun _ ->
               let holes = [ entry307 "r" (RepeatHole(IntRange(-1, 3))) ]
-              let text = CapabilityCodec.encode (Capability.create "c" (sig307 holes) Server)
+
+              let text =
+                  CapabilityCodec.encode (Capability.create "c" (sig307 holes) Server (Returns.Value AnyString))
 
               match
                   CapabilityCodec.decodeJsonDetailedWith
@@ -2302,6 +2345,10 @@ let internal invokeBaselines528: (InvokeError * string) list =
       "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"duplicateHoleAddr\",\"addr\":\"c\"},\"id\":\"x\"}"
       IllFormedCapability("x", HoleUnderSlot "n"),
       "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"holeUnderSlot\",\"node\":\"n\"},\"id\":\"x\"}"
+      IllFormedCapability("x", EmptyResult(Enum [])),
+      "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"emptyResult\",\"space\":{\"$type\":\"enum\",\"values\":[]}},\"id\":\"x\"}"
+      IllFormedCapability("x", NonFiniteResult),
+      "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"nonFiniteResult\"},\"id\":\"x\"}"
       DuplicateArg "a", "{\"$type\":\"duplicateArg\",\"addr\":\"a\"}"
       PolicyRefused("p", "r", [ "a" ]),
       "{\"$type\":\"policyRefused\",\"allowed\":[\"a\"],\"policy\":\"p\",\"reason\":\"r\"}"
@@ -2319,7 +2366,7 @@ let private invokeRefusals528: (string * string) list =
       "{\"$type\":\"argOutOfSpace\",\"addr\":\"a\",\"got\":\"g\",\"space\":{\"$type\":\"intRange\",\"min\":\"x\",\"max\":1}}",
       "expected int, got string"
       "{\"$type\":\"illFormedCapability\",\"id\":\"x\",\"fault\":{\"$type\":\"nope\"}}",
-      "unknown $type 'nope'; expected one of 'emptySpace', 'nonFiniteBound', 'duplicateHoleAddr', 'holeUnderSlot'"
+      "unknown $type 'nope'; expected one of 'emptySpace', 'nonFiniteBound', 'duplicateHoleAddr', 'holeUnderSlot', 'emptyResult', 'nonFiniteResult'"
       "{\"$type\":\"illFormedCapability\",\"id\":\"x\",\"fault\":{\"$type\":\"holeUnderSlot\"}}",
       "missing property: node"
       "{\"$type\":\"policyRefused\",\"policy\":\"p\",\"reason\":\"r\"}", "missing property: allowed"
@@ -2338,7 +2385,7 @@ let private placementBaselines528: (Placement * string) list =
 
 /// The declaration every placement refusal below is planted into, at its `placement` member.
 let private placementHost528 =
-    "{\"$type\":\"capability\",\"determinism\":\"deterministic\",\"id\":\"c\",\"placement\":{\"$type\":\"server\"},\"signature\":{\"effect\":{\"determinism\":\"deterministic\",\"host\":\"pure\"},\"holes\":[],\"name\":\"c\"}}"
+    "{\"$type\":\"capability\",\"determinism\":\"deterministic\",\"id\":\"c\",\"placement\":{\"$type\":\"server\"},\"result\":{\"$type\":\"nothing\"},\"signature\":{\"effect\":{\"determinism\":\"deterministic\",\"host\":\"pure\"},\"holes\":[],\"name\":\"c\"}}"
 
 /// A planted `placement`, then the typed refusal under `Lenient` and under `Strict`, rendered as
 /// code, path and sentence (`DecodeError.render`).
@@ -2458,6 +2505,7 @@ let private netCap528 =
             { Host = ReadsHost
               Determinism = Effect.network } }
         Server
+        (Returns.Value AnyString)
 
 let private netReg528 =
     CapabilityRegistry.register netCap528 CapabilityRegistry.empty

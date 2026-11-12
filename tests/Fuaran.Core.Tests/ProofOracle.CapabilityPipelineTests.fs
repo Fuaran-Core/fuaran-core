@@ -68,6 +68,12 @@ let private isTopological (nodes: PipelineNode list) : bool =
 
     go Set.empty nodes
 
+/// A declared result as the differential reads it (Phase 642): `nothing`, or the space it answers.
+let private modelAnswerRender (r: ModelCap.answer) : string =
+    match r with
+    | ModelCap.RNothing -> "nothing"
+    | ModelCap.RValue s -> sprintf "%A" s
+
 let private prodPipeErrRender (e: PipelineError) : string =
     match e with
     | PipelineError.DuplicateNode id -> sprintf "DuplicateNode(%s)" id
@@ -78,6 +84,13 @@ let private prodPipeErrRender (e: PipelineError) : string =
     | PipelineError.PipelineCycle(n, c) -> sprintf "PipelineCycle(%s;%s)" n (String.concat ">" c)
     | PipelineError.EdgeTypeMismatch(n, a, p, c) -> sprintf "EdgeTypeMismatch(%s;%s;%s;%s)" n a p c
     | PipelineError.PipelineForwardEdge(n, a, u) -> sprintf "PipelineForwardEdge(%s;%s;%s)" n a u
+    | PipelineError.PipelineOutputContradicts(n, c, d, r) ->
+        sprintf
+            "PipelineOutputContradicts(%s;%s;%s;%s)"
+            n
+            c
+            (sprintf "%A" (spaceToModel d))
+            (modelAnswerRender (returnsToModel r))
 
 let private modelPipeErrRender (e: ModelCap.pipeline_error) : string =
     match e with
@@ -89,6 +102,8 @@ let private modelPipeErrRender (e: ModelCap.pipeline_error) : string =
     | ModelCap.PipelineCycle(n, c) -> sprintf "PipelineCycle(%s;%s)" n (String.concat ">" c)
     | ModelCap.EdgeTypeMismatch(n, a, p, c) -> sprintf "EdgeTypeMismatch(%s;%s;%s;%s)" n a p c
     | ModelCap.PipelineForwardEdge(n, a, u) -> sprintf "PipelineForwardEdge(%s;%s;%s)" n a u
+    | ModelCap.PipelineOutputContradicts(n, c, d, r) ->
+        sprintf "PipelineOutputContradicts(%s;%s;%s;%s)" n c (sprintf "%A" d) (modelAnswerRender r)
 
 let private pipeError: Differential<PipelineError, ModelCap.pipeline_error> =
     Differential.pair prodPipeErrRender modelPipeErrRender
@@ -163,8 +178,15 @@ let private genRegistryPair
         for k in 1..3 do
             if not placed then
                 let sg, r1 = genCapSignature (id + string k) rng
-                rng <- r1
-                let cap = Capability.create id sg Server
+                // Phase 642: a declared result, one in sixteen answering nothing and the rest a drawn
+                // space, which the admission gate refuses where it is ill-formed.
+                let nothing, r2 = ConfRng.intBelow 16 r1
+                let space, r3 = genSpace r2
+                rng <- r3
+
+                let result = if nothing = 0 then Returns.Nothing else Returns.Value space
+
+                let cap = Capability.create id sg Server result
 
                 match CapabilityRegistry.register cap preg, ModelCap.register rd (capToModel cap) mreg with
                 | Ok p', ModelCap.Ok m' ->
@@ -215,8 +237,18 @@ let private genPipeline (preg: CapabilityRegistry<unit>) (r: ConfRng.T) : Capabi
             nodes.Add(PipelineNode.Invoke(nid, "cap-x", AnyString, []))
         else
             let cap, r2 = ConfRng.choose registered rng
-            let outTy, r3 = genSpace r2
-            rng <- r3
+            // Phase 642: fifteen nodes in sixteen declare their capability's own result, so the
+            // pipelines reach the argument and edge checks as often as before the result was
+            // declared; the rest declare a drawn space, which may contradict it.
+            let own, r3 = ConfRng.intBelow 16 r2
+            let drawn, r4 = genSpace r3
+            rng <- r4
+
+            let outTy =
+                match cap.Result with
+                | Returns.Value s when own > 0 -> s
+                | _ -> drawn
+
             let args = System.Collections.Generic.List<string * ArgSource>()
 
             for e in cap.Signature.Holes do
@@ -485,7 +517,9 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
 
         let evaluates (tally: Tally) =
             match pt, pe0 with
-            | Error e, Error(PipelineEvalError.EvalIllTyped e') when e = e' ->
+            // Compared as rendered: a refusal carries the spaces it is about, and a drawn space may
+            // hold a NaN bound, which no structural equality admits (Phase 642's contradiction carries two).
+            | Error e, Error(PipelineEvalError.EvalIllTyped e') when prodPipeErrRender e = prodPipeErrRender e' ->
                 // `pipeline_refused_never_evaluated`: the refusal is the type check's, and no body ran.
                 Differential.check
                     (pLog.Count = 0)
@@ -750,9 +784,14 @@ let private codecDifferential (rd: ModelCap.readers) (seed: int) (trials: int) :
         //      cannot be built; the reader meets their documents below, as targeted mutations ----
         let sg, r1 = genCapSignature (sprintf "c%d" i) rng
         let placement, r2 = ConfRng.choose placements r1
-        rng <- r2
+        // Phase 642: the declared result, both spellings — nothing on every fifth draw.
+        let space, r3 = genSpace r2
+        rng <- r3
 
-        let cap = Capability.create (sprintf "cap-%d" i) sg placement
+        let result = if i % 5 = 0 then Returns.Nothing else Returns.Value space
+
+        let cap = Capability.create (sprintf "cap-%d" i) sg placement result
+
         let mcap = capToModel cap
         let j0 = CapabilityCodec.encodeJson cap
 
@@ -989,6 +1028,8 @@ let private faultToModel (f: DeclarationFault) : ModelCap.decl_fault =
     | NonFiniteBound a -> ModelCap.NonFiniteBound a
     | DuplicateHoleAddr a -> ModelCap.DuplicateHoleAddr a
     | HoleUnderSlot n -> ModelCap.HoleUnderSlot n
+    | EmptyResult s -> ModelCap.EmptyResult(spaceToModel s)
+    | NonFiniteResult -> ModelCap.NonFiniteResult
 
 /// Production's twelve-case `InvokeError` as the model's `gated_error`.
 let private invokeErrorToModel (e: InvokeError) : ModelCap.gated_error =

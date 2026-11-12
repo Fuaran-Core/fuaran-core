@@ -1704,7 +1704,11 @@ let tests =
               // collision needed that byte in a value — the shard said "no separator", which was
               // true of `Query` and not of `Capability`. Both exhibits, keyed apart.
               let cap =
-                  Capability.create "cap-k" (fst (genCapSignature "k" (ConfRng.ofSeed 225))) Server
+                  Capability.create
+                      "cap-k"
+                      (fst (genCapSignature "k" (ConfRng.ofSeed 225)))
+                      Server
+                      (Returns.Value AnyString)
 
               let cOne = [ "a", "1\u0001b=2" ]
               let cTwo = [ "a", "1"; "b", "2" ]
@@ -1798,7 +1802,11 @@ let tests =
               // The capability model's key agrees with production's over adversarial invocations,
               // byte for byte, and is held still under a reversal of distinct addresses.
               let cap =
-                  Capability.create "cap-k" (fst (genCapSignature "k" (ConfRng.ofSeed 225))) Server
+                  Capability.create
+                      "cap-k"
+                      (fst (genCapSignature "k" (ConfRng.ofSeed 225)))
+                      Server
+                      (Returns.Value AnyString)
 
               let mcap = capToModel cap
               let mutable compared = 0

@@ -46,6 +46,7 @@ let private fmtTemp =
             [ valueHole "fmt-temp/celsius" (IntRange(-60, 60)) true
               valueHole "fmt-temp/station" (Enum [ "harbour"; "ridge" ]) true ])
         (ClientIsland Fable)
+        (Returns.Value AnyString)
 
 /// One hole per value space, so every typed argument case is reached.
 let private wide =
@@ -63,6 +64,7 @@ let private wide =
                 Kind = SlotHole(Some "para")
                 Required = false } ])
         Server
+        (Returns.Value AnyString)
 
 /// A capability with an action hole, so the strict check reaches an `actionEffect`.
 let private withAction =
@@ -79,6 +81,7 @@ let private withAction =
             { Host = ReadsHost
               Determinism = Effect.network } }
         Precomputed
+        (Returns.Value AnyString)
 
 let private toolIds =
     [ "fmt-temp"; "log-note"; "pick-sample"; "sensor-now"; "stamp" ]

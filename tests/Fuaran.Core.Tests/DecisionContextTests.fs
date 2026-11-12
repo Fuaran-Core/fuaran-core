@@ -29,6 +29,7 @@ let private cap (id: string) : Capability =
                 Required = true } ]
           Effect = Effect.pureDeterministic }
         Server
+        (Returns.Value(IntRange(0, 99)))
 
 /// One gate: the local side may do anything; the remote side may read, needs an approval to reset,
 /// and may never purge.
@@ -241,9 +242,7 @@ let tests =
               let functions: FunctionRegistry<Side> =
                   [ cap "read"; cap "reset" ]
                   |> List.fold
-                      (fun r c ->
-                          FunctionRegistry.register (FunctionRegistry.entry "doc" c) r
-                          |> Result.defaultValue r)
+                      (fun r c -> FunctionRegistry.register (FunctionRegistry.entry c) r |> Result.defaultValue r)
                       FunctionRegistry.empty
                   |> FunctionRegistry.withGate hazard
 
@@ -299,6 +298,7 @@ let tests =
                               Required = true } ]
                         Effect = Effect.pureDeterministic }
                       Server
+                      (Returns.Value AnyString)
 
               let notes: CapabilityRegistry<Side> =
                   [ noteCap "store"; noteCap "purge" ]

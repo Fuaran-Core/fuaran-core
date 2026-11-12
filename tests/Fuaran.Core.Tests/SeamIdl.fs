@@ -109,7 +109,10 @@ let private capabilityIdl =
               [ case "EmptySpace" [ req "addr" TStr; req "space" space ]
                 case "NonFiniteBound" [ req "addr" TStr ]
                 case "DuplicateHoleAddr" [ req "addr" TStr ]
-                case "HoleUnderSlot" [ req "node" TStr ] ]
+                case "HoleUnderSlot" [ req "node" TStr ]
+                // Phase 642: a capability's declared result, held to the well-formedness a hole is.
+                case "EmptyResult" [ req "space" space ]
+                case "NonFiniteResult" [] ]
           union
               "InvokeError"
               []

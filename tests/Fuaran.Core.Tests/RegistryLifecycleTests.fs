@@ -26,6 +26,7 @@ let private cap (id: string) (hi: int) : Capability =
           Holes = [ hole hi ]
           Effect = Effect.pureDeterministic }
         BuildTime
+        (Returns.Value AnyString)
 
 let private query (id: string) : Query =
     { Id = id
@@ -55,7 +56,13 @@ let private caps (ids: string list) : CapabilityRegistry<unit> =
 let private fns (entries: (string * string) list) : FunctionRegistry<unit> =
     entries
     |> List.fold
-        (fun r (id, kind) -> FunctionRegistry.register (FunctionRegistry.entry kind (cap id 9)) r |> orFail)
+        (fun r (id, kind) ->
+            FunctionRegistry.register
+                (FunctionRegistry.entry
+                    { cap id 9 with
+                        Result = Returns.Value(SlotTree(Some kind)) })
+                r
+            |> orFail)
         FunctionRegistry.empty
 
 let private queries (ids: string list) : QueryRegistry =
@@ -100,7 +107,11 @@ let tests =
               let fr = fns [ "a", "doc"; "b", "sheet" ]
 
               Expect.equal
-                  (FunctionRegistry.register (FunctionRegistry.entry "doc" (cap "c" 9)) fr
+                  (FunctionRegistry.register
+                      (FunctionRegistry.entry
+                          { cap "c" 9 with
+                              Result = Returns.Value(SlotTree(Some "doc")) })
+                      fr
                    |> Result.bind (FunctionRegistry.unregister "c"))
                   (Ok fr)
                   "function — the index too, by structural equality"
@@ -277,7 +288,11 @@ let tests =
               Expect.equal (ofKind "doc" unregistered) [ "b" ] "no phantom after unregister"
 
               let moved =
-                  FunctionRegistry.replace (FunctionRegistry.entry "sheet" (cap "b" 9)) fr
+                  FunctionRegistry.replace
+                      (FunctionRegistry.entry
+                          { cap "b" 9 with
+                              Result = Returns.Value(SlotTree(Some "sheet")) })
+                      fr
                   |> orFail
 
               Expect.equal (ofKind "doc" moved) [ "a" ] "replace moves the entry out of its old kind"
@@ -291,7 +306,11 @@ let tests =
 
           testCase "a content pack unloads, all or nothing"
           <| fun _ ->
-              let baseEntry = FunctionRegistry.entry "doc" (cap "base" 9)
+              let baseEntry =
+                  FunctionRegistry.entry
+                      { cap "base" 9 with
+                          Result = Returns.Value(SlotTree(Some "doc")) }
+
               let reg = FunctionRegistry.register baseEntry FunctionRegistry.empty |> orFail
 
               let manifest =

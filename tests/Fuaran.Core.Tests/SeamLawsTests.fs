@@ -28,8 +28,8 @@ let seamLawTests =
 
               Expect.equal
                   (List.length results)
-                  10
-                  "validation + replay + enumeration + round-trip + the three envelope laws + the slotted-artifact law (Phase 229) + the capture-covers law and its under-declaration converse (Phase 319) reported"
+                  11
+                  "validation + replay + enumeration + round-trip + the three envelope laws + the slotted-artifact law (Phase 229) + the capture-covers law and its under-declaration converse (Phase 319) + the declared result (Phase 642) reported"
 
               if results |> List.exists (fun r -> not r.Passed) then
                   let fails =

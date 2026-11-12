@@ -59,6 +59,7 @@ let private capabilities: Capability list =
           { Name = "sum"
             Holes = [ intHole "a"; intHole "b" ]
             Effect = effect }
+        Result = Returns.Value(IntRange(0, 200))
         Placement = Server }
       { Id = "label"
         Signature =
@@ -67,6 +68,7 @@ let private capabilities: Capability list =
               [ { intHole "text" with
                     Kind = ValueHole(Enum [ "x"; "y" ]) } ]
             Effect = effect }
+        Result = Returns.Nothing
         Placement = ClientIsland Fable } ]
 
 /// Every `RootDecodeCode` with its case name, in declaration order (Phase 443).

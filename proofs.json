@@ -5283,6 +5283,53 @@
       }
     },
     {
+      "id": "capability-pipeline-invokes-at-declared-result",
+      "level": "proved",
+      "statement": "`typecheck_invokes_at_declared_result`: every `Invoke` node of a pipeline `CapabilityPipeline.typeCheck` accepts resolves to a capability that answers a value (`Returns.Value`, never `Returns.Nothing`), and the node's declared output admits that value's space under THE space relation, so the output every downstream edge is checked against holds what the capability answers. A node whose declared output does not admit its capability's result, or whose capability answers nothing, is refused `PipelineOutputContradicts` carrying the node, the capability, the declared output and the declared result, before any of its arguments is read (`output_contradiction_refused`).",
+      "boundary": "The relation is `Space.subsumes` as modelled, whose two float comparisons are a premise (`feed_readers`); that a body's realised answer lies in the declared result is the host's and is not checked at the invoke seam. Within the model, the correspondence to production is the differential's (`capability-sections-differential`) and the extractor's (premise `extractor-and-compiler-trusted`).",
+      "phase": "fuaran-core#642",
+      "evidence": {
+        "theorem": "typecheck_invokes_at_declared_result",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityPipeline.typeCheck"
+        ]
+      }
+    },
+    {
+      "id": "function-registry-result-is-capability-result",
+      "level": "proved",
+      "statement": "`registry_result_is_capability_result`: a function registry entry states no result of its own. A query naming result kind `k` matches an entry exactly when its capability declares a tree of kind `k` (`Returns.Value(SlotTree(Some k))`), and the result index a query narrows through files an id under `k` exactly when an entry registered under that id has a capability declaring one, whatever order the entries were filed in.",
+      "boundary": "The index is modelled as an association list built by the production's `indexed` step folded over the entries; production's `Map` and `Set` are its premise. Within the model; the correspondence to production rests on the extractor (premise `extractor-and-compiler-trusted`) and the registry tests.",
+      "phase": "fuaran-core#642",
+      "evidence": {
+        "theorem": "registry_result_is_capability_result",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "FunctionRegistry.findBySignature",
+          "FunctionRegistry.register"
+        ]
+      }
+    },
+    {
+      "id": "capability-register-well-formed-result",
+      "level": "proved",
+      "statement": "A registry admits only a capability whose DECLARED RESULT is well-formed. After the signature's checks, `CapabilityRegistry.register` refuses a fresh, total, well-formed capability whose declared result ranges over a space `Space.wellFormed` refuses, as `IllFormedCapability` carrying `EmptyResult` or `NonFiniteResult` (`register_refuses_ill_formed_result`), and every capability it admits answers nothing or a space that admits a value with finite bounds (`register_admits_well_formed_result`). A capability with no declared result is not a value of the model's `capability`, as it is no value of production's record.",
+      "boundary": "Within the model; the correspondence to production rests on the differential and the extractor (premise `extractor-and-compiler-trusted`).",
+      "phase": "fuaran-core#642",
+      "evidence": {
+        "theorem": "register_refuses_ill_formed_result",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityRegistry.register",
+          "Space.wellFormed"
+        ]
+      }
+    },
+    {
       "id": "capability-pipeline-illtyped-iff-refused",
       "level": "proved",
       "statement": "`CapabilityPipeline.eval` and `evalFrom` answer `EvalIllTyped e` exactly when `typeCheck` refuses with `e` (`pipeline_illtyped_iff_refused`). A refused pipeline is answered with the check's own refusal under every host body, prior evaluation and change set alike, so no body runs (`pipeline_refused_never_evaluated`); over an accepted one neither evaluator answers `EvalIllTyped` — the two arms `runNode` marks unreachable are unreachable — and what remains is a result, a body's failure (`EvalNodeFailed`) or an upstream value outside the space of the hole it feeds (`EvalArgRefused`).",

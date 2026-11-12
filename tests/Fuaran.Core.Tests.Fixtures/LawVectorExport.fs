@@ -160,13 +160,22 @@ module LawVectorExport =
                           { Host = ReadsHost
                             Determinism = List.item (i % 7) nonEmptySets } }
 
+                  // Phase 642: the declared result alternates as `capabilityLaws`' does — the captured
+                  // value's space on an even iteration, nothing on an odd one — so the file carries both
+                  // spellings of the `result` member.
+                  let result =
+                      if i % 2 = 0 then
+                          Returns.Value(IntRange(0, 999))
+                      else
+                          Returns.Nothing
+
                   yield
                       { Iteration = i
                         Lo = lo
                         Hi = hi
                         Realized = realized
-                        Cap = Capability.create ("cap-" + string i) sg (ClientIsland Pyodide)
-                        CapB = Capability.create ("cap-a" + string i) sg BuildTime } ]
+                        Cap = Capability.create ("cap-" + string i) sg (ClientIsland Pyodide) result
+                        CapB = Capability.create ("cap-a" + string i) sg BuildTime result } ]
 
         let private argsJson (args: (string * string) list) : CorpusCell =
             args
@@ -254,7 +263,96 @@ module LawVectorExport =
                 Input = [ "declarations", jarr [ jstr declaration; jstr (CapabilityCodec.encode d.CapB) ] ]
                 Expected = [ "ids", jarr (registryIds |> List.map jstr) ] } ]
 
-        let internal allVectors () : Vector list = draws () |> List.collect vectorsFor
+        /// The declaration with its `result` member replaced (`Some`) or removed (`None`), re-rendered
+        /// canonically.
+        let private reResulted (declaration: string) (result: JVal option) : string =
+            match Json.parse declaration with
+            | Ok(JObj fs) ->
+                let fs' =
+                    fs
+                    |> List.choose (fun (k, v) ->
+                        if k <> "result" then
+                            Some(k, v)
+                        else
+                            result |> Option.map (fun r -> k, r))
+
+                Canonical.write Rendering.CrossHost (JObj fs')
+            | other -> failwithf "not a declaration: %A" other
+
+        /// A refusal's cells: its code and its path, each segment as written.
+        let private refusalCells (code: DecodeCode) (path: string list) : (string * CorpusCell) list =
+            [ "verdict", jstr "reject"
+              "code", jstr (string code)
+              "path", jarr (path |> List.map jstr) ]
+
+        let private segText (s: PathSegment) =
+            match s with
+            | PathSegment.Key k -> k
+            | PathSegment.Index i -> string i
+
+        /// One `declarationRefused` vector (Phase 642): the reference reader's refusal of a declaration,
+        /// and the model's (`capability_of_j`) on the same text.
+        let private refusedDeclaration (id: string) (declaration: string) : Vector =
+            let expected =
+                match CapabilityCodec.decodeDetailedWith ReadPolicy.Lenient declaration with
+                | Error e -> refusalCells e.Code (e.Path |> List.map segText)
+                | Ok _ -> [ "verdict", jstr "accept" ]
+
+            let model =
+                match CapabilityOracle.declarationRefusal declaration with
+                | Some(code, path) -> refusalCells code path
+                | None -> [ "verdict", jstr "accept" ]
+
+            { Id = id
+              Case = "declarationRefused"
+              Model = CapabilityOracle.answer model
+              Input = [ "declaration", jstr declaration ]
+              Expected = expected }
+
+        /// One `pipelineTypeCheck` vector (Phase 642): a one-node pipeline calling the drawn capability
+        /// with its declared output, type-checked against a registry holding the capability alone. No
+        /// model is stamped here: the model's check runs beside production in the pipeline
+        /// differential (`capability-sections-differential`), which carries its float readers.
+        let private pipelineCheck (id: string) (d: Draw) (declared: ValueSpace) : Vector =
+            let pipeline =
+                { Nodes = [ Invoke("call", d.Cap.Id, declared, [ "h0", Literal(string d.Lo) ]) ] }
+
+            let lookup =
+                match CapabilityRegistry.register d.Cap CapabilityRegistry.empty with
+                | Ok r -> CapabilityLookup.ofRegistry r
+                | Error e -> failwithf "the drawn capability was refused: %A" e
+
+            let expected =
+                match CapabilityPipeline.typeCheck lookup pipeline with
+                | Ok() -> [ "verdict", jstr "accept" ]
+                | Error(PipelineError.PipelineOutputContradicts(node, cap, _, _)) ->
+                    [ "verdict", jstr "reject"
+                      "error", jstr "pipelineOutputContradicts"
+                      "node", jstr node
+                      "capability", jstr cap ]
+                | Error _ -> [ "verdict", jstr "reject"; "error", jstr "unexpected" ]
+
+            { Id = id
+              Case = "pipelineTypeCheck"
+              Model = None
+              Input =
+                [ "capability", jstr (CapabilityCodec.encode d.Cap)
+                  "pipeline", jstr (CapabilityPipeline.encode pipeline) ]
+              Expected = expected }
+
+        /// The Phase 642 vectors for one draw: the two new refusals, each beside its acceptance.
+        let internal resultVectorsFor (d: Draw) : Vector list =
+            let declaration = CapabilityCodec.encode d.Cap
+
+            [ refusedDeclaration (sprintf "capability-%d-without-result" d.Iteration) (reResulted declaration None)
+              refusedDeclaration
+                  (sprintf "capability-%d-empty-result" d.Iteration)
+                  (reResulted declaration (Some(SpaceCodec.toJson (Enum []))))
+              pipelineCheck (sprintf "capability-%d-pipeline-output-admits" d.Iteration) d AnyString
+              pipelineCheck (sprintf "capability-%d-pipeline-output-narrower" d.Iteration) d (IntRange(d.Lo, d.Hi)) ]
+
+        let internal allVectors () : Vector list =
+            draws () |> List.collect (fun d -> vectorsFor d @ resultVectorsFor d)
 
         let private description =
             "The (input, expected) pairs Fuaran.Core.Conformance.capabilityLaws draws from `seed` over "
@@ -267,7 +365,14 @@ module LawVectorExport =
             + "vectors expect the effect-identity key a non-deterministic invocation is journalled under, its "
             + "determinism tag, and the value the replay must return byte-identically. `declarationRoundTrip` expects "
             + "decode-then-encode to return the input bytes. `registryEnumerate` expects id-sorted enumeration "
-            + "regardless of insertion order (the declarations are given in insertion order)."
+            + "regardless of insertion order (the declarations are given in insertion order). Since Phase 642 every "
+            + "capability declares its `result`: IntRange(0, 999) on an even iteration and `{\"$type\":\"nothing\"}` on an "
+            + "odd one. `declarationRefused` vectors expect the declaration reader to reject with a decode `code` and "
+            + "the `path` to the fault: a declaration without `result` is MissingField at [result], and one whose result "
+            + "space is empty is OutOfRange at [result]. `pipelineTypeCheck` vectors register the capability alone and "
+            + "type-check the given one-node pipeline: accept, or reject `pipelineOutputContradicts` naming the node "
+            + "and the capability when the node's declared output does not admit the capability's result (or the "
+            + "capability answers nothing)."
 
         /// Rendered with an explicit `kitVersion` so the byte-identity pin can render the file at the
         /// version a published copy was stamped with; `render ()` stamps this kit's own version.

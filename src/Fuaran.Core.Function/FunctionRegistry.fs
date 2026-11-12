@@ -12,8 +12,9 @@ namespace Fuaran.Core
 //  Additive over the FROZEN witnesses (GP1/GP7); it EXTENDS the Phase-30
 //  `Capability` registry pattern rather than introducing a parallel one — a
 //  registry entry IS an invocable `Capability` (reused verbatim for the typed
-//  signature + arg-validated, default-deny dispatch via `Capability.invoke`)
-//  annotated with the node-kind it produces. No new trust posture; no new
+//  signature + arg-validated, default-deny dispatch via `Capability.invoke`),
+//  whose declared result says the node-kind it produces (Phase 642: derived,
+//  never stated beside it). No new trust posture; no new
 //  dispatch path. A partially-applied function (a content pack) is a first-
 //  class entry whose `Capability.Signature` has been narrowed
 //  (`Function.signatureExcluding`, Phase 24) — fewer required holes, no special
@@ -21,16 +22,28 @@ namespace Fuaran.Core
 // ============================================================================
 
 /// A registry entry: an invocable `Capability` (its `Signature` carries the REQUIRED holes — what
-/// the function needs) annotated with the node-kind it PRODUCES (`ResultType`). Keying by
-/// `(ResultType, required-hole shape)` is what makes the catalogue queryable "by what it produces and
-/// what it requires", not by name. The entry's id is its `Capability.Id`.
+/// the function needs — and its `Result` what it PRODUCES). Keying by `(ResultType, required-hole
+/// shape)` is what makes the catalogue queryable "by what it produces and what it requires", not by
+/// name. The entry's id is its `Capability.Id`.
+///
+/// Since Phase 642 the entry states no result of its own (DECISIONS.md D253): the node kind it
+/// produces is DERIVED from its capability's declared result, so the two cannot disagree. Until
+/// then the entry carried a kind name beside a capability that declared nothing.
 type FunctionEntry =
     {
-        /// The invocable function; its `Id` is the entry's registry key.
+        /// The invocable function; its `Id` is the entry's registry key, and its `Result` the entry's.
         Capability: Capability
-        /// The node kind the function produces; the `ByResult` index key, compared exactly.
-        ResultType: string
     }
+
+    /// The node kind the function produces, derived from its capability's result: `Some kind` when
+    /// the result is a tree of that kind (`Returns.Value(SlotTree(Some kind))`), `None` for any other
+    /// result. The `ByResult` index key, compared exactly; an entry whose result is no named tree
+    /// is found only by a query naming no result type.
+    member e.ResultType: string option =
+        match e.Capability.Result with
+        | Returns.Value(SlotTree(Some kind)) -> Some kind
+        | Returns.Value _
+        | Returns.Nothing -> None
 
 /// A signature query (Phase 50): the desired result type (`None` = any result type — a wildcard on the
 /// produce-axis) plus the available-context shape — the holes the caller can fill, each keyed by its
@@ -71,8 +84,9 @@ type FunctionRegistry<'Ctx> =
         {
             /// Every entry, keyed by its capability id; each was admitted by `register`, so each is total.
             Entries: Map<string, FunctionEntry>
-            /// Result kind to the ids producing it: exactly the ids of `Entries`, grouped by result
-            /// kind, with no empty group — the projection every verb below maintains.
+            /// Result kind to the ids producing it: exactly the ids of `Entries` whose result is a tree
+            /// of a named kind, grouped by that kind, with no empty group — the projection every verb
+            /// below maintains.
             ByResult: Map<string, Set<string>>
             /// The gates `dispatch` runs and the observers a refusal reaches (Phase 318); carried
             /// through every lifecycle verb, combined by `union`.
@@ -91,10 +105,17 @@ module FunctionRegistry =
           ByResult = Map.empty
           Policy = RegistryPolicy.none }
 
-    /// Build an entry from the node-kind it produces + an invocable capability.
-    let entry (resultType: string) (cap: Capability) : FunctionEntry =
-        { Capability = cap
-          ResultType = resultType }
+    /// The entry for an invocable capability; what it produces is the capability's declared result
+    /// (Phase 642), so nothing else is given.
+    let entry (cap: Capability) : FunctionEntry = { Capability = cap }
+
+    /// `index` with `id` filed under the kind `e` produces, when it produces a named tree.
+    let private indexed (id: string) (e: FunctionEntry) (index: Map<string, Set<string>>) : Map<string, Set<string>> =
+        match e.ResultType with
+        | Some kind ->
+            let held = index |> Map.tryFind kind |> Option.defaultValue Set.empty
+            Map.add kind (Set.add id held) index
+        | None -> index
 
     /// Register an entry — additive, no silent overwrite (a duplicate id is a named
     /// `DuplicateCapability`, reusing the Capability registry's error vocabulary), and only a total,
@@ -111,14 +132,8 @@ module FunctionRegistry =
             e
             r.Entries
         |> Result.map (fun entries ->
-            let ids =
-                r.ByResult
-                |> Map.tryFind e.ResultType
-                |> Option.defaultValue Set.empty
-                |> Set.add id
-
             { Entries = entries
-              ByResult = Map.add e.ResultType ids r.ByResult
+              ByResult = indexed id e r.ByResult
               Policy = r.Policy })
 
     /// The entry registered under exactly `id` (ordinal, case-sensitive), or `None`; the result index
@@ -140,13 +155,7 @@ module FunctionRegistry =
         (entries: Map<string, FunctionEntry>)
         : FunctionRegistry<'Ctx> =
         { Entries = entries
-          ByResult =
-            entries
-            |> Map.fold
-                (fun idx id (e: FunctionEntry) ->
-                    let held = idx |> Map.tryFind e.ResultType |> Option.defaultValue Set.empty
-                    Map.add e.ResultType (Set.add id held) idx)
-                Map.empty
+          ByResult = entries |> Map.fold (fun idx id e -> indexed id e idx) Map.empty
           Policy = policy }
 
     // ---- the lifecycle (Phase 316): a registry is a lattice, not an append log ----
@@ -265,7 +274,7 @@ module FunctionRegistry =
         let resultMatches =
             match query.ResultType with
             | None -> true
-            | Some t -> t = entry.ResultType
+            | Some t -> entry.ResultType = Some t
 
         match mode with
         | Subsumes ->
@@ -370,5 +379,7 @@ module FunctionRegistry =
             let narrowed = Function.signatureExcluding boundAddrs source.Capability.Signature
 
             Ok
-                { Capability = Capability.create newId narrowed source.Capability.Placement
-                  ResultType = source.ResultType }
+                { Capability =
+                    { source.Capability with
+                        Id = newId
+                        Signature = narrowed } }

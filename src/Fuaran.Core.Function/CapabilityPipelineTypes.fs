@@ -31,8 +31,10 @@ type PipelineNode =
     /// An input the host supplies: `dataRef` is opaque to the core, and `outputType` is what
     /// downstream edges are checked against.
     | Source of id: string * dataRef: string * outputType: ValueSpace
-    /// A call of `capabilityId`, each argument keyed by hole address; `outputType` is declared, not
-    /// derived, and every downstream edge is checked against it.
+    /// A call of `capabilityId`, each argument keyed by hole address; every downstream edge is checked
+    /// against `outputType`. It restates what the capability answers, so validation holds it to the
+    /// capability's declared result (Phase 642): it must admit every value that result admits, and a
+    /// capability that answers nothing has no output to declare (`PipelineOutputContradicts`).
     | Invoke of id: string * capabilityId: string * outputType: ValueSpace * args: (string * ArgSource) list
 
 /// A serializable, typed capability-DAG (Phase 35) — nodes in topological (declaration) order; edges are
@@ -76,6 +78,11 @@ type PipelineError =
     /// An acyclic edge that points FORWARD in declaration order (Phase 295) — the pipeline is not in
     /// topological order, so the upstream would not have run.
     | PipelineForwardEdge of node: string * arg: string * upstream: string
+    /// An `Invoke` node declares an output its capability does not answer (Phase 642): `declared`
+    /// does not admit every value of the capability's `result` (`Space.subsumes`), or the capability
+    /// answers `Returns.Nothing`, so there is no output to declare. Checked when the capability
+    /// resolves, before the node's arguments; declared last, so every earlier case keeps its tag.
+    | PipelineOutputContradicts of node: string * capability: string * declared: ValueSpace * result: Returns
 
 /// A pipeline node's argument, resolved for evaluation (Phase 62): an upstream node's realised output, or
 /// a declared literal. The engine resolves each `ArgSource` edge into one of these before handing the arg

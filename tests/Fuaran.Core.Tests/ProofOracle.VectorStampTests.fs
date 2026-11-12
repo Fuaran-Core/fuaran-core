@@ -78,7 +78,7 @@ let modelStamps: (string * (string * int)) list =
       "decode/decode-rejects.json", ("JsonParse", 8)
       "decode/decode-rejects.json", ("DecodeLayer", 28)
       "escape/string-escape.json", ("WireCanon", 1)
-      "laws/capability-laws.json", ("Capability", 72)
+      "laws/capability-laws.json", ("Capability", 96)
       "laws/decimal-laws.json", ("DecimalText", 49)
       "laws/decimal-laws.json", ("WireColumn", 7)
       "laws/field-laws.json", ("WireColumn", 24)
@@ -90,7 +90,7 @@ let modelStamps: (string * (string * int)) list =
       "premises/string-model.json", ("JsonParse", 10)
       "refusals/codec-refusals.json", ("JsonParse", 59)
       "refusals/codec-refusals.json", ("WireColumn", 13)
-      "refusals/seam-refusals.json", ("Capability", 55)
+      "refusals/seam-refusals.json", ("Capability", 59)
       "refusals/seam-refusals.json", ("Query", 45) ]
 
 [<Tests>]

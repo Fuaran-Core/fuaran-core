@@ -207,6 +207,44 @@ let private checkCapabilityVectorWith
             | Error m -> Some(sprintf "%s: the declarations did not register (%s)" id m)
             | Ok r -> differs [ "ids", JArr(CapabilityRegistry.enumerate r |> List.map (fun c -> JStr c.Id)) ]
         | _ -> Some(sprintf "%s: input.declarations missing" id)
+    // Phase 642: the declaration reader's refusal, as its code and the path to the fault.
+    | Some "declarationRefused", _ ->
+        match str "declaration" input with
+        | None -> Some(sprintf "%s: input.declaration missing" id)
+        | Some d ->
+            let segment (p: PathSegment) =
+                match p with
+                | PathSegment.Key k -> JStr k
+                | PathSegment.Index i -> JStr(string i)
+
+            differs (
+                match CapabilityCodec.decodeDetailedWith ReadPolicy.Lenient d with
+                | Ok _ -> [ "verdict", JStr "accept" ]
+                | Error e ->
+                    [ "verdict", JStr "reject"
+                      "code", JStr(string e.Code)
+                      "path", JArr(e.Path |> List.map segment) ]
+            )
+    // Phase 642: a one-node pipeline type-checked against a registry holding the capability alone.
+    | Some "pipelineTypeCheck", _ ->
+        match decl "capability", str "pipeline" input |> Option.map CapabilityPipeline.decode with
+        | Error m, _ -> Some m
+        | _, None -> Some(sprintf "%s: input.pipeline missing" id)
+        | _, Some(Error m) -> Some(sprintf "%s: input.pipeline did not decode (%s)" id m)
+        | Ok(_, c), Some(Ok p) ->
+            match CapabilityRegistry.register c CapabilityRegistry.empty with
+            | Error e -> Some(sprintf "%s: the capability did not register (%A)" id e)
+            | Ok r ->
+                differs (
+                    match CapabilityPipeline.typeCheck (CapabilityLookup.ofRegistry r) p with
+                    | Ok() -> [ "verdict", JStr "accept" ]
+                    | Error(PipelineError.PipelineOutputContradicts(node, cap, _, _)) ->
+                        [ "verdict", JStr "reject"
+                          "error", JStr "pipelineOutputContradicts"
+                          "node", JStr node
+                          "capability", JStr cap ]
+                    | Error _ -> [ "verdict", JStr "reject"; "error", JStr "unexpected" ]
+                )
     | Some other, _ -> Some(sprintf "%s: unknown case `%s`" id other)
     | None, _ -> Some(sprintf "%s: no case" id)
 
@@ -678,8 +716,8 @@ let tests =
               | Ok vectors ->
                   Expect.equal
                       (List.length vectors)
-                      (8 * LawVectorExport.Capabilities.iterations)
-                      "eight vectors per declared iteration"
+                      (12 * LawVectorExport.Capabilities.iterations)
+                      "twelve vectors per declared iteration (Phase 642 added the two refusals, each beside its acceptance)"
 
                   let failures = vectors |> List.choose checkCapabilityVector
                   Expect.isEmpty failures (sprintf "%A" failures)

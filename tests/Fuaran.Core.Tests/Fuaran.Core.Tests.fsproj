@@ -521,6 +521,7 @@
          order, its declaration rules, its differ classes, and its conformance vectors on every host.
          Appended (append-only). -->
     <Compile Include="IdlWiderUniverseTests.fs" />
+    <Compile Include="CapabilityResultTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

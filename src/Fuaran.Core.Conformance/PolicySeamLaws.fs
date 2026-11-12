@@ -78,6 +78,7 @@ module internal PolicySeamLaws =
                         Required = true } ]
                   Effect = Effect.pureDeterministic }
                 BuildTime
+                (Returns.Value(IntRange(0, 9)))
 
         let queryOf (id: string) : Query =
             { Id = id
@@ -156,7 +157,7 @@ module internal PolicySeamLaws =
                     build
                         FunctionRegistry.register
                         FunctionRegistry.empty
-                        (ids |> List.map (fun id -> FunctionRegistry.entry "doc" (capOf id)))
+                        (ids |> List.map (fun id -> FunctionRegistry.entry (capOf id)))
                     |> FunctionRegistry.withGate
                         { Policy = gateName
                           Decide = fun _ c _ -> decideFor c.Id }
@@ -190,7 +191,7 @@ module internal PolicySeamLaws =
                     build
                         FunctionRegistry.register
                         FunctionRegistry.empty
-                        (ids |> List.map (fun id -> FunctionRegistry.entry "doc" (capOf id)))
+                        (ids |> List.map (fun id -> FunctionRegistry.entry (capOf id)))
                     |> FunctionRegistry.withGate
                         { Policy = gateName
                           Decide =
@@ -798,6 +799,7 @@ module internal PolicySeamLaws =
                     { Effect.pureDeterministic with
                         Determinism = Effect.network } }
                 Server
+                (Returns.Value AnyString)
 
         LawKit.run (runner.Fork 3182) iterations (fun rng _ at ->
             let n = 1 + rng.IntBelow 6

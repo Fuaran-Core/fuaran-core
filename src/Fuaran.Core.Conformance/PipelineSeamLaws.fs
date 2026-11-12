@@ -114,6 +114,10 @@ module internal PipelineSeamLaws =
         let checkedFirst =
             LawKit.LawCell "an ill-typed pipeline is refused PipelineEvalError.EvalIllTyped before any body runs"
 
+        let statesResult =
+            LawKit.LawCell
+                "a call is accepted exactly when its declared output admits its capability's result (Space.subsumes), and is refused PipelineError.PipelineOutputContradicts by name otherwise (Phase 642)"
+
         let encV (n: int) : string = string n
 
         let decV (s: string) : Result<int, string> =
@@ -143,8 +147,12 @@ module internal PipelineSeamLaws =
 
         let regResult =
             CapabilityRegistry.empty
-            |> CapabilityRegistry.register (Capability.create "prod" prodSig (ClientIsland Pyodide))
-            |> Result.bind (CapabilityRegistry.register (Capability.create "cons" consSig Server))
+            |> CapabilityRegistry.register (
+                Capability.create "prod" prodSig (ClientIsland Pyodide) (Returns.Value(IntRange(0, 100)))
+            )
+            |> Result.bind (
+                CapabilityRegistry.register (Capability.create "cons" consSig Server (Returns.Value(IntRange(0, 100))))
+            )
 
         match regResult with
         | Error e ->
@@ -192,6 +200,7 @@ module internal PipelineSeamLaws =
                                        | _ -> ValueHole argSpace) } ]
                           Effect = Effect.pureDeterministic }
                         Server
+                        (Returns.Value AnyString)
 
                 let edge =
                     { Nodes =
@@ -216,6 +225,37 @@ module internal PipelineSeamLaws =
                                      argSpace
                                      output
                                      (Space.subsumes argSpace output)
+                             )
+                     ))
+
+                // ---- the call states its capability's result (Phase 642) ----
+                let answered = drawSpace rng
+
+                let resultCap = Capability.create "res" prodSig Server (Returns.Value answered)
+
+                let call = { Nodes = [ Invoke("n", "res", output, []) ] }
+
+                let resultLookup =
+                    { reg with
+                        TryFind = fun id -> if id = "res" then Some resultCap else reg.TryFind id }
+
+                (match CapabilityPipeline.typeCheck resultLookup call with
+                 | Ok() when Space.subsumes output answered -> statesResult.Saw()
+                 | Error(PipelineError.PipelineOutputContradicts("n", "res", d, Returns.Value r)) when
+                     d = output && r = answered && not (Space.subsumes output answered)
+                     ->
+                     statesResult.Saw()
+                 | other ->
+                     statesResult.Check(
+                         false,
+                         fun () ->
+                             at (
+                                 sprintf
+                                     "the call check (%A) is not Space.subsumes (%A ⊇ %A = %b)"
+                                     other
+                                     output
+                                     answered
+                                     (Space.subsumes output answered)
                              )
                      ))
 
@@ -288,7 +328,15 @@ module internal PipelineSeamLaws =
                     )
                 | Error m -> replay.Check(false, fun () -> at (sprintf "node replay errored: %s" m)))
 
-            LawKit.results [ typecheck; roundtrip; replay; relation; sound; ordered; checkedFirst ]
+            LawKit.results
+                [ typecheck
+                  roundtrip
+                  replay
+                  relation
+                  sound
+                  ordered
+                  checkedFirst
+                  statesResult ]
 
     /// The capability-pipeline laws at a DOMAIN'S pipelines and registry (Phase 246).
     /// `capabilityPipelineLaws` beside it builds a fixed two-node pipeline over a fixed registry and
@@ -463,6 +511,7 @@ module internal PipelineSeamLaws =
                             Required = true } ]
                       Effect = Effect.pureDeterministic }
                     Server
+                    (Returns.Value(IntRange(0, 1000)))
 
             { TryFind = fun id -> if id = "inc" then Some inc else None
               Known = [ "inc" ]

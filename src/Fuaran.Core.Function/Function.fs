@@ -145,8 +145,10 @@ type Signature =
 
 /// Why a declaration is refused at the seams' admission gate (Phase 307). `Signature.validate`
 /// answers the first three over a signature's entries; `Function.validate` adds the fourth, which
-/// only the witness can see. The registries, the capability decoder and `Function.compose` all run
-/// the same check, so there is one gate and one vocabulary for what it refuses.
+/// only the witness can see; the last two are a capability's declared result (Phase 642), which the
+/// registries' admission gate checks beside its signature. The registries, the capability decoder
+/// and `Function.compose` all run the same check, so there is one gate and one vocabulary for what
+/// it refuses.
 type DeclarationFault =
     /// The hole's space admits no value (`Space.wellFormed` answered `SpaceFault.Empty`).
     | EmptySpace of addr: string * space: ValueSpace
@@ -161,6 +163,13 @@ type DeclarationFault =
     /// the slot — the check walks subtrees, whose holes the witness addresses relative to the
     /// subtree it is handed, so a node id is the one name that means the same thing in every frame.
     | HoleUnderSlot of node: string
+    /// The capability's declared result ranges over a space that admits no value (Phase 642): the
+    /// result is held to the well-formedness its holes are, at the same gate. Declared after the
+    /// hole faults, so each keeps its tag.
+    | EmptyResult of space: ValueSpace
+    /// The capability's declared result has a NaN or infinite bound (Phase 642), which no JSON number
+    /// spells, so the fault carries nothing: the space could not travel in it.
+    | NonFiniteResult
 
 /// The admission refusal in words (Phase 307).
 module DeclarationFault =
@@ -172,6 +181,8 @@ module DeclarationFault =
         | NonFiniteBound addr -> "hole '" + addr + "' has a bound that is not a finite number"
         | DuplicateHoleAddr addr -> "two holes share the address '" + addr + "'"
         | HoleUnderSlot node -> "the slot declared at node '" + node + "' has a hole beneath it"
+        | EmptyResult space -> "the declared result ranges over an empty space: " + Space.describe space
+        | NonFiniteResult -> "the declared result has a bound that is not a finite number"
 
 /// An argument bound into a hole: a leaf value, or a tree (for slots / composition).
 type Arg<'Node> =

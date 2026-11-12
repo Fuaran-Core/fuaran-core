@@ -15,6 +15,14 @@ module internal RegistrySeamLaws =
     // the site to the relation over drawn spaces; `capabilityPipelineLaws` also certifies the relation
     // SOUND against `Space.validate`.
 
+    /// The result a function registry entry of `kind` declares (Phase 642): a tree of that kind. The
+    /// entry's result kind is derived from it, so a law that files an entry under a kind says so here.
+    let internal treeOf (kind: string) : Returns = Returns.Value(SlotTree(Some kind))
+
+    /// The entry for `c` filed under `kind`: `c` declaring a tree of that kind as its result.
+    let internal entryOf (kind: string) (c: Capability) : FunctionEntry =
+        FunctionRegistry.entry { c with Result = treeOf kind }
+
     /// A small value space, drawn so that related and unrelated pairs both occur: tight bounds, a
     /// shared enum alphabet, both tree constraints.
     let internal drawSpace (rng: LawKit.Draws) : ValueSpace =
@@ -119,14 +127,15 @@ module internal RegistrySeamLaws =
             (match
                 FunctionRegistry.empty
                 |> FunctionRegistry.register (
-                    FunctionRegistry.entry
+                    entryOf
                         "doc"
                         (Capability.create
                             "rel"
                             { Name = "rel"
                               Holes = [ holeOf required ]
                               Effect = Effect.pureDeterministic }
-                            BuildTime)
+                            BuildTime
+                            (treeOf "doc"))
                 )
              with
              | Error e -> relation.Check(false, fun () -> at (sprintf "register failed: %A" e))
@@ -171,8 +180,8 @@ module internal RegistrySeamLaws =
                   Effect = Effect.pureDeterministic }
 
             let resultType = "doc"
-            let cap = Capability.create ("fn-" + string i) sg BuildTime
-            let ent = FunctionRegistry.entry resultType cap
+            let cap = Capability.create ("fn-" + string i) sg BuildTime (treeOf "doc")
+            let ent = entryOf resultType cap
 
             match FunctionRegistry.empty |> FunctionRegistry.register ent with
             | Error e -> findable.Check(false, fun () -> at (sprintf "register failed: %A" e))
@@ -317,6 +326,7 @@ module internal RegistrySeamLaws =
                         Required = true } ]
                   Effect = Effect.pureDeterministic }
                 BuildTime
+                (treeOf "doc")
 
         let queryOf (id: string) (param: string) : Query =
             { Id = id
@@ -368,7 +378,7 @@ module internal RegistrySeamLaws =
                 build
                     FunctionRegistry.register
                     FunctionRegistry.empty
-                    (held |> List.map (fun id -> FunctionRegistry.entry (kindOf id) (capOf id 9))),
+                    (held |> List.map (fun id -> entryOf (kindOf id) (capOf id 9))),
                 build QueryRegistry.register QueryRegistry.empty (held |> List.map (fun id -> queryOf id "p")),
                 build Validator.register Validator.empty (held |> List.map familyOf)
             with
@@ -379,7 +389,7 @@ module internal RegistrySeamLaws =
                     |> Result.bind (CapabilityRegistry.unregister fresh)
 
                 let fnBack =
-                    FunctionRegistry.register (FunctionRegistry.entry "doc" (capOf fresh 9)) fr
+                    FunctionRegistry.register (entryOf "doc" (capOf fresh 9)) fr
                     |> Result.bind (FunctionRegistry.unregister fresh)
 
                 let qBack =
@@ -405,7 +415,7 @@ module internal RegistrySeamLaws =
                     CapabilityRegistry.unregister fresh cr = Error(NoSuchCapability(fresh, sorted))
                     && CapabilityRegistry.replace (capOf fresh 9) cr = Error(NoSuchCapability(fresh, sorted))
                     && FunctionRegistry.unregister fresh fr = Error(NoSuchCapability(fresh, sorted))
-                    && FunctionRegistry.replace (FunctionRegistry.entry "doc" (capOf fresh 9)) fr = Error(
+                    && FunctionRegistry.replace (entryOf "doc" (capOf fresh 9)) fr = Error(
                         NoSuchCapability(fresh, sorted)
                     )
                     && QueryRegistry.unregister fresh qr = Error(NoSuchQuery(fresh, sorted))
@@ -427,7 +437,7 @@ module internal RegistrySeamLaws =
                      let k = rng.Choose held
                      let others (ids: string list) = ids |> List.filter (fun id -> id <> k)
                      let swapped = capOf k 3
-                     let swappedEntry = FunctionRegistry.entry "sheet" swapped
+                     let swappedEntry = entryOf "sheet" swapped
                      let swappedQuery = queryOf k "p2"
 
                      let capOk =
@@ -508,7 +518,7 @@ module internal RegistrySeamLaws =
                     build
                         FunctionRegistry.register
                         FunctionRegistry.empty
-                        (ids |> List.map (fun id -> FunctionRegistry.entry (kindOf id) (capOf id 9)))
+                        (ids |> List.map (fun id -> entryOf (kindOf id) (capOf id 9)))
 
                 let qs ids =
                     build QueryRegistry.register QueryRegistry.empty (ids |> List.map (fun id -> queryOf id "p"))
@@ -565,7 +575,7 @@ module internal RegistrySeamLaws =
                         | 1 ->
                             let k = rng.Choose pool
 
-                            FunctionRegistry.replace (FunctionRegistry.entry (rng.Choose kinds) (capOf k 9)) r
+                            FunctionRegistry.replace (entryOf (rng.Choose kinds) (capOf k 9)) r
                             |> Result.defaultValue r
                         | 2 -> FunctionRegistry.restrict (Set.ofList (subset ())) r
                         | _ -> FunctionRegistry.union r fc |> Result.defaultValue r
@@ -586,10 +596,11 @@ module internal RegistrySeamLaws =
 
                         let scanned =
                             FunctionRegistry.findBySignature Subsumes { ResultType = None; Available = probe } edited
-                            |> List.filter (fun e -> e.ResultType = kind)
+                            |> List.filter (fun e -> e.ResultType = Some kind)
 
                         let enumerated =
-                            FunctionRegistry.enumerate edited |> List.filter (fun e -> e.ResultType = kind)
+                            FunctionRegistry.enumerate edited
+                            |> List.filter (fun e -> e.ResultType = Some kind)
 
                         index.Check(
                             found = scanned && found = enumerated,
@@ -810,8 +821,8 @@ module internal RegistrySeamLaws =
                   Effect = Effect.pureDeterministic }
 
             let resultType = "doc"
-            let baseCap = Capability.create ("base-" + string i) sg BuildTime
-            let baseEntry = FunctionRegistry.entry resultType baseCap
+            let baseCap = Capability.create ("base-" + string i) sg BuildTime (treeOf "doc")
+            let baseEntry = entryOf resultType baseCap
 
             match FunctionRegistry.empty |> FunctionRegistry.register baseEntry with
             | Error e -> roundTrip.Check(false, fun () -> at (sprintf "base register failed: %A" e))

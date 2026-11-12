@@ -38,6 +38,7 @@ let private capability (id: string) (holes: SigEntry list) : Capability =
           Holes = holes
           Effect = Effect.pureDeterministic }
         Server
+        (Returns.Value(IntRange(0, 10)))
 
 /// `echo` settles with its argument, `later` stays pending, `flaky` fails for `flaky/k = 0`.
 let capabilityRegistry: CapabilityRegistry<unit> =

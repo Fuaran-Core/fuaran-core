@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 410 claims — 297 proved (296 across 38 models, 1 a host's own proof), 67 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
+**The ladder, counted:** 413 claims — 300 proved (299 across 38 models, 1 a host's own proof), 67 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -391,7 +391,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Column` | 127 | 50 | 51 | 3 | 0 | 0 | 0 | 23 |
 | `Fuaran.Core.Conformance` | 165 | 2 | 107 | 2 | 6 | 0 | 0 | 48 |
 | `Fuaran.Core.ContentAddress` | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `Fuaran.Core.Function` | 197 | 50 | 91 | 5 | 0 | 0 | 0 | 51 |
+| `Fuaran.Core.Function` | 197 | 52 | 89 | 5 | 0 | 0 | 0 | 51 |
 | `Fuaran.Core.Idl` | 79 | 0 | 6 | 1 | 1 | 0 | 0 | 71 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 51 | 8 | 0 | 0 | 0 | 0 | 0 | 43 |
@@ -408,7 +408,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 64 | 0 | 25 | 3 | 0 | 0 | 0 | 36 |
 | `Fuaran.Core.Wire` | 193 | 116 | 11 | 3 | 4 | 0 | 0 | 59 |
-| **Total** | 1387 | 382 | 431 | 38 | 15 | 0 | 3 | 518 |
+| **Total** | 1387 | 384 | 429 | 38 | 15 | 0 | 3 | 518 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -3184,6 +3184,12 @@ host's handlers to an artifact's action holes — with the `Map` its table is;
 - the CODECS (section 16): `CapabilityCodec` for a signature and a capability and the
 pipeline's codec for a node, with `SpaceCodec` and `EffectCodec`, at the `JVal`.
 
+And since Phase 642 the capability's DECLARED RESULT (`Returns`, here `answer`): the field, the
+admission gate's check of it, its wire member, the pipeline's check of a node's declared output
+against it (`PipelineOutputContradicts`), and the function registry entry whose result kind is
+derived from it, with the index a query narrows through (`FunctionEntry`, `FunctionRegistry`'s
+`indexed`).
+
 Two things are PARAMETERS rather than clauses, exactly as Phase 135 made `float i` a parameter
 and Phase 176 made the pipeline evaluator one. The WITNESS (`ArtifactWitness`'s `Holes`,
 `Effect`, `Bind`, the tree witness's `KindTag`, and `Tree.preorder` over it) is a record of
@@ -3201,7 +3207,7 @@ one float read the codecs make (`codec_readers`). The pipeline's host body and t
 spells (`node_body`, `spell`) are parameters as `invoke`'s body is; a handler is an abstract
 type.
 
-**Proved** (41)
+**Proved** (44)
 
 - <a id="row-capability-unregistered-refused"></a>**`capability-unregistered-refused`** — `unregistered_refused` · fuaran-core#177
 
@@ -3390,6 +3396,24 @@ type.
   `typecheck_topological`: a pipeline `CapabilityPipeline.typeCheck` accepts has distinct node ids and every `FromNode` edge naming a node declared strictly earlier — its declaration order is a topological order of its edges, so it is acyclic and each upstream runs before the node it feeds (`typecheck_ordered`) — and of two declarations of the same nodes, each in a topological order, the check accepts both or refuses both (`typecheck_order_independent`): the verdict is a fact about the node set, never about which topological order was written. The cycle search is modelled with its visited set and terminates by a checked measure.
 
   _Boundary:_ The check walks DECLARATION order and refuses one that is not topological (`PipelineCycle`, `PipelineForwardEdge`); it does not search for an order, so order independence holds only between declarations that are each topological.
+
+- <a id="row-capability-pipeline-invokes-at-declared-result"></a>**`capability-pipeline-invokes-at-declared-result`** — `typecheck_invokes_at_declared_result` · fuaran-core#642
+
+  `typecheck_invokes_at_declared_result`: every `Invoke` node of a pipeline `CapabilityPipeline.typeCheck` accepts resolves to a capability that answers a value (`Returns.Value`, never `Returns.Nothing`), and the node's declared output admits that value's space under THE space relation, so the output every downstream edge is checked against holds what the capability answers. A node whose declared output does not admit its capability's result, or whose capability answers nothing, is refused `PipelineOutputContradicts` carrying the node, the capability, the declared output and the declared result, before any of its arguments is read (`output_contradiction_refused`).
+
+  _Boundary:_ The relation is `Space.subsumes` as modelled, whose two float comparisons are a premise (`feed_readers`); that a body's realised answer lies in the declared result is the host's and is not checked at the invoke seam. Within the model, the correspondence to production is the differential's (`capability-sections-differential`) and the extractor's (premise `extractor-and-compiler-trusted`).
+
+- <a id="row-function-registry-result-is-capability-result"></a>**`function-registry-result-is-capability-result`** — `registry_result_is_capability_result` · fuaran-core#642
+
+  `registry_result_is_capability_result`: a function registry entry states no result of its own. A query naming result kind `k` matches an entry exactly when its capability declares a tree of kind `k` (`Returns.Value(SlotTree(Some k))`), and the result index a query narrows through files an id under `k` exactly when an entry registered under that id has a capability declaring one, whatever order the entries were filed in.
+
+  _Boundary:_ The index is modelled as an association list built by the production's `indexed` step folded over the entries; production's `Map` and `Set` are its premise. Within the model; the correspondence to production rests on the extractor (premise `extractor-and-compiler-trusted`) and the registry tests.
+
+- <a id="row-capability-register-well-formed-result"></a>**`capability-register-well-formed-result`** — `register_refuses_ill_formed_result` · fuaran-core#642
+
+  A registry admits only a capability whose DECLARED RESULT is well-formed. After the signature's checks, `CapabilityRegistry.register` refuses a fresh, total, well-formed capability whose declared result ranges over a space `Space.wellFormed` refuses, as `IllFormedCapability` carrying `EmptyResult` or `NonFiniteResult` (`register_refuses_ill_formed_result`), and every capability it admits answers nothing or a space that admits a value with finite bounds (`register_admits_well_formed_result`). A capability with no declared result is not a value of the model's `capability`, as it is no value of production's record.
+
+  _Boundary:_ Within the model; the correspondence to production rests on the differential and the extractor (premise `extractor-and-compiler-trusted`).
 
 - <a id="row-capability-pipeline-illtyped-iff-refused"></a>**`capability-pipeline-illtyped-iff-refused`** — `pipeline_illtyped_iff_refused` · fuaran-core#354
 

@@ -28,6 +28,7 @@ let private noteCap (id: string) (host: HostEffect) : Capability =
             { Effect.pureDeterministic with
                 Host = host } }
         Server
+        (Returns.Value AnyString)
 
 /// The capability registry the note surface's ops invoke: storing and deleting a note both write
 /// to the host; `count-notes` only reads.

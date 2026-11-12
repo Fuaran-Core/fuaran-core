@@ -90,9 +90,22 @@ let placementToModel (p: Placement) : ModelCap.placement =
     | ClientIsland Js -> ModelCap.ClientIsland ModelCap.Js
     | Precomputed -> ModelCap.Precomputed
 
+/// A declared result (Phase 642) as the model's `answer`.
+let returnsToModel (r: Returns) : ModelCap.answer =
+    match r with
+    | Returns.Nothing -> ModelCap.RNothing
+    | Returns.Value s -> ModelCap.RValue(spaceToModel s)
+
+/// The model's `answer` back.
+let returnsOfModel (r: ModelCap.answer) : Returns =
+    match r with
+    | ModelCap.RNothing -> Returns.Nothing
+    | ModelCap.RValue s -> Returns.Value(spaceOfModel s)
+
 let capToModel (c: Capability) : ModelCap.capability =
     { ModelCap.capability.c_id = c.Id
       ModelCap.capability.c_signature = sigToModel c.Signature
+      ModelCap.capability.c_result = returnsToModel c.Result
       ModelCap.capability.c_determinism = detToModel c.Determinism
       ModelCap.capability.c_placement = placementToModel c.Placement }
 
@@ -199,6 +212,22 @@ let invocationKey (c: Capability) (args: (string * string) list) : string =
 /// `determinism_tag_of`.
 let determinismTag (c: Capability) : string =
     ModelCap.determinism_tag_of (capToModel c)
+
+/// `capability_of_j` over a declaration's text (Phase 642): `None` where the model reads it, and its
+/// refusal's code and path, each segment as its key or index, where it refuses.
+let declarationRefusal (declaration: string) : (DecodeCode * string list) option =
+    match Json.parse declaration with
+    | Error _ -> Some(DecodeCode.InvalidJson, [])
+    | Ok j ->
+        match ModelCap.capability_of_j readers codecReaders (jvalToModel j) with
+        | ModelCap.Ok _ -> None
+        | ModelCap.Error e ->
+            let seg (p: ModelCap.path_seg) =
+                match p with
+                | ModelCap.Key k -> k
+                | ModelCap.Index i -> string i
+
+            Some(modelCodeOf e.d_code, List.map seg e.d_path)
 
 /// A capability vector's model answer, its `expected` members as the exporter builds them.
 let answer (expected: (string * CorpusCell) list) : Answer option =

@@ -1,8 +1,8 @@
 namespace Fuaran.Core
 
 /// The canonical wire codec for a `Capability` declaration + a typed invocation record. Round-trips
-/// the full `Signature` (so an enumerated capability re-serialises identically), the determinism
-/// tag, and the placement. Fable-clean (`Json` / `Decode`).
+/// the full `Signature` (so an enumerated capability re-serialises identically), the declared result
+/// (Phase 642), the determinism tag, and the placement. Fable-clean (`Json` / `Decode`).
 module CapabilityCodec =
 
     // ---- value-space ----
@@ -118,6 +118,26 @@ module CapabilityCodec =
     // IDL declaration (`CapabilitySeamCodec`, DECISIONS.md D200); the strict reading's roster is the
     // declaration's.
 
+    // ---- declared result (Phase 642) ----
+
+    /// The declared result as a wire document (D253): a value's space is written as the space
+    /// document itself (`SpaceCodec.toJson`), and "returns nothing" as the one document
+    /// `{"$type":"nothing"}`, whose tag no value space uses.
+    let private resultJson (r: Returns) : JVal =
+        match r with
+        | Returns.Nothing -> Canonical.typed "nothing" []
+        | Returns.Value space -> SpaceCodec.toJson space
+
+    /// Read a declared result as `resultJson` writes it, dispatched on `"$type"`: `nothing`, or one of
+    /// the value-space tags read by `SpaceCodec`'s own readers. Any other tag is `UnknownTag`, naming
+    /// every tag it knows; JSON `null` is not a spelling of "nothing" and is refused `WrongKind`.
+    let private resultOf: Decoder<Returns> =
+        Decoder.tagDispatch
+            "$type"
+            ((SpaceCodec.cases
+              |> List.map (fun (tag, d) -> tag, d |> Decoder.map Returns.Value))
+             @ [ "nothing", Decoder.succeed Returns.Nothing ])
+
     // ---- capability declaration ----
 
     /// Encode a `Capability` declaration to a `JVal` (`"$type":"capability"`).
@@ -126,6 +146,7 @@ module CapabilityCodec =
             "capability"
             [ "id", JStr c.Id
               "signature", signatureJson c.Signature
+              "result", resultJson c.Result
               "determinism", JStr(Effect.determinismTag c.Determinism)
               "placement", CapabilitySeamCodec.encodePlacement c.Placement ]
 
@@ -148,26 +169,36 @@ module CapabilityCodec =
         Decoder.field "$type" (Decoder.oneOf [ "capability", () ]) el
         |> Result.bind (fun () -> Decoder.field "id" Decoder.str el)
         |> Result.bind (fun id ->
+            // Phase 385: THE admission gate the registries run (D111) — totality, then
+            // well-formedness — over what was just read, where Phase 307's reader ran the
+            // well-formedness half alone. A declaration that decodes is one `register` admits, and a
+            // refused one is refused with the registry's own error: at `signature.holes` for the
+            // signature, then (Phase 642) at `result` for the declared result.
+            let refusedAt (path: PathSegment list) (e: InvokeError) =
+                Error(
+                    List.foldBack
+                        DecodeError.under
+                        path
+                        (DecodeError.make
+                            DecodeCode.OutOfRange
+                            "a declaration the registries admit"
+                            (InvokeError.describe e))
+                )
+
             Decoder.field "signature" signatureFieldsOf el
             |> Result.bind (fun sg ->
-                // Phase 385: THE admission gate the registries run (D111) — totality, then
-                // well-formedness — over the signature just read, where Phase 307's reader ran the
-                // well-formedness half alone. A declaration that decodes is one `register` admits,
-                // and a refused one is refused at `signature.holes` with the registry's own error.
-                match Capability.admissionOf id sg with
-                | Some e ->
-                    Error(
-                        DecodeError.under
-                            (PathSegment.Key "signature")
-                            (DecodeError.under
-                                (PathSegment.Key "holes")
-                                (DecodeError.make
-                                    DecodeCode.OutOfRange
-                                    "a declaration the registries admit"
-                                    (InvokeError.describe e)))
-                    )
+                match Capability.signatureAdmissionOf id sg with
+                | Some e -> refusedAt [ PathSegment.Key "signature"; PathSegment.Key "holes" ] e
                 | None -> Ok sg)
             |> Result.bind (fun sg ->
+                // Phase 642: the declared result is REQUIRED — a declaration without one is refused
+                // `MissingField` at `result`, the refusal that names it (D253) — and held to the gate.
+                Decoder.field "result" resultOf el
+                |> Result.bind (fun result ->
+                    match Capability.admissionOf id sg result with
+                    | Some e -> refusedAt [ PathSegment.Key "result" ] e
+                    | None -> Ok(sg, result)))
+            |> Result.bind (fun (sg, result) ->
                 // Cross-check the wire `determinism` tag against the signature's effect determinism
                 // (Phase 44). The tag is written on encode but was previously ignored on decode, so a
                 // payload whose tag disagrees with its signature — tampered, or from a divergent host —
@@ -196,6 +227,7 @@ module CapabilityCodec =
                     |> Result.map (fun placement ->
                         { Id = id
                           Signature = sg
+                          Result = result
                           Placement = placement }))))
 
     let private decodeJsonDetailed: Decoder<Capability> =
@@ -340,8 +372,11 @@ module CapabilityCodec =
         |> Result.bind (fun () -> within "holes" (each strictEntry) el)
 
     let private strictCapability (el: JVal) =
-        Decoder.members [ "$type"; "id"; "signature"; "determinism"; "placement" ] el
+        Decoder.members [ "$type"; "id"; "signature"; "result"; "determinism"; "placement" ] el
         |> Result.bind (fun () -> within "signature" strictSignature el)
+        // Phase 642: a declared result is a space document or `nothing`, which has no member but its
+        // tag; both are policed as a space is.
+        |> Result.bind (fun () -> within "result" strictSpace el)
 
     let private strictInvocation (el: JVal) =
         Decoder.members [ "$type"; "capabilityId"; "args" ] el

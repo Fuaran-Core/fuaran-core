@@ -165,13 +165,15 @@ your own edit). `Function.signature w name tree` derives the signature a caller 
 let artifactW : ArtifactWitness<Item,string> =
     { Tree = nodew; IdW = idw; Holes = holesOf; Effect = fun _ -> Effect.pureDeterministic; Bind = bind }
 
-let fill = Capability.create "outline.fill" (Function.signature artifactW "fill-reading" template) Server
+let fill =
+    Capability.create "outline.fill" (Function.signature artifactW "fill-reading" template) Server (Returns.Value AnyString)
 let capabilities = CapabilityRegistry.register fill CapabilityRegistry.empty       // Result: a duplicate id is refused
 ```
 
 Arguments are keyed by the hole's ADDRESS (`"report/temp"`), never its name (`"celsius"`): that is
 the hygiene law, and `Function.toJsonSchema`'s properties use the same keys, so a model sees the
-address. A capability declares no result type — the body's `'v` is yours.
+address. A capability declares what it answers — `Returns.Value` a space, or `Returns.Nothing` — and
+the body's `'v` is yours, answering to that declaration.
 
 **A query registry.** A `Query` declares typed parameters (keyed by NAME — a query has no holes), a
 result `Schema`, an effect class and a `DataSource`; `QueryRegistry.register` adds it. Your resolver

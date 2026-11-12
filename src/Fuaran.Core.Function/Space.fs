@@ -273,7 +273,9 @@ module SpaceCodec =
                  | Some k -> [ "slotKind", JStr k ]
                  | None -> [])
 
-    let private cases: (string * Decoder<ValueSpace>) list =
+    /// The readers by `"$type"` tag, in the order an unknown tag's refusal names them — shared with
+    /// the declared result's reader (`CapabilityCodec`, Phase 642), which adds `nothing` to them.
+    let internal cases: (string * Decoder<ValueSpace>) list =
         let int name = Decoder.field name Decoder.int
         let num name = Decoder.field name Decoder.float
 

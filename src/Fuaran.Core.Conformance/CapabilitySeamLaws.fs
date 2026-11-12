@@ -55,6 +55,10 @@ module internal CapabilitySeamLaws =
         let roundtrip =
             LawKit.LawCell "capability declaration round-trips through the codec"
 
+        let declaredResult =
+            LawKit.LawCell
+                "a declaration states its result: one without `result` is refused MissingField at `result` (Phase 642)"
+
         let envelope =
             LawKit.LawCell "the envelope rides out of invoke / dispatch unchanged for Ready and Pending"
 
@@ -115,7 +119,15 @@ module internal CapabilitySeamLaws =
                     { Host = ReadsHost
                       Determinism = List.item (i % 7) nonEmptySets } }
 
-            let cap = Capability.create ("cap-" + string i) sg (ClientIsland Pyodide)
+            // Phase 642: the declared result alternates, so a run reads both spellings — the captured
+            // value's space on an even iteration, nothing on an odd one.
+            let result =
+                if i % 2 = 0 then
+                    Returns.Value(IntRange(0, 999))
+                else
+                    Returns.Nothing
+
+            let cap = Capability.create ("cap-" + string i) sg (ClientIsland Pyodide) result
 
             // arg-validation: in-space accepts; out-of-space + unknown-arg reject.
             let inSpace = string lo
@@ -214,7 +226,7 @@ module internal CapabilitySeamLaws =
             | None -> ()
 
             // stable enumeration regardless of insertion order.
-            let capB = Capability.create ("cap-a" + string i) sg BuildTime
+            let capB = Capability.create ("cap-a" + string i) sg BuildTime result
 
             let reg =
                 CapabilityRegistry.empty
@@ -231,6 +243,22 @@ module internal CapabilitySeamLaws =
             match CapabilityCodec.decode (CapabilityCodec.encode cap) with
             | Ok c2 -> roundtrip.Check((c2 = cap), fun () -> at "capability ≠ round-trip")
             | Error m -> roundtrip.Check(false, fun () -> at (sprintf "decode failed: %s" m))
+
+            // the declared result is the declaration's (Phase 642): without it, nothing is read.
+            (match CapabilityCodec.encodeJson cap with
+             | JObj fs ->
+                 let undeclared =
+                     Canonical.write Rendering.CrossHost (JObj(fs |> List.filter (fun (k, _) -> k <> "result")))
+
+                 match CapabilityCodec.decodeDetailedWith ReadPolicy.Lenient undeclared with
+                 | Error e when e.Code = DecodeCode.MissingField && e.Path = [ PathSegment.Key "result" ] ->
+                     declaredResult.Saw()
+                 | other ->
+                     declaredResult.Check(
+                         false,
+                         fun () -> at (sprintf "a declaration without its result was not refused at it: %A" other)
+                     )
+             | other -> declaredResult.Check(false, fun () -> at (sprintf "the declaration is no object: %A" other)))
 
             // ---- the Deferred envelope on the seam (Phase 210) ----
 
@@ -338,7 +366,11 @@ module internal CapabilitySeamLaws =
                       Bind = fun _ _ () -> Ok() }
 
                 let slottedCap =
-                    Capability.create ("slotted-" + string i) (Function.signature slottedWitness "slotted" ()) Server
+                    Capability.create
+                        ("slotted-" + string i)
+                        (Function.signature slottedWitness "slotted" ())
+                        Server
+                        (Returns.Value(SlotTree(Some "slotted")))
 
                 let tree (k: string) =
                     Json.render (Json.kindObj k [ "n", JInt i ])
@@ -392,6 +424,7 @@ module internal CapabilitySeamLaws =
               replay
               enumeration
               roundtrip
+              declaredResult
               envelope
               asyncAxis
               typedFailure

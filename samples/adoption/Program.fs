@@ -204,9 +204,10 @@ let template =
 let celsiusAddr = "report/temp"
 let fillId = "outline.fill"
 
-/// The capability: the template's signature (its holes, their spaces, its effect), placed on a server.
+/// The capability: the template's signature (its holes, their spaces, its effect), placed on a server,
+/// and what it answers: the filled note's text.
 let fillCapability =
-    Capability.create fillId (Function.signature artifactW "fill-reading" template) Server
+    Capability.create fillId (Function.signature artifactW "fill-reading" template) Server (Returns.Value AnyString)
 
 /// Default deny is this registry's shape: only what is registered here can be dispatched.
 let capabilities =

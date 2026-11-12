@@ -36,15 +36,30 @@ type Placement =
     /// Served from a result computed ahead of time; wire tag `precomputed`.
     | Precomputed
 
+/// What a capability answers (Phase 642, DECISIONS.md D253): a value in a space, or nothing. It is
+/// stated in the one vocabulary a hole is (`ValueSpace`), so a result that is a tree of a kind is
+/// `Value(SlotTree(Some kind))`. "Returns nothing" has this one spelling, `Nothing`, and on the wire
+/// one document, `{"$type":"nothing"}`.
+[<RequireQualifiedAccess>]
+type Returns =
+    /// The capability answers no value: a call made for its effect.
+    | Nothing
+    /// The capability answers a value in this space; the registries hold the space to the
+    /// well-formedness a hole's is held to (`EmptyResult`, `NonFiniteResult`).
+    | Value of space: ValueSpace
+
 /// A registrable, invocable runtime capability. `Signature` (incl. its `Effect`) is reused
-/// verbatim from the artifact-function surface; `Placement` routes the host body. The wire carries
-/// this declaration + a typed invocation, never the body.
+/// verbatim from the artifact-function surface; `Result` says what it answers; `Placement` routes
+/// the host body. The wire carries this declaration + a typed invocation, never the body.
 type Capability =
     {
         /// The registry key; a second registration under the same id is refused `DuplicateCapability`.
         Id: string
         /// The arguments it takes and the effect it declares; registration refuses a non-total one.
         Signature: Signature
+        /// What it answers (Phase 642) — the one statement of it in Core: a function registry entry's
+        /// result kind is derived from it, and a pipeline call's declared output is checked against it.
+        Result: Returns
         /// Where its body runs; carried, never acted on, by the core.
         Placement: Placement
     }
@@ -213,10 +228,12 @@ type ArgValue =
 module Capability =
 
     /// Build a capability. Its `Determinism` is the signature's effect determinism, by derivation
-    /// (Phase 295), so the two cannot disagree.
-    let create (id: string) (sg: Signature) (placement: Placement) : Capability =
+    /// (Phase 295), so the two cannot disagree. The result is declared (Phase 642): there is no
+    /// capability without one, and `Returns.Nothing` is how one that answers no value says so.
+    let create (id: string) (sg: Signature) (placement: Placement) (result: Returns) : Capability =
         { Id = id
           Signature = sg
+          Result = result
           Placement = placement }
 
     /// The entries that make a signature non-total (Phase 295): a repeat over an unbounded count
@@ -226,22 +243,40 @@ module Capability =
         |> List.filter (fun e -> not (Function.isTotalEntry e))
         |> List.map _.Addr
 
+    /// Why a declared result is not well-formed (Phase 642): a value space `Space.wellFormed`
+    /// refuses, named as the hole faults are; `Returns.Nothing` is always well-formed.
+    let internal resultFault (result: Returns) : DeclarationFault option =
+        match result with
+        | Returns.Nothing -> None
+        | Returns.Value space ->
+            match Space.wellFormed space with
+            | Ok() -> None
+            | Error SpaceFault.Empty -> Some(EmptyResult space)
+            | Error SpaceFault.NonFinite -> Some NonFiniteResult
+
     /// THE admission gate (Phase 307; one function since Phase 385, D111): totality first
     /// (`NonTotalCapability`, naming the non-total entries), then well-formedness
-    /// (`Signature.validate`, refused `IllFormedCapability`), for a declaration under `id`. `None`
-    /// admits. Both registries run it through `admissionFault`, and `CapabilityCodec`'s capability
-    /// reader runs it over the signature it has just read, so a reader never admits what a registry
-    /// refuses and refuses it with the registry's own error.
-    let internal admissionOf (id: string) (sg: Signature) : InvokeError option =
+    /// (`Signature.validate`, then the declared result's space — Phase 642 — each refused
+    /// `IllFormedCapability`), for a declaration under `id`. `None` admits. Both registries run it
+    /// through `admissionFault`, and `CapabilityCodec`'s capability reader runs it over the signature
+    /// and result it has just read, so a reader never admits what a registry refuses and refuses it
+    /// with the registry's own error.
+    let internal admissionOf (id: string) (sg: Signature) (result: Returns) : InvokeError option =
         match nonTotalAddrs sg with
         | _ :: _ as addrs -> Some(NonTotalCapability(id, addrs))
         | [] ->
             match Signature.validate sg with
-            | Ok() -> None
             | Error fault -> Some(IllFormedCapability(id, fault))
+            | Ok() -> resultFault result |> Option.map (fun fault -> IllFormedCapability(id, fault))
+
+    /// `admissionOf`'s signature half: what the capability reader runs before it reads the result,
+    /// so a signature fault is answered before a result's (Phase 642). `Returns.Nothing` has no
+    /// fault, so this is exactly the gate over the signature alone.
+    let internal signatureAdmissionOf (id: string) (sg: Signature) : InvokeError option =
+        admissionOf id sg Returns.Nothing
 
     /// `admissionOf` over a built capability — what both registries run at `register` / `replace`.
-    let internal admissionFault (c: Capability) : InvokeError option = admissionOf c.Id c.Signature
+    let internal admissionFault (c: Capability) : InvokeError option = admissionOf c.Id c.Signature c.Result
 
     /// The space an argument for this entry is checked against: its own, or — for a slot entry built
     /// by hand before Phase 229, which carries none — the `SlotTree` of its constraint, so the

@@ -110,6 +110,11 @@ module internal SeamRefusalLaws =
                 """{"$type":"illFormedCapability","fault":{"$type":"duplicateHoleAddr","addr":"c"},"id":"x"}"""
                 "illFormedCapability-holeUnderSlot",
                 """{"$type":"illFormedCapability","fault":{"$type":"holeUnderSlot","node":"n"},"id":"x"}"""
+                // Phase 642: a capability's declared result, held to the gate a hole's space is.
+                "illFormedCapability-emptyResult",
+                """{"$type":"illFormedCapability","fault":{"$type":"emptyResult","space":{"$type":"enum","values":[]}},"id":"x"}"""
+                "illFormedCapability-nonFiniteResult",
+                """{"$type":"illFormedCapability","fault":{"$type":"nonFiniteResult"},"id":"x"}"""
                 "duplicateArg", """{"$type":"duplicateArg","addr":"a"}"""
                 "policyRefused", """{"$type":"policyRefused","allowed":["a"],"policy":"p","reason":"r"}"""
                 "approvalRequired", """{"$type":"approvalRequired","policy":"p"}""" ] do
@@ -174,6 +179,14 @@ module internal SeamRefusalLaws =
                   "declarationFault"
                   "emptySpace"
                   """{"$type":"emptySpace","addr":"a","space":{"$type":"enum","values":[]}}"""
+          yield reads "declarationFault" "nonFiniteResult" """{"$type":"nonFiniteResult"}"""
+          yield
+              refused
+                  "declarationFault"
+                  "emptyResult-missing-space"
+                  """{"$type":"emptyResult"}"""
+                  DecodeCode.MissingField
+                  [ k "space" ]
           yield
               refused
                   "declarationFault/strict"

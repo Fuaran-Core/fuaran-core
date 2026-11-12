@@ -41,15 +41,25 @@ module CapabilityPipeline =
                 | FromNode up -> Some up
                 | Literal _ -> None)
 
+    /// Does a node's declared output state what its capability answers (Phase 642)? It must admit
+    /// every value of the declared result, so every downstream edge checked against it is checked
+    /// against a space that holds the capability's answers; a capability that answers nothing has
+    /// no output a node could declare.
+    let private outputStates (declared: ValueSpace) (result: Returns) : bool =
+        match result with
+        | Returns.Value answered -> Space.subsumes declared answered
+        | Returns.Nothing -> false
+
     /// Type-check the pipeline against a capability lookup (Phase 35; the lookup since Phase 295):
-    /// node ids are unique; every `Invoke`'s capability resolves (default-deny); every arg is one the
-    /// capability takes, once (`DuplicateArg`, Phase 307), refused as `Capability.validateArgs`
-    /// refuses it and wrapped `PipelineArgRefused`; a `Literal` is in its hole's space; a `FromNode` edge names a declared
-    /// node that comes EARLIER in declaration order — a self-edge or an edge that closes a cycle is
-    /// `PipelineCycle` naming the cycle, any other later node `PipelineForwardEdge` — and its
-    /// producer's output space feeds the arg's space (`Space.subsumes`; an ill-typed edge is a named
-    /// `EdgeTypeMismatch`); every required hole is bound. Total; the first refusal in declaration
-    /// order is the answer.
+    /// node ids are unique; every `Invoke`'s capability resolves (default-deny); its declared output
+    /// admits the capability's declared result (`PipelineOutputContradicts`, Phase 642); every arg
+    /// is one the capability takes, once (`DuplicateArg`, Phase 307), refused as
+    /// `Capability.validateArgs` refuses it and wrapped `PipelineArgRefused`; a `Literal` is in its
+    /// hole's space; a `FromNode` edge names a declared node that comes EARLIER in declaration order
+    /// — a self-edge or an edge that closes a cycle is `PipelineCycle` naming the cycle, any other
+    /// later node `PipelineForwardEdge` — and its producer's output space feeds the arg's space
+    /// (`Space.subsumes`; an ill-typed edge is a named `EdgeTypeMismatch`); every required hole is
+    /// bound. Total; the first refusal in declaration order is the answer.
     let typeCheck (lookup: CapabilityLookup<'Ctx>) (p: CapabilityPipeline) : Result<unit, PipelineError> =
         let ids = p.Nodes |> List.map nodeId
         let nodeById = p.Nodes |> List.map (fun n -> nodeId n, n) |> Map.ofList
@@ -93,9 +103,11 @@ module CapabilityPipeline =
                 function
                 | [] -> Ok()
                 | Source _ :: rest -> go rest
-                | Invoke(nid, capId, _, args) :: rest ->
+                | Invoke(nid, capId, declared, args) :: rest ->
                     match lookup.TryFind capId with
                     | None -> Error(PipelineError.PipelineNoSuchCapability(capId, lookup.Known))
+                    | Some cap when not (outputStates declared cap.Result) ->
+                        Error(PipelineError.PipelineOutputContradicts(nid, capId, declared, cap.Result))
                     | Some cap ->
                         let holes = cap.Signature.Holes
                         let declared = holes |> List.map _.Addr

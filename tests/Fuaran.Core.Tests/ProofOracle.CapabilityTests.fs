@@ -69,6 +69,8 @@ let private prodFaultRender (f: DeclarationFault) : string =
     | NonFiniteBound a -> sprintf "NonFiniteBound(%s)" a
     | DuplicateHoleAddr a -> sprintf "DuplicateHoleAddr(%s)" a
     | HoleUnderSlot n -> sprintf "HoleUnderSlot(%s)" n
+    | EmptyResult s -> sprintf "EmptyResult(%s)" (modelSpaceRender (spaceToModel s))
+    | NonFiniteResult -> "NonFiniteResult"
 
 let private modelFaultRender (f: ModelCap.decl_fault) : string =
     match f with
@@ -76,6 +78,8 @@ let private modelFaultRender (f: ModelCap.decl_fault) : string =
     | ModelCap.NonFiniteBound a -> sprintf "NonFiniteBound(%s)" a
     | ModelCap.DuplicateHoleAddr a -> sprintf "DuplicateHoleAddr(%s)" a
     | ModelCap.HoleUnderSlot n -> sprintf "HoleUnderSlot(%s)" n
+    | ModelCap.EmptyResult s -> sprintf "EmptyResult(%s)" (modelSpaceRender s)
+    | ModelCap.NonFiniteResult -> "NonFiniteResult"
 
 let private prodApplyErrRender (e: ApplyError) : string =
     match e with
@@ -486,7 +490,7 @@ let private capProbe (rd: ModelCap.readers) (seedTag: int) (r: ConfRng.T) (acc: 
         let id, r2 = ConfRng.choose capIdPool rng
         let sg, r3 = genCapSignature (sprintf "f%d" i) r2
         let placement, r4 = ConfRng.choose [ BuildTime; Server; ClientIsland Pyodide ] r3
-        let cap = Capability.create id sg placement
+        let cap = Capability.create id sg placement (Returns.Value AnyString)
 
         match CapabilityRegistry.register cap preg, ModelCap.register rd (capToModel cap) mreg with
         | Ok p', ModelCap.Ok m' -> (r4, p', m'), Tally.bump "Registered" tally
@@ -1119,7 +1123,7 @@ let tests =
                               | SlotHole _ -> false
                               | _ -> true) }
 
-              let cap = Capability.create "cap-t" sg Server
+              let cap = Capability.create "cap-t" sg Server (Returns.Value AnyString)
 
               let reg =
                   match CapabilityRegistry.register cap CapabilityRegistry.empty with
@@ -1175,7 +1179,7 @@ let tests =
               // the body never running, and DISPATCHES a conforming one (asserted after the counts
               // below): `slot_hole_invocable_in_space`, `slot_wrong_kind_refused` and
               // `slot_scalar_uninvocable`, on the shipped seam.
-              let slotCap = Capability.create "cap-slot" full Server
+              let slotCap = Capability.create "cap-slot" full Server (Returns.Value AnyString)
 
               let reg2 =
                   match CapabilityRegistry.register slotCap reg with
