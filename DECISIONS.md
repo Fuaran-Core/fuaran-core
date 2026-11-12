@@ -20,6 +20,7 @@ it equal to them. [`CONTRIBUTING.md`](CONTRIBUTING.md) says how an entry is adde
 | Id | Date | Decision | Status |
 |---|---|---|---|
 | D250 | 2026-11-12 | the proof kit runs two legs, selected by a field of the pin: the present one unchanged, and a custard leg for the prover with no legacy printer, which extracts the whole program in one run, takes Pulse models and can run its oracle under Fable | Live |
+| D249 | 2026-11-12 | a gate decides under a decision context, a type parameter of the gate, the seam and the registries; a dispatch may present a grant, bound to the invocation's injective pre-image and never to its hashed capture key; a grant lifts exactly one needs-approval and is not a gate | Live |
 | D248 | 2026-11-11 | a generic union's seam receives, beside each argument decoder, the argument's witness: a generated case per concrete type the vocabulary instantiates one at, carrying the identity both ways, so a host decoder that depends on the instantiation needs no runtime type | Live |
 | D247 | 2026-11-10 | the SDK stays on the `10.0.2xx` band until the extracted oracles compile under strict indentation | Live |
 | D246 | 2026-11-10 | a structure write is its parent's child-list slot against a slot access, and a read is of a node's existence, which no slot write changes; a slot access meets the node sets only at a content write | Live |
@@ -351,6 +352,98 @@ repository that opens one is the first to check it on the newer prover. The cust
 `mirror` yet: the mirror is a `prover-fstar-<release>` release of this repository holding the same
 assets, cut with the kit release that first carries the pin. This repository's CI runs the kit tests on
 the present leg only; running the custard arms there needs the newer prover fetched on the runner.
+
+## 2026-11-12 — D249: a gate decides under a decision context, a type parameter of the gate, the seam and the registries; a dispatch may present a grant, bound to the invocation's injective pre-image and never to its hashed capture key; a grant lifts exactly one needs-approval and is not a gate
+
+**Status:** Live
+
+Phase 638. A gate was a function of a declaration and its arguments. It could not be shown who was
+acting, so a restricted actor needed a registry built for it by hand; and it could not be shown an
+approval, so an approved action went round the gate. Three kinds of consumer need the same two
+additions: a model-update-view runtime that decides each step for whoever wrote the message, a
+device's safety envelope that tells its network side from a local operator, and a tool gate that
+decides under a ceiling. This entry records the shape.
+
+**1. Where the context sits.** `PolicyGate<'Ctx, 'Decl, 'Args>.Decide` is
+`'Ctx -> 'Decl -> 'Args -> PolicyDecision`. The parameter runs through everything that holds a gate:
+`RegistryPolicy<'Ctx, 'Decl, 'Args>`, `Seam<'Ctx, 'Decl, 'Args, 'E>`, `CapabilityRegistry<'Ctx>`,
+`FunctionRegistry<'Ctx>` and `CapabilityLookup<'Ctx>`. A dispatch and a `decide` take the context as
+a value, after the registry: `CapabilityRegistry.dispatch r ctx grant id args body`. The pipeline's
+`eval` and `evalFrom` take it after the lookup. A denial observer is told the context it was refused
+under (`PolicyDenial<'Ctx, 'Args>.Context`), because one registry now serves every context and an
+audit record that could not say which would be worth less than the one it replaces. Core names
+nothing the context holds: no actor, no role, no destination. A destination is an argument a
+capability declares.
+
+**2. What a registry that needs no context writes.** `CapabilityRegistry<unit>`, and `()` at each
+dispatch. A gate written before this phase is carried across by one helper,
+`PolicyGate.ignoringContext policy decide`, which decides as `decide` does under every context.
+`CapabilityRegistry.under ctx r` (with `Seam.under`, `FunctionRegistry.under` and
+`RegistryPolicy.under`) fixes a context: the result takes `unit` and decides exactly as `r` does
+under `ctx`. It is what a conformance witness is handed, since the witness records are frozen and
+hold a `CapabilityRegistry<unit>`, and it is the view a host gives a caller that must not choose its
+own context.
+
+**3. What a grant is, and what it is bound to.** `Grant` is a record of one string, `Invocation`:
+the identity of the invocation it is for. For a capability that identity is
+`Capability.invocationPreimage c args`: the capability id, then each binding's address and canonical
+spelling, address sorted, through `Hash.canonicalFields`, with **no hash taken**.
+`Capability.grant c args` mints the grant for exactly that invocation.
+
+The phase was filed to bind a grant to `Capability.invocationKey`, on the reading that the key is
+injective and proved. It is not, and the record should say so. `invocationKey` is the capability id,
+`#`, and `Hash.fnv1a` of the canonical pre-image. What `invocation_key_injective` proves injective is
+the pre-image. The key ends in a 32-bit cache hash, and `Hash.fs` says of it that a second pre-image
+is seconds of search and that it must never stand where an adversary gains by forging. An approval
+is exactly that place: whoever chooses the arguments could choose a second argument set whose key
+collides with an approved one, and present the approval for the first with the second. So the grant
+is bound to the pre-image, compared by equality. `invocation_identity_injective` in
+`proofs/Capability.fst` proves that two invocations with one identity name one capability id and
+carry the same keyed bindings, under the field-encoding premises the capture key's theorem already
+spends and no premise about any hash. The capture key is unchanged, byte for byte, and journals
+keyed under it replay as before.
+
+A generic seam states its own identity: `SeamVocabulary.Invocation`, documented as required to be
+injective. The query seam states one (the query id, then the fields its capture key hashes) and
+presents no grant yet; the query registry stays at the `unit` context in this phase.
+
+**4. Where a dispatch presents it, and what Core checks.** Each dispatch verb and each `decide`
+takes a `Grant option` after the context. A pipeline run takes a `Grant list`, since it makes many
+invocations. Core checks one thing: that a presented grant's `Invocation` equals this invocation's
+identity. If the gates answer `NeedsApproval` and it does, the invocation is admitted as an `Allow`
+is, and no observer is told. `PolicyDecision.lifted` is the whole of it.
+
+**5. What stays the host's.** Who minted the grant, whether it was already spent, when it expires
+and which generation of the registry it was minted against. Core holds none of these and reads no
+clock and no counter. They are facts the host puts in the decision context, where a gate reads them
+and answers `Deny` for a grant that is spent or stale; and no grant lifts a `Deny`. A gate's decision
+stays total and free of side effects, as it has had to be since a registry could be asked to
+`decide` without dispatching.
+
+**6. Why a grant is not a gate.** A gate can only tighten: the decision is the join over the gates,
+and `with_gate_tightens_in_context` proves that adding one never lowers it, under every context. A
+grant goes the other way, so it cannot be a gate, and it is kept narrow instead: it changes one
+decision, the `NeedsApproval` of the invocation it is for, to `Allow`. It changes no `Allow`, lifts
+no `Deny`, and is nothing to any other invocation. `grant_changes_only_its_own_decision` states
+that in full.
+
+**7. The guarded AI surface.** `Proposals.decideGuarded`, `submitGuarded` and `approveGuarded` take
+the registry's context. An approval used to pass over a `NeedsApproval` from the registry, beside
+the gate. `approveGuarded` now decides each invocation the proposal names with the grant for exactly
+that invocation presented, so the approval goes through the gate, and a `Deny` under the approver's
+context still refuses. The witness records are untouched; a state-aware witness is Phase 643.
+
+**8. What was considered and not done.** Binding the grant to a SHA-256 digest of the pre-image
+would make it short, at the price of a partial constructor (`Digest.tryOfFields` refuses an
+ill-formed string) and a theorem conditional on the digest; a host that wants a short token can
+digest the identity itself. Showing the gate the grant was rejected: a gate that could read an
+approval could loosen on it, which is the property the join exists to exclude. Keeping the
+registries non-generic with the context erased to `obj` was rejected as a cast at every gate.
+
+**Laws first.** The laws in `tests/Fuaran.Core.Tests/DecisionContextTests.fs` and the two Phase 638
+laws of `Conformance.policyLaws` were written against the new shape. None is expressible on the tree
+before this phase: a gate's `Decide` took no context, no dispatch verb took a context or a grant,
+and there was no `Grant` type to construct.
 
 ## 2026-11-11 — D248: a generic union's seam receives, beside each argument decoder, the argument's witness: a generated case per concrete type the vocabulary instantiates one at, carrying the identity both ways, so a host decoder that depends on the instantiation needs no runtime type
 

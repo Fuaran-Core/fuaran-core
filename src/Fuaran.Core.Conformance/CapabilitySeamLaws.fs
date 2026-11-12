@@ -243,7 +243,9 @@ module internal CapabilitySeamLaws =
                 // capability-level `invoke` and the registry-level `dispatch` alike.
                 for answer in [ Ready realized; Pending ] do
                     let direct = Capability.invoke cap args (fun () -> answer)
-                    let dispatched = CapabilityRegistry.dispatch creg cap.Id args (fun _ () -> answer)
+
+                    let dispatched =
+                        CapabilityRegistry.dispatch creg () None cap.Id args (fun _ () -> answer)
 
                     envelope.Check(
                         (direct = Ok answer && dispatched = Ok answer),
@@ -262,7 +264,7 @@ module internal CapabilitySeamLaws =
                 let ran = ref false
 
                 (match
-                    CapabilityRegistry.dispatch creg cap.Id [ "h0", string (hi + 1) ] (fun _ () ->
+                    CapabilityRegistry.dispatch creg () None cap.Id [ "h0", string (hi + 1) ] (fun _ () ->
                         ran.Value <- true
                         Ready realized)
                  with
@@ -274,7 +276,7 @@ module internal CapabilitySeamLaws =
                      ))
 
                 (match
-                    CapabilityRegistry.dispatch creg "no-such-capability" args (fun _ () ->
+                    CapabilityRegistry.dispatch creg () None "no-such-capability" args (fun _ () ->
                         ran.Value <- true
                         Ready realized)
                  with
@@ -295,7 +297,7 @@ module internal CapabilitySeamLaws =
                 // `BodyFailed`, so `Ok(Failed _)` is unreachable. Exhausts the body's three answers
                 // rather than asserting the fourth away.
                 for answer in [ Ready realized; Pending; Failed("boom-" + string i) ] do
-                    match CapabilityRegistry.dispatch creg cap.Id args (fun _ () -> answer), answer with
+                    match CapabilityRegistry.dispatch creg () None cap.Id args (fun _ () -> answer), answer with
                     | Error(BodyFailed m), Failed fm when m = fm -> typedFailure.Saw()
                     | Ok d, (Ready _ | Pending) when d = answer -> typedFailure.Saw()
                     | other, _ ->
@@ -364,7 +366,7 @@ module internal CapabilitySeamLaws =
                     let run a =
                         ran.Value <- false
 
-                        CapabilityRegistry.dispatch sreg slottedCap.Id a (fun _ () ->
+                        CapabilityRegistry.dispatch sreg () None slottedCap.Id a (fun _ () ->
                             ran.Value <- true
                             Ready realized)
 

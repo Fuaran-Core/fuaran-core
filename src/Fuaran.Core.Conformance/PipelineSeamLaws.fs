@@ -258,6 +258,8 @@ module internal PipelineSeamLaws =
                 (match
                     CapabilityPipeline.eval
                         reg
+                        ()
+                        []
                         string
                         (fun _ _ ->
                             ran.Value <- true
@@ -449,7 +451,7 @@ module internal PipelineSeamLaws =
         let mutable cleanNodes = 0
 
         // `inc` takes one integer and is total; evaluation type-checks against it (Phase 295).
-        let lookup: CapabilityLookup =
+        let lookup: CapabilityLookup<unit> =
             let inc =
                 Capability.create
                     "inc"
@@ -507,17 +509,17 @@ module internal PipelineSeamLaws =
                 | 1 -> Map.ofList [ "s1", s1v0; "s2", s2v1 ], Set.ofList [ "s2" ]
                 | _ -> Map.ofList [ "s1", s1v1; "s2", s2v1 ], Set.ofList [ "s1"; "s2" ]
 
-            match CapabilityPipeline.eval lookup string (bodyWith sv0 (ResizeArray())) pipeline with
+            match CapabilityPipeline.eval lookup () [] string (bodyWith sv0 (ResizeArray())) pipeline with
             | Error e -> byteIdentical.Check(false, fun () -> at (sprintf "prior eval errored: %A" e))
             | Ok prior ->
                 let fullInvoked = ResizeArray()
                 let incrInvoked = ResizeArray()
 
                 let viaFull =
-                    CapabilityPipeline.eval lookup string (bodyWith sv1 fullInvoked) pipeline
+                    CapabilityPipeline.eval lookup () [] string (bodyWith sv1 fullInvoked) pipeline
 
                 let viaIncr =
-                    CapabilityPipeline.evalFrom lookup string (bodyWith sv1 incrInvoked) prior changed pipeline
+                    CapabilityPipeline.evalFrom lookup () [] string (bodyWith sv1 incrInvoked) prior changed pipeline
 
                 // byte-identical to a full eval over the changed inputs
                 byteIdentical.Check(

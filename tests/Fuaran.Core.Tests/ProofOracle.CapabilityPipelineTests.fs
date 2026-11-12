@@ -149,7 +149,10 @@ let private validValueFor (s: ValueSpace) : string =
 
 /// A registry on both sides holding up to the three pool ids, each tried up to three times so
 /// most registries hold all of them (the admission gate refuses a good share of the draws).
-let private genRegistryPair (rd: ModelCap.readers) (r: ConfRng.T) : CapabilityRegistry * ModelCap.registry * ConfRng.T =
+let private genRegistryPair
+    (rd: ModelCap.readers)
+    (r: ConfRng.T)
+    : CapabilityRegistry<unit> * ModelCap.registry * ConfRng.T =
     let mutable rng = r
     let mutable preg = CapabilityRegistry.empty
     let mutable mreg = ModelCap.empty
@@ -195,7 +198,7 @@ let private rewriteFirst (pick: PipelineNode -> bool) (f: PipelineNode -> Pipeli
 /// node id, the first node moved last (a forward edge), a self-edge, a cycle through two nodes, an
 /// edge to no node, an argument at no hole, an argument bound twice, an argument dropped, or the
 /// whole declaration reversed.
-let private genPipeline (preg: CapabilityRegistry) (r: ConfRng.T) : CapabilityPipeline * ConfRng.T =
+let private genPipeline (preg: CapabilityRegistry<unit>) (r: ConfRng.T) : CapabilityPipeline * ConfRng.T =
     let mutable rng = r
     let nodes = System.Collections.Generic.List<PipelineNode>()
     let registered = CapabilityRegistry.enumerate preg
@@ -477,7 +480,7 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
 
         let pLog = ResizeArray<string>()
         let mLog = ResizeArray<string>()
-        let pe0 = CapabilityPipeline.eval lookup id (pBodyOf table pLog) p
+        let pe0 = CapabilityPipeline.eval lookup () [] id (pBodyOf table pLog) p
         let me0 = ModelCap.eval feedReaders rd mlookup id (mBodyOf table mLog) mp
 
         let evaluates (tally: Tally) =
@@ -584,7 +587,7 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
         let mLog1 = ResizeArray<string>()
 
         let pf =
-            CapabilityPipeline.evalFrom lookup id (pBodyOf table1 pLog1) prior changedSet p
+            CapabilityPipeline.evalFrom lookup () [] id (pBodyOf table1 pLog1) prior changedSet p
 
         let mf =
             ModelCap.eval_from feedReaders rd mlookup id (mBodyOf table1 mLog1) (Map.toList prior) changedList mp
@@ -606,7 +609,7 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
                 // evaluation and a body that moved only at the changed nodes, the incremental answer
                 // IS the full one.
                 let full =
-                    CapabilityPipeline.eval lookup id (pBodyOf table1 (ResizeArray<string>())) p
+                    CapabilityPipeline.eval lookup () [] id (pBodyOf table1 (ResizeArray<string>())) p
 
                 // THE HYPOTHESIS IS NEEDED: a body that also moves at a node the caller did NOT name
                 // is a stale reuse. Counted, not asserted per probe — the unnamed node must be one
@@ -622,6 +625,8 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
                         let stale =
                             CapabilityPipeline.evalFrom
                                 lookup
+                                ()
+                                []
                                 id
                                 (pBodyOf table2 (ResizeArray<string>()))
                                 prior
@@ -629,7 +634,7 @@ let private pipeDifferential (rd: ModelCap.readers) (seed: int) (trials: int) : 
                                 p
 
                         let fresh =
-                            CapabilityPipeline.eval lookup id (pBodyOf table2 (ResizeArray<string>())) p
+                            CapabilityPipeline.eval lookup () [] id (pBodyOf table2 (ResizeArray<string>())) p
 
                         stale <> fresh
                     | None -> false

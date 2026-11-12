@@ -4562,10 +4562,42 @@ let _ = assert_norm (twins_hold twins == true)
    The gated outcome wraps the ungated seam's refusals (`GRefused`) rather than widening
    `invoke_error`: production adds the two cases to `InvokeError` itself, and the wrapper is
    the same three-way split stated without touching the extracted type. Everything in this
-   section but `gated_error` (which section 18's codec carries, Phase 455) is
-   `noextract_to "FSharp"`; the bridge to
-   production is the `Conformance.policyLaws` family, which samples the same two properties
-   against the shipped registries. ====================================================== *)
+   section but `gated_error` (which section 18's codec carries, Phase 455) and, since Phase 638,
+   `invocation_identity` and `granted` (which the oracle runs beside
+   `Capability.invocationPreimage` and `Grant.covers`) is `noextract_to "FSharp"`; the bridge to
+   production for the rest is the `Conformance.policyLaws` family, which samples the same
+   properties against the shipped registries.
+
+   PHASE 638 — THE DECISION CONTEXT AND THE GRANT. A gate reads a decision context before the
+   capability and the arguments, and a dispatch may present a grant. Both theorems above are
+   restated over the two (neither is weakened: with no grant each is the Phase 318 statement,
+   under every context), and the section gains:
+
+     `policy_join_monotone_in_context`, `with_gate_tightens_in_context` — the join is monotone
+     under a context, and adding a gate gives exactly the join with the old decision, so a
+     decision never falls, under every context;
+     `invocation_identity_injective` — the identity a grant is bound to is injective: the
+     capability id and the keyed bindings, with no hash taken;
+     `approval_dispatches_iff_granted`, `grant_for_another_invocation_refused` — a
+     needs-approval dispatch answers the body's answer with the grant for exactly its
+     invocation, and is refused, the same under every body, with none or any other;
+     `deny_reaches_no_performer` — a deny is refused whatever grant is presented;
+     `grant_lifts_only_needs_approval`, `grant_changes_only_its_own_decision`,
+     `allow_unchanged_by_any_grant` — a grant changes the one decision it is bound to;
+     `unregistered_refused_whatever_presented` — default-deny, under every context and grant;
+     `one_registry_two_contexts` — one gate list, two contexts, two decisions (a witness);
+     `decision_reads_only_its_inputs` — the decision reads the gates only at its own context,
+     capability and arguments.
+
+   THE PARAMETERS, and what is assumed of each. `ctx`, the context type: a type variable
+   (`Type0`), nothing assumed; the one theorem about a context instantiates it at `bool`. The gate
+   list, the registry, the body and the presented grant: universally quantified, nothing
+   assumed. `rd` (the scalar readers) and `kr` (the key renderers): nothing assumed, except in
+   the two theorems CONDITIONAL on `key_premises`, section 12's reading of `Hash.canonicalField`
+   as an escaper and a terminator: `invocation_identity_injective` and
+   `grant_for_another_invocation_refused`. Every other theorem of the section is unconditional.
+   A grant is modelled as the identity string it carries (`option string`), which is all
+   `Grant` holds. ====================================================================== *)
 
 [@@ noextract_to "FSharp"]
 type decision =
@@ -4596,56 +4628,159 @@ let policy_join_monotone (a a' b b':decision)
           (ensures policy_rank (policy_join a b) <= policy_rank (policy_join a' b'))
   = ()
 
-(* F#: `PolicyGate`. *)
+(* F#: `PolicyGate` (Phase 638) — a gate reads the DECISION CONTEXT the dispatch was made under,
+   then the declaration and the arguments. The context is a type parameter here as in production:
+   Core names nothing it holds. `Type0`, because nothing in this section needs a higher universe.
+   Every theorem below that quantifies over `ctx` assumes nothing of it; the one theorem that is
+   ABOUT a context (`one_registry_two_contexts`) instantiates it at `bool`. *)
 [@@ noextract_to "FSharp"]
-noeq type gate = { gname: string; gdecide: capability -> invocation -> decision }
+noeq type gate (ctx:Type0) = { gname: string; gdecide: ctx -> capability -> invocation -> decision }
 
 (* F#: `RegistryPolicy.decideNamed` — the fold from `("", Allow)`, keeping the first gate of the
-   highest rank. *)
+   highest rank, every gate consulted under the one context. No grant is read here. *)
 [@@ noextract_to "FSharp"]
-let rec decide_from (gs:list gate) (c:capability) (a:invocation) (acc:(string & decision))
+let rec decide_from (#ctx:Type0) (gs:list (gate ctx)) (x:ctx) (c:capability) (a:invocation)
+                    (acc:(string & decision))
   : Tot (string & decision) (decreases gs) =
   match gs with
   | [] -> acc
   | g :: t ->
-    let d = g.gdecide c a in
-    if policy_rank d > policy_rank (snd acc) then decide_from t c a (g.gname, d) else decide_from t c a acc
+    let d = g.gdecide x c a in
+    if policy_rank d > policy_rank (snd acc) then decide_from t x c a (g.gname, d) else decide_from t x c a acc
 
 [@@ noextract_to "FSharp"]
-let decide_named (gs:list gate) (c:capability) (a:invocation) : Tot (string & decision) =
-  decide_from gs c a ("", DAllow)
+let decide_named (#ctx:Type0) (gs:list (gate ctx)) (x:ctx) (c:capability) (a:invocation)
+  : Tot (string & decision) =
+  decide_from gs x c a ("", DAllow)
 
 [@@ noextract_to "FSharp"]
-let rec gate_named (n:string) (d:decision) (gs:list gate) (c:capability) (a:invocation) : Tot prop =
+let rec gate_named (#ctx:Type0) (n:string) (d:decision) (gs:list (gate ctx)) (x:ctx) (c:capability)
+                   (a:invocation) : Tot prop =
   match gs with
   | [] -> False
-  | g :: t -> (g.gname == n /\ g.gdecide c a == d) \/ gate_named n d t c a
+  | g :: t -> (g.gname == n /\ g.gdecide x c a == d) \/ gate_named n d t x c a
 
-let rec decide_from_names_a_gate (gs:list gate) (c:capability) (a:invocation) (acc:(string & decision))
-  : Lemma (ensures (let (n, d) = decide_from gs c a acc in
-                    (n == fst acc /\ d == snd acc) \/ gate_named n d gs c a))
+let rec decide_from_names_a_gate (#ctx:Type0) (gs:list (gate ctx)) (x:ctx) (c:capability) (a:invocation)
+                                 (acc:(string & decision))
+  : Lemma (ensures (let (n, d) = decide_from gs x c a acc in
+                    (n == fst acc /\ d == snd acc) \/ gate_named n d gs x c a))
           (decreases gs)
   = match gs with
     | [] -> ()
     | g :: t ->
-      let d = g.gdecide c a in
-      if policy_rank d > policy_rank (snd acc) then decide_from_names_a_gate t c a (g.gname, d)
-      else decide_from_names_a_gate t c a acc
+      let d = g.gdecide x c a in
+      if policy_rank d > policy_rank (snd acc) then decide_from_names_a_gate t x c a (g.gname, d)
+      else decide_from_names_a_gate t x c a acc
 
-(* A decision other than `Allow` was made by a gate of the list, under the name it carries. *)
-let decide_named_names_a_gate (gs:list gate) (c:capability) (a:invocation)
-  : Lemma (ensures (let (n, d) = decide_named gs c a in DAllow? d \/ gate_named n d gs c a))
-  = decide_from_names_a_gate gs c a ("", DAllow)
+(* A decision other than `Allow` was made by a gate of the list, under the name it carries and
+   under the context the dispatch was made in. *)
+let decide_named_names_a_gate (#ctx:Type0) (gs:list (gate ctx)) (x:ctx) (c:capability) (a:invocation)
+  : Lemma (ensures (let (n, d) = decide_named gs x c a in DAllow? d \/ gate_named n d gs x c a))
+  = decide_from_names_a_gate gs x c a ("", DAllow)
 
 (* The decision only rises along the fold, so a longer gate list never decides lower. *)
-let rec decide_from_rises (gs:list gate) (c:capability) (a:invocation) (acc:(string & decision))
-  : Lemma (ensures policy_rank (snd (decide_from gs c a acc)) >= policy_rank (snd acc)) (decreases gs)
+let rec decide_from_rises (#ctx:Type0) (gs:list (gate ctx)) (x:ctx) (c:capability) (a:invocation)
+                          (acc:(string & decision))
+  : Lemma (ensures policy_rank (snd (decide_from gs x c a acc)) >= policy_rank (snd acc)) (decreases gs)
   = match gs with
     | [] -> ()
     | g :: t ->
-      let d = g.gdecide c a in
-      if policy_rank d > policy_rank (snd acc) then decide_from_rises t c a (g.gname, d)
-      else decide_from_rises t c a acc
+      let d = g.gdecide x c a in
+      if policy_rank d > policy_rank (snd acc) then decide_from_rises t x c a (g.gname, d)
+      else decide_from_rises t x c a acc
+
+(* THEOREM (Phase 638) — `policy_join_monotone`, OVER A CONTEXT. The Phase 318 statement above is
+   kept as it is: it is about `policy_join`, which reads no context. This is the same statement at
+   the gates: under ONE context, raising either gate's decision never lowers their join. *)
+let policy_join_monotone_in_context (#ctx:Type0) (g g' h h':gate ctx) (x:ctx) (c:capability)
+                                    (a:invocation)
+  : Lemma (requires policy_rank (g.gdecide x c a) <= policy_rank (g'.gdecide x c a) /\
+                    policy_rank (h.gdecide x c a) <= policy_rank (h'.gdecide x c a))
+          (ensures policy_rank (policy_join (g.gdecide x c a) (h.gdecide x c a)) <=
+                   policy_rank (policy_join (g'.gdecide x c a) (h'.gdecide x c a)))
+  = policy_join_monotone (g.gdecide x c a) (g'.gdecide x c a) (h.gdecide x c a) (h'.gdecide x c a)
+
+(* F#: `RegistryPolicy.withGate` is `p.Gates @ [ gate ]`. The decision over the longer list is the
+   join of the shorter list's decision with the new gate's, under the same context. *)
+let rec decide_from_snoc (#ctx:Type0) (gs:list (gate ctx)) (g:gate ctx) (x:ctx) (c:capability)
+                         (a:invocation) (acc:(string & decision))
+  : Lemma (ensures snd (decide_from (app gs [g]) x c a acc) ==
+                   policy_join (snd (decide_from gs x c a acc)) (g.gdecide x c a))
+          (decreases gs)
+  = match gs with
+    | [] -> ()
+    | h :: t ->
+      let d = h.gdecide x c a in
+      if policy_rank d > policy_rank (snd acc) then decide_from_snoc t g x c a (h.gname, d)
+      else decide_from_snoc t g x c a acc
+
+(* THEOREM (Phase 638) — `with_gate_tightens_in_context`. Under EVERY context, adding a gate gives
+   exactly the join of the old decision with the new gate's, so the decision never falls: a gate
+   can tighten a registry for a context and can never loosen it for any. *)
+let with_gate_tightens_in_context (#ctx:Type0) (gs:list (gate ctx)) (g:gate ctx) (x:ctx)
+                                  (c:capability) (a:invocation)
+  : Lemma (ensures snd (decide_named (app gs [g]) x c a) ==
+                   policy_join (snd (decide_named gs x c a)) (g.gdecide x c a) /\
+                   policy_rank (snd (decide_named gs x c a)) <=
+                   policy_rank (snd (decide_named (app gs [g]) x c a)))
+  = decide_from_snoc gs g x c a ("", DAllow)
+
+(* --------------------------------------------------------------------------------------
+   THE GRANT (Phase 638; F#: `Grant`, `Capability.invocationPreimage`, `Capability.grant`,
+   `Grant.covers`, `PolicyDecision.lifted`).
+
+   A dispatch may present a grant. A grant is for ONE invocation, named by the invocation's
+   IDENTITY: the capability id, then the fields the capture key hashes, as one canonical
+   pre-image with NO hash taken. The capture key (`invocation_key`) ends in `k_hash`, about which
+   nothing is claimed, so an approval is never bound to it.
+   -------------------------------------------------------------------------------------- *)
+
+(* F#: `Capability.invocationPreimage` — `Hash.canonicalFields (c.Id :: bindingFields c args)`. *)
+let invocation_identity (kr:key_renderers) (c:capability) (a:invocation) : Tot string =
+  key_fields kr (c.c_id :: binding_fields (sort_bindings kr (keyed kr c a)))
+
+(* THEOREM (Phase 638) — `invocation_identity_injective`. Two invocations with one identity name
+   one capability id and carry the same keyed bindings. Under section 12's premises about the
+   field encoding and nothing else: no hash, no comparator. *)
+let invocation_identity_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym)
+  (kr:key_renderers) (c c':capability) (a a':invocation)
+  : Lemma (requires key_premises reveal e t kr /\
+                    invocation_identity kr c a == invocation_identity kr c' a')
+          (ensures c.c_id == c'.c_id /\
+                   sort_bindings kr (keyed kr c a) == sort_bindings kr (keyed kr c' a') /\
+                   (forall (b:(string & string)).
+                      mem_binding b (keyed kr c a) = mem_binding b (keyed kr c' a'))) =
+  let s = sort_bindings kr (keyed kr c a) in
+  let s' = sort_bindings kr (keyed kr c' a') in
+  key_fields_injective reveal e t kr (c.c_id :: binding_fields s) (c'.c_id :: binding_fields s');
+  binding_fields_injective s s';
+  let aux (b:(string & string))
+    : Lemma (mem_binding b (keyed kr c a) = mem_binding b (keyed kr c' a')) =
+    sort_bindings_mem kr (keyed kr c a) b; sort_bindings_mem kr (keyed kr c' a') b
+  in
+  FStar.Classical.forall_intro aux
+
+(* F#: `Grant.covers (v.Invocation decl args) (Option.toList grant)` — the presented grant, if
+   any, is for exactly this invocation. A grant is modelled as the identity it carries. *)
+let granted (kr:key_renderers) (c:capability) (a:invocation) (g:option string) : Tot bool =
+  match g with
+  | None -> false
+  | Some i -> i = invocation_identity kr c a
+
+(* F#: `PolicyDecision.lifted`. *)
+[@@ noextract_to "FSharp"]
+let grant_lifted (b:bool) (d:decision) : Tot decision =
+  match d with
+  | DNeedsApproval -> if b then DAllow else d
+  | _ -> d
+
+(* F#: `KeyedRegistry.decide`, for a held id and arguments that validate — the gates' join under
+   the context, lifted by the presented grant. Production takes `lifted` only on the
+   `NeedsApproval` arm; `lifted` is the identity on the other two, so the two read the same. *)
+[@@ noextract_to "FSharp"]
+let decide_granted (#ctx:Type0) (kr:key_renderers) (gs:list (gate ctx)) (x:ctx) (c:capability)
+                   (a:invocation) (g:option string) : Tot decision =
+  grant_lifted (granted kr c a g) (snd (decide_named gs x c a))
 
 (* Extracted since Phase 455: section 18's invoke-error codec reads and writes it, and the oracle
    runs that codec beside production's. The functions of this section stay unextracted. *)
@@ -4654,10 +4789,21 @@ type gated_error =
   | GPolicyRefused : policy:string -> msg:string -> alts:list string -> gated_error
   | GApprovalRequired : policy:string -> gated_error
 
-(* F#: `CapabilityRegistry.dispatch` over a registry carrying `gs`: resolve, validate, the gates'
-   join, and only under `Allow` the body. *)
+(* F#: `InvokeError.settle` — the body's answer, in the `Deferred` envelope. Reaching it is what
+   "reaches a performer" means below. *)
 [@@ noextract_to "FSharp"]
-let dispatch_gated (#v:Type) (rd:readers) (r:registry) (gs:list gate) (id:string) (a:invocation)
+let settle_body (#v:Type) (d:deferred v) : Tot (outcome (deferred v) gated_error) =
+  match d with
+  | Ready y -> Ok (Ready y)
+  | Pending -> Ok Pending
+  | Failed m -> Error (GRefused (BodyFailed m))
+
+(* F#: `CapabilityRegistry.dispatch` over a registry carrying `gs`, under the context `x`, with
+   the grant `g` presented: resolve, validate, the gates' join, and the body under `Allow`, or
+   under a `NeedsApproval` the grant is for. *)
+[@@ noextract_to "FSharp"]
+let dispatch_gated (#v:Type) (#ctx:Type0) (rd:readers) (kr:key_renderers) (r:registry)
+                   (gs:list (gate ctx)) (x:ctx) (g:option string) (id:string) (a:invocation)
                    (body:capability -> unit -> deferred v)
   : Tot (outcome (deferred v) gated_error) =
   match find_cap id r.capabilities with
@@ -4666,46 +4812,197 @@ let dispatch_gated (#v:Type) (rd:readers) (r:registry) (gs:list gate) (id:string
     match validate_args rd c a with
     | Error e -> Error (GRefused e)
     | Ok () ->
-      match decide_named gs c a with
-      | (_, DAllow) ->
-        (match body c () with
-         | Ready x -> Ok (Ready x)
-         | Pending -> Ok Pending
-         | Failed m -> Error (GRefused (BodyFailed m)))
-      | (n, DNeedsApproval) -> Error (GApprovalRequired n)
+      match decide_named gs x c a with
+      | (_, DAllow) -> settle_body (body c ())
+      | (n, DNeedsApproval) ->
+        if granted kr c a g then settle_body (body c ()) else Error (GApprovalRequired n)
       | (n, DDeny m alts) -> Error (GPolicyRefused n m alts)
 
-(* THEOREM (Phase 318) — `gate_before_body`. For a held id and arguments that validate, a gate
-   list whose join is not `Allow` is refused — `GApprovalRequired n` or `GPolicyRefused n m alts`
-   — identically under every body, so no body runs; and `n` names a gate of the list whose own
-   decision is the one the refusal reports. *)
-let gate_before_body (#v:Type) (rd:readers) (r:registry) (gs:list gate) (id:string) (a:invocation)
+(* THEOREM (Phase 318; restated over a context and a grant by Phase 638) — `gate_before_body`. For
+   a held id and arguments that validate, a decision that is not `Allow` once the presented grant
+   is read is refused — `GApprovalRequired n` or `GPolicyRefused n m alts` — identically under
+   every body, so no body runs; and `n` names a gate of the list whose own decision under this
+   context is the one the refusal reports. With no grant this is the Phase 318 statement. *)
+let gate_before_body (#v:Type) (#ctx:Type0) (rd:readers) (kr:key_renderers) (r:registry)
+                     (gs:list (gate ctx)) (x:ctx) (g:option string) (id:string) (a:invocation)
                      (body body':capability -> unit -> deferred v)
   : Lemma (requires (match find_cap id r.capabilities with
-                     | Some c -> validate_args rd c a == Ok () /\ ~(DAllow? (snd (decide_named gs c a)))
+                     | Some c -> validate_args rd c a == Ok () /\ ~(DAllow? (decide_granted kr gs x c a g))
                      | None -> False))
           (ensures (match find_cap id r.capabilities with
                     | Some c ->
-                      (let (n, d) = decide_named gs c a in
-                       gate_named n d gs c a /\
+                      (let (n, d) = decide_named gs x c a in
+                       gate_named n d gs x c a /\
                        (match d with
-                        | DNeedsApproval -> dispatch_gated rd r gs id a body == Error (GApprovalRequired n)
-                        | DDeny m alts -> dispatch_gated rd r gs id a body == Error (GPolicyRefused n m alts)
+                        | DNeedsApproval -> dispatch_gated rd kr r gs x g id a body == Error (GApprovalRequired n)
+                        | DDeny m alts -> dispatch_gated rd kr r gs x g id a body == Error (GPolicyRefused n m alts)
                         | DAllow -> False))
                     | None -> True) /\
-                   dispatch_gated rd r gs id a body == dispatch_gated rd r gs id a body')
+                   dispatch_gated rd kr r gs x g id a body == dispatch_gated rd kr r gs x g id a body')
   = match find_cap id r.capabilities with
-    | Some c -> decide_named_names_a_gate gs c a
+    | Some c -> decide_named_names_a_gate gs x c a
     | None -> ()
 
-(* With no gate the gated dispatch IS the seam's `dispatch`, its refusals wrapped: the gate is
-   additive over the Phase 30 theorems. *)
-let no_gate_is_dispatch (#v:Type) (rd:readers) (r:registry) (id:string) (a:invocation)
+(* With no gate the gated dispatch IS the seam's `dispatch`, its refusals wrapped, under every
+   context and whatever is presented: the gate is additive over the Phase 30 theorems. *)
+let no_gate_is_dispatch (#v:Type) (#ctx:Type0) (rd:readers) (kr:key_renderers) (r:registry) (x:ctx)
+                        (g:option string) (id:string) (a:invocation)
                         (body:capability -> unit -> deferred v)
   : Lemma (ensures (match dispatch rd r id a body with
-                    | Ok x -> dispatch_gated rd r [] id a body == Ok x
-                    | Error e -> dispatch_gated rd r [] id a body == Error (GRefused e)))
+                    | Ok y -> dispatch_gated #v #ctx rd kr r [] x g id a body == Ok y
+                    | Error e -> dispatch_gated #v #ctx rd kr r [] x g id a body == Error (GRefused e)))
   = ()
+
+(* THEOREM (Phase 638) — `approval_dispatches_iff_granted`. For a held id, arguments that validate
+   and gates that answer `NeedsApproval` under the context: with a grant for exactly this
+   invocation the answer is the body's; with no grant, or a grant carrying any other identity, it
+   is `GApprovalRequired` naming the gate, identically under every body, so no body runs. *)
+let approval_dispatches_iff_granted (#v:Type) (#ctx:Type0) (rd:readers) (kr:key_renderers) (r:registry)
+                                    (gs:list (gate ctx)) (x:ctx) (g:option string) (id:string)
+                                    (a:invocation) (body body':capability -> unit -> deferred v)
+  : Lemma (requires (match find_cap id r.capabilities with
+                     | Some c -> validate_args rd c a == Ok () /\ DNeedsApproval? (snd (decide_named gs x c a))
+                     | None -> False))
+          (ensures (match find_cap id r.capabilities with
+                    | Some c ->
+                      (g == Some (invocation_identity kr c a) ==>
+                         dispatch_gated rd kr r gs x g id a body == settle_body (body c ())) /\
+                      (~(g == Some (invocation_identity kr c a)) ==>
+                         dispatch_gated rd kr r gs x g id a body ==
+                           Error (GApprovalRequired (fst (decide_named gs x c a))) /\
+                         dispatch_gated rd kr r gs x g id a body == dispatch_gated rd kr r gs x g id a body')
+                    | None -> True))
+  = ()
+
+(* THEOREM (Phase 638) — `grant_for_another_invocation_refused`. What "any other" means, through
+   the identity's injectivity: a grant minted for an invocation of another capability id, or of
+   this capability with other keyed bindings, does not carry this invocation's identity, so by the
+   theorem above it lifts nothing here. *)
+let grant_for_another_invocation_refused (#sym:eqtype) (reveal:string -> list sym) (e t:sym)
+                                         (kr:key_renderers) (c c':capability) (a a':invocation)
+  : Lemma (requires key_premises reveal e t kr /\
+                    (~(c.c_id == c'.c_id) \/
+                     ~(sort_bindings kr (keyed kr c a) == sort_bindings kr (keyed kr c' a'))))
+          (ensures granted kr c a (Some (invocation_identity kr c' a')) == false)
+  = if invocation_identity kr c' a' = invocation_identity kr c a
+    then invocation_identity_injective reveal e t kr c c' a a'
+    else ()
+
+(* THEOREM (Phase 638) — `deny_reaches_no_performer`. For a held id and arguments that validate,
+   gates that answer `Deny` under the context refuse `GPolicyRefused` whatever grant is presented
+   and under every body: the answer is one value for every grant and every body. *)
+let deny_reaches_no_performer (#v:Type) (#ctx:Type0) (rd:readers) (kr:key_renderers) (r:registry)
+                              (gs:list (gate ctx)) (x:ctx) (g g':option string) (id:string)
+                              (a:invocation) (body body':capability -> unit -> deferred v)
+  : Lemma (requires (match find_cap id r.capabilities with
+                     | Some c -> validate_args rd c a == Ok () /\ DDeny? (snd (decide_named gs x c a))
+                     | None -> False))
+          (ensures (match find_cap id r.capabilities with
+                    | Some c ->
+                      (match decide_named gs x c a with
+                       | (n, DDeny m alts) ->
+                         dispatch_gated rd kr r gs x g id a body == Error (GPolicyRefused n m alts)
+                       | _ -> False)
+                    | None -> True) /\
+                   dispatch_gated rd kr r gs x g id a body == dispatch_gated rd kr r gs x g' id a body')
+  = ()
+
+(* THEOREM (Phase 638) — `grant_lifts_only_needs_approval`. What a grant does to a decision, in
+   full: it turns `NeedsApproval` into `Allow` when it is for the invocation, and it is the
+   identity everywhere else. So it never raises a decision and never changes an `Allow` or a
+   `Deny`. *)
+let grant_lifts_only_needs_approval (b:bool) (d:decision)
+  : Lemma (ensures (~(DNeedsApproval? d) ==> grant_lifted b d == d) /\
+                   grant_lifted false d == d /\
+                   grant_lifted true DNeedsApproval == DAllow /\
+                   policy_rank (grant_lifted b d) <= policy_rank d)
+  = ()
+
+(* THEOREM (Phase 638) — `grant_changes_only_its_own_decision`. The registry's decision with a
+   grant presented is the gates' own decision, except in ONE case: the gates answer
+   `NeedsApproval` and the grant carries this invocation's identity, where it is `Allow`. An
+   `Allow` is unchanged by any grant, a `Deny` is lifted by none, and no grant is no change. *)
+let grant_changes_only_its_own_decision (#ctx:Type0) (kr:key_renderers) (gs:list (gate ctx)) (x:ctx)
+                                        (c:capability) (a:invocation) (g:option string)
+  : Lemma (ensures (let d = snd (decide_named gs x c a) in
+                    (decide_granted kr gs x c a g == d \/
+                     (DNeedsApproval? d /\ g == Some (invocation_identity kr c a) /\
+                      decide_granted kr gs x c a g == DAllow)) /\
+                    (DAllow? d ==> decide_granted kr gs x c a g == d) /\
+                    (DDeny? d ==> decide_granted kr gs x c a g == d) /\
+                    decide_granted kr gs x c a None == d))
+  = ()
+
+(* THEOREM (Phase 638) — `allow_unchanged_by_any_grant`, at the dispatch: where the gates answer
+   `Allow` under the context, the dispatch answers what it answers with no grant, whatever is
+   presented. *)
+let allow_unchanged_by_any_grant (#v:Type) (#ctx:Type0) (rd:readers) (kr:key_renderers) (r:registry)
+                                 (gs:list (gate ctx)) (x:ctx) (g:option string) (id:string)
+                                 (a:invocation) (body:capability -> unit -> deferred v)
+  : Lemma (requires (match find_cap id r.capabilities with
+                     | Some c -> validate_args rd c a == Ok () /\ DAllow? (snd (decide_named gs x c a))
+                     | None -> False))
+          (ensures dispatch_gated rd kr r gs x g id a body == dispatch_gated rd kr r gs x None id a body)
+  = ()
+
+(* THEOREM (Phase 638) — `unregistered_refused_whatever_presented`. An id the registry does not
+   hold is `NoSuchCapability`, naming the held ids, under every gate list, every context, every
+   grant and every body. *)
+let unregistered_refused_whatever_presented (#v:Type) (#ctx:Type0) (rd:readers) (kr:key_renderers)
+                                            (r:registry) (gs:list (gate ctx)) (x:ctx)
+                                            (g:option string) (id:string) (a:invocation)
+                                            (body:capability -> unit -> deferred v)
+  : Lemma (requires None? (find_cap id r.capabilities))
+          (ensures dispatch_gated rd kr r gs x g id a body ==
+                   Error (GRefused (NoSuchCapability id (ids r.capabilities))))
+  = ()
+
+(* The context this section's one context-specific theorem is about: a single fact, as `bool`. The
+   gate allows under one value of it and asks for approval under the other. *)
+[@@ noextract_to "FSharp"]
+let context_gate : gate bool =
+  { gname = "context"; gdecide = (fun (trusted:bool) _ _ -> if trusted then DAllow else DNeedsApproval) }
+
+(* THEOREM (Phase 638) — `one_registry_two_contexts`. ONE gate list decides differently under two
+   contexts, for every capability and every arguments: `Allow` under one, `NeedsApproval` naming
+   the gate under the other. A witness, at a concrete context type. *)
+let one_registry_two_contexts (c:capability) (a:invocation)
+  : Lemma (ensures decide_named [context_gate] true c a == ("", DAllow) /\
+                   decide_named [context_gate] false c a == ("context", DNeedsApproval))
+  = ()
+
+(* Two gate lists AGREE AT one context, capability and arguments: the same names, in order, and
+   the same decision from each gate at exactly that point. Nothing is said of any other point. *)
+[@@ noextract_to "FSharp"]
+let rec agree_at (#ctx:Type0) (gs gs':list (gate ctx)) (x:ctx) (c:capability) (a:invocation)
+  : Tot prop (decreases gs) =
+  match gs, gs' with
+  | [], [] -> True
+  | g :: t, g' :: t' -> g.gname == g'.gname /\ g.gdecide x c a == g'.gdecide x c a /\ agree_at t t' x c a
+  | _, _ -> False
+
+let rec decide_from_reads_its_point (#ctx:Type0) (gs gs':list (gate ctx)) (x:ctx) (c:capability)
+                                    (a:invocation) (acc:(string & decision))
+  : Lemma (requires agree_at gs gs' x c a)
+          (ensures decide_from gs x c a acc == decide_from gs' x c a acc)
+          (decreases gs)
+  = match gs, gs' with
+    | g :: t, _ :: t' ->
+      let d = g.gdecide x c a in
+      if policy_rank d > policy_rank (snd acc) then decide_from_reads_its_point t t' x c a (g.gname, d)
+      else decide_from_reads_its_point t t' x c a acc
+    | _, _ -> ()
+
+(* THEOREM (Phase 638) — `decision_reads_only_its_inputs`. The decision is a total function
+   (`decide_granted` is `Tot`) of the gates, the context, the capability, the arguments and the
+   grant, and of the gates it reads only what they answer AT that context, capability and
+   arguments: two gate lists that agree there decide the same, whatever they answer anywhere else. *)
+let decision_reads_only_its_inputs (#ctx:Type0) (kr:key_renderers) (gs gs':list (gate ctx)) (x:ctx)
+                                   (c:capability) (a:invocation) (g:option string)
+  : Lemma (requires agree_at gs gs' x c a)
+          (ensures decide_named gs x c a == decide_named gs' x c a /\
+                   decide_granted kr gs x c a g == decide_granted kr gs' x c a g)
+  = decide_from_reads_its_point gs gs' x c a ("", DAllow)
 
 (* ======================================================================================
    18. THE SEAM CODEC, WHOLE (Phase 455) — `CapabilityCodec`'s three remaining pairs, clause for

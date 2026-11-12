@@ -256,13 +256,13 @@ module internal RegistrySeamLaws =
                 let body (_: FunctionEntry) () = Ready 1
 
                 let unreg =
-                    FunctionRegistry.dispatch r "nope" [ "h0", string lo; "h1", string lo ] body
+                    FunctionRegistry.dispatch r () None "nope" [ "h0", string lo; "h1", string lo ] body
 
                 let okCall =
-                    FunctionRegistry.dispatch r cap.Id [ "h0", string lo; "h1", string lo ] body
+                    FunctionRegistry.dispatch r () None cap.Id [ "h0", string lo; "h1", string lo ] body
 
                 let badArg =
-                    FunctionRegistry.dispatch r cap.Id [ "h0", string (hi + 1); "h1", string lo ] body
+                    FunctionRegistry.dispatch r () None cap.Id [ "h0", string (hi + 1); "h1", string lo ] body
 
                 let denyOk =
                     match unreg, okCall, badArg with
@@ -337,7 +337,7 @@ module internal RegistrySeamLaws =
         let build (add: 'x -> 'r -> Result<'r, 'e>) (empty: 'r) (xs: 'x list) : Result<'r, 'e> =
             xs |> List.fold (fun acc x -> acc |> Result.bind (add x)) (Ok empty)
 
-        let capIds (r: CapabilityRegistry) =
+        let capIds (r: CapabilityRegistry<unit>) =
             CapabilityRegistry.enumerate r |> List.map _.Id
 
         let qIds (r: QueryRegistry) =
@@ -559,7 +559,7 @@ module internal RegistrySeamLaws =
                     )
 
                     // ---- the function registry's index after a sequence of edits ----
-                    let step (r: FunctionRegistry) =
+                    let step (r: FunctionRegistry<unit>) =
                         match rng.IntBelow 4 with
                         | 0 -> FunctionRegistry.unregister (rng.Choose pool) r |> Result.defaultValue r
                         | 1 ->

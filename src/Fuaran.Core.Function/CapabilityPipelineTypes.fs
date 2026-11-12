@@ -109,7 +109,7 @@ type PipelineEvalError =
 /// holds (for the refusal that names them) and the policy that admits an invocation (Phase 383).
 /// Both registries project one — `ofRegistry`, `ofFunctionRegistry` — so a host that loads content
 /// packs into a `FunctionRegistry` type-checks and evaluates against it, and keeps no second registry.
-type CapabilityLookup =
+type CapabilityLookup<'Ctx> =
     {
         /// Resolves a capability id; `None` makes an `Invoke` of it a `PipelineNoSuchCapability`.
         TryFind: string -> Capability option
@@ -120,20 +120,20 @@ type CapabilityLookup =
         /// `Policy` in both projections, so evaluating a pipeline over a registry tightened with
         /// `withGate` admits exactly what that registry's dispatch admits. A hand-built lookup states
         /// its policy; `RegistryPolicy.none` runs no gate.
-        Policy: RegistryPolicy<Capability, (string * string) list>
+        Policy: RegistryPolicy<'Ctx, Capability, (string * string) list>
     }
 
 /// The two projections onto `CapabilityLookup`.
 module CapabilityLookup =
 
     /// A capability registry as a lookup, carrying the registry's policy.
-    let ofRegistry (r: CapabilityRegistry) : CapabilityLookup =
+    let ofRegistry (r: CapabilityRegistry<'Ctx>) : CapabilityLookup<'Ctx> =
         { TryFind = fun id -> CapabilityRegistry.tryFind id r
           Known = Seam.ids r.Seam
           Policy = r.Seam.Policy }
 
     /// A function registry as a lookup: each entry's capability, by its id, and the registry's policy.
-    let ofFunctionRegistry (r: FunctionRegistry) : CapabilityLookup =
+    let ofFunctionRegistry (r: FunctionRegistry<'Ctx>) : CapabilityLookup<'Ctx> =
         { TryFind = fun id -> FunctionRegistry.tryFind id r |> Option.map _.Capability
           Known = FunctionRegistry.ids r
           Policy = r.Policy }

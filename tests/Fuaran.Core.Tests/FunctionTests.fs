@@ -26,7 +26,7 @@ let private packBaseSig: Signature =
 let private packBaseEntry () : FunctionEntry =
     FunctionRegistry.entry "doc" (Capability.create "doc-fn" packBaseSig BuildTime)
 
-let private packBaseReg () : FunctionRegistry =
+let private packBaseReg () : FunctionRegistry<unit> =
     FunctionRegistry.empty
     |> FunctionRegistry.register (packBaseEntry ())
     |> function
@@ -378,14 +378,14 @@ let tests =
                   [ "tpl/t", "Hello"; "tpl/c", "5"; "tpl/s", s ]
 
               Expect.equal
-                  (CapabilityRegistry.dispatch reg "tpl-cap" (args para) (fun _ () -> Ready "ran"))
+                  (CapabilityRegistry.dispatch reg () None "tpl-cap" (args para) (fun _ () -> Ready "ran"))
                   (Ok(Ready "ran"))
                   "a conforming slot argument dispatches"
 
               let ran = ref false
 
               match
-                  CapabilityRegistry.dispatch reg "tpl-cap" (args """{"kind":"heading"}""") (fun _ () ->
+                  CapabilityRegistry.dispatch reg () None "tpl-cap" (args """{"kind":"heading"}""") (fun _ () ->
                       ran.Value <- true
                       Ready "ran")
               with
@@ -485,12 +485,12 @@ let tests =
               | Error(DuplicateCapability "apple") -> ()
               | other -> failtestf "expected DuplicateCapability, got %A" other
 
-              match CapabilityRegistry.dispatch reg "ghost" [] (fun _ () -> Ready 1) with
+              match CapabilityRegistry.dispatch reg () None "ghost" [] (fun _ () -> Ready 1) with
               | Error(NoSuchCapability("ghost", _)) -> ()
               | other -> failtestf "expected NoSuchCapability, got %A" other
 
               Expect.equal
-                  (CapabilityRegistry.dispatch reg "apple" [] (fun _ () -> Ready 42))
+                  (CapabilityRegistry.dispatch reg () None "apple" [] (fun _ () -> Ready 42))
                   (Ok(Ready 42))
                   "registered id dispatches, settled"
 
@@ -498,12 +498,12 @@ let tests =
               // pending inside an `Ok`, and a failing one is the typed `BodyFailed`, never
               // `Ok(Failed _)`.
               Expect.equal
-                  (CapabilityRegistry.dispatch reg "apple" [] (fun _ () -> Pending))
+                  (CapabilityRegistry.dispatch reg () None "apple" [] (fun _ () -> Pending))
                   (Ok Pending: Result<Deferred<int>, InvokeError>)
                   "a pending body stays pending"
 
               Expect.equal
-                  (CapabilityRegistry.dispatch reg "apple" [] (fun _ () -> Failed "boom"))
+                  (CapabilityRegistry.dispatch reg () None "apple" [] (fun _ () -> Failed "boom"))
                   (Error(BodyFailed "boom"): Result<Deferred<int>, InvokeError>)
                   "a failing body is the typed BodyFailed"
 
@@ -1311,7 +1311,13 @@ let memoTests =
                           )
 
               match
-                  CapabilityPipeline.eval lookup string (bodyWith (Map.ofList [ "s1", 10; "s2", 20 ]) (ResizeArray())) p
+                  CapabilityPipeline.eval
+                      lookup
+                      ()
+                      []
+                      string
+                      (bodyWith (Map.ofList [ "s1", 10; "s2", 20 ]) (ResizeArray()))
+                      p
               with
               | Error e -> failtestf "eval errored: %A" e
               | Ok prior ->
@@ -1323,6 +1329,8 @@ let memoTests =
                   match
                       CapabilityPipeline.evalFrom
                           lookup
+                          ()
+                          []
                           string
                           (bodyWith (Map.ofList [ "s1", 100; "s2", 20 ]) incrInvoked)
                           prior
@@ -1395,7 +1403,8 @@ let memoTests =
                   Expect.isFalse (List.contains "doc-fn" ids) "un-narrowed base still needs h0 — not findable from {h1}"
                   // FGP 6 — the pack carried no body; the HOST supplies it at dispatch (content stays domain-side)
                   let dispatched =
-                      FunctionRegistry.dispatch loaded "house-style" [ "h1", "5" ] (fun _ () -> Ready "rendered")
+                      FunctionRegistry.dispatch loaded () None "house-style" [ "h1", "5" ] (fun _ () ->
+                          Ready "rendered")
 
                   Expect.equal
                       dispatched
@@ -1766,6 +1775,8 @@ let convergenceTests =
               match
                   CapabilityPipeline.eval
                       lookup
+                      ()
+                      []
                       string
                       body
                       { Nodes = [ Invoke("a", "cons", IntRange(0, 100), [ "x", FromNode "a" ]) ] }
@@ -1781,7 +1792,7 @@ let convergenceTests =
               let overflow (n: PipelineNode) (_: (string * PipelineArg<int>) list) : Result<int, string> =
                   Ok(if CapabilityPipeline.nodeId n = "s" then 500 else 0)
 
-              match CapabilityPipeline.eval lookup string overflow narrow with
+              match CapabilityPipeline.eval lookup () [] string overflow narrow with
               | Error(PipelineEvalError.EvalArgRefused("a", ArgOutOfSpace("x", IntRange(0, 100), "500"))) -> ()
               | other -> failtestf "expected PipelineEvalError.EvalArgRefused, got %A" other
 
@@ -1848,8 +1859,8 @@ let validatedDeclarationTests =
         [ testCase "every probe declaration is refused at registration, by both registries, with a typed reason"
           <| fun _ ->
               for name, holes, expected in probes307 do
-                  Expect.equal (register307 holes) (Error expected) (name + ": CapabilityRegistry")
-                  Expect.equal (registerFn307 holes) (Error expected) (name + ": FunctionRegistry")
+                  Expect.equal (register307 holes) (Error expected) (name + ": CapabilityRegistry<unit>")
+                  Expect.equal (registerFn307 holes) (Error expected) (name + ": FunctionRegistry<unit>")
 
           testCase "a declaration fault reads as a sentence naming what is wrong"
           <| fun _ ->
@@ -2162,10 +2173,10 @@ let validatedDeclarationTests =
                         Invoke("a", "up", AnyString, []) ] }
 
               let body _ _ = Ok "v"
-              let e1 = CapabilityPipeline.eval lookup id body reordered
+              let e1 = CapabilityPipeline.eval lookup () [] id body reordered
 
               let e2 =
-                  CapabilityPipeline.evalFrom lookup id body Map.empty (Set.ofList [ "a" ]) reordered
+                  CapabilityPipeline.evalFrom lookup () [] id body Map.empty (Set.ofList [ "a" ]) reordered
 
               Expect.isError e1 "eval refuses"
               Expect.equal e2 e1 "evalFrom refuses with the same reason" ]
@@ -2608,7 +2619,16 @@ let seamBaselineTests528 =
               let enc (s: string) = "\"" + s + "\""
 
               let dispatch n body journal =
-                  (CapabilityRegistry.dispatchCaptured OpStream.defaultHash enc netReg528 "net" [ "n", n ] body journal)
+                  (CapabilityRegistry.dispatchCaptured
+                      OpStream.defaultHash
+                      enc
+                      netReg528
+                      ()
+                      None
+                      "net"
+                      [ "n", n ]
+                      body
+                      journal)
                       .Journal
 
               let journal =
@@ -2633,6 +2653,8 @@ let seamBaselineTests528 =
                   (CapabilityRegistry.dispatchReplayed
                       dec
                       netReg528
+                      ()
+                      None
                       "net"
                       [ "n", n ]
                       (fun _ () -> Ready "live")

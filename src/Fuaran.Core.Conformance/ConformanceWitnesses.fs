@@ -44,7 +44,7 @@ type StreamGen<'Op, 'State> =
 ///   the body, and every other call must be refused with the registry's own error.
 /// - `Dispatch` — the domain's HOST path: the function its surface actually calls to invoke a
 ///   capability, handed the id, the arguments and the body to run. A host that delegates to Core
-///   passes `CapabilityRegistry.dispatch registry`; a host with its own wiring passes that wiring, which is the
+///   passes `CapabilityRegistry.dispatch registry () None`; a host with its own wiring passes that wiring, which is the
 ///   point — a defect in it (a body run before the registry refuses) is what the family can see.
 /// - `GenCall` — the calls a model could make: registered and invented ids, arguments in space, out
 ///   of space, missing and stray. The family is starved unless it reaches a settled, a pending and a
@@ -58,8 +58,10 @@ type StreamGen<'Op, 'State> =
 type CapabilitySeamWitness<'v> =
     {
         /// The oracle: whether a call should reach the body, and which error it must be refused
-        /// with otherwise, is read from this registry alone.
-        Registry: CapabilityRegistry
+        /// with otherwise, is read from this registry alone. It takes the `unit` context: a host
+        /// whose registry reads a decision context hands over `CapabilityRegistry.under ctx registry`
+        /// (Phase 638), the registry as that context sees it.
+        Registry: CapabilityRegistry<unit>
         /// The host's invocation path — id, arguments, body. It must refuse with exactly the
         /// registry's error and must never return `Ok(Failed _)`; a throw fails the family.
         Dispatch:
@@ -101,7 +103,7 @@ type CapabilityPipelineWitness =
     {
         /// The registry every drawn pipeline must type-check against; the kit also derives an id
         /// absent from it to build the unregistered-capability refusal.
-        PipelineRegistry: CapabilityRegistry
+        PipelineRegistry: CapabilityRegistry<unit>
         /// Draws one pipeline the domain would build. The default-deny laws are built per `Invoke`
         /// node, so pipelines with none leave the family starved.
         GenPipeline: ConfRng.T -> CapabilityPipeline * ConfRng.T

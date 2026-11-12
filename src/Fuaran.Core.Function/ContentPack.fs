@@ -129,8 +129,8 @@ module ContentPack =
     /// Total — returns the extended registry or the FIRST `PackLoadError`; the registry threads by value
     /// (no global state, GP2). All-or-nothing: a failing entry returns the error WITHOUT handing back a
     /// partially-extended registry, so a rejected pack never half-loads (the caller keeps its original).
-    let load (manifest: PackManifest) (reg: FunctionRegistry) : Result<FunctionRegistry, PackLoadError> =
-        let rec go (acc: FunctionRegistry) =
+    let load (manifest: PackManifest) (reg: FunctionRegistry<'Ctx>) : Result<FunctionRegistry<'Ctx>, PackLoadError> =
+        let rec go (acc: FunctionRegistry<'Ctx>) =
             function
             | [] -> Ok acc
             | (pf: PackedFunction) :: rest ->
@@ -160,8 +160,8 @@ module ContentPack =
     /// holds, and the caller keeps its registry. `unload m` undoes a successful `load m`: over the
     /// registry `load m reg` returned it gives back `reg`. The base functions the pack curried are
     /// not the pack's and stay registered.
-    let unload (manifest: PackManifest) (reg: FunctionRegistry) : Result<FunctionRegistry, PackLoadError> =
-        let rec go (acc: FunctionRegistry) =
+    let unload (manifest: PackManifest) (reg: FunctionRegistry<'Ctx>) : Result<FunctionRegistry<'Ctx>, PackLoadError> =
+        let rec go (acc: FunctionRegistry<'Ctx>) =
             function
             | [] -> Ok acc
             | (pf: PackedFunction) :: rest ->

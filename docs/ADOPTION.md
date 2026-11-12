@@ -197,7 +197,7 @@ model could make:
 ```fsharp
 let capabilitySeam : CapabilitySeamWitness<string> =
     { Registry = capabilities
-      Dispatch = CapabilityRegistry.dispatch capabilities   // the path your surface really calls
+      Dispatch = CapabilityRegistry.dispatch capabilities () None   // the path your surface really calls
       GenCall = genCall }                         // settled, pending and refused calls
 
 let capabilityBody args (_: Capability) = fillBody args   // your body, handed each call

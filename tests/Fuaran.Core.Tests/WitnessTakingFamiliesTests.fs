@@ -40,7 +40,7 @@ let private capability (id: string) (holes: SigEntry list) : Capability =
         Server
 
 /// `echo` settles with its argument, `later` stays pending, `flaky` fails for `flaky/k = 0`.
-let capabilityRegistry: CapabilityRegistry =
+let capabilityRegistry: CapabilityRegistry<unit> =
     [ capability "echo" [ hole "echo/n" (IntRange(0, 10)) ]
       capability "later" [ hole "later/x" (Enum [ "a"; "b" ]) ]
       capability "flaky" [ hole "flaky/k" (IntRange(0, 3)) ] ]
@@ -93,7 +93,7 @@ let genCapabilityCall (rng: ConfRng.T) : (string * (string * string) list) * Con
 
 let capabilityWitness: CapabilitySeamWitness<string> =
     { Registry = capabilityRegistry
-      Dispatch = CapabilityRegistry.dispatch capabilityRegistry
+      Dispatch = CapabilityRegistry.dispatch capabilityRegistry () None
       GenCall = genCapabilityCall }
 
 /// The planted defect: a host that runs the body BEFORE the registry has refused. Every call to a
@@ -107,8 +107,8 @@ let private bodyBeforeRefusal
     match CapabilityRegistry.tryFind id capabilityRegistry with
     | Some c ->
         let early = body c ()
-        CapabilityRegistry.dispatch capabilityRegistry id args (fun _ () -> early)
-    | None -> CapabilityRegistry.dispatch capabilityRegistry id args body
+        CapabilityRegistry.dispatch capabilityRegistry () None id args (fun _ () -> early)
+    | None -> CapabilityRegistry.dispatch capabilityRegistry () None id args body
 
 // ---------------------------------------------------------------------------
 //  the query seam

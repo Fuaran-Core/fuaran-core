@@ -253,7 +253,7 @@ let capabilityBody (args: (string * string) list) (_: Capability) : Deferred<str
 
 let capabilitySeam: CapabilitySeamWitness<string> =
     { Registry = capabilities
-      Dispatch = CapabilityRegistry.dispatch capabilities // the host path: delegate to Core's dispatch
+      Dispatch = CapabilityRegistry.dispatch capabilities () None // the host path: delegate to Core's dispatch
       GenCall = genCall }
 
 /// The query: the notes under a section, by the section's id. Parameters are keyed by NAME.
@@ -384,7 +384,7 @@ let main _ =
     printfn "  its invocation key for 20 degrees: %s" (Capability.invocationKey fillCapability [ celsiusAddr, "20" ])
 
     let call id args =
-        CapabilityRegistry.dispatch capabilities id args (fun _ () -> fillBody args)
+        CapabilityRegistry.dispatch capabilities () None id args (fun _ () -> fillBody args)
         |> Result.mapError InvokeError.describe
         |> outcome
 
