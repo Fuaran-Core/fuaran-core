@@ -74,7 +74,8 @@ if (-not $WorkDir) { $WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "che
 # The legs under test (Phase 641): each named pin's `leg` field, absent meaning the present leg. The
 # prover-free arms (R, M, I) exercise the engine, not an adopter's pin, so when no present-leg pin is
 # named they read the kit's own, which sits one directory above this file in the asset and in the tree.
-$pinFiles = @(if ($PinFile) { $PinFile | ForEach-Object { [System.IO.Path]::GetFullPath($_) } } else { Join-Path $ProofsDir 'fstar-pin.json' })
+# Split on commas as well: `pwsh -File` hands `-PinFile a,b` over as ONE string, not an array.
+$pinFiles = @(if ($PinFile) { $PinFile -split ',' | Where-Object { $_ } | ForEach-Object { [System.IO.Path]::GetFullPath($_) } } else { Join-Path $ProofsDir 'fstar-pin.json' })
 function Get-PinLeg([string] $path) {
     $declared = Get-Content $path -Raw | ConvertFrom-Json
     if ($null -eq $declared.PSObject.Properties['leg']) { 'legacy' } else { [string]$declared.leg }
