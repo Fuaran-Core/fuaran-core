@@ -303,7 +303,9 @@ let tests =
                         "ArgOutOfSpace"
 
                     let denied =
-                        refusalOf (CapabilityRegistry.dispatch registry "purge-station" [] (fun _ () -> Ready "never"))
+                        refusalOf (
+                            CapabilityRegistry.dispatch registry () None "purge-station" [] (fun _ () -> Ready "never")
+                        )
 
                     Expect.equal
                         (InvokeError.describe denied)
@@ -582,7 +584,8 @@ let tests =
                 testCase "dispatchWithArgs denies by default and hands on the resolved capability"
                 <| fun _ ->
                     match
-                        CapabilityRegistry.dispatchWithArgs registry "purge-station" [] (fun _ _ -> Ready "never")
+                        CapabilityRegistry.dispatchWithArgs registry () None "purge-station" [] (fun _ _ ->
+                            Ready "never")
                     with
                     | Error(NoSuchCapability("purge-station", known)) -> Expect.equal known toolIds "names the tools"
                     | other -> failtestf "expected NoSuchCapability, got %A" other
@@ -590,6 +593,8 @@ let tests =
                     let r =
                         CapabilityRegistry.dispatchWithArgs
                             registry
+                            ()
+                            None
                             "fmt-temp"
                             [ "fmt-temp/celsius", "-4"; "fmt-temp/station", "ridge" ]
                             (fun c typed -> Ready(c.Id, typed))

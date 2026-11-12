@@ -263,6 +263,21 @@ module Capability =
         |> snd
         |> List.rev
 
+    /// The fields of an invocation's canonical pre-image: two per binding (address, then the value's
+    /// canonical spelling in its hole's space where it has one — Phase 295), address sorted. The
+    /// capability grammar (D173), with no shape prefix; `invocationKey` hashes them and
+    /// `invocationPreimage` keeps them.
+    let private bindingFields (c: Capability) (args: (string * string) list) : string list =
+        let spelled (a: string, v: string) =
+            match c.Signature.Holes |> List.tryFind (fun h -> h.Addr = a) |> Option.bind _.Space with
+            | Some space -> a, (Space.canonical space v |> Option.defaultValue v)
+            | None -> a, v
+
+        args
+        |> List.map spelled
+        |> List.sortBy fst
+        |> List.collect (fun (a, v) -> [ a; v ])
+
     /// The Phase 27 determinism label this capability keys its captures on: `Effect.determinismTag` of its
     /// determinism set — `"deterministic"` for the empty set, else its factors joined by `+` in canonical
     /// order (`"clock"`, `"clock+random"`, …; Phase 319).
@@ -282,17 +297,22 @@ module Capability =
     /// for a number hole, are one value and one key — and by its own spelling otherwise, so
     /// injectivity holds over the canonical argument lists.
     let invocationKey (c: Capability) (args: (string * string) list) : string =
-        let spelled (a: string, v: string) =
-            match c.Signature.Holes |> List.tryFind (fun h -> h.Addr = a) |> Option.bind _.Space with
-            | Some space -> a, (Space.canonical space v |> Option.defaultValue v)
-            | None -> a, v
+        Hash.keyedBy c.Id (bindingFields c args)
 
-        // The capability grammar (D173): two fields per binding, addr-sorted, no shape prefix.
-        args
-        |> List.map spelled
-        |> List.sortBy fst
-        |> List.collect (fun (a, v) -> [ a; v ])
-        |> Hash.keyedBy c.Id
+    /// The IDENTITY of one invocation (Phase 638) — what a `Grant` is for: the capability id, then
+    /// the fields `invocationKey` hashes (each binding's address and canonical spelling, address
+    /// sorted), as one canonical pre-image (`Hash.canonicalFields`). No hash is taken, so it is
+    /// INJECTIVE outright: two invocations share an identity only when they name one capability id
+    /// and carry the same canonical bindings (`invocation_identity_injective` in
+    /// `proofs/Capability.fst`). `invocationKey` ends in a 32-bit cache hash a second pre-image of
+    /// which is cheap to find, so an approval is never bound to it.
+    let invocationPreimage (c: Capability) (args: (string * string) list) : string =
+        Hash.canonicalFields (c.Id :: bindingFields c args)
+
+    /// The grant for exactly this invocation of `c` (Phase 638): `Grant.ofInvocation` of its
+    /// `invocationPreimage`. What a host mints when an approval is given for a previewed invocation.
+    let grant (c: Capability) (args: (string * string) list) : Grant =
+        Grant.ofInvocation (invocationPreimage c args)
 
     /// Validate typed `args` (addr → string value) against the capability's signature *before*
     /// dispatch: every arg must address a declared data hole, once (`DuplicateArg` otherwise, Phase
@@ -480,13 +500,13 @@ module Capability =
 /// Map.add id c r.Capabilities }` admitted a capability no gate had seen, which is the default-deny
 /// promise broken by construction. Since Phase 509 it is a `Seam` over `Capability`, in this seam's
 /// vocabulary (`CapabilityRegistry.vocabulary`), and every verb below forwards to it.
-type CapabilityRegistry =
+type CapabilityRegistry<'Ctx> =
     private
         {
             /// The capabilities keyed by `Capability.Id` — each admitted by `register`, so each is
             /// total — and the gates every dispatch runs after validation and before the body, with
             /// the observers a refusal reaches (Phase 318).
-            Seam: Seam<Capability, (string * string) list, InvokeError>
+            Seam: Seam<'Ctx, Capability, (string * string) list, InvokeError>
         }
 
 /// Populate / enumerate / dispatch the capability registry (named `Registry` until Phase 295; the
@@ -507,6 +527,7 @@ module CapabilityRegistry =
           Validate = Capability.validateArgs
           Refused = InvokeError.policyRefused
           Approval = ApprovalRequired
+          Invocation = Capability.invocationPreimage
           Describe = InvokeError.describe }
 
     /// How the capability seam journals (Phase 318): under `Capability.determinismTag` and
@@ -524,9 +545,9 @@ module CapabilityRegistry =
 
     /// The registry with no capabilities: every dispatch through it is `NoSuchCapability` with an
     /// empty `known` list.
-    let empty: CapabilityRegistry = { Seam = Seam.create vocabulary }
+    let empty<'Ctx> : CapabilityRegistry<'Ctx> = { Seam = Seam.create vocabulary }
 
-    let private lift (r: Result<Seam<Capability, (string * string) list, InvokeError>, InvokeError>) =
+    let private lift (r: Result<Seam<'Ctx, Capability, (string * string) list, InvokeError>, InvokeError>) =
         r |> Result.map (fun s -> { Seam = s })
 
     /// Register a capability — additive, no silent overwrite (a duplicate id is a named error), and
@@ -534,64 +555,92 @@ module CapabilityRegistry =
     /// space is refused `NonTotalCapability`, naming the holes, rather than dispatched. And only a
     /// WELL-FORMED one (Phase 307): a signature `Signature.validate` refuses — an empty or
     /// non-finite space, two holes at one address — is `IllFormedCapability`.
-    let register (c: Capability) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
+    let register (c: Capability) (r: CapabilityRegistry<'Ctx>) : Result<CapabilityRegistry<'Ctx>, InvokeError> =
         Seam.register c r.Seam |> lift
 
     // ---- the policy gate (Phase 318) ----
 
     /// `r` with `gate` added to the gates every dispatch runs (`RegistryPolicy.withGate`). A gate runs
     /// after the arguments validate and before the body, and the decision is the join over every
-    /// gate — so adding one can only refuse more: an invocation `r` refused, the result refuses.
-    let withGate (gate: PolicyGate<Capability, (string * string) list>) (r: CapabilityRegistry) : CapabilityRegistry =
+    /// gate — so adding one can only refuse more: an invocation `r` refused under a context, the
+    /// result refuses under it. A gate that reads no context is `PolicyGate.ignoringContext`.
+    let withGate
+        (gate: PolicyGate<'Ctx, Capability, (string * string) list>)
+        (r: CapabilityRegistry<'Ctx>)
+        : CapabilityRegistry<'Ctx> =
         { Seam = Seam.withGate gate r.Seam }
 
     /// `r` with `observe` told of every invocation its policy refuses — a `Deny` or a
     /// `NeedsApproval` — before the refusal is returned. A refusal for any other reason (an unknown
     /// id, an argument out of space) is not a policy refusal and reaches no observer.
-    let onDenied (observe: PolicyDenial<(string * string) list> -> unit) (r: CapabilityRegistry) : CapabilityRegistry =
+    let onDenied
+        (observe: PolicyDenial<'Ctx, (string * string) list> -> unit)
+        (r: CapabilityRegistry<'Ctx>)
+        : CapabilityRegistry<'Ctx> =
         { Seam = Seam.onDenied observe r.Seam }
+
+    /// `r` as the one context `ctx` sees it (Phase 638): the same capabilities, every gate deciding
+    /// as it does under `ctx`. The result takes the `unit` context and decides and dispatches
+    /// exactly as `r` does under `ctx` — the registry a conformance witness is handed, and the view
+    /// a host gives a caller that must not choose its own context.
+    let under (ctx: 'Ctx) (r: CapabilityRegistry<'Ctx>) : CapabilityRegistry<unit> = { Seam = Seam.under ctx r.Seam }
 
     /// What the registry would decide for an invocation, without dispatching it (Phase 318) — the
     /// meeting point of default-deny by shape and the policy gate: an id the
     /// registry does not hold is a `Deny` whose guidance is `NoSuchCapability`'s sentence with the
     /// registered ids as its alternatives; an invocation whose arguments do not validate is a
-    /// `Deny` with the validation refusal's sentence; otherwise the gates' join. No observer is told.
-    let decide (r: CapabilityRegistry) (id: string) (args: (string * string) list) : PolicyDecision =
-        Seam.decide r.Seam id args
+    /// `Deny` with the validation refusal's sentence; otherwise the gates' join under `ctx`, with a
+    /// `NeedsApproval` lifted to `Allow` when `grant` is for exactly this invocation (Phase 638:
+    /// `Capability.grant`). A `Deny` is lifted by no grant and an `Allow` is changed by none. No
+    /// observer is told. The decision is a total function of the capability, the arguments, the
+    /// context and the grant, and reads nothing else.
+    let decide
+        (r: CapabilityRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
+        (id: string)
+        (args: (string * string) list)
+        : PolicyDecision =
+        Seam.decide r.Seam ctx grant id args
 
     /// The capability registered under exactly `id` (ordinal, case-sensitive), or `None`.
-    let tryFind (id: string) (r: CapabilityRegistry) : Capability option = Seam.tryFind id r.Seam
+    let tryFind (id: string) (r: CapabilityRegistry<'Ctx>) : Capability option = Seam.tryFind id r.Seam
 
     /// Enumerate the registry in a stable order (by id) — the discovery surface; stability is part
     /// of the contract (`capabilityLaws` certifies it).
-    let enumerate (r: CapabilityRegistry) : Capability list = Seam.enumerate r.Seam
+    let enumerate (r: CapabilityRegistry<'Ctx>) : Capability list = Seam.enumerate r.Seam
 
     /// Dispatch an invocation through the registry: resolve the id (default-deny — an unregistered
-    /// id is `NoSuchCapability`), validate the arguments, run the policy's gates (Phase 318 — a
-    /// `Deny` is `PolicyRefused`, a `NeedsApproval` is `ApprovalRequired`, and either reaches every
-    /// `onDenied` observer), and only then the body. With no gate this is `Capability.invoke`
-    /// exactly. The host body is supplied by the caller per the resolved capability's placement, and
+    /// id is `NoSuchCapability`, whatever is presented), validate the arguments, run the policy's
+    /// gates under `ctx` (Phase 318 — a `Deny` is `PolicyRefused`, whatever is presented; a
+    /// `NeedsApproval` is `ApprovalRequired` unless `grant` is for exactly this invocation, Phase
+    /// 638; a refusal reaches every `onDenied` observer), and only then the body. With no gate this
+    /// is `Capability.invoke` exactly, under every context and grant. The host body is supplied by the caller per the resolved capability's placement, and
     /// answers in the `Deferred` envelope (Phase 210 — the same three outcomes `Capability.invoke`
     /// documents).
     let dispatch
-        (r: CapabilityRegistry)
+        (r: CapabilityRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * string) list)
         (body: Capability -> unit -> Deferred<'v>)
         : Result<Deferred<'v>, InvokeError> =
-        Seam.dispatch r.Seam id args (fun c -> InvokeError.settle (body c ()))
+        Seam.dispatch r.Seam ctx grant id args (fun c -> InvokeError.settle (body c ()))
 
     /// `dispatch`, with the body handed the resolved capability and the validated arguments, typed
     /// (`Capability.typeArgs`, Phase 251). Additive beside `dispatch`; default-deny and gated the
     /// same (Phase 318: the gate runs after the arguments validate, before the body). The arguments
     /// are typed after the gate; an argument that validated always types (`Capability.typeArgs`).
     let dispatchWithArgs
-        (r: CapabilityRegistry)
+        (r: CapabilityRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * string) list)
         (body: Capability -> (string * ArgValue) list -> Deferred<'v>)
         : Result<Deferred<'v>, InvokeError> =
-        Seam.dispatch r.Seam id args (fun c ->
+        Seam.dispatch r.Seam ctx grant id args (fun c ->
             Capability.typeArgs c args
             |> Result.bind (fun typed -> InvokeError.settle (body c typed)))
 
@@ -609,13 +658,25 @@ module CapabilityRegistry =
     let dispatchCaptured
         (hashFn: HashFn)
         (encode: 'v -> string)
-        (r: CapabilityRegistry)
+        (r: CapabilityRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * string) list)
         (body: Capability -> unit -> Deferred<'v>)
         (journal: KeyedCapture list)
         : CapturedDispatch<'v, InvokeError> =
-        Seam.dispatchCaptured hashFn encode capture r.Seam id args (fun c -> InvokeError.settle (body c ())) journal
+        Seam.dispatchCaptured
+            hashFn
+            encode
+            capture
+            r.Seam
+            ctx
+            grant
+            id
+            args
+            (fun c -> InvokeError.settle (body c ()))
+            journal
 
     /// REPLAY an invocation from the keyed capture journal instead of running its body (Phase 318) —
     /// so a `Network` capability's replay is exact. The id resolves, the arguments validate and the
@@ -630,40 +691,56 @@ module CapabilityRegistry =
     /// beside it whatever the outcome.
     let dispatchReplayed
         (decode: string -> Result<'v, string>)
-        (r: CapabilityRegistry)
+        (r: CapabilityRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * string) list)
         (body: Capability -> unit -> Deferred<'v>)
         (cursor: Map<string, int>)
         (journal: KeyedCapture list)
         : ReplayedDispatch<'v, InvokeError> =
-        Seam.dispatchReplayed decode capture r.Seam id args (fun c -> InvokeError.settle (body c ())) cursor journal
+        Seam.dispatchReplayed
+            decode
+            capture
+            r.Seam
+            ctx
+            grant
+            id
+            args
+            (fun c -> InvokeError.settle (body c ()))
+            cursor
+            journal
 
     // ---- the lifecycle (Phase 316): a registry is a lattice, not an append log ----
 
     /// Remove the capability registered under `id` — refused `NoSuchCapability(id, known)` when the
     /// registry does not hold it, naming every id it does hold. Removing a capability just
     /// registered gives back the registry it was registered into.
-    let unregister (id: string) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
+    let unregister (id: string) (r: CapabilityRegistry<'Ctx>) : Result<CapabilityRegistry<'Ctx>, InvokeError> =
         Seam.unregister id r.Seam |> lift
 
     /// Swap the capability registered under `c.Id` for `c` — the hot-reload verb. Refused
     /// `NoSuchCapability` when the id is not registered, and held to the admission gate `register`
     /// runs (`NonTotalCapability`, `IllFormedCapability`), so a replacement can admit nothing a
     /// registration would refuse. On a refusal the registry is unchanged.
-    let replace (c: Capability) (r: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
+    let replace (c: Capability) (r: CapabilityRegistry<'Ctx>) : Result<CapabilityRegistry<'Ctx>, InvokeError> =
         Seam.replace c r.Seam |> lift
 
     /// The registry narrowed to the ids in `keep` — a session- or actor-scoped default-deny is a
     /// `restrict` of the host's registry. An id in `keep` the registry does not hold is ignored, so
     /// the result enumerates a subset of what `r` enumerates and dispatches nothing `r` would refuse.
-    let restrict (keep: Set<string>) (r: CapabilityRegistry) : CapabilityRegistry = { Seam = Seam.restrict keep r.Seam }
+    let restrict (keep: Set<string>) (r: CapabilityRegistry<'Ctx>) : CapabilityRegistry<'Ctx> =
+        { Seam = Seam.restrict keep r.Seam }
 
     /// The join of two registries whose ids are disjoint — refused `DuplicateCapability` naming the
     /// first id, in id order, that both hold (no silent overwrite, as `register`). Associative. The
     /// union runs BOTH registries' gates and tells both registries' observers (Phase 318,
     /// `RegistryPolicy.combine`), so it refuses every invocation either registry's policy refused.
-    let union (a: CapabilityRegistry) (b: CapabilityRegistry) : Result<CapabilityRegistry, InvokeError> =
+    let union
+        (a: CapabilityRegistry<'Ctx>)
+        (b: CapabilityRegistry<'Ctx>)
+        : Result<CapabilityRegistry<'Ctx>, InvokeError> =
         Seam.union a.Seam b.Seam |> lift
 
 /// How a seam codec treats a member it does not know (Phase 251). `Lenient` — the default, and

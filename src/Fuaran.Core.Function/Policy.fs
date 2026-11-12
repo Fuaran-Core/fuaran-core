@@ -14,8 +14,18 @@ namespace Fuaran.Core
 //  A registry carries a `RegistryPolicy`: the gates it runs and the observers it
 //  tells about a refusal. `withGate` only ever ADDS a gate, and the decision is
 //  the join over every gate, so a gate can tighten a registry and can never
-//  loosen it. FSharp.Core + Fuaran.Core.Ops (whose `RejectionGuidance` a denial
-//  carries) only, Fable-clean.
+//  loosen it.
+//
+//  Phase 638 gives the decision two more inputs, both generic. A gate reads a
+//  DECISION CONTEXT, a type parameter as the declaration and the arguments are,
+//  so one registry decides differently for two contexts and Core names nothing
+//  the context holds. And a dispatch may present a GRANT, bound to exactly one
+//  invocation: it turns that invocation's `NeedsApproval` into `Allow` and
+//  changes no other decision. A grant is not a gate. A gate can only tighten;
+//  a grant lifts one needs-approval and nothing else, and no grant lifts a `Deny`.
+//
+//  FSharp.Core + Fuaran.Core.Ops (whose `RejectionGuidance` a denial carries)
+//  only, Fable-clean.
 // ============================================================================
 
 /// The policy decision for one action by one actor — the shape of a domain's permission policy (the
@@ -96,25 +106,77 @@ module PolicyDecision =
                   Alternatives = [] }
         | PolicyDecision.Deny g -> Some g
 
-/// One named policy over the invocations of a registry (Phase 318): `Decide` sees the declaration
-/// the invocation resolved to and its validated arguments. `Policy` names it in every refusal it
-/// makes, so a refused caller and a denial observer can tell which of several gates said no. The
-/// content of `Decide` is the domain's; Core only runs it, after validation and before the body.
-type PolicyGate<'Decl, 'Args> =
+    /// The decision once an approval has been presented (Phase 638): `NeedsApproval` becomes `Allow`
+    /// when `granted`, and every other decision is returned as it is. So a grant never lifts a
+    /// `Deny`, never changes an `Allow`, and without one the decision is the gates' own
+    /// (`proofs/Capability.fst`, `grant_lifts_only_needs_approval`).
+    let lifted (granted: bool) (d: PolicyDecision) : PolicyDecision =
+        match d with
+        | PolicyDecision.NeedsApproval when granted -> PolicyDecision.Allow
+        | _ -> d
+
+/// An approval presented at a dispatch (Phase 638): a value bound to ONE invocation, named by the
+/// seam's injective invocation identity (`Capability.invocationPreimage` for a capability). A
+/// dispatch whose gates answer `NeedsApproval` runs when it presents a grant for exactly its own
+/// invocation, and is refused `ApprovalRequired` with none or with a grant for any other.
+///
+/// Core checks one thing, that the grant is for this invocation. Who minted it, whether it was
+/// already used, when it expires and which generation of the registry it was minted against are
+/// the host's, as facts the host puts in the decision context, where a gate reads them and can
+/// answer `Deny`, which no grant lifts.
+type Grant =
+    {
+        /// The identity of the invocation the grant is for: the declaration's id and its canonical
+        /// arguments, as the seam renders them. Compared by equality and never parsed.
+        Invocation: string
+    }
+
+/// Minting and reading a `Grant` (Phase 638).
+module Grant =
+
+    /// The grant for the invocation `invocation` names.
+    let ofInvocation (invocation: string) : Grant = { Invocation = invocation }
+
+    /// Whether one of `grants` is for exactly `invocation`.
+    let covers (invocation: string) (grants: Grant list) : bool =
+        grants |> List.exists (fun g -> g.Invocation = invocation)
+
+/// One named policy over the invocations of a registry (Phase 318): `Decide` sees the decision
+/// context the dispatch was made under (Phase 638), the declaration the invocation resolved to and
+/// its validated arguments. `Policy` names it in every refusal it makes, so a refused caller and a
+/// denial observer can tell which of several gates said no. The content of `Decide`, and of the
+/// context, is the domain's; Core only runs it, after validation and before the body.
+type PolicyGate<'Ctx, 'Decl, 'Args> =
     {
         /// The gate's name, carried by `PolicyRefused` / `ApprovalRequired` and by `PolicyDenial`.
         Policy: string
-        /// The decision for one resolved declaration and its validated arguments. Must be total and
-        /// side-effect free: a registry may consult it to answer `decide` without dispatching.
-        Decide: 'Decl -> 'Args -> PolicyDecision
+        /// The decision under one context for one resolved declaration and its validated arguments.
+        /// Must be total and side-effect free: a registry may consult it to answer `decide` without
+        /// dispatching. A fact that changes (a clock reading, a counter, whether an approval was
+        /// already spent) is a value the host puts in the context, never something the gate reads.
+        Decide: 'Ctx -> 'Decl -> 'Args -> PolicyDecision
     }
 
+/// Building a `PolicyGate` (Phase 638).
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module PolicyGate =
+
+    /// A gate that decides on the declaration and the arguments alone, under every context: the
+    /// one helper that carries a gate written before Phase 638 across unchanged. It decides exactly
+    /// as `decide` does, whatever the context is.
+    let ignoringContext (policy: string) (decide: 'Decl -> 'Args -> PolicyDecision) : PolicyGate<'Ctx, 'Decl, 'Args> =
+        { Policy = policy
+          Decide = fun _ decl args -> decide decl args }
+
 /// A refusal a registry's policy made, as a denial observer sees it (Phase 318): which gate refused,
-/// the id invoked, the arguments, and the decision — a `Deny` with its guidance, or `NeedsApproval`.
-type PolicyDenial<'Args> =
+/// the context it decided under (Phase 638), the id invoked, the arguments, and the decision — a
+/// `Deny` with its guidance, or `NeedsApproval`.
+type PolicyDenial<'Ctx, 'Args> =
     {
         /// The refusing gate's `Policy` name.
         Policy: string
+        /// The decision context the refused dispatch was made under.
+        Context: 'Ctx
         /// The id the invocation named.
         Id: string
         /// The arguments the invocation carried, as validated.
@@ -133,26 +195,26 @@ type PolicyDenial<'Args> =
 /// itself after `register` then `unregister`, because both carry its policy through untouched.
 /// There is no ordering: a registry carrying a policy is not `comparison`.
 [<CustomEquality; NoComparison>]
-type RegistryPolicy<'Decl, 'Args> =
+type RegistryPolicy<'Ctx, 'Decl, 'Args> =
     private
-        { Gates: PolicyGate<'Decl, 'Args> list
-          Observers: (PolicyDenial<'Args> -> unit) list }
+        { Gates: PolicyGate<'Ctx, 'Decl, 'Args> list
+          Observers: (PolicyDenial<'Ctx, 'Args> -> unit) list }
 
     /// Equal when both hold the same gates — the same `Policy` name AND the same `Decide` function
     /// value, in order — and the same observer values, in order. Identity of the functions, because a
     /// function has no extensional equality.
     override p.Equals(o: obj) =
         match o with
-        | :? RegistryPolicy<'Decl, 'Args> as q ->
+        | :? RegistryPolicy<'Ctx, 'Decl, 'Args> as q ->
             p.Gates.Length = q.Gates.Length
             && p.Observers.Length = q.Observers.Length
             && List.forall2
-                (fun (a: PolicyGate<'Decl, 'Args>) (b: PolicyGate<'Decl, 'Args>) ->
+                (fun (a: PolicyGate<'Ctx, 'Decl, 'Args>) (b: PolicyGate<'Ctx, 'Decl, 'Args>) ->
                     a.Policy = b.Policy && obj.ReferenceEquals(a.Decide, b.Decide))
                 p.Gates
                 q.Gates
             && List.forall2
-                (fun (a: PolicyDenial<'Args> -> unit) b -> obj.ReferenceEquals(a, b))
+                (fun (a: PolicyDenial<'Ctx, 'Args> -> unit) b -> obj.ReferenceEquals(a, b))
                 p.Observers
                 q.Observers
         | _ -> false
@@ -169,41 +231,75 @@ type RegistryPolicy<'Decl, 'Args> =
 module RegistryPolicy =
 
     /// No gate and no observer: every validated invocation is admitted.
-    let none<'Decl, 'Args> : RegistryPolicy<'Decl, 'Args> =
+    let none<'Ctx, 'Decl, 'Args> : RegistryPolicy<'Ctx, 'Decl, 'Args> =
         { Gates = []; Observers = [] }
 
     /// `p` with `gate` added after its gates. Adding is the only verb: the decision is the join over
     /// every gate, so the result refuses everything `p` refused, and possibly more.
-    let withGate (gate: PolicyGate<'Decl, 'Args>) (p: RegistryPolicy<'Decl, 'Args>) : RegistryPolicy<'Decl, 'Args> =
+    let withGate
+        (gate: PolicyGate<'Ctx, 'Decl, 'Args>)
+        (p: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        : RegistryPolicy<'Ctx, 'Decl, 'Args> =
         { p with Gates = p.Gates @ [ gate ] }
 
     /// `p` with `observe` added after its observers. Every observer is told of every refusal, in the
     /// order they were added.
     let onDenied
-        (observe: PolicyDenial<'Args> -> unit)
-        (p: RegistryPolicy<'Decl, 'Args>)
-        : RegistryPolicy<'Decl, 'Args> =
+        (observe: PolicyDenial<'Ctx, 'Args> -> unit)
+        (p: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        : RegistryPolicy<'Ctx, 'Decl, 'Args> =
         { p with
             Observers = p.Observers @ [ observe ] }
 
     /// The policy of the union of two registries: both policies' gates and observers, the left's
     /// first. A union never loosens either side — an invocation either registry's policy refused,
     /// the union's refuses. Associative.
-    let combine (a: RegistryPolicy<'Decl, 'Args>) (b: RegistryPolicy<'Decl, 'Args>) : RegistryPolicy<'Decl, 'Args> =
+    let combine
+        (a: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        (b: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        : RegistryPolicy<'Ctx, 'Decl, 'Args> =
         { Gates = a.Gates @ b.Gates
           Observers = a.Observers @ b.Observers }
 
-    /// The gate names, in the order they run.
-    let gates (p: RegistryPolicy<'Decl, 'Args>) : string list = p.Gates |> List.map _.Policy
+    /// `p` as the one context `ctx` sees it (Phase 638): each gate decides as it does under `ctx`,
+    /// and each observer is told of a refusal with `ctx` as its context. The result takes no
+    /// context (`unit`), so `decide (under ctx p) () decl args = decide p ctx decl args` for every
+    /// declaration and arguments. It fixes a context and loosens nothing.
+    let under (ctx: 'Ctx) (p: RegistryPolicy<'Ctx, 'Decl, 'Args>) : RegistryPolicy<unit, 'Decl, 'Args> =
+        { Gates =
+            p.Gates
+            |> List.map (fun g ->
+                { Policy = g.Policy
+                  Decide = fun () decl args -> g.Decide ctx decl args })
+          Observers =
+            p.Observers
+            |> List.map (fun observe ->
+                fun (d: PolicyDenial<unit, 'Args>) ->
+                    observe
+                        { Policy = d.Policy
+                          Context = ctx
+                          Id = d.Id
+                          Args = d.Args
+                          Decision = d.Decision }) }
 
-    /// The decision for one declaration and its arguments, with the name of the gate that made it:
-    /// the join over every gate, in order, so the deciding gate is the FIRST of the most restrictive
-    /// rank. `("", Allow)` when no gate runs. Consults the gates only — no observer is told.
-    let decideNamed (p: RegistryPolicy<'Decl, 'Args>) (decl: 'Decl) (args: 'Args) : string * PolicyDecision =
+    /// The gate names, in the order they run.
+    let gates (p: RegistryPolicy<'Ctx, 'Decl, 'Args>) : string list = p.Gates |> List.map _.Policy
+
+    /// The gates' decision under one context for one declaration and its arguments, with the name of
+    /// the gate that made it: the join over every gate, in order, so the deciding gate is the FIRST
+    /// of the most restrictive rank. `("", Allow)` when no gate runs. Consults the gates only — no
+    /// observer is told, and no grant is read: what a grant does to this decision is
+    /// `PolicyDecision.lifted`.
+    let decideNamed
+        (p: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        (ctx: 'Ctx)
+        (decl: 'Decl)
+        (args: 'Args)
+        : string * PolicyDecision =
         p.Gates
         |> List.fold
             (fun (name, acc) g ->
-                let d = g.Decide decl args
+                let d = g.Decide ctx decl args
 
                 if PolicyDecision.rank d > PolicyDecision.rank acc then
                     g.Policy, d
@@ -212,25 +308,33 @@ module RegistryPolicy =
             ("", PolicyDecision.Allow)
 
     /// The decision alone: `PolicyDecision.all` over the gates' decisions.
-    let decide (p: RegistryPolicy<'Decl, 'Args>) (decl: 'Decl) (args: 'Args) : PolicyDecision =
-        decideNamed p decl args |> snd
+    let decide (p: RegistryPolicy<'Ctx, 'Decl, 'Args>) (ctx: 'Ctx) (decl: 'Decl) (args: 'Args) : PolicyDecision =
+        decideNamed p ctx decl args |> snd
 
-    /// Run the gates for one invocation: `Ok ()` on `Allow`; otherwise every observer is told, in
-    /// order, and the refusal is the seam's own — `refused policy guidance` for a `Deny`,
-    /// `approval policy` for `NeedsApproval`. Internal: the registries' dispatch is the surface.
+    /// Run the gates for one invocation: `Ok ()` on `Allow`, and on a `NeedsApproval` that one of
+    /// `grants` covers (Phase 638: `invocation` renders this invocation's identity, and is read
+    /// only when the gates ask for an approval). Otherwise every observer
+    /// is told, in order, and the refusal is the seam's own — `refused policy guidance` for a
+    /// `Deny`, whatever is presented, and `approval policy` for a `NeedsApproval` no grant covers.
+    /// Internal: the registries' dispatch is the surface.
     let internal admit
         (refused: string -> RejectionGuidance -> 'E)
         (approval: string -> 'E)
-        (p: RegistryPolicy<'Decl, 'Args>)
+        (invocation: 'Decl -> 'Args -> string)
+        (p: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        (ctx: 'Ctx)
+        (grants: Grant list)
         (id: string)
         (decl: 'Decl)
         (args: 'Args)
         : Result<unit, 'E> =
-        match decideNamed p decl args with
+        match decideNamed p ctx decl args with
         | _, PolicyDecision.Allow -> Ok()
+        | _, PolicyDecision.NeedsApproval when Grant.covers (invocation decl args) grants -> Ok()
         | name, d ->
             let denial =
                 { Policy = name
+                  Context = ctx
                   Id = id
                   Args = args
                   Decision = d }

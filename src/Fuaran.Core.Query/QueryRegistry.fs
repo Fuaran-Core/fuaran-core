@@ -14,7 +14,7 @@ type QueryRegistry =
             /// The registered queries keyed by `Query.Id` — each admitted by `register` — and the
             /// gates every dispatch runs after the parameters validate and before the resolver, with
             /// the observers a refusal reaches (Phase 318).
-            Seam: Seam<Query, (string * Cell) list, QueryError>
+            Seam: Seam<unit, Query, (string * Cell) list, QueryError>
         }
 
 /// Building, enumerating and dispatching through a `QueryRegistry`.
@@ -52,7 +52,9 @@ module QueryRegistry =
 
     /// The query seam's vocabulary (Phase 509): `NoSuchQuery` / `DuplicateQuery`, `admissionFault`
     /// as the registration gate, `Query.validateParams` before the policy, and `QueryPolicyRefused` /
-    /// `QueryApprovalRequired` for its gates.
+    /// `QueryApprovalRequired` for its gates. `Invocation` (Phase 638) is the query id, then the
+    /// fields `Query.invocationKey` hashes, as one canonical pre-image with no hash taken. This
+    /// registry decides under the `unit` context and presents no grant, so nothing reads it yet.
     let private vocabulary: SeamVocabulary<Query, (string * Cell) list, QueryError> =
         { Id = _.Id
           NoSuch = fun id known -> NoSuchQuery(id, known)
@@ -61,13 +63,14 @@ module QueryRegistry =
           Validate = Query.validateParams
           Refused = fun policy g -> QueryPolicyRefused(policy, g.Message, g.Alternatives)
           Approval = QueryApprovalRequired
+          Invocation = fun q args -> Hash.canonicalFields (q.Id :: Query.grammarFields q args)
           Describe = QueryError.describe }
 
     /// The registry with no queries: every dispatch against it is `NoSuchQuery` with an empty
     /// `known` list.
     let empty: QueryRegistry = { Seam = Seam.create vocabulary }
 
-    let private lift (r: Result<Seam<Query, (string * Cell) list, QueryError>, QueryError>) =
+    let private lift (r: Result<Seam<unit, Query, (string * Cell) list, QueryError>, QueryError>) =
         r |> Result.map (fun s -> { Seam = s })
 
     /// Register a query — additive, no silent overwrite (a duplicate id is a named error), and,
@@ -88,18 +91,18 @@ module QueryRegistry =
     /// `r` with `gate` added to the gates every dispatch runs (`RegistryPolicy.withGate`): after the
     /// parameters validate, before the resolver. The decision is the join over every gate, so adding
     /// one can only refuse more.
-    let withGate (gate: PolicyGate<Query, (string * Cell) list>) (r: QueryRegistry) : QueryRegistry =
+    let withGate (gate: PolicyGate<unit, Query, (string * Cell) list>) (r: QueryRegistry) : QueryRegistry =
         { Seam = Seam.withGate gate r.Seam }
 
     /// `r` with `observe` told of every invocation its policy refuses, before the refusal returns.
-    let onDenied (observe: PolicyDenial<(string * Cell) list> -> unit) (r: QueryRegistry) : QueryRegistry =
+    let onDenied (observe: PolicyDenial<unit, (string * Cell) list> -> unit) (r: QueryRegistry) : QueryRegistry =
         { Seam = Seam.onDenied observe r.Seam }
 
     /// What the registry would decide for an invocation without dispatching it: an unknown id is a
     /// `Deny` naming the registered ids as alternatives, parameters that do not validate a `Deny`
     /// with the refusal's sentence, otherwise the gates' join. No observer is told.
     let decide (r: QueryRegistry) (id: string) (args: (string * Cell) list) : PolicyDecision =
-        Seam.decide r.Seam id args
+        Seam.decide r.Seam () None id args
 
     /// Dispatch an invocation through the registry: resolve the id (default-deny — an unregistered id
     /// is `NoSuchQuery`), validate the parameters, run the policy's gates (Phase 318 —
@@ -113,7 +116,7 @@ module QueryRegistry =
         (args: (string * Cell) list)
         (resolve: Query -> Deferred<QueryResult>)
         : Result<Deferred<QueryResult>, QueryError> =
-        Seam.dispatch r.Seam id args (fun q -> Query.invoke q args resolve)
+        Seam.dispatch r.Seam () None id args (fun q -> Query.invoke q args resolve)
 
     /// `dispatch`, with the resolver handed the resolved query and the validated argument list
     /// (`Query.invokeWithArgs`, Phase 251). Additive beside `dispatch`; default-deny the same.
@@ -123,7 +126,7 @@ module QueryRegistry =
         (args: (string * Cell) list)
         (resolve: Query -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
         : Result<Deferred<QueryResult>, QueryError> =
-        Seam.dispatch r.Seam id args (fun q -> Query.invokeWithArgs q args resolve)
+        Seam.dispatch r.Seam () None id args (fun q -> Query.invokeWithArgs q args resolve)
 
     /// `dispatch` for ONE PAGE (Phase 316): resolve the id (default-deny), then `Query.invokePage`,
     /// handing the resolver the page token. `dispatch r id args resolve` is
@@ -135,7 +138,7 @@ module QueryRegistry =
         (pageToken: string option)
         (resolve: Query -> string option -> Deferred<QueryResult>)
         : Result<Deferred<QueryResult>, QueryError> =
-        Seam.dispatch r.Seam id args (fun q -> Query.invokePage q args pageToken resolve)
+        Seam.dispatch r.Seam () None id args (fun q -> Query.invokePage q args pageToken resolve)
 
     /// `dispatchPage` with the typed resolver (Phase 385): resolve the id (default-deny), validate,
     /// admit through the policy, then `Query.invokePageWithArgs` — so a resolver answering a
@@ -148,7 +151,7 @@ module QueryRegistry =
         (pageToken: string option)
         (resolve: Query -> string option -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
         : Result<Deferred<QueryResult>, QueryError> =
-        Seam.dispatch r.Seam id args (fun q -> Query.invokePageWithArgs q args pageToken resolve)
+        Seam.dispatch r.Seam () None id args (fun q -> Query.invokePageWithArgs q args pageToken resolve)
 
     // ---- the lifecycle (Phase 316): a registry is a lattice, not an append log ----
 
@@ -222,7 +225,17 @@ module QueryRegistry =
         (resolve: Query -> Deferred<QueryResult>)
         (journal: KeyedCapture list)
         : CapturedDispatch<QueryResult, QueryError> =
-        Seam.dispatchCaptured hashFn encode unpaged r.Seam id args (fun q -> Query.invoke q args resolve) journal
+        Seam.dispatchCaptured
+            hashFn
+            encode
+            unpaged
+            r.Seam
+            ()
+            None
+            id
+            args
+            (fun q -> Query.invoke q args resolve)
+            journal
 
     /// `dispatchPage`, journalled under `Query.invocationKeyPage` (Phase 318), so every page of a
     /// non-deterministic query has its own capture and replays from it.
@@ -241,6 +254,8 @@ module QueryRegistry =
             encode
             (paged pageToken)
             r.Seam
+            ()
+            None
             id
             args
             (fun q -> Query.invokePage q args pageToken resolve)
@@ -264,6 +279,8 @@ module QueryRegistry =
             encode
             unpaged
             r.Seam
+            ()
+            None
             id
             args
             (fun q -> Query.invokeWithArgs q args resolve)
@@ -287,6 +304,8 @@ module QueryRegistry =
             encode
             (paged pageToken)
             r.Seam
+            ()
+            None
             id
             args
             (fun q -> Query.invokePageWithArgs q args pageToken resolve)
@@ -317,6 +336,8 @@ module QueryRegistry =
             decode
             (paged pageToken)
             r.Seam
+            ()
+            None
             id
             args
             (fun q -> Query.invokePage q args pageToken resolve)
@@ -341,6 +362,8 @@ module QueryRegistry =
             decode
             (paged pageToken)
             r.Seam
+            ()
+            None
             id
             args
             (fun q -> Query.invokePageWithArgs q args pageToken resolve)

@@ -353,7 +353,7 @@ module Query =
     /// The query grammar (Phase 225, D173): the declaration's shape fields (`QueryShape.keyFields`),
     /// then three fields per binding — name, cell tag, cell payload — name-sorted. The one body both
     /// keys read, so the paged key is the unpaged one behind a page triple.
-    let private grammarFields (q: Query) (args: (string * Cell) list) : string list =
+    let internal grammarFields (q: Query) (args: (string * Cell) list) : string list =
         QueryShape.keyFields q.Where q.OrderBy
         @ (args
            |> List.sortBy fst

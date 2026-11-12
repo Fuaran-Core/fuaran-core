@@ -133,6 +133,10 @@ module Hash =
     ///   - `Query.invocationKeyPage` (Phase 316: `Query.invocationKey`'s fields behind a page triple —
     ///     an empty name, the tag `p` no cell carries, the page token)
     ///   - `Capability.invocationKey`
+    ///   - `Capability.invocationPreimage` (Phase 638: the capability id, then `invocationKey`'s
+    ///     fields, with no hash taken — the identity a `Grant` is for)
+    ///   - `QueryRegistry.vocabulary` (Phase 638: the query seam's invocation identity — the query
+    ///     id, then `Query.invocationKey`'s fields, with no hash taken)
     ///   - `CapabilityPipeline.nodeInvocationKey`
     ///   - `Function.memoKey`
     ///   - `Projection.digestOf`

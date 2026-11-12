@@ -576,24 +576,48 @@ module Proposals =
         : SubmitOutcome<'State, 'Op, 'Rej> =
         submitWith w (w.Decide author) None author at intent ops q state
 
-    /// The capabilities an op invokes, through the registry the actor acts through, joined with the
-    /// domain's own decision for the op (Phase 318): `w.Decide actor op`
-    /// joined with `CapabilityRegistry.decide registry id args` for every invocation
-    /// `EffectsOf op` names — so an op that invokes an unregistered capability is denied naming the
-    /// registered ones, an op whose arguments do not validate is denied, and the registry's gates
-    /// refuse what they refuse, without the domain stating any of it in `Decide`. The registry is
-    /// the one THIS actor acts through: an actor-scoped policy is a `restrict` or a `withGate` of the
-    /// host's registry.
-    let decideGuarded
+    /// The one guarded decision (Phase 638): the domain's own decision for the op joined with the
+    /// registry's, under `ctx`, for every invocation `EffectsOf op` names. `approving` presents each
+    /// invocation with the grant for exactly it (`Capability.grant`), which is what an approval is:
+    /// the registry's `NeedsApproval` for that invocation is lifted through the gate, and its `Deny`
+    /// is not.
+    let private decideThrough
+        (approving: bool)
         (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
-        (registry: CapabilityRegistry)
+        (registry: CapabilityRegistry<'Ctx>)
+        (ctx: 'Ctx)
         (actor: string)
         (op: 'Op)
         : PolicyDecision =
+        let grantFor (id: string) (args: (string * string) list) : Grant option =
+            if approving then
+                CapabilityRegistry.tryFind id registry
+                |> Option.map (fun c -> Capability.grant c args)
+            else
+                None
+
         gw.Surface.Decide actor op
         :: (gw.EffectsOf op
-            |> List.map (fun (id, args) -> CapabilityRegistry.decide registry id args))
+            |> List.map (fun (id, args) -> CapabilityRegistry.decide registry ctx (grantFor id args) id args))
         |> PolicyDecision.all
+
+    /// The capabilities an op invokes, through the registry the actor acts through, joined with the
+    /// domain's own decision for the op (Phase 318): `w.Decide actor op`
+    /// joined with `CapabilityRegistry.decide registry ctx None id args` for every invocation
+    /// `EffectsOf op` names — so an op that invokes an unregistered capability is denied naming the
+    /// registered ones, an op whose arguments do not validate is denied, and the registry's gates
+    /// refuse what they refuse, without the domain stating any of it in `Decide`. The registry
+    /// decides under `ctx` (Phase 638), the decision context the host builds for THIS actor: one
+    /// registry serves every actor, and a gate reads who is acting from the context. No grant is
+    /// presented, so a gate's `NeedsApproval` parks the sequence.
+    let decideGuarded
+        (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
+        (registry: CapabilityRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (actor: string)
+        (op: 'Op)
+        : PolicyDecision =
+        decideThrough false gw registry ctx actor op
 
     /// Dry-run the whole sequence through `DryRun` (Phase 318): the first op that
     /// would not apply, threaded through the states the earlier ones would produce. Runs no `Apply`.
@@ -616,7 +640,8 @@ module Proposals =
     /// later op refuses.
     let submitGuarded
         (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
-        (registry: CapabilityRegistry)
+        (registry: CapabilityRegistry<'Ctx>)
+        (ctx: 'Ctx)
         (author: string)
         (at: string)
         (intent: string option)
@@ -624,23 +649,32 @@ module Proposals =
         (q: ProposalQueue<'Op>)
         (state: 'State)
         : SubmitOutcome<'State, 'Op, 'Rej> =
-        submitWith gw.Surface (decideGuarded gw registry author) (Some(dryRunAll gw)) author at intent ops q state
+        submitWith gw.Surface (decideGuarded gw registry ctx author) (Some(dryRunAll gw)) author at intent ops q state
 
     /// `approve` behind the registry's gate and a dry run (Phase 318). The approver may not be the
-    /// author (`SelfApproval`); every op's `decideGuarded` for the APPROVER through `registry` — the
-    /// registry the approver acts through — must not be a `Deny` (`ApprovalDenied`, the first
-    /// denial's guidance); the whole sequence is dry-run before the first `Apply`, and an op that no
-    /// longer applies is `OpNoLongerApplies` with the proposal left pending and nothing applied.
+    /// author (`SelfApproval`); every op's guarded decision for the APPROVER through `registry`,
+    /// under `ctx` — the decision context the host builds for the approver — must not be a `Deny`
+    /// (`ApprovalDenied`, the first denial's guidance); the whole sequence is dry-run before the
+    /// first `Apply`, and an op that no longer applies is `OpNoLongerApplies` with the proposal left
+    /// pending and nothing applied.
+    ///
+    /// **The approval goes THROUGH the gate (Phase 638).** Each invocation the proposal's ops name
+    /// is decided with the grant for exactly that invocation presented, so the registry's
+    /// `NeedsApproval` for it is lifted by the grant and by nothing else: a `Deny` under the
+    /// approver's context still refuses, and an invocation the proposal does not name is granted
+    /// nothing. Before this phase a `NeedsApproval` from the registry was passed over here, beside
+    /// the gate.
     let approveGuarded
         (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
-        (registry: CapabilityRegistry)
+        (registry: CapabilityRegistry<'Ctx>)
+        (ctx: 'Ctx)
         (approver: string)
         (at: string)
         (id: int)
         (q: ProposalQueue<'Op>)
         (state: 'State)
         : Result<ProposalQueue<'Op> * 'State, ApprovalFailure<'Rej>> =
-        approveWith gw.Surface (decideGuarded gw registry approver) (Some(dryRunAll gw)) approver at id q state
+        approveWith gw.Surface (decideThrough true gw registry ctx approver) (Some(dryRunAll gw)) approver at id q state
 
     /// Render guidance as agent-readable text: the message plus the enumerated
     /// alternatives (one per line), so a refused agent repairs instead of

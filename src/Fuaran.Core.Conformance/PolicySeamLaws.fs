@@ -19,7 +19,16 @@ module internal PolicySeamLaws =
     ///  - **every policy refusal reaches every observer, once** — and nothing else does;
     ///  - **a gate only tightens** — `decide` after `withGate` is never less restrictive than before,
     ///    a union refuses whatever either side's policy refused, and `restrict` keeps the policy;
-    ///  - **`decide` agrees with `dispatch`** — the body runs exactly when `decide` answers `Allow`.
+    ///  - **`decide` agrees with `dispatch`** — the body runs exactly when `decide` answers `Allow`;
+    ///  - **one registry decides per context** (Phase 638) — a gate that reads the decision context
+    ///    answers `Allow` under one context and its own verdict under another, through one registry;
+    ///    `CapabilityRegistry.under` fixes a context and decides as the registry does under it; and a
+    ///    gate lifted by `PolicyGate.ignoringContext` decides the same under every context;
+    ///  - **a grant lifts exactly its own approval** (Phase 638) — a `NeedsApproval` dispatches with
+    ///    the grant for exactly its invocation, and with none, a grant for other arguments or a
+    ///    grant for another capability it does not; a `Deny` is lifted by no grant; an `Allow` is
+    ///    unchanged by any; an unregistered id is refused whatever is presented; and the decision
+    ///    is the same on every asking.
     let policyLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let lattice =
             LawKit.LawCell
@@ -37,6 +46,14 @@ module internal PolicySeamLaws =
                 "withGate never lowers decide's rank, a union refuses what either side refused, and restrict, register and unregister carry the policy through equality"
 
         let agrees = LawKit.LawCell "the body runs exactly when decide answers Allow"
+
+        let contexts =
+            LawKit.LawCell
+                "one registry decides per context: a context-reading gate allows under one context and gives its verdict under another, under fixes a context, and ignoringContext decides alike under every context"
+
+        let grants =
+            LawKit.LawCell
+                "a grant lifts exactly its own approval: NeedsApproval dispatches only with the grant for its invocation, Deny is lifted by none, Allow is unchanged by any, an unregistered id is refused whatever is presented, and the decision is a function of its inputs"
 
         let pipelineAdmits =
             LawKit.LawCell
@@ -125,14 +142,14 @@ module internal PolicySeamLaws =
                 let decideFor (id: string) =
                     if id = target then verdict else PolicyDecision.Allow
 
-                let told = ResizeArray<PolicyDenial<(string * string) list>>()
-                let qTold = ResizeArray<PolicyDenial<(string * Cell) list>>()
+                let told = ResizeArray<PolicyDenial<unit, (string * string) list>>()
+                let qTold = ResizeArray<PolicyDenial<unit, (string * Cell) list>>()
 
                 let capReg =
                     build CapabilityRegistry.register CapabilityRegistry.empty (ids |> List.map capOf)
                     |> CapabilityRegistry.withGate
                         { Policy = gateName
-                          Decide = fun c _ -> decideFor c.Id }
+                          Decide = fun _ c _ -> decideFor c.Id }
                     |> CapabilityRegistry.onDenied told.Add
 
                 let fnReg =
@@ -142,26 +159,114 @@ module internal PolicySeamLaws =
                         (ids |> List.map (fun id -> FunctionRegistry.entry "doc" (capOf id)))
                     |> FunctionRegistry.withGate
                         { Policy = gateName
-                          Decide = fun c _ -> decideFor c.Id }
+                          Decide = fun _ c _ -> decideFor c.Id }
 
                 let qReg =
                     build QueryRegistry.register QueryRegistry.empty (ids |> List.map queryOf)
                     |> QueryRegistry.withGate
                         { Policy = gateName
-                          Decide = fun q _ -> decideFor q.Id }
+                          Decide = fun _ q _ -> decideFor q.Id }
                     |> QueryRegistry.onDenied qTold.Add
 
                 let id = target
                 let n = rng.IntBelow 10
                 let ran = ResizeArray<string>()
 
+                // ---- Phase 638: one registry under two contexts, and the grant ----
+                // The context is one fact, `trusted`: the gate allows under it and gives `verdict`
+                // for the target otherwise. Nothing but the context differs between the two askings.
+                let ctxReg =
+                    build CapabilityRegistry.register CapabilityRegistry.empty (ids |> List.map capOf)
+                    |> CapabilityRegistry.withGate
+                        { Policy = gateName
+                          Decide =
+                            fun (trusted: bool) c _ ->
+                                if trusted || c.Id <> target then
+                                    PolicyDecision.Allow
+                                else
+                                    verdict }
+
+                let liftedReg =
+                    build CapabilityRegistry.register CapabilityRegistry.empty (ids |> List.map capOf)
+                    |> CapabilityRegistry.withGate (PolicyGate.ignoringContext gateName (fun c _ -> decideFor c.Id))
+
+                let cargs = [ "n", string n ]
+                let otherArgs = [ "n", string ((n + 1) % 10) ]
+                let otherId = ids |> List.find (fun i -> i <> target)
+                let performed = ResizeArray<int>()
+
+                let perform (_: Capability) () =
+                    performed.Add n
+                    Ready n
+
+                let decideAt (trusted: bool) (grant: Grant option) =
+                    CapabilityRegistry.decide ctxReg trusted grant target cargs
+
+                let dispatchAt (trusted: bool) (grant: Grant option) =
+                    CapabilityRegistry.dispatch ctxReg trusted grant target cargs perform
+
+                contexts.Check(
+                    decideAt true None = PolicyDecision.Allow
+                    && decideAt false None = verdict
+                    && dispatchAt true None = Ok(Ready n)
+                    && ((dispatchAt false None = Ok(Ready n)) = (verdict = PolicyDecision.Allow))
+                    && CapabilityRegistry.decide (CapabilityRegistry.under false ctxReg) () None target cargs = verdict
+                    && CapabilityRegistry.decide (CapabilityRegistry.under true ctxReg) () None target cargs = PolicyDecision.Allow
+                    && CapabilityRegistry.decide liftedReg true None target cargs = verdict
+                    && CapabilityRegistry.decide liftedReg false None target cargs = verdict
+                    && CapabilityRegistry.decide liftedReg false None target cargs = CapabilityRegistry.decide
+                        capReg
+                        ()
+                        None
+                        target
+                        cargs,
+                    fun () -> at (sprintf "the contexts law failed for %s under %A" target verdict)
+                )
+
+                let own = Capability.grant (capOf target) cargs
+                let forOtherArgs = Capability.grant (capOf target) otherArgs
+                let forOtherCap = Capability.grant (capOf otherId) cargs
+                let needsApproval = verdict = PolicyDecision.NeedsApproval
+                let before = performed.Count
+                let withOwn = dispatchAt false (Some own)
+                let ranWithOwn = performed.Count - before
+                let withOtherArgs = dispatchAt false (Some forOtherArgs)
+                let withOtherCap = dispatchAt false (Some forOtherCap)
+                let ranWithOthers = performed.Count - before - ranWithOwn
+
+                grants.Check(
+                    // the decision: lifted by its own grant only, and only from NeedsApproval
+                    decideAt false (Some own) = PolicyDecision.lifted true verdict
+                    && (decideAt false (Some own) = verdict) = (not needsApproval)
+                    && decideAt false (Some forOtherArgs) = verdict
+                    && decideAt false (Some forOtherCap) = verdict
+                    && decideAt true (Some own) = PolicyDecision.Allow
+                    // the dispatch: the body runs with its own grant unless denied, and with another's only when allowed
+                    && (withOwn = Ok(Ready n)) = (rank verdict < 2)
+                    && ranWithOwn = (if rank verdict < 2 then 1 else 0)
+                    && (withOtherArgs = Ok(Ready n)) = (verdict = PolicyDecision.Allow)
+                    && withOtherArgs = dispatchAt false None
+                    && withOtherCap = withOtherArgs
+                    && ranWithOthers = (if verdict = PolicyDecision.Allow then 2 else 0)
+                    && (not needsApproval || withOtherArgs = Error(ApprovalRequired gateName))
+                    // an unregistered id is refused whatever is presented
+                    && CapabilityRegistry.dispatch ctxReg false (Some own) "missing" cargs perform = Error(
+                        NoSuchCapability("missing", ids)
+                    )
+                    && rank (CapabilityRegistry.decide ctxReg true (Some own) "missing" cargs) = 2
+                    // a function of its inputs: the same asking, the same answer
+                    && decideAt false (Some own) = decideAt false (Some own)
+                    && Capability.grant (capOf target) cargs = own,
+                    fun () -> at (sprintf "the grant law failed for %s under %A" target verdict)
+                )
+
                 let capOut =
-                    CapabilityRegistry.dispatch capReg id [ "n", string n ] (fun _ () ->
+                    CapabilityRegistry.dispatch capReg () None id [ "n", string n ] (fun _ () ->
                         ran.Add "capability"
                         Ready n)
 
                 let fnOut =
-                    FunctionRegistry.dispatch fnReg id [ "n", string n ] (fun _ () ->
+                    FunctionRegistry.dispatch fnReg () None id [ "n", string n ] (fun _ () ->
                         ran.Add "function"
                         Ready n)
 
@@ -193,13 +298,13 @@ module internal PolicySeamLaws =
                     CapabilityRegistry.withGate
                         { Policy = "watch"
                           Decide =
-                            fun c _ ->
+                            fun _ c _ ->
                                 consulted.Add c.Id
                                 PolicyDecision.Allow }
                         capReg
 
                 let bad =
-                    CapabilityRegistry.dispatch watching target [ "n", "99" ] (fun _ () ->
+                    CapabilityRegistry.dispatch watching () None target [ "n", "99" ] (fun _ () ->
                         ran.Add "bad"
                         Ready 0)
 
@@ -233,6 +338,7 @@ module internal PolicySeamLaws =
                     (if refusedHere then
                          capTold = 1
                          && told[0] = { Policy = gateName
+                                        Context = ()
                                         Id = id
                                         Args = [ "n", string n ]
                                         Decision = expected }
@@ -260,16 +366,24 @@ module internal PolicySeamLaws =
                 let toldBefore = told.Count
 
                 let viaCap =
-                    CapabilityPipeline.eval (CapabilityLookup.ofRegistry capReg) string pipelineBody pipeline
+                    CapabilityPipeline.eval (CapabilityLookup.ofRegistry capReg) () [] string pipelineBody pipeline
 
                 let toldByEval = told.Count - toldBefore
 
                 let viaFn =
-                    CapabilityPipeline.eval (CapabilityLookup.ofFunctionRegistry fnReg) string pipelineBody pipeline
+                    CapabilityPipeline.eval
+                        (CapabilityLookup.ofFunctionRegistry fnReg)
+                        ()
+                        []
+                        string
+                        pipelineBody
+                        pipeline
 
                 let viaFrom =
                     CapabilityPipeline.evalFrom
                         (CapabilityLookup.ofRegistry capReg)
+                        ()
+                        []
                         string
                         pipelineBody
                         Map.empty
@@ -318,9 +432,9 @@ module internal PolicySeamLaws =
 
                 let secondVerdict = rng.Choose decisions
 
-                let second: PolicyGate<Capability, (string * string) list> =
+                let second: PolicyGate<unit, Capability, (string * string) list> =
                     { Policy = "second"
-                      Decide = fun _ _ -> secondVerdict }
+                      Decide = fun _ _ _ -> secondVerdict }
 
                 let gated = CapabilityRegistry.withGate second capReg
 
@@ -331,20 +445,25 @@ module internal PolicySeamLaws =
                 let unionTightens =
                     match CapabilityRegistry.union capReg other with
                     | Ok u ->
-                        rank (CapabilityRegistry.decide u id args)
-                        >= rank (CapabilityRegistry.decide capReg id args)
-                        && rank (CapabilityRegistry.decide u id args) >= rank secondVerdict
+                        rank (CapabilityRegistry.decide u () None id args)
+                        >= rank (CapabilityRegistry.decide capReg () None id args)
+                        && rank (CapabilityRegistry.decide u () None id args) >= rank secondVerdict
                     | Error _ -> false
 
                 let restricted = CapabilityRegistry.restrict (Set.ofList ids) capReg
 
                 tightens.Check(
-                    rank (CapabilityRegistry.decide gated id args)
-                    >= rank (CapabilityRegistry.decide capReg id args)
-                    && rank (CapabilityRegistry.decide capReg id args)
-                       >= rank (CapabilityRegistry.decide baseReg id args)
+                    rank (CapabilityRegistry.decide gated () None id args)
+                    >= rank (CapabilityRegistry.decide capReg () None id args)
+                    && rank (CapabilityRegistry.decide capReg () None id args)
+                       >= rank (CapabilityRegistry.decide baseReg () None id args)
                     && unionTightens
-                    && CapabilityRegistry.decide restricted id args = CapabilityRegistry.decide capReg id args
+                    && CapabilityRegistry.decide restricted () None id args = CapabilityRegistry.decide
+                        capReg
+                        ()
+                        None
+                        id
+                        args
                     && restricted = capReg
                     && hash restricted = hash capReg
                     && (CapabilityRegistry.register (capOf "w") capReg
@@ -353,16 +472,24 @@ module internal PolicySeamLaws =
                 )
 
                 agrees.Check(
-                    (CapabilityRegistry.decide capReg id args = PolicyDecision.Allow) = (capOut = Ok(Ready n))
-                    && (FunctionRegistry.decide fnReg id args = PolicyDecision.Allow) = (fnOut = Ok(Ready n))
+                    (CapabilityRegistry.decide capReg () None id args = PolicyDecision.Allow) = (capOut = Ok(Ready n))
+                    && (FunctionRegistry.decide fnReg () None id args = PolicyDecision.Allow) = (fnOut = Ok(Ready n))
                     && (QueryRegistry.decide qReg id [ "n", Int n ] = PolicyDecision.Allow) = (qOut = Ok(
                         Ready emptyResult
                     ))
-                    && rank (CapabilityRegistry.decide capReg "missing" []) = 2,
+                    && rank (CapabilityRegistry.decide capReg () None "missing" []) = 2,
                     fun () -> at (sprintf "decide and dispatch disagree on %s" id)
                 ))
 
-        LawKit.results [ lattice; beforeBody; observed; tightens; agrees; pipelineAdmits ]
+        LawKit.results
+            [ lattice
+              beforeBody
+              observed
+              tightens
+              agrees
+              pipelineAdmits
+              contexts
+              grants ]
 
     /// The no-unapproved-write law and the dry run's agreement with `Apply`, at a DOMAIN's guarded
     /// AI surface (Phase 318). Runs the domain's OWN `Decide` (never a kit policy), joined with the
@@ -377,7 +504,7 @@ module internal PolicySeamLaws =
     ///    refuses is a refusal (`SubmitDenied` or `SubmitOpRejected`), never applied or parked.
     let policyLawsAt
         (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
-        (registry: CapabilityRegistry)
+        (registry: CapabilityRegistry<unit>)
         (state0: 'State)
         (genOp: ConfRng.T -> 'Op * ConfRng.T)
         (actors: Actor list)
@@ -419,7 +546,7 @@ module internal PolicySeamLaws =
                     writes <- writes + 1
 
                     noWrite.Check(
-                        Proposals.decideGuarded gw registry actorId op <> PolicyDecision.Allow,
+                        Proposals.decideGuarded gw registry () actorId op <> PolicyDecision.Allow,
                         fun () ->
                             at (sprintf "%A was allowed for unprivileged %s although it writes to the host" op actorId)
                     )
@@ -442,7 +569,7 @@ module internal PolicySeamLaws =
             | Error _ ->
                 refusedRuns <- refusedRuns + 1
 
-                match Proposals.submitGuarded gw registry actorId "t" None seqOps Proposals.Queue.empty state0 with
+                match Proposals.submitGuarded gw registry () actorId "t" None seqOps Proposals.Queue.empty state0 with
                 | Proposals.SubmitDenied _
                 | Proposals.SubmitOpRejected _ -> inapplicable.Saw()
                 | other -> inapplicable.Check(false, fun () -> at (sprintf "an inapplicable sequence was %A" other)))
@@ -807,6 +934,8 @@ module internal PolicySeamLaws =
                     hashFn
                     enc
                     reg
+                    ()
+                    None
                     "fetch"
                     [ "n", string arg ]
                     (fun _ () -> Ready recordedN)
@@ -816,6 +945,8 @@ module internal PolicySeamLaws =
                 CapabilityRegistry.dispatchReplayed
                     dec
                     reg
+                    ()
+                    None
                     "fetch"
                     [ "n", string arg ]
                     (fun _ () -> Ready(recordedN + 1))
@@ -825,7 +956,7 @@ module internal PolicySeamLaws =
             let denying =
                 CapabilityRegistry.withGate
                     { Policy = "no"
-                      Decide = fun _ _ -> PolicyDecision.deny "never" }
+                      Decide = fun _ _ _ -> PolicyDecision.deny "never" }
                     reg
 
             let refused =
@@ -833,6 +964,8 @@ module internal PolicySeamLaws =
                     hashFn
                     enc
                     denying
+                    ()
+                    None
                     "fetch"
                     [ "n", string arg ]
                     (fun _ () -> Ready 0)

@@ -482,7 +482,7 @@ let private capProbe (rd: ModelCap.readers) (seedTag: int) (r: ConfRng.T) (acc: 
     // build a registry on both sides, in the same order, with duplicates possible
     let n, r1 = ConfRng.intBelow 4 r
 
-    let register (i: int) (rng: ConfRng.T, preg: CapabilityRegistry, mreg: ModelCap.registry) (tally: Tally) =
+    let register (i: int) (rng: ConfRng.T, preg: CapabilityRegistry<unit>, mreg: ModelCap.registry) (tally: Tally) =
         let id, r2 = ConfRng.choose capIdPool rng
         let sg, r3 = genCapSignature (sprintf "f%d" i) r2
         let placement, r4 = ConfRng.choose [ BuildTime; Server; ClientIsland Pyodide ] r3
@@ -550,7 +550,7 @@ let private capProbe (rd: ModelCap.readers) (seedTag: int) (r: ConfRng.T) (acc: 
             | 1 -> ModelCap.Pending
             | _ -> ModelCap.Ready 42
 
-        let p = CapabilityRegistry.dispatch preg id args pBody
+        let p = CapabilityRegistry.dispatch preg () None id args pBody
         let m = ModelCap.dispatch rd mreg id args mBody
 
         // ... and neither side ever hands an `Ok(Failed _)` out of the seam
@@ -1142,12 +1142,12 @@ let tests =
 
               // unregistered_refused
               Expect.equal
-                  (CapabilityRegistry.dispatch reg "cap-u" [ "tpl/t", "x" ] body)
+                  (CapabilityRegistry.dispatch reg () None "cap-u" [ "tpl/t", "x" ] body)
                   (Error(NoSuchCapability("cap-u", [ "cap-t" ])))
                   "an unregistered id is the typed refusal, naming what IS registered"
 
               Expect.equal
-                  (CapabilityRegistry.dispatch reg "cap-u" [ "tpl/t", "x" ] failing)
+                  (CapabilityRegistry.dispatch reg () None "cap-u" [ "tpl/t", "x" ] failing)
                   (Error(NoSuchCapability("cap-u", [ "cap-t" ])))
                   "and the same refusal under a failing body"
 
@@ -1157,8 +1157,8 @@ let tests =
                     [ "tpl/t", "x"; "tpl/c", "1"; "tpl/zz", "1" ]
                     [ "tpl/t", "x"; "tpl/c", "1"; "tpl/s", "para" ]
                     [ "tpl/t", "x" ] ] do
-                  let a = CapabilityRegistry.dispatch reg "cap-t" args body
-                  let b = CapabilityRegistry.dispatch reg "cap-t" args failing
+                  let a = CapabilityRegistry.dispatch reg () None "cap-t" args body
+                  let b = CapabilityRegistry.dispatch reg () None "cap-t" args failing
                   Expect.isTrue (Result.isError a) (sprintf "the set %A is refused" args)
                   Expect.equal a b "and the refusal is the same under a failing body"
 
@@ -1195,7 +1195,7 @@ let tests =
                     ArgOutOfSpace("tpl/s", SlotTree(Some "para"), """{"kind":"field"}""")
                     [ "tpl/s", "" ], UninvocableArg "tpl/s" ] do
                   Expect.equal
-                      (CapabilityRegistry.dispatch reg2 "cap-slot" args body)
+                      (CapabilityRegistry.dispatch reg2 () None "cap-slot" args body)
                       (Error expected)
                       (sprintf "the slot-bearing capability refuses %A by name" args)
 
@@ -1205,7 +1205,7 @@ let tests =
               let accepted = [ "tpl/t", "x"; "tpl/c", "3" ]
 
               Expect.equal
-                  (CapabilityRegistry.dispatch reg "cap-t" accepted body)
+                  (CapabilityRegistry.dispatch reg () None "cap-t" accepted body)
                   (Ok(Ready "ran"))
                   "an accepted set runs the body"
 
@@ -1215,12 +1215,12 @@ let tests =
               // past an accepted validation the envelope's three cases go to exactly the three
               // outcomes, and `Ok(Failed _)` is not among them.
               Expect.equal
-                  (CapabilityRegistry.dispatch reg "cap-t" accepted pending)
+                  (CapabilityRegistry.dispatch reg () None "cap-t" accepted pending)
                   (Ok Pending: Result<Deferred<string>, InvokeError>)
                   "a pending body stays pending inside the Ok"
 
               Expect.equal
-                  (CapabilityRegistry.dispatch reg "cap-t" accepted failing)
+                  (CapabilityRegistry.dispatch reg () None "cap-t" accepted failing)
                   (Error(BodyFailed "boom"): Result<Deferred<string>, InvokeError>)
                   "a failing body is the typed BodyFailed, never Ok(Failed _)"
 
@@ -1228,7 +1228,13 @@ let tests =
 
               // ... and the slot-bearing capability DISPATCHES a conforming slot argument.
               Expect.equal
-                  (CapabilityRegistry.dispatch reg2 "cap-slot" (accepted @ [ "tpl/s", """{"kind":"para"}""" ]) body)
+                  (CapabilityRegistry.dispatch
+                      reg2
+                      ()
+                      None
+                      "cap-slot"
+                      (accepted @ [ "tpl/s", """{"kind":"para"}""" ])
+                      body)
                   (Ok(Ready "ran"))
                   "a capability over a slotted artifact is invocable"
 

@@ -50,7 +50,7 @@ module CapabilityPipeline =
     /// producer's output space feeds the arg's space (`Space.subsumes`; an ill-typed edge is a named
     /// `EdgeTypeMismatch`); every required hole is bound. Total; the first refusal in declaration
     /// order is the answer.
-    let typeCheck (lookup: CapabilityLookup) (p: CapabilityPipeline) : Result<unit, PipelineError> =
+    let typeCheck (lookup: CapabilityLookup<'Ctx>) (p: CapabilityPipeline) : Result<unit, PipelineError> =
         let ids = p.Nodes |> List.map nodeId
         let nodeById = p.Nodes |> List.map (fun n -> nodeId n, n) |> Map.ofList
         let position = ids |> List.mapi (fun i id -> id, i) |> Map.ofList
@@ -235,7 +235,9 @@ module CapabilityPipeline =
     /// must lie in the space of the hole it feeds, read through `spell` (Phase 295) — a value outside
     /// it is `EvalArgRefused`, wrapping the `ArgOutOfSpace` the capability gives the same string.
     let private runNode
-        (lookup: CapabilityLookup)
+        (lookup: CapabilityLookup<'Ctx>)
+        (ctx: 'Ctx)
+        (grants: Grant list)
         (spell: 'v -> string)
         (body: PipelineNode -> (string * PipelineArg<'v>) list -> Result<'v, string>)
         (results: Map<string, 'v>)
@@ -285,7 +287,9 @@ module CapabilityPipeline =
         // Phase 383 — the admission gate (D111: one gate at every reader). An `Invoke` passes the
         // lookup's policy over its arguments as the seam reads them — a literal as declared, an
         // upstream value through `spell` — exactly as `CapabilityRegistry.dispatch` would, observers
-        // told; a refusal stops evaluation before the body. A `Source` invokes nothing.
+        // told; a refusal stops evaluation before the body. A `Source` invokes nothing. Phase 638:
+        // the gates decide under `ctx`, and a `NeedsApproval` passes when one of `grants` is for
+        // exactly this node's invocation (`Capability.grant` of its capability and spelled arguments).
         let admitted (args: (string * PipelineArg<'v>) list) : Result<unit, PipelineEvalError> =
             match n with
             | Source _ -> Ok()
@@ -302,7 +306,16 @@ module CapabilityPipeline =
                             | LiteralArg s -> addr, s
                             | FromUpstream v -> addr, spell v)
 
-                    RegistryPolicy.admit InvokeError.policyRefused ApprovalRequired lookup.Policy capId c spelled
+                    RegistryPolicy.admit
+                        InvokeError.policyRefused
+                        ApprovalRequired
+                        Capability.invocationPreimage
+                        lookup.Policy
+                        ctx
+                        grants
+                        capId
+                        c
+                        spelled
                     |> Result.mapError (fun e -> PipelineEvalError.EvalPolicyRefused(nid, e))
 
         resolved
@@ -326,6 +339,9 @@ module CapabilityPipeline =
     /// registry's `PolicyRefused` / `ApprovalRequired`, observers told. So it is not a second dispatch
     /// path beside `CapabilityRegistry.dispatch`: a node runs only where its capability resolves, its
     /// arguments are ones that capability takes, and the registry's policy admits the invocation.
+    /// Since Phase 638 the gates decide under `ctx`, and `grants` are the approvals presented for
+    /// the run: a node whose gates answer `NeedsApproval` runs when one of them is for exactly its
+    /// invocation, and is `EvalPolicyRefused` otherwise. `[]` presents none.
     /// `spell` writes an upstream value as the argument string the seam reads (the identity for a
     /// `string` pipeline), and a value outside the space of the hole it feeds is `EvalArgRefused`.
     ///
@@ -337,7 +353,9 @@ module CapabilityPipeline =
     /// and no demand for one has been measured. Asynchrony belongs at the leaves: a host that must
     /// wait resolves its `Deferred` invocations before it folds the pipeline.
     let eval
-        (lookup: CapabilityLookup)
+        (lookup: CapabilityLookup<'Ctx>)
+        (ctx: 'Ctx)
+        (grants: Grant list)
         (spell: 'v -> string)
         (body: PipelineNode -> (string * PipelineArg<'v>) list -> Result<'v, string>)
         (p: CapabilityPipeline)
@@ -349,7 +367,7 @@ module CapabilityPipeline =
                 function
                 | [] -> Ok results
                 | n :: rest ->
-                    runNode lookup spell body results n
+                    runNode lookup ctx grants spell body results n
                     |> Result.bind (fun v -> go (Map.add (nodeId n) v results) rest)
 
             go Map.empty p.Nodes
@@ -377,10 +395,12 @@ module CapabilityPipeline =
     /// Phase-53 gate), an uncaptured live node on the dirty path re-invokes, so incrementality never serves
     /// a stale effect result. A node absent from `prior` (never evaluated) is always (re-)evaluated.
     /// It type-checks first and admits every node it re-invokes through the lookup's policy, exactly as
-    /// `eval` does (Phases 295, 383), so the two refuse the same pipelines; a reused clean node runs no
-    /// body, and so is admitted by the evaluation that recorded it.
+    /// `eval` does (Phases 295, 383; under `ctx` and `grants`, Phase 638), so the two refuse the same
+    /// pipelines; a reused clean node runs no body, and so is admitted by the evaluation that recorded it.
     let evalFrom
-        (lookup: CapabilityLookup)
+        (lookup: CapabilityLookup<'Ctx>)
+        (ctx: 'Ctx)
+        (grants: Grant list)
         (spell: 'v -> string)
         (body: PipelineNode -> (string * PipelineArg<'v>) list -> Result<'v, string>)
         (prior: Map<string, 'v>)
@@ -401,7 +421,7 @@ module CapabilityPipeline =
                     if not (Set.contains nid dirty) && Map.containsKey nid prior then
                         go (Map.add nid (Map.find nid prior) results) rest
                     else
-                        runNode lookup spell body results n
+                        runNode lookup ctx grants spell body results n
                         |> Result.bind (fun v -> go (Map.add nid v results) rest)
 
             go Map.empty p.Nodes

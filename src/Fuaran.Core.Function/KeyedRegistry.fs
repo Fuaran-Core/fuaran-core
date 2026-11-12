@@ -30,6 +30,11 @@ open System.Runtime.CompilerServices
 //  D118.7), so a registry outside this package is built on the same gate
 //  rather than beside it.
 //
+//  Phase 638 threads two inputs through that one prologue: the DECISION CONTEXT
+//  the gates read, and the GRANTS a dispatch presents. A grant is for one
+//  invocation, named by the vocabulary's `Invocation`; it lifts that
+//  invocation's `NeedsApproval` and nothing else (`PolicyDecision.lifted`).
+//
 //  Its registration-ordered twin is `Validator.Ordered` in `Fuaran.Core.Validator`
 //  (Phase 521): the same four lifecycle verbs and the same laws over a LIST,
 //  because a validator registry's order is its run order (D117.2). It carries
@@ -105,8 +110,13 @@ type SeamVocabulary<'Decl, 'Args, 'E> =
         Validate: 'Decl -> 'Args -> Result<unit, 'E>
         /// A gate answered `Deny`: the gate's name and its guidance.
         Refused: string -> RejectionGuidance -> 'E
-        /// A gate answered `NeedsApproval`: the gate's name.
+        /// A gate answered `NeedsApproval` and no presented grant covers the invocation: the gate's name.
         Approval: string -> 'E
+        /// The identity of one invocation (Phase 638) — what a `Grant` is for. It must be
+        /// INJECTIVE over the declaration's id and the arguments as the seam reads them: two
+        /// invocations with one identity are one invocation, so a grant for one can lift no other.
+        /// A hashed capture key is not one.
+        Invocation: 'Decl -> 'Args -> string
         /// The sentence a refusal reads as — what `decide` puts in a `Deny`'s guidance.
         Describe: 'E -> string
     }
@@ -205,37 +215,47 @@ module internal KeyedRegistry =
         | Some x -> Ok x
         | None -> Error(v.NoSuch id (ids m))
 
-    /// Validate the arguments, then run the policy's gates — a policy refusal reaching every
-    /// `onDenied` observer, in the vocabulary's `Refused` / `Approval`. `Ok ()` admits the invocation.
+    /// Validate the arguments, then run the policy's gates under `ctx` — a policy refusal reaching
+    /// every `onDenied` observer, in the vocabulary's `Refused` / `Approval`. A `NeedsApproval` one
+    /// of `grants` covers admits the invocation, as an `Allow` does. `Ok ()` admits it.
     let admit
         (v: SeamVocabulary<'Decl, 'Args, 'E>)
-        (policy: RegistryPolicy<'Decl, 'Args>)
+        (policy: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        (ctx: 'Ctx)
+        (grants: Grant list)
         (decl: 'Decl)
         (args: 'Args)
         : Result<unit, 'E> =
         v.Validate decl args
-        |> Result.bind (fun () -> RegistryPolicy.admit v.Refused v.Approval policy (v.Id decl) decl args)
+        |> Result.bind (fun () ->
+            RegistryPolicy.admit v.Refused v.Approval v.Invocation policy ctx grants (v.Id decl) decl args)
 
     /// Resolve, then admit: the entry an admitted invocation runs against.
     let private admitted
         (v: SeamVocabulary<'Decl, 'Args, 'E>)
         (gated: 'V -> 'Decl)
-        (policy: RegistryPolicy<'Decl, 'Args>)
+        (policy: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        (ctx: 'Ctx)
+        (grants: Grant list)
         (id: string)
         (args: 'Args)
         (m: Map<string, 'V>)
         : Result<'V, 'E> =
         resolve v id m
-        |> Result.bind (fun x -> admit v policy (gated x) args |> Result.map (fun () -> x))
+        |> Result.bind (fun x -> admit v policy ctx grants (gated x) args |> Result.map (fun () -> x))
 
     /// What the seam would decide for an invocation without dispatching it: an id the map does not
     /// hold is a `Deny` whose guidance is the `NoSuch` sentence with the held ids as alternatives;
     /// arguments that do not validate a `Deny` with the refusal's sentence; otherwise the gates'
-    /// join. No observer is told.
+    /// join under `ctx`, with a `NeedsApproval` that one of `grants` covers lifted to `Allow`
+    /// (Phase 638). No observer is told. A total function of the entry, the arguments, the context
+    /// and the grants: it reads nothing else.
     let decide
         (v: SeamVocabulary<'Decl, 'Args, 'E>)
         (gated: 'V -> 'Decl)
-        (policy: RegistryPolicy<'Decl, 'Args>)
+        (policy: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        (ctx: 'Ctx)
+        (grants: Grant list)
         (id: string)
         (args: 'Args)
         (m: Map<string, 'V>)
@@ -249,20 +269,26 @@ module internal KeyedRegistry =
 
             match v.Validate decl args with
             | Error e -> PolicyDecision.deny (v.Describe e)
-            | Ok() -> RegistryPolicy.decide policy decl args
+            | Ok() ->
+                match RegistryPolicy.decide policy ctx decl args with
+                | PolicyDecision.NeedsApproval as d ->
+                    PolicyDecision.lifted (Grant.covers (v.Invocation decl args) grants) d
+                | d -> d
 
     /// Resolve the id (default-deny), validate, admit through the policy, and only then `run` the
     /// resolved entry; `run`'s refusal is the seam's own.
     let dispatch
         (v: SeamVocabulary<'Decl, 'Args, 'E>)
         (gated: 'V -> 'Decl)
-        (policy: RegistryPolicy<'Decl, 'Args>)
+        (policy: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        (ctx: 'Ctx)
+        (grants: Grant list)
         (id: string)
         (args: 'Args)
         (run: 'V -> Result<Deferred<'r>, 'E>)
         (m: Map<string, 'V>)
         : Result<Deferred<'r>, 'E> =
-        admitted v gated policy id args m |> Result.bind run
+        admitted v gated policy ctx grants id args m |> Result.bind run
 
     /// `dispatch`, journalled in the KEYED capture journal under `c.Key` and `c.Label`: the attempt
     /// after the invocation was admitted and before `run`; `run`'s answer settles it — `Ready` as
@@ -275,7 +301,9 @@ module internal KeyedRegistry =
         (hashFn: HashFn)
         (encode: 'r -> string)
         (gated: 'V -> 'Decl)
-        (policy: RegistryPolicy<'Decl, 'Args>)
+        (policy: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        (ctx: 'Ctx)
+        (grants: Grant list)
         (id: string)
         (args: 'Args)
         (run: 'V -> Result<Deferred<'r>, 'E>)
@@ -287,7 +315,7 @@ module internal KeyedRegistry =
               Ticket = None
               Journal = journal }
 
-        match admitted v gated policy id args m with
+        match admitted v gated policy ctx grants id args m with
         | Error e -> unjournalled (Error e)
         | Ok x ->
             let decl = gated x
@@ -329,7 +357,9 @@ module internal KeyedRegistry =
         (c: SeamCapture<'Decl, 'Args, 'E>)
         (decode: string -> Result<'r, string>)
         (gated: 'V -> 'Decl)
-        (policy: RegistryPolicy<'Decl, 'Args>)
+        (policy: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        (ctx: 'Ctx)
+        (grants: Grant list)
         (id: string)
         (args: 'Args)
         (run: 'V -> Result<Deferred<'r>, 'E>)
@@ -337,7 +367,7 @@ module internal KeyedRegistry =
         (journal: KeyedCapture list)
         (m: Map<string, 'V>)
         : ReplayedDispatch<'r, 'E> =
-        match admitted v gated policy id args m with
+        match admitted v gated policy ctx grants id args m with
         | Error e ->
             { Outcome = Error(ReplayFailure.Refused e)
               Cursor = cursor }
@@ -362,8 +392,8 @@ module internal KeyedRegistry =
                       Cursor = cursor' }
 
 /// An invocable registry with its default-deny dispatch (Phase 509; DECISIONS.md D172): the
-/// declarations it holds by id, the policy every invocation passes, and the vocabulary it answers
-/// in. OPAQUE: `register` — and its admission gate — is the only way a declaration gets in, and
+/// declarations it holds by id, the policy every invocation passes under the decision context
+/// `'Ctx` (Phase 638), and the vocabulary it answers in. OPAQUE: `register` — and its admission gate — is the only way a declaration gets in, and
 /// every dispatch verb resolves, validates and admits through the policy before the body runs, so a
 /// registry built on it cannot skip the gate. `CapabilityRegistry` and `QueryRegistry` are each one
 /// of these; `FunctionRegistry` dispatches through the same prologue.
@@ -371,16 +401,16 @@ module internal KeyedRegistry =
 /// Equal when the declarations, the policies (`RegistryPolicy`'s equality) and the vocabularies —
 /// the same VALUE, by reference, as a policy's gates are compared — are.
 [<CustomEquality; NoComparison>]
-type Seam<'Decl, 'Args, 'E> =
+type Seam<'Ctx, 'Decl, 'Args, 'E> =
     private
         { Entries: Map<string, 'Decl>
-          Policy: RegistryPolicy<'Decl, 'Args>
+          Policy: RegistryPolicy<'Ctx, 'Decl, 'Args>
           Vocabulary: SeamVocabulary<'Decl, 'Args, 'E> }
 
     /// Equal declarations (structurally), an equal policy and the same vocabulary value (by reference).
     override s.Equals(o: obj) =
         match o with
-        | :? Seam<'Decl, 'Args, 'E> as t ->
+        | :? Seam<'Ctx, 'Decl, 'Args, 'E> as t ->
             Unchecked.equals s.Entries t.Entries
             && s.Policy.Equals t.Policy
             && obj.ReferenceEquals(s.Vocabulary, t.Vocabulary)
@@ -398,7 +428,7 @@ module Seam =
 
     /// The seam holding nothing, under no gate: every dispatch is `NoSuch` with an empty `known` list.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
-    let create (vocabulary: SeamVocabulary<'Decl, 'Args, 'E>) : Seam<'Decl, 'Args, 'E> =
+    let create (vocabulary: SeamVocabulary<'Decl, 'Args, 'E>) : Seam<'Ctx, 'Decl, 'Args, 'E> =
         { Entries = Map.empty
           Policy = RegistryPolicy.none
           Vocabulary = vocabulary }
@@ -406,7 +436,7 @@ module Seam =
     /// Register a declaration under its id — refused `Duplicate` when the seam holds the id, and the
     /// `Admission` gate's refusal when it refuses the declaration; the seam unchanged on a refusal.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
-    let register (decl: 'Decl) (s: Seam<'Decl, 'Args, 'E>) : Result<Seam<'Decl, 'Args, 'E>, 'E> =
+    let register (decl: 'Decl) (s: Seam<'Ctx, 'Decl, 'Args, 'E>) : Result<Seam<'Ctx, 'Decl, 'Args, 'E>, 'E> =
         let v = s.Vocabulary
 
         KeyedRegistry.register v.Duplicate v.Admission (v.Id decl) decl s.Entries
@@ -415,27 +445,27 @@ module Seam =
     /// The declaration registered under exactly `id`, or `None`. A bare lookup: it validates nothing
     /// and admits nothing — what runs a declaration is `dispatch`.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
-    let tryFind (id: string) (s: Seam<'Decl, 'Args, 'E>) : 'Decl option = Map.tryFind id s.Entries
+    let tryFind (id: string) (s: Seam<'Ctx, 'Decl, 'Args, 'E>) : 'Decl option = Map.tryFind id s.Entries
 
     /// Every declaration, in id order — the discovery surface; the order is part of the contract.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
-    let enumerate (s: Seam<'Decl, 'Args, 'E>) : 'Decl list = s.Entries |> Map.toList |> List.map snd
+    let enumerate (s: Seam<'Ctx, 'Decl, 'Args, 'E>) : 'Decl list = s.Entries |> Map.toList |> List.map snd
 
     /// The ids the seam holds, in id order — what a `NoSuch` refusal names.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
-    let ids (s: Seam<'Decl, 'Args, 'E>) : string list = KeyedRegistry.ids s.Entries
+    let ids (s: Seam<'Ctx, 'Decl, 'Args, 'E>) : string list = KeyedRegistry.ids s.Entries
 
     /// Remove the declaration under `id` — refused `NoSuch` naming every held id when the seam does
     /// not hold it. `unregister` undoes a `register` of an id the seam did not hold.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
-    let unregister (id: string) (s: Seam<'Decl, 'Args, 'E>) : Result<Seam<'Decl, 'Args, 'E>, 'E> =
+    let unregister (id: string) (s: Seam<'Ctx, 'Decl, 'Args, 'E>) : Result<Seam<'Ctx, 'Decl, 'Args, 'E>, 'E> =
         KeyedRegistry.unregister s.Vocabulary.NoSuch id s.Entries
         |> Result.map (fun m -> { s with Entries = m })
 
     /// Swap the declaration under its id — refused `NoSuch` when the seam does not hold the id, and
     /// held to the `Admission` gate `register` runs; the seam unchanged on a refusal.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
-    let replace (decl: 'Decl) (s: Seam<'Decl, 'Args, 'E>) : Result<Seam<'Decl, 'Args, 'E>, 'E> =
+    let replace (decl: 'Decl) (s: Seam<'Ctx, 'Decl, 'Args, 'E>) : Result<Seam<'Ctx, 'Decl, 'Args, 'E>, 'E> =
         let v = s.Vocabulary
 
         KeyedRegistry.replace v.NoSuch v.Admission (v.Id decl) decl s.Entries
@@ -444,7 +474,7 @@ module Seam =
     /// The seam narrowed to the ids in `keep`; an id it does not hold is ignored, so `restrict` never
     /// widens. The policy is kept.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
-    let restrict (keep: Set<string>) (s: Seam<'Decl, 'Args, 'E>) : Seam<'Decl, 'Args, 'E> =
+    let restrict (keep: Set<string>) (s: Seam<'Ctx, 'Decl, 'Args, 'E>) : Seam<'Ctx, 'Decl, 'Args, 'E> =
         { s with
             Entries = KeyedRegistry.restrict keep s.Entries }
 
@@ -452,7 +482,10 @@ module Seam =
     /// order, that both hold. The join runs BOTH policies' gates and tells both policies' observers
     /// (`RegistryPolicy.combine`), and answers in `a`'s vocabulary. Associative.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
-    let union (a: Seam<'Decl, 'Args, 'E>) (b: Seam<'Decl, 'Args, 'E>) : Result<Seam<'Decl, 'Args, 'E>, 'E> =
+    let union
+        (a: Seam<'Ctx, 'Decl, 'Args, 'E>)
+        (b: Seam<'Ctx, 'Decl, 'Args, 'E>)
+        : Result<Seam<'Ctx, 'Decl, 'Args, 'E>, 'E> =
         KeyedRegistry.union a.Vocabulary.Duplicate a.Entries b.Entries
         |> Result.map (fun m ->
             { a with
@@ -462,35 +495,71 @@ module Seam =
     /// `s` with `gate` added to the gates every dispatch runs, after validation and before the body.
     /// The decision is the join over every gate, so adding one can only refuse more.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
-    let withGate (gate: PolicyGate<'Decl, 'Args>) (s: Seam<'Decl, 'Args, 'E>) : Seam<'Decl, 'Args, 'E> =
+    let withGate
+        (gate: PolicyGate<'Ctx, 'Decl, 'Args>)
+        (s: Seam<'Ctx, 'Decl, 'Args, 'E>)
+        : Seam<'Ctx, 'Decl, 'Args, 'E> =
         { s with
             Policy = RegistryPolicy.withGate gate s.Policy }
 
     /// `s` with `observe` told of every invocation its policy refuses, before the refusal returns. A
     /// refusal for any other reason (an unknown id, arguments that do not validate) reaches no observer.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
-    let onDenied (observe: PolicyDenial<'Args> -> unit) (s: Seam<'Decl, 'Args, 'E>) : Seam<'Decl, 'Args, 'E> =
+    let onDenied
+        (observe: PolicyDenial<'Ctx, 'Args> -> unit)
+        (s: Seam<'Ctx, 'Decl, 'Args, 'E>)
+        : Seam<'Ctx, 'Decl, 'Args, 'E> =
         { s with
             Policy = RegistryPolicy.onDenied observe s.Policy }
 
-    /// What the seam would decide for an invocation without dispatching it — an unknown id and
-    /// arguments that do not validate are denials, otherwise the gates' join. No observer is told.
+    /// `s` as the one context `ctx` sees it (Phase 638; `RegistryPolicy.under`): the same
+    /// declarations and vocabulary, every gate deciding as it does under `ctx`. The result takes the
+    /// `unit` context, and decides and dispatches exactly as `s` does under `ctx`.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
-    let decide (s: Seam<'Decl, 'Args, 'E>) (id: string) (args: 'Args) : PolicyDecision =
-        KeyedRegistry.decide s.Vocabulary (fun (d: 'Decl) -> d) s.Policy id args s.Entries
+    let under (ctx: 'Ctx) (s: Seam<'Ctx, 'Decl, 'Args, 'E>) : Seam<unit, 'Decl, 'Args, 'E> =
+        { Entries = s.Entries
+          Policy = RegistryPolicy.under ctx s.Policy
+          Vocabulary = s.Vocabulary }
+
+    /// What the seam would decide for an invocation without dispatching it — an unknown id and
+    /// arguments that do not validate are denials, otherwise the gates' join under `ctx`, with a
+    /// `NeedsApproval` lifted to `Allow` when `grant` is for exactly this invocation (Phase 638). No
+    /// observer is told. A total function of the declaration, the arguments, the context and the
+    /// grant.
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
+    let decide
+        (s: Seam<'Ctx, 'Decl, 'Args, 'E>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
+        (id: string)
+        (args: 'Args)
+        : PolicyDecision =
+        KeyedRegistry.decide s.Vocabulary (fun (d: 'Decl) -> d) s.Policy ctx (Option.toList grant) id args s.Entries
 
     /// Dispatch an invocation: resolve the id (default-deny — an id the seam does not hold is
-    /// `NoSuch`), validate the arguments, run the policy's gates (a `Deny` is `Refused`, a
-    /// `NeedsApproval` is `Approval`, and either reaches every observer), and only then `run` the
+    /// `NoSuch`, whatever is presented), validate the arguments, run the policy's gates under `ctx`
+    /// (a `Deny` is `Refused`, whatever is presented; a `NeedsApproval` is `Approval` unless `grant`
+    /// is for exactly this invocation; a refusal reaches every observer), and only then `run` the
     /// resolved declaration, in the `Deferred` envelope.
     [<MethodImpl(MethodImplOptions.NoInlining)>]
     let dispatch
-        (s: Seam<'Decl, 'Args, 'E>)
+        (s: Seam<'Ctx, 'Decl, 'Args, 'E>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: 'Args)
         (run: 'Decl -> Result<Deferred<'r>, 'E>)
         : Result<Deferred<'r>, 'E> =
-        KeyedRegistry.dispatch s.Vocabulary (fun (d: 'Decl) -> d) s.Policy id args run s.Entries
+        KeyedRegistry.dispatch
+            s.Vocabulary
+            (fun (d: 'Decl) -> d)
+            s.Policy
+            ctx
+            (Option.toList grant)
+            id
+            args
+            run
+            s.Entries
 
     /// `dispatch`, journalled in the keyed capture journal as `capture` says: the attempt after the
     /// invocation was admitted and before `run`, settled by `run`'s answer; a `Pending` answer leaves
@@ -502,7 +571,9 @@ module Seam =
         (hashFn: HashFn)
         (encode: 'r -> string)
         (capture: SeamCapture<'Decl, 'Args, 'E>)
-        (s: Seam<'Decl, 'Args, 'E>)
+        (s: Seam<'Ctx, 'Decl, 'Args, 'E>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: 'Args)
         (run: 'Decl -> Result<Deferred<'r>, 'E>)
@@ -515,6 +586,8 @@ module Seam =
             encode
             (fun (d: 'Decl) -> d)
             s.Policy
+            ctx
+            (Option.toList grant)
             id
             args
             run
@@ -530,7 +603,9 @@ module Seam =
     let dispatchReplayed
         (decode: string -> Result<'r, string>)
         (capture: SeamCapture<'Decl, 'Args, 'E>)
-        (s: Seam<'Decl, 'Args, 'E>)
+        (s: Seam<'Ctx, 'Decl, 'Args, 'E>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: 'Args)
         (run: 'Decl -> Result<Deferred<'r>, 'E>)
@@ -543,6 +618,8 @@ module Seam =
             decode
             (fun (d: 'Decl) -> d)
             s.Policy
+            ctx
+            (Option.toList grant)
             id
             args
             run

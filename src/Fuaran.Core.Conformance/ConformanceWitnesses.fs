@@ -59,7 +59,7 @@ type CapabilitySeamWitness<'v> =
     {
         /// The oracle: whether a call should reach the body, and which error it must be refused
         /// with otherwise, is read from this registry alone.
-        Registry: CapabilityRegistry
+        Registry: CapabilityRegistry<unit>
         /// The host's invocation path — id, arguments, body. It must refuse with exactly the
         /// registry's error and must never return `Ok(Failed _)`; a throw fails the family.
         Dispatch:
@@ -101,7 +101,7 @@ type CapabilityPipelineWitness =
     {
         /// The registry every drawn pipeline must type-check against; the kit also derives an id
         /// absent from it to build the unregistered-capability refusal.
-        PipelineRegistry: CapabilityRegistry
+        PipelineRegistry: CapabilityRegistry<unit>
         /// Draws one pipeline the domain would build. The default-deny laws are built per `Invoke`
         /// node, so pipelines with none leave the family starved.
         GenPipeline: ConfRng.T -> CapabilityPipeline * ConfRng.T

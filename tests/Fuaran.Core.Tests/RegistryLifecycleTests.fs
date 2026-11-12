@@ -48,11 +48,11 @@ let private orFail (r: Result<'a, 'e>) : 'a =
     | Ok v -> v
     | Error e -> failtestf "unexpected refusal %A" e
 
-let private caps (ids: string list) : CapabilityRegistry =
+let private caps (ids: string list) : CapabilityRegistry<unit> =
     ids
     |> List.fold (fun r id -> CapabilityRegistry.register (cap id 9) r |> orFail) CapabilityRegistry.empty
 
-let private fns (entries: (string * string) list) : FunctionRegistry =
+let private fns (entries: (string * string) list) : FunctionRegistry<unit> =
     entries
     |> List.fold
         (fun r (id, kind) -> FunctionRegistry.register (FunctionRegistry.entry kind (cap id 9)) r |> orFail)
@@ -75,7 +75,7 @@ let private colRules (ids: string list) : ColumnValidator.Registry =
 let private capIds r =
     CapabilityRegistry.enumerate r |> List.map _.Id
 
-let private ofKind (kind: string) (r: FunctionRegistry) : string list =
+let private ofKind (kind: string) (r: FunctionRegistry<unit>) : string list =
     FunctionRegistry.findBySignature
         Subsumes
         { ResultType = Some kind
@@ -222,7 +222,7 @@ let tests =
 
               let restricted = CapabilityRegistry.restrict keep (caps [ "a"; "b" ])
 
-              match CapabilityRegistry.dispatch restricted "a" [ "h", "1" ] (fun _ () -> Ready 1) with
+              match CapabilityRegistry.dispatch restricted () None "a" [ "h", "1" ] (fun _ () -> Ready 1) with
               | Error(NoSuchCapability("a", [ "b" ])) -> ()
               | other -> failtestf "a restricted-away id must be default-denied, got %A" other
 
@@ -400,6 +400,7 @@ let private toyVocabulary: SeamVocabulary<ToyDecl, int, ToyError> =
       Validate = fun d n -> if n > d.Max then Error(TooBig n) else Ok()
       Refused = fun gate g -> Denied(gate, g.Message)
       Approval = Parked
+      Invocation = fun d n -> sprintf "%s/%d" d.Name n
       Describe = sprintf "%A" }
 
 let private toyCapture: SeamCapture<ToyDecl, int, ToyError> =
@@ -413,14 +414,14 @@ let private toyCapture: SeamCapture<ToyDecl, int, ToyError> =
 
 let private toy (name: string) (label: string) : ToyDecl = { Name = name; Max = 9; Label = label }
 
-let private toys (names: string list) : Seam<ToyDecl, int, ToyError> =
+let private toys (names: string list) : Seam<unit, ToyDecl, int, ToyError> =
     names
     |> List.fold (fun s n -> Seam.register (toy n "network") s |> orFail) (Seam.create toyVocabulary)
 
-let private denyOver (limit: int) : PolicyGate<ToyDecl, int> =
+let private denyOver (limit: int) : PolicyGate<unit, ToyDecl, int> =
     { Policy = "limit"
       Decide =
-        fun _ n ->
+        fun _ _ n ->
             if n > limit then
                 PolicyDecision.deny "over the limit"
             else
@@ -469,7 +470,7 @@ let seamTests =
 
           testCase "dispatch resolves, validates and admits before the body, and decide agrees without telling anyone"
           <| fun _ ->
-              let told = ResizeArray<PolicyDenial<int>>()
+              let told = ResizeArray<PolicyDenial<unit, int>>()
               let mutable ran = 0
 
               let s = toys [ "a" ] |> Seam.withGate (denyOver 3) |> Seam.onDenied told.Add
@@ -478,22 +479,27 @@ let seamTests =
                   ran <- ran + 1
                   Ok(Ready 7)
 
-              Expect.equal (Seam.dispatch s "z" 1 run) (Error(NoToy("z", [ "a" ]))) "default-deny by shape"
-              Expect.equal (Seam.dispatch s "a" 12 run) (Error(TooBig 12)) "validation before the policy"
+              Expect.equal (Seam.dispatch s () None "z" 1 run) (Error(NoToy("z", [ "a" ]))) "default-deny by shape"
+              Expect.equal (Seam.dispatch s () None "a" 12 run) (Error(TooBig 12)) "validation before the policy"
               Expect.equal told.Count 0 "a validation refusal reaches no observer"
-              Expect.equal (Seam.dispatch s "a" 5 run) (Error(Denied("limit", "over the limit"))) "the gate refuses"
+
+              Expect.equal
+                  (Seam.dispatch s () None "a" 5 run)
+                  (Error(Denied("limit", "over the limit")))
+                  "the gate refuses"
+
               Expect.equal told.Count 1 "the observer was told once"
               Expect.equal ran 0 "no refused invocation ran its body"
-              Expect.equal (Seam.dispatch s "a" 2 run) (Ok(Ready 7)) "an admitted invocation runs"
+              Expect.equal (Seam.dispatch s () None "a" 2 run) (Ok(Ready 7)) "an admitted invocation runs"
               Expect.equal ran 1 "once"
 
               Expect.equal
-                  (Seam.decide s "a" 5)
+                  (Seam.decide s () None "a" 5)
                   (PolicyDecision.deny "over the limit")
                   "decide answers the gate's decision"
 
               Expect.equal
-                  (Seam.decide s "z" 1)
+                  (Seam.decide s () None "z" 1)
                   (PolicyDecision.denyWith (sprintf "%A" (NoToy("z", [ "a" ]))) [ "a" ])
                   "an unknown id is a Deny naming the held ids"
 
@@ -504,13 +510,15 @@ let seamTests =
               let s = toys [ "a"; "b" ] |> Seam.withGate (denyOver 3)
 
               let capture id n d j =
-                  Seam.dispatchCaptured OpStream.defaultHash string toyCapture s id n (answer d) j
+                  Seam.dispatchCaptured OpStream.defaultHash string toyCapture s () None id n (answer d) j
 
               let replay id n j =
                   Seam.dispatchReplayed
                       (fun t -> Ok(int t))
                       toyCapture
                       s
+                      ()
+                      None
                       id
                       n
                       (fun _ -> failwith "a non-deterministic replay never runs the body")
@@ -547,12 +555,12 @@ let seamTests =
                   |> orFail
 
               let captured =
-                  Seam.dispatchCaptured OpStream.defaultHash string toyCapture s "d" 1 (answer (Ready 3)) []
+                  Seam.dispatchCaptured OpStream.defaultHash string toyCapture s () None "d" 1 (answer (Ready 3)) []
 
               Expect.equal (captured.Outcome, captured.Ticket, captured.Journal) (Ok(Ready 3), None, []) "unjournalled"
 
               Expect.equal
-                  (Seam.dispatchReplayed (fun t -> Ok(int t)) toyCapture s "d" 1 (answer (Ready 4)) Map.empty [])
+                  (Seam.dispatchReplayed (fun t -> Ok(int t)) toyCapture s () None "d" 1 (answer (Ready 4)) Map.empty [])
                       .Outcome
                   (Ok(Ready 4))
                   "replayed live"

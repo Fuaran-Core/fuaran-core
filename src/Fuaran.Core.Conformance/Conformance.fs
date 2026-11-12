@@ -748,7 +748,7 @@ module Conformance =
     /// asked about each by its attribution id, `Actor.id`.
     let policyLawsAt
         (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
-        (registry: CapabilityRegistry)
+        (registry: CapabilityRegistry<unit>)
         (state0: 'State)
         (genOp: ConfRng.T -> 'Op * ConfRng.T)
         (actors: Actor list)

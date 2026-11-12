@@ -31,7 +31,7 @@ let private noteCap (id: string) (host: HostEffect) : Capability =
 
 /// The capability registry the note surface's ops invoke: storing and deleting a note both write
 /// to the host; `count-notes` only reads.
-let noteRegistry: CapabilityRegistry =
+let noteRegistry: CapabilityRegistry<unit> =
     [ noteCap "store-note" WritesHost
       noteCap "delete-note" WritesHost
       noteCap "count-notes" ReadsHost ]
@@ -112,7 +112,7 @@ let tests =
 
           testCase "a denied dispatch runs no body, names its gate, and reaches the observer once"
           <| fun _ ->
-              let seen = ResizeArray<PolicyDenial<(string * string) list>>()
+              let seen = ResizeArray<PolicyDenial<unit, (string * string) list>>()
               let mutable ran = false
 
               let reg =
@@ -120,7 +120,7 @@ let tests =
                   |> CapabilityRegistry.withGate
                       { Policy = "read-only-session"
                         Decide =
-                          fun c _ ->
+                          fun _ c _ ->
                               if c.Signature.Effect.Host = WritesHost then
                                   PolicyDecision.denyWith "this session may only read" [ "count-notes" ]
                               else
@@ -128,7 +128,7 @@ let tests =
                   |> CapabilityRegistry.onDenied seen.Add
 
               let out =
-                  CapabilityRegistry.dispatch reg "store-note" [ "id", "n9" ] (fun _ () ->
+                  CapabilityRegistry.dispatch reg () None "store-note" [ "id", "n9" ] (fun _ () ->
                       ran <- true
                       Ready())
 
@@ -151,7 +151,7 @@ let tests =
                   "the sentence a model reads"
 
               Expect.equal
-                  (CapabilityRegistry.dispatch reg "count-notes" [ "id", "n1" ] (fun _ () -> Ready 1))
+                  (CapabilityRegistry.dispatch reg () None "count-notes" [ "id", "n1" ] (fun _ () -> Ready 1))
                   (Ok(Ready 1))
                   "a read passes the same gate"
 
@@ -161,7 +161,7 @@ let tests =
                   noteRegistry
                   |> CapabilityRegistry.withGate
                       { Policy = "p"
-                        Decide = fun _ _ -> PolicyDecision.Allow }
+                        Decide = fun _ _ _ -> PolicyDecision.Allow }
 
               Expect.equal
                   (CapabilityRegistry.register (noteCap "extra" Pure) reg
@@ -188,6 +188,7 @@ let tests =
                   Proposals.submitGuarded
                       counting
                       noteRegistry
+                      ()
                       "admin"
                       "t0"
                       None
@@ -224,6 +225,7 @@ let tests =
                   Proposals.submitGuarded
                       stray
                       noteRegistry
+                      ()
                       "admin"
                       "t0"
                       None
@@ -242,6 +244,7 @@ let tests =
                   Proposals.submitGuarded
                       guarded
                       noteRegistry
+                      ()
                       "agent"
                       "t0"
                       None
@@ -254,13 +257,13 @@ let tests =
                       noteRegistry
                       |> CapabilityRegistry.withGate
                           { Policy = "read-only"
-                            Decide = fun _ _ -> PolicyDecision.deny "read only" }
+                            Decide = fun _ _ _ -> PolicyDecision.deny "read only" }
 
-                  match Proposals.approveGuarded guarded readOnly "admin" "t1" id q state0 with
+                  match Proposals.approveGuarded guarded readOnly () "admin" "t1" id q state0 with
                   | Error(Proposals.ApprovalDenied(_, g)) -> Expect.equal g.Message "read only" "the approver's gate"
                   | other -> failtestf "expected the approver's registry to deny, got %A" other
 
-                  match Proposals.approveGuarded guarded noteRegistry "admin" "t1" id q state0 with
+                  match Proposals.approveGuarded guarded noteRegistry () "admin" "t1" id q state0 with
                   | Ok(_, s) -> Expect.equal s.Notes [ "n1", "hello"; "n2", "b" ] "applied"
                   | Error e -> failtestf "expected approval, got %A" e
               | other -> failtestf "expected a parked proposal, got %A" other
