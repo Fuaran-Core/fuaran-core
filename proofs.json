@@ -2939,8 +2939,8 @@
     {
       "id": "policy-gate-before-body",
       "level": "proved",
-      "statement": "THE POLICY GATE RUNS BEFORE THE BODY AND NAMES ITSELF. Over a registry carrying a list of named gates — the model of `CapabilityRegistry.withGate` / `dispatch`: resolve the id, validate the arguments, take the join of every gate's decision, and run the body only under `Allow` — an invocation of a held id whose arguments validate and whose gates' join is not `Allow` is refused `ApprovalRequired n` (a `NeedsApproval`) or `PolicyRefused n reason allowed` (a `Deny`), the SAME under every body, so no body ran; and `n` names a gate of the list whose own decision is exactly the one the refusal reports (`gate_before_body`, with `decide_named_names_a_gate`). With no gate the gated dispatch is the seam's ungated `dispatch`, its refusals wrapped (`no_gate_is_dispatch`), so the gate is additive over the ungated capability theorems. Proved with no assume and no admit.",
-      "boundary": "The model wraps the ungated refusals in its own `gated_error` rather than widening the extracted `invoke_error`; production adds the two cases to `InvokeError`. Everything in the section is `noextract_to \"FSharp\"`, so the extracted oracle is unchanged and the bridge to production is the `Conformance.policyLaws` family, which samples the same refusals, the observer and the untouched body on all three registries. NOT claimed: that no effect is CAPTURED for a refused invocation — capture is not in this model; `Conformance.keyedCaptureLaws` samples it.",
+      "statement": "THE POLICY GATE RUNS BEFORE THE BODY AND NAMES ITSELF. Stated over a decision context and a presented grant, and with no grant it is the statement over the gates alone: \"not `Allow`\" is read after the grant, so a `NeedsApproval` the grant covers is not refused. Over a registry carrying a list of named gates — the model of `CapabilityRegistry.withGate` / `dispatch`: resolve the id, validate the arguments, take the join of every gate's decision, and run the body only under `Allow` — an invocation of a held id whose arguments validate and whose gates' join is not `Allow` is refused `ApprovalRequired n` (a `NeedsApproval`) or `PolicyRefused n reason allowed` (a `Deny`), the SAME under every body, so no body ran; and `n` names a gate of the list whose own decision is exactly the one the refusal reports (`gate_before_body`, with `decide_named_names_a_gate`). With no gate the gated dispatch is the seam's ungated `dispatch`, its refusals wrapped (`no_gate_is_dispatch`), so the gate is additive over the ungated capability theorems. Proved with no assume and no admit.",
+      "boundary": "The model wraps the ungated refusals in its own `gated_error` rather than widening the extracted `invoke_error`; production adds the two cases to `InvokeError`. Everything in the section but `gated_error`, `invocation_identity` and `granted` is `noextract_to \"FSharp\"`, and the bridge to production is the `Conformance.policyLaws` family, which samples the same refusals, the observer and the untouched body on all three registries. NOT claimed: that no effect is CAPTURED for a refused invocation — capture is not in this model; `Conformance.keyedCaptureLaws` samples it.",
       "phase": "fuaran-core#318",
       "evidence": {
         "theorem": "gate_before_body",
@@ -2958,6 +2958,157 @@
         "theorem": "policy_join_monotone",
         "model": "proofs/Capability.fst",
         "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "policy-join-monotone-in-context",
+      "level": "proved",
+      "statement": "THE POLICY JOIN IS MONOTONE UNDER A CONTEXT. For gates that read a decision context, under any ONE context raising either gate's decision never lowers the join of the two.",
+      "boundary": "The section's gates, decisions and gated dispatch are `noextract_to \"FSharp\"`; the bridge to production for them is the `Conformance.policyLaws` family, whose context and grant laws sample the same statements on the shipped registries, and `DecisionContextTests`. The context is a type variable and nothing is assumed of it. The row `policy-join-monotone` stands unchanged beside this one: it is about the join of two decisions, which reads no context.",
+      "phase": "fuaran-core#638",
+      "evidence": {
+        "theorem": "policy_join_monotone_in_context",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json"
+      }
+    },
+    {
+      "id": "policy-gate-tightens-in-context",
+      "level": "proved",
+      "statement": "ADDING A GATE NEVER LOWERS A DECISION, UNDER ANY CONTEXT. The decision of a gate list with one gate added (`RegistryPolicy.withGate`, which appends) is exactly the join of the old list's decision with the new gate's, under the same context, so its rank never falls.",
+      "boundary": "The section's gates, decisions and gated dispatch are `noextract_to \"FSharp\"`; the bridge to production for them is the `Conformance.policyLaws` family, whose context and grant laws sample the same statements on the shipped registries, and `DecisionContextTests`. The context is a type variable and nothing is assumed of it. NOT claimed: anything relating the decisions under two DIFFERENT contexts; a gate may answer anything for each.",
+      "phase": "fuaran-core#638",
+      "evidence": {
+        "theorem": "with_gate_tightens_in_context",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "RegistryPolicy.withGate",
+          "CapabilityRegistry.withGate"
+        ]
+      }
+    },
+    {
+      "id": "grant-identity-injective",
+      "level": "proved",
+      "statement": "THE IDENTITY A GRANT IS BOUND TO IS INJECTIVE. Two invocations with the same `Capability.invocationPreimage` name the same capability id and carry the same keyed bindings.",
+      "boundary": "Under the field-encoding premises the capture key's row already spends (`key_premises`: the escaper and terminator of `Hash.canonicalField`, read as symbols) and no premise about any hash or about the address comparator. The identity is extracted, and the oracle runs it beside `Capability.invocationPreimage` byte for byte. NOT claimed of `Capability.invocationKey`, which ends in `Hash.fnv1a` and is not what a grant is bound to. The bindings are compared as KEYED (each value's canonical spelling in its hole's space), so `05` and `5` for an integer hole are one invocation.",
+      "phase": "fuaran-core#638",
+      "evidence": {
+        "theorem": "invocation_identity_injective",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Capability.invocationPreimage",
+          "Capability.grant"
+        ]
+      }
+    },
+    {
+      "id": "approval-dispatches-iff-granted",
+      "level": "proved",
+      "statement": "A NEEDS-APPROVAL DISPATCH REACHES ITS BODY EXACTLY WHEN IT PRESENTS THE GRANT FOR ITS OWN INVOCATION. For a held id, arguments that validate and gates that answer `NeedsApproval` under the context, a dispatch presenting a grant that carries this invocation's identity answers what the body answers, and a dispatch presenting none, or a grant carrying anything else, is `ApprovalRequired` naming the gate, the same under every body.",
+      "boundary": "The section's gates, decisions and gated dispatch are `noextract_to \"FSharp\"`; the bridge to production for them is the `Conformance.policyLaws` family, whose context and grant laws sample the same statements on the shipped registries, and `DecisionContextTests`. `granted` is extracted and run beside `Grant.covers`. \"Reaches its body\" is stated as the answer BEING the body's settled answer, and \"does not\" as the answer being one value under every body, the reading `gate_before_body` takes. NOT claimed: who may mint a grant, single use, expiry or a registry generation; those are the host's, stated as facts in the context.",
+      "phase": "fuaran-core#638",
+      "evidence": {
+        "theorem": "approval_dispatches_iff_granted",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityRegistry.dispatch",
+          "PolicyDecision.lifted"
+        ]
+      }
+    },
+    {
+      "id": "grant-for-another-invocation-refused",
+      "level": "proved",
+      "statement": "A GRANT FOR ANOTHER INVOCATION LIFTS NOTHING. A grant minted for an invocation of another capability id, or of the same capability with other keyed bindings, does not cover this invocation.",
+      "boundary": "Under `key_premises`, through `invocation_identity_injective`. With `approval-dispatches-iff-granted` it is what \"any other\" means there. NOT claimed for two argument lists that key alike (the same bindings in another order, or two spellings of one value): those are one invocation by design.",
+      "phase": "fuaran-core#638",
+      "evidence": {
+        "theorem": "grant_for_another_invocation_refused",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Capability.grant"
+        ]
+      }
+    },
+    {
+      "id": "deny-reaches-no-performer",
+      "level": "proved",
+      "statement": "A DENY REACHES NO BODY, WHATEVER IS PRESENTED. For a held id and arguments that validate, gates that answer `Deny` under the context refuse `PolicyRefused` naming the gate and its guidance, and the answer is one value for every grant and every body.",
+      "boundary": "The section's gates, decisions and gated dispatch are `noextract_to \"FSharp\"`; the bridge to production for them is the `Conformance.policyLaws` family, whose context and grant laws sample the same statements on the shipped registries, and `DecisionContextTests`. ",
+      "phase": "fuaran-core#638",
+      "evidence": {
+        "theorem": "deny_reaches_no_performer",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityRegistry.dispatch"
+        ]
+      }
+    },
+    {
+      "id": "grant-changes-only-its-own-decision",
+      "level": "proved",
+      "statement": "A GRANT CHANGES ONE DECISION AND NO OTHER. The registry's decision with a grant presented is the gates' own decision, except where the gates answer `NeedsApproval` and the grant carries this invocation's identity, where it is `Allow`; an `Allow` is unchanged by any grant and a `Deny` by every grant.",
+      "boundary": "The section's gates, decisions and gated dispatch are `noextract_to \"FSharp\"`; the bridge to production for them is the `Conformance.policyLaws` family, whose context and grant laws sample the same statements on the shipped registries, and `DecisionContextTests`. With `grant_lifts_only_needs_approval` (a lifted decision's rank never rises) and `allow_unchanged_by_any_grant` (the same at the dispatch) beside it in the model.",
+      "phase": "fuaran-core#638",
+      "evidence": {
+        "theorem": "grant_changes_only_its_own_decision",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityRegistry.decide",
+          "PolicyDecision.lifted"
+        ]
+      }
+    },
+    {
+      "id": "unregistered-refused-whatever-presented",
+      "level": "proved",
+      "statement": "AN UNREGISTERED ID IS REFUSED WHATEVER IS PRESENTED. An id the registry does not hold is `NoSuchCapability`, naming the held ids, under every gate list, every context, every grant and every body.",
+      "boundary": "The section's gates, decisions and gated dispatch are `noextract_to \"FSharp\"`; the bridge to production for them is the `Conformance.policyLaws` family, whose context and grant laws sample the same statements on the shipped registries, and `DecisionContextTests`. Default-deny by shape, stated over the context and the grant; the row for `unregistered_refused` is the ungated statement.",
+      "phase": "fuaran-core#638",
+      "evidence": {
+        "theorem": "unregistered_refused_whatever_presented",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityRegistry.dispatch"
+        ]
+      }
+    },
+    {
+      "id": "one-registry-two-contexts",
+      "level": "proved",
+      "statement": "ONE GATE LIST DECIDES DIFFERENTLY UNDER TWO CONTEXTS. A single gate reading a one-fact context answers `Allow` under one value of it and `NeedsApproval`, naming itself, under the other, for every capability and every arguments.",
+      "boundary": "The section's gates, decisions and gated dispatch are `noextract_to \"FSharp\"`; the bridge to production for them is the `Conformance.policyLaws` family, whose context and grant laws sample the same statements on the shipped registries, and `DecisionContextTests`. A witness at a concrete context type (`bool`), not an existential: both decisions are computed.",
+      "phase": "fuaran-core#638",
+      "evidence": {
+        "theorem": "one_registry_two_contexts",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityRegistry.decide"
+        ]
+      }
+    },
+    {
+      "id": "decision-reads-only-its-inputs",
+      "level": "proved",
+      "statement": "THE DECISION IS A TOTAL FUNCTION OF THE GATES, THE CONTEXT, THE CAPABILITY, THE ARGUMENTS AND THE GRANT. It reads of the gates only what each answers at that context, capability and arguments: two gate lists with the same names that agree there decide the same, with or without a grant, whatever they answer anywhere else.",
+      "boundary": "The section's gates, decisions and gated dispatch are `noextract_to \"FSharp\"`; the bridge to production for them is the `Conformance.policyLaws` family, whose context and grant laws sample the same statements on the shipped registries, and `DecisionContextTests`. Totality is the model function's `Tot` effect. NOT claimed of a production gate whose `Decide` is not a function (one that reads a clock or mutable state); `PolicyGate.Decide` is documented as required to be total and side-effect free, and nothing checks it.",
+      "phase": "fuaran-core#638",
+      "evidence": {
+        "theorem": "decision_reads_only_its_inputs",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "CapabilityRegistry.decide"
+        ]
       }
     },
     {

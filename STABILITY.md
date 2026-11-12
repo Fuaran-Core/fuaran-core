@@ -595,6 +595,75 @@ canonical text of any unit, or the refusal class of any text is **major**. The p
 project reference and is FSharp.Core-only, which is also guaranteed: a consumer that needs units without
 columns takes only it, and `Fuaran.Core.Column` depends on it, never the reverse.
 
+### The decision context and the grant (`Fuaran.Core.Function`, Phase 638, `0.43.0`)
+
+**This is a source break.** A gate decides under a decision context, and a dispatch may present a
+grant ([DECISIONS.md](DECISIONS.md) D249). The context is a type parameter of `PolicyGate`,
+`RegistryPolicy`, `Seam`, `CapabilityRegistry`, `FunctionRegistry` and `CapabilityLookup`, and every
+dispatch and `decide` takes the context and a `Grant option` after the registry. The surface class is
+**breaking** (removals: every member that named one of those types moved its signature), and it
+rides the standing `0.43.0` slot, which is a breaking slot already.
+
+**Guaranteed, and proved in `proofs/Capability.fst`:**
+
+- The join stays monotone under every context, and adding a gate never lowers a decision for any
+  context (`policy_join_monotone_in_context`, `with_gate_tightens_in_context`).
+- A dispatch whose gates answer `NeedsApproval` runs its body exactly when it presents the grant for
+  its own invocation. With no grant, or a grant for any other capability or any other arguments, it
+  is `ApprovalRequired` and no body runs (`approval_dispatches_iff_granted`,
+  `grant_for_another_invocation_refused`).
+- A `Deny` is lifted by no grant, an `Allow` is changed by none, and an id the registry does not
+  hold is refused whatever is presented (`deny_reaches_no_performer`,
+  `allow_unchanged_by_any_grant`, `unregistered_refused_whatever_presented`).
+- A grant is bound to `Capability.invocationPreimage`, which is injective with no hash in it
+  (`invocation_identity_injective`). It is **never** bound to `Capability.invocationKey`, whose last
+  field is a 32-bit cache hash. `invocationKey` and every journal keyed under it are unchanged.
+
+**Not guaranteed, because it is the host's:** who minted a grant, that it is used once, when it
+expires, and which generation of a registry it was minted against. Core reads no clock and keeps no
+count. A host states those as facts in the decision context, and a gate that reads them answers
+`Deny` for a grant that is spent or stale.
+
+**Migration, for an implementer of a gate.** A gate that does not read the context changes one line:
+
+```fsharp
+// before
+let gate = { Policy = "limit"; Decide = fun cap args -> decide cap args }
+// after
+let gate = PolicyGate.ignoringContext "limit" decide
+```
+
+It decides exactly as it did, under every context. A gate that should read the context is written
+`{ Policy = "limit"; Decide = fun ctx cap args -> ... }`, and the registry is then a
+`CapabilityRegistry<YourContext>`. A registry that needs no context is a `CapabilityRegistry<unit>`.
+A denial observer reads the context the refusal was made under from `PolicyDenial.Context`. A seam
+built on `Seam.create` adds `Invocation` to its vocabulary: the invocation's identity, which must be
+injective, so not a hashed key.
+
+**Migration, for a caller of dispatch.** Pass the context and the grant after the registry:
+
+```fsharp
+// before
+CapabilityRegistry.dispatch registry id args body
+CapabilityRegistry.decide registry id args
+CapabilityPipeline.eval lookup spell body pipeline
+// after, with no context and no approval
+CapabilityRegistry.dispatch registry () None id args body
+CapabilityRegistry.decide registry () None id args
+CapabilityPipeline.eval lookup () [] spell body pipeline
+// after, presenting an approval for exactly this invocation
+CapabilityRegistry.dispatch registry ctx (Some(Capability.grant cap args)) id args body
+```
+
+`FunctionRegistry.dispatch` and `decide`, `dispatchWithArgs`, `dispatchCaptured`, `dispatchReplayed`
+and `CapabilityPipeline.evalFrom` take the same two arguments in the same place.
+`Proposals.decideGuarded`, `submitGuarded` and `approveGuarded` take the context after the registry.
+The conformance witnesses hold a `CapabilityRegistry<unit>`: a host whose registry reads a context
+hands them `CapabilityRegistry.under ctx registry`. `QueryRegistry` keeps its verbs; only the type of
+the gate it takes moved, to `PolicyGate<unit, Query, _>`, and `PolicyGate.ignoringContext` builds one.
+
+The other-language ports and the consumers of the registry follow at their own raise.
+
 ### Public because a sibling Core package calls it (`0.19.0`)
 
 `Fuaran.Core.*` is twenty-one packable assemblies. Between them it grants `InternalsVisibleTo` in exactly eight

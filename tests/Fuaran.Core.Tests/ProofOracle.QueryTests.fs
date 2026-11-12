@@ -1814,6 +1814,34 @@ let tests =
                       (Capability.invocationKey cap args)
                       (sprintf "the capability model's key is production's on %A" args)
 
+                  // Phase 638 — the identity a grant is bound to, and whether a presented grant
+                  // covers the invocation: the model's beside production's, on the same draws. The
+                  // "other" grant is for the same arguments with one value changed, so the pair
+                  // reaches both answers.
+                  Expect.equal
+                      (ModelCap.invocation_identity keyRenderers mcap args)
+                      (Capability.invocationPreimage cap args)
+                      (sprintf "the capability model's identity is production's on %A" args)
+
+                  let own = Capability.grant cap args
+
+                  let other =
+                      Capability.grant cap (args |> List.mapi (fun i (a, v) -> if i = 0 then a, v + "x" else a, v))
+
+                  for grant in [ own; other ] do
+                      Expect.equal
+                          (ModelCap.granted keyRenderers mcap args (FStar_Pervasives_Native.Some grant.Invocation))
+                          (Grant.covers (Capability.invocationPreimage cap args) [ grant ])
+                          (sprintf "the model's granted is production's covers on %A" args)
+
+                  Expect.isTrue
+                      (ModelCap.granted keyRenderers mcap args (FStar_Pervasives_Native.Some own.Invocation))
+                      "its own grant covers it"
+
+                  Expect.isFalse
+                      (ModelCap.granted keyRenderers mcap args FStar_Pervasives_Native.None)
+                      "no grant covers nothing"
+
               Expect.equal compared 500 "every drawn invocation was compared"
 
               // And the query model's key agrees with production's over string cells drawn from the
