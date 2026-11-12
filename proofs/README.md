@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 409 claims — 297 proved (296 across 38 models, 1 a host's own proof), 66 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
+**The ladder, counted:** 410 claims — 297 proved (296 across 38 models, 1 a host's own proof), 67 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -407,8 +407,8 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Tree` | 48 | 12 | 8 | 0 | 0 | 0 | 0 | 28 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 64 | 0 | 25 | 3 | 0 | 0 | 0 | 36 |
-| `Fuaran.Core.Wire` | 193 | 72 | 11 | 3 | 4 | 0 | 0 | 59 |
-| **Total** | 1387 | 338 | 431 | 38 | 15 | 0 | 3 | 518 |
+| `Fuaran.Core.Wire` | 193 | 116 | 11 | 3 | 4 | 0 | 0 | 59 |
+| **Total** | 1387 | 382 | 431 | 38 | 15 | 0 | 3 | 518 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -4364,7 +4364,7 @@ flag the scanner records while it scans the token (section 3).
 
   THE LOSSLESS READER REBUILDS THE PARSE. `JDoc.read` reads a document through `Reader`'s token surface — a `null` by `Reader.readNull`, a number by `Reader.numberText` (the scanner's token scan and the JSON number grammar, and no reading of a value), a container by the scanner's own member and item loops, a string or a literal by the scanner's own arms — and `JDoc.toJVal` converts the document, reading each number text by the scanner's own classification. The reading is modelled as `lossless_value` and its group over `JsonParse`'s alphabet, scans and messages, and `lossless_reader_rebuilds_the_parse` says that on EVERY input, under every limits record, byte verdict and depth budget, the lossless reading then the conversion answers exactly the value `parse_limited` under `RejectNull` accepts the input with, and nothing where `parse_limited` refuses it: the strict parse accepts exactly the documents whose lossless reading converts. The corollary `lossless_refusal_is_a_parse_refusal` is the one-grammar statement: a document the lossless reader refuses — by the grammar, a bound, or trailing input — the strict parse refuses too. `scan_number_flag` ties the float flag the conversion recomputes from a number text (`Json.isFloatToken`) to the one the scanner records while it scans the token, and the accumulator lemmas (`rev_fields`, `poisoned_members`, ...) carry the equality through the loops.
 
-  _With:_ `lossless_is_parse_value`, `lossless_is_parse_members`, `lossless_is_parse_items`, `lossless_refusal_is_a_parse_refusal`, `scan_number_flag`, `rev_fields`, `rev_items`, `poisoned_members`, `poisoned_items`.
+  _With:_ `lossless_is_parse_value`, `lossless_refusal_is_a_parse_refusal`, `scan_number_flag`, `rev_fields`, `rev_items`, `poisoned_members`, `poisoned_items`.
 
   _Boundary:_ Within the model; the correspondence to production is the differential's (`lossless-reader-differential`) and the extractor's (premise `extractor-and-compiler-trusted`). Value for value and refusal for refusal on what the parse accepts; where both refuse, the two refusals are not claimed equal by the theorem (the strict parse stops at the first null or number past `JVal`, the lossless reading reads on) — `JsonDocumentTests.fs` holds them identical wherever the strict refusal is the grammar's or a bound's. NOT modelled, as in `reader-rebuilds-the-parse`: the breach's path and the re-scan after a shape mismatch, which admits the numbers a reading read as text — both held by the tests. The writer and `JDoc.ofJVal` are held by the round-trip tests, not modelled.
 
@@ -4376,13 +4376,19 @@ flag the scanner records while it scans the token (section 3).
 
   _Boundary:_ For decoders run through `ofDecoder`. `JDocDecoder`'s own combinators over a document are the shared `DecodeOver` code whose `JVal` instance `DecodeLayer.fst` models; their document instance is held to the `JVal` one by `JsonDocumentTests.fs` (`JDocDecoder is Decoder's algebra`), not proved. Within the model; premise `extractor-and-compiler-trusted`.
 
-**Tested** (1)
+**Tested** (2)
 
 - <a id="row-lossless-reader-differential"></a>**`lossless-reader-differential`** — `Proofs.Oracle`, 4 cases · fuaran-core#640
 
   The extracted lossless reader agrees with the shipped one. Over the reader's differential pool (the parser corpus, the wire benchmark corpora and the generated documents with their truncations, cuts and splices) and the same pool with nulls written in, `JDoc.read` and the extracted `read_lossless` answer the same document, or the same refusal at the same position with the same sentence, or the same breach; the theorem is evaluated on the extracted model (its conversion beside its own `parse_limited`); and the extracted `lower` refuses a document's null, its first number past the carrier and its first repeated name at production's codes and paths. The go-red is the BLIND bridge that hides the two container characters from the model, which loses on every structured input and on no scalar.
 
   _Boundary:_ Agreement over the pool only, never over all inputs; the lowering is compared with the host's number reading supplied by production.
+
+- <a id="row-lossless-document-suite"></a>**`lossless-document-suite`** — `Suite:JsonDocumentTests.tests`, 11 cases · fuaran-core#640
+
+  The document's writer, accessors, conversions and decode algebra, held by their suite. `JDoc.tryWrite` writes every document the reader reads to text that reads back to it, writes a value's `JDoc.ofJVal` to `Json.tryRender`'s bytes, round-trips compact foreign JSON with nulls and numbers of any length and scale byte for byte, and refuses a number text outside the grammar, a lone surrogate and a repeated name at their paths; `toJVal` and `ofJVal` refuse exactly what the other side cannot hold, at the path; the accessors read a number by the scanner's own rule and the index takes the first member; `JDocDecoder` decodes a foreign document with the decode algebra's refusals at their paths, and over the pool's values its structural combinators answer as `Decoder`'s do, code and path alike; a constructed document of any depth is written and converted.
+
+  _Boundary:_ Production code held by its suite over the reader's pool and hand-picked documents, never proved: the writer and `ofJVal` are outside the model, and `JDocDecoder`'s combinators are the shared `DecodeOver` code whose `JVal` instance `DecodeLayer.fst` models (`document-decodes-soundly-through-the-layer` covers only `ofDecoder`).
 
 **Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed).
 
