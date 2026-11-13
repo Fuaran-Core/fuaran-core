@@ -258,8 +258,9 @@ let tests =
               let q, id = parkedIn [ Drop "n1" ]
 
               match Proposals.approveGuardedIn stateAware registry () "approver" "t1" id q state0 with
-              | Ok(q', next, grants) ->
-                  Expect.isFalse (holds "n1" next) "approved: the note is gone"
+              | Ok approved ->
+                  let grants = approved.Grants
+                  Expect.isFalse (holds "n1" approved.State) "approved: the note is gone"
 
                   Expect.equal
                       grants
@@ -267,7 +268,7 @@ let tests =
                       "one grant, for exactly the deletion the approval covered"
 
                   Expect.equal
-                      (q'.Proposals |> List.map _.Status)
+                      (approved.Queue.Proposals |> List.map _.Status)
                       [ Proposals.ProposalStatus.Approved("approver", "t1") ]
                       "the proposal is approved"
 

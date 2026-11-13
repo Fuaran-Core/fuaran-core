@@ -298,7 +298,8 @@ module internal PolicySeamLaws =
                 )
 
                 match approval with
-                | Ok(_, _, grants) ->
+                | Ok approved ->
+                    let grants = approved.Grants
                     let covered = staged |> List.collect _.Invocations
 
                     let dispatched =

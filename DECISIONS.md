@@ -334,9 +334,9 @@ ones refuses the proposal as stale, `StagedApprovalFailure.StaleEffects`, naming
 with and what it would invoke now. Only then is each op decided for the approver, under the approver's
 context, with the grant for each staged invocation presented, so the approval goes through the gate and a
 `Deny` still refuses (D249.7). An op that no longer applies is `OpNoLongerApplies`. Every refusal leaves the
-proposal pending and applies nothing. On success the approval answers, beside the queue and the state, the
-grant for each invocation it covered, in order: what the host presents when it dispatches them, which then run
-through the gate.
+proposal pending and applies nothing. On success the approval answers a `StagedApproval`: the queue, the state,
+and the grant for each invocation it covered, in order, which is what the host presents when it dispatches them
+through the gate. It is a record and not a three-place tuple, by D138.1.
 
 The stale check comes before the gate decision because the grants are bound to what the approver was shown. Three
 alternatives lost. Granting whatever the ops would invoke at the approval's state approves invocations nobody

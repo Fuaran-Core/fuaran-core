@@ -509,6 +509,18 @@ module Proposals =
             submitted: (string * (string * string) list) list *
             now: (string * (string * string) list) list
 
+    /// What an approval over the state-aware form answers (Phase 643).
+    type StagedApproval<'Op, 'State> =
+        {
+            /// The queue, the proposal in it marked approved.
+            Queue: ProposalQueue<StagedOp<'Op>>
+            /// The state the proposal's ops produced, applied in order.
+            State: 'State
+            /// The grant for each invocation the approval covered, in order (`Capability.grant`):
+            /// what the host presents when it dispatches them, which then run through the gate.
+            Grants: Grant list
+        }
+
     /// The one approval body (Phase 510, D173; Phase 643): `approve` is it with no guard,
     /// `approveGuarded` and `approveGuardedIn` with the registry's. The approver may not be the
     /// author (`SelfApproval`); then `judge` reads the proposal at `state` — the sequence's decision
@@ -860,9 +872,9 @@ module Proposals =
     /// Only then do the ops apply, in order. Every refusal leaves the proposal pending and nothing
     /// applied.
     ///
-    /// On success it answers, beside the queue and the state, the grant for each invocation the
-    /// approval covers, in order (`Capability.grant`): what the host presents when it dispatches
-    /// those invocations through the registry, which then runs them through the gate.
+    /// On success it answers a `StagedApproval`: the queue, the state, and the grant for each
+    /// invocation the approval covers, in order (`Capability.grant`) — what the host presents when it
+    /// dispatches those invocations through the registry, which then runs them through the gate.
     let approveGuardedIn
         (sw: StateAwareGuardedWitness<'State, 'Op, 'Rej>)
         (registry: CapabilityRegistry<'Ctx>)
@@ -872,7 +884,7 @@ module Proposals =
         (id: int)
         (q: ProposalQueue<StagedOp<'Op>>)
         (state: 'State)
-        : Result<ProposalQueue<StagedOp<'Op>> * 'State * Grant list, StagedApprovalFailure<'Rej>> =
+        : Result<StagedApproval<'Op, 'State>, StagedApprovalFailure<'Rej>> =
         let judge (p: Proposal<StagedOp<'Op>>) =
             let walked, rejection = along sw.DryRun (p.Ops |> List.map _.Op) state
 
@@ -906,7 +918,9 @@ module Proposals =
                 |> List.collect _.Invocations
                 |> List.choose (fun (cid, args) -> grantFor registry cid args)
 
-            q', next, grants)
+            { Queue = q'
+              State = next
+              Grants = grants })
 
     /// Render guidance as agent-readable text: the message plus the enumerated
     /// alternatives (one per line), so a refused agent repairs instead of
