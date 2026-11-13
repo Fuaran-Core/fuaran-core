@@ -92,7 +92,6 @@
     <Compile Include="AiSurfaceTests.fs" />
     <Compile Include="PolicyGateTests.fs" />
     <Compile Include="DecisionContextTests.fs" />
-    <Compile Include="StateAwareWitnessTests.fs" />
     <Compile Include="ProjectionTests.fs" />
     <Compile Include="DigestTests.fs" />
     <Compile Include="SmallSeamsTests.fs" />
@@ -283,6 +282,7 @@
          witnesses the census below runs them over. BEFORE ConformanceVacuityTests.fs, which reuses
          those witnesses. -->
     <Compile Include="WitnessTakingFamiliesTests.fs" />
+    <Compile Include="StateAwareWitnessTests.fs" />
     <!-- Phase 313 — the structural-integrity strand and its reference grammar / reference
          witnesses, which the census below runs the two families over. -->
     <Compile Include="StructuralIntegrityTests.fs" />

@@ -364,4 +364,76 @@ let tests =
                       (q.Proposals |> List.collect (fun p -> p.Ops |> List.map _.Op))
                       (q0.Proposals |> List.collect _.Ops)
                       "the same ops parked"
-              | a, b -> failtestf "the two forms disagree: %A / %A" a b ]
+              | a, b -> failtestf "the two forms disagree: %A / %A" a b
+
+          // ---- t6: the frozen witnesses stay at the unit context; `under` is the route ----
+          testCase "a registry that reads a context is certified by the guarded family once per context, through under"
+          <| fun () ->
+              // The note surface's capabilities, in ONE registry whose gate reads a context: the
+              // trusted side may do anything, the other needs an approval to delete.
+              let byContext: CapabilityRegistry<bool> =
+                  CapabilityRegistry.enumerate PolicyGateTests.noteRegistry
+                  |> List.fold
+                      (fun r c -> CapabilityRegistry.register c r |> Result.defaultValue r)
+                      CapabilityRegistry.empty
+                  |> CapabilityRegistry.withGate
+                      { Policy = "side"
+                        Decide =
+                          fun trusted c _ ->
+                              if trusted || c.Id <> "delete-note" then
+                                  PolicyDecision.Allow
+                              else
+                                  PolicyDecision.NeedsApproval }
+
+              for ctx in [ true; false ] do
+                  let results =
+                      Conformance.policyLawsAt
+                          PolicyGateTests.guarded
+                          (CapabilityRegistry.under ctx byContext)
+                          state0
+                          genNoteOp
+                          PolicyGateTests.actors
+                          PolicyGateTests.privileged
+                          4242
+                          300
+
+                  for r in results do
+                      Expect.isTrue r.Passed (sprintf "under %b: %s — %A" ctx r.Law r.Counterexample)
+
+          testCase "the capability seam family certifies a context only where its gate admits every drawn call"
+          <| fun () ->
+              // The finding t6 recorded (DECISIONS.md D254.6): `capabilityLawsAt` takes a call as
+              // admitted when its id is registered and its arguments validate, and reads no gate. So
+              // `under` certifies a context whose gate admits every drawn call, and a context whose
+              // gate parks one fails the agreement law although host and registry agree. This pins
+              // that, so the change that makes the family read the gate turns it red here.
+              let byContext: CapabilityRegistry<bool> =
+                  CapabilityRegistry.enumerate WitnessTakingFamiliesTests.capabilityRegistry
+                  |> List.fold
+                      (fun r c -> CapabilityRegistry.register c r |> Result.defaultValue r)
+                      CapabilityRegistry.empty
+                  |> CapabilityRegistry.withGate
+                      { Policy = "side"
+                        Decide =
+                          fun trusted c _ ->
+                              if trusted || c.Id <> "flaky" then
+                                  PolicyDecision.Allow
+                              else
+                                  PolicyDecision.NeedsApproval }
+
+              let run (ctx: bool) =
+                  Conformance.capabilityLawsAt
+                      { Registry = CapabilityRegistry.under ctx byContext
+                        Dispatch = CapabilityRegistry.dispatch byContext ctx None
+                        GenCall = WitnessTakingFamiliesTests.genCapabilityCall }
+                      WitnessTakingFamiliesTests.capabilityBody
+                      2460
+                      300
+
+              for r in run true do
+                  Expect.isTrue r.Passed (sprintf "under the admitting context: %s — %A" r.Law r.Counterexample)
+
+              Expect.exists
+                  (run false)
+                  (fun r -> not r.Passed && r.Law.Contains "agrees with its registry")
+                  "under the parking context the family reads no gate, and its agreement law fails" ]
