@@ -92,6 +92,7 @@
     <Compile Include="AiSurfaceTests.fs" />
     <Compile Include="PolicyGateTests.fs" />
     <Compile Include="DecisionContextTests.fs" />
+    <Compile Include="StateAwareWitnessTests.fs" />
     <Compile Include="ProjectionTests.fs" />
     <Compile Include="DigestTests.fs" />
     <Compile Include="SmallSeamsTests.fs" />

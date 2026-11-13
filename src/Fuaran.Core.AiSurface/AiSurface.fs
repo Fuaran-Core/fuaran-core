@@ -188,6 +188,39 @@ type GuardedSurfaceWitness<'State, 'Op, 'Rej> =
         EffectsOf: 'Op -> (string * (string * string) list) list
     }
 
+/// The guarded AI surface whose effects-of reads the STATE (Phase 643) — the form for a domain whose
+/// operations are messages to an update function, where what an operation invokes depends on the
+/// state it is applied to. It sits BESIDE `GuardedSurfaceWitness`, which is unchanged (compose, never
+/// grow), and a domain on that witness gets this form for free through
+/// `StateAwareGuardedWitness.ofGuarded`. `Proposals.submitGuardedIn` / `approveGuardedIn` decide
+/// over it: each operation's invocations are computed at the state it would be applied to, along
+/// the dry run, before anything is applied. Frozen at birth.
+type StateAwareGuardedWitness<'State, 'Op, 'Rej> =
+    {
+        /// The surface this guards: its `Decide`, `Apply` and `Explain` are the ones run.
+        Surface: AiSurfaceWitness<'State, 'Op, 'Rej>
+        /// An effect-free check of one op against a state, exactly as `GuardedSurfaceWitness.DryRun`:
+        /// the state the op WOULD produce, or the rejection `Apply` would give. Runs no capability
+        /// body and performs no effect, and agrees with `Apply` on which ops apply.
+        DryRun: 'Op -> 'State -> Result<'State, 'Rej>
+        /// The capability invocations the op makes when it is applied to the state — `(capability
+        /// id, arguments)`, in the order it makes them; `[]` when it invokes nothing there. Total, and
+        /// free of effects: a sequence is decided by asking it at every state the dry run reaches.
+        EffectsOf: 'Op -> 'State -> (string * (string * string) list) list
+    }
+
+/// The lift from the present guarded witness (Phase 643).
+[<RequireQualifiedAccess>]
+module StateAwareGuardedWitness =
+
+    /// `gw` as the state-aware form: the same surface and dry run, and an effects-of that asks
+    /// `gw.EffectsOf` and ignores the state. Over it `Proposals.decideGuardedIn` decides every op as
+    /// `Proposals.decideGuarded` does over `gw`, in every state (`Conformance.policyLaws` holds it).
+    let ofGuarded (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>) : StateAwareGuardedWitness<'State, 'Op, 'Rej> =
+        { Surface = gw.Surface
+          DryRun = gw.DryRun
+          EffectsOf = fun op _ -> gw.EffectsOf op }
+
 /// The NL→op fast-path: deterministic anchor matching over the witness's
 /// pattern bank. The resolver is a pure function of the intent — no clock, no
 /// rng — so the same intent always resolves to the same emission (the token
@@ -447,36 +480,66 @@ module Proposals =
         : Result<'State, 'Rej> =
         ops |> List.fold (fun acc op -> acc |> Result.bind (w.Apply op)) (Ok state)
 
-    /// The one approval body (Phase 510, D173): `approve` is it with no guard, `approveGuarded` with
-    /// the registry's. The approver may not be the author (`SelfApproval`); the sequence's decision
-    /// for the approver, the join of `decide` over its ops with the first denial winning, must not be
-    /// a `Deny` (`ApprovalDenied`); a guard's dry run must pass (`OpNoLongerApplies`, nothing
+    /// One operation of a proposal parked over the state-aware form (Phase 643), with the capability
+    /// invocations it was decided with: `EffectsOf` at the state it would be applied to, computed
+    /// along the dry run at submission. They are what the approval covers, so an approval that finds
+    /// them changed refuses the proposal as stale (`StagedApprovalFailure.StaleEffects`).
+    type StagedOp<'Op> =
+        {
+            /// The operation, applied through the surface's reducer on approval.
+            Op: 'Op
+            /// `(capability id, arguments)` in the order the operation makes them, at the state it was
+            /// decided at; `[]` when it invoked nothing there.
+            Invocations: (string * (string * string) list) list
+        }
+
+    /// Why an approval over the state-aware form was refused (Phase 643): a refusal the present
+    /// approval makes too, or the one only this form can make. The proposal stays pending either way.
+    [<RequireQualifiedAccess>]
+    type StagedApprovalFailure<'Rej> =
+        /// A refusal `approveGuarded` makes, with the same meaning: an unknown or decided proposal,
+        /// an approval by the author, a denial for the approver, or an op that no longer applies.
+        | Refused of ApprovalFailure<'Rej>
+        /// The proposal is STALE: op `index` (0-based), at the state it would be applied to now,
+        /// invokes `now`, where at submission it invoked `submitted`. The approval covers the
+        /// invocations it was shown, so an approval of different ones is refused, never granted.
+        | StaleEffects of
+            id: int *
+            index: int *
+            submitted: (string * (string * string) list) list *
+            now: (string * (string * string) list) list
+
+    /// The one approval body (Phase 510, D173; Phase 643): `approve` is it with no guard,
+    /// `approveGuarded` and `approveGuardedIn` with the registry's. The approver may not be the
+    /// author (`SelfApproval`); then `judge` reads the proposal at `state` — the sequence's decision
+    /// for the approver, the join over its ops with the first denial winning, and the dry run's
+    /// rejection if one would not apply — or refuses it in a way of its own form; the decision must
+    /// not be a `Deny` (`ApprovalDenied`); the dry run must pass (`OpNoLongerApplies`, nothing
     /// applied); then the ops apply through the surface's reducer.
     let private approveWith
         (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
-        (decide: 'Op -> PolicyDecision)
-        (dryRun: ('Op list -> 'State -> Result<unit, 'Rej>) option)
+        (opOf: 'P -> 'Op)
+        (refused: ApprovalFailure<'Rej> -> 'F)
+        (judge: Proposal<'P> -> Result<PolicyDecision * 'Rej option, 'F>)
         (approver: string)
         (at: string)
         (id: int)
-        (q: ProposalQueue<'Op>)
+        (q: ProposalQueue<'P>)
         (state: 'State)
-        : Result<ProposalQueue<'Op> * 'State, ApprovalFailure<'Rej>> =
-        find id q
-        |> Result.bind (fun p ->
-            if p.Author = approver then
-                Error(SelfApproval(id, p.Author))
-            else
-                match PolicyDecision.all (p.Ops |> List.map decide) with
-                | PolicyDecision.Deny g -> Error(ApprovalDenied(id, g))
-                | _ ->
-                    match dryRun |> Option.map (fun run -> run p.Ops state) with
-                    | Some(Error rejection) -> Error(OpNoLongerApplies(id, rejection))
-                    | Some(Ok())
-                    | None ->
-                        match applyAll w p.Ops state with
-                        | Error rejection -> Error(OpNoLongerApplies(id, rejection))
-                        | Ok next -> Ok(setStatus id (ProposalStatus.Approved(approver, at)) q, next))
+        : Result<ProposalQueue<'P> * 'State, 'F> =
+        match find id q with
+        | Error failure -> Error(refused failure)
+        | Ok p when p.Author = approver -> Error(refused (SelfApproval(id, p.Author)))
+        | Ok p ->
+            judge p
+            |> Result.bind (fun (decision, dryRun) ->
+                match decision, dryRun with
+                | PolicyDecision.Deny g, _ -> Error(refused (ApprovalDenied(id, g)))
+                | _, Some rejection -> Error(refused (OpNoLongerApplies(id, rejection)))
+                | _, None ->
+                    match applyAll w (p.Ops |> List.map opOf) state with
+                    | Error rejection -> Error(refused (OpNoLongerApplies(id, rejection)))
+                    | Ok next -> Ok(setStatus id (ProposalStatus.Approved(approver, at)) q, next))
 
     /// Approve a pending proposal: its ops apply through the domain reducer. On
     /// success the proposal is marked approved (dual attribution — the proposer
@@ -498,7 +561,16 @@ module Proposals =
         (q: ProposalQueue<'Op>)
         (state: 'State)
         : Result<ProposalQueue<'Op> * 'State, ApprovalFailure<'Rej>> =
-        approveWith w (w.Decide approver) None approver at id q state
+        approveWith
+            w
+            (fun op -> op)
+            (fun failure -> failure)
+            (fun p -> Ok(PolicyDecision.all (p.Ops |> List.map (w.Decide approver)), None))
+            approver
+            at
+            id
+            q
+            state
 
     /// Reject a pending proposal with a reason. Recorded, never dropped — and
     /// the artifact is never touched (a denied proposal never mutates). The proposal id precedes the
@@ -525,34 +597,34 @@ module Proposals =
         /// Policy allowed it but the domain reducer rejected an op.
         | SubmitOpRejected of 'Rej
 
-    /// The one submission body (Phase 510, D173): `submit` is it with no guard, `submitGuarded` with
-    /// the registry's. The sequence's decision is the JOIN of `decide` over its ops: the most
-    /// restrictive wins, and of several denials the first (Phase 318). A `Deny` refuses it before
-    /// anything else; then a guard's dry run refuses a sequence one of whose ops would not apply
-    /// (`SubmitOpRejected`), before it is parked or applied; then it is parked (`NeedsApproval`) or
-    /// applied (`Allow`). With no guard nothing is dry-run, so a parked sequence is checked against
-    /// the state only when `approve` applies it.
+    /// The one submission body (Phase 510, D173; Phase 643): `submit` is it with no guard,
+    /// `submitGuarded` and `submitGuardedIn` with the registry's. `decision` is the sequence's: the
+    /// JOIN over its ops, the most restrictive winning and of several denials the first (Phase 318).
+    /// A `Deny` refuses it before anything else; then `dryRun`, asked only now, refuses a sequence
+    /// one of whose ops would not apply (`SubmitOpRejected`), before it is parked or applied; then it
+    /// is parked as `parked` (`NeedsApproval`) or `ops` are applied (`Allow`). With no guard nothing
+    /// is dry-run, so a parked sequence is checked against the state only when `approve` applies it.
     let private submitWith
         (w: AiSurfaceWitness<'State, 'Op, 'Rej>)
-        (decide: 'Op -> PolicyDecision)
-        (dryRun: ('Op list -> 'State -> Result<unit, 'Rej>) option)
+        (decision: PolicyDecision)
+        (dryRun: unit -> 'Rej option)
         (author: string)
         (at: string)
         (intent: string option)
         (ops: 'Op list)
-        (q: ProposalQueue<'Op>)
+        (parked: 'P list)
+        (q: ProposalQueue<'P>)
         (state: 'State)
-        : SubmitOutcome<'State, 'Op, 'Rej> =
-        match PolicyDecision.all (ops |> List.map decide) with
+        : SubmitOutcome<'State, 'P, 'Rej> =
+        match decision with
         | PolicyDecision.Deny g -> SubmitDenied g
         | decision ->
-            match dryRun |> Option.map (fun run -> run ops state) with
-            | Some(Error rejection) -> SubmitOpRejected rejection
-            | Some(Ok())
+            match dryRun () with
+            | Some rejection -> SubmitOpRejected rejection
             | None ->
                 match decision with
                 | PolicyDecision.NeedsApproval ->
-                    let q', id = propose author at intent ops q
+                    let q', id = propose author at intent parked q
                     SubmitProposed(q', id)
                 | _ ->
                     match applyAll w ops state with
@@ -574,31 +646,47 @@ module Proposals =
         (q: ProposalQueue<'Op>)
         (state: 'State)
         : SubmitOutcome<'State, 'Op, 'Rej> =
-        submitWith w (w.Decide author) None author at intent ops q state
+        submitWith
+            w
+            (PolicyDecision.all (ops |> List.map (w.Decide author)))
+            (fun () -> None)
+            author
+            at
+            intent
+            ops
+            ops
+            q
+            state
 
-    /// The one guarded decision (Phase 638): the domain's own decision for the op joined with the
-    /// registry's, under `ctx`, for every invocation `EffectsOf op` names. `approving` presents each
-    /// invocation with the grant for exactly it (`Capability.grant`), which is what an approval is:
-    /// the registry's `NeedsApproval` for that invocation is lifted through the gate, and its `Deny`
-    /// is not.
+    /// The grant for exactly one invocation (Phase 638): `Capability.grant` of the capability the
+    /// registry holds under `id`, or `None` for an id it does not hold, which no grant could lift.
+    let private grantFor
+        (registry: CapabilityRegistry<'Ctx>)
+        (id: string)
+        (args: (string * string) list)
+        : Grant option =
+        CapabilityRegistry.tryFind id registry
+        |> Option.map (fun c -> Capability.grant c args)
+
+    /// The one guarded decision (Phase 638; Phase 643 hands it the invocations): the domain's own
+    /// decision for the op joined with the registry's, under `ctx`, for every invocation in
+    /// `invocations`. `approving` presents each invocation with the grant for exactly it, which is
+    /// what an approval is: the registry's `NeedsApproval` for that invocation is lifted through the
+    /// gate, and its `Deny` is not.
     let private decideThrough
         (approving: bool)
-        (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
+        (surface: AiSurfaceWitness<'State, 'Op, 'Rej>)
         (registry: CapabilityRegistry<'Ctx>)
         (ctx: 'Ctx)
         (actor: string)
         (op: 'Op)
+        (invocations: (string * (string * string) list) list)
         : PolicyDecision =
-        let grantFor (id: string) (args: (string * string) list) : Grant option =
-            if approving then
-                CapabilityRegistry.tryFind id registry
-                |> Option.map (fun c -> Capability.grant c args)
-            else
-                None
-
-        gw.Surface.Decide actor op
-        :: (gw.EffectsOf op
-            |> List.map (fun (id, args) -> CapabilityRegistry.decide registry ctx (grantFor id args) id args))
+        surface.Decide actor op
+        :: (invocations
+            |> List.map (fun (id, args) ->
+                let grant = if approving then grantFor registry id args else None
+                CapabilityRegistry.decide registry ctx grant id args))
         |> PolicyDecision.all
 
     /// The capabilities an op invokes, through the registry the actor acts through, joined with the
@@ -617,18 +705,47 @@ module Proposals =
         (actor: string)
         (op: 'Op)
         : PolicyDecision =
-        decideThrough false gw registry ctx actor op
+        decideThrough false gw.Surface registry ctx actor op (gw.EffectsOf op)
 
-    /// Dry-run the whole sequence through `DryRun` (Phase 318): the first op that
-    /// would not apply, threaded through the states the earlier ones would produce. Runs no `Apply`.
-    let private dryRunAll
-        (gw: GuardedSurfaceWitness<'State, 'Op, 'Rej>)
+    /// `decideGuarded` over the state-aware form (Phase 643): the domain's own decision for the op
+    /// joined with the registry's, under `ctx` and with no grant, for every invocation the op makes
+    /// when it is applied to `state` (`EffectsOf op state`). Over
+    /// `StateAwareGuardedWitness.ofGuarded gw` it is `decideGuarded gw` in every state.
+    let decideGuardedIn
+        (sw: StateAwareGuardedWitness<'State, 'Op, 'Rej>)
+        (registry: CapabilityRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (actor: string)
+        (op: 'Op)
+        (state: 'State)
+        : PolicyDecision =
+        decideThrough false sw.Surface registry ctx actor op (sw.EffectsOf op state)
+
+    /// The dry run, walked (Phase 318; Phase 643 keeps the states): each op paired with the state it
+    /// would be applied to, threaded through the states the earlier ones would produce, up to and
+    /// including the first op that would not apply, and that op's rejection. Runs no `Apply`.
+    let private along
+        (dryRun: 'Op -> 'State -> Result<'State, 'Rej>)
         (ops: 'Op list)
         (state: 'State)
-        : Result<unit, 'Rej> =
-        ops
-        |> List.fold (fun acc op -> acc |> Result.bind (gw.DryRun op)) (Ok state)
-        |> Result.map ignore
+        : ('Op * 'State) list * 'Rej option =
+        let rec walk (walked: ('Op * 'State) list) (s: 'State) (rest: 'Op list) =
+            match rest with
+            | [] -> List.rev walked, None
+            | op :: tail ->
+                match dryRun op s with
+                | Ok next -> walk ((op, s) :: walked) next tail
+                | Error rejection -> List.rev ((op, s) :: walked), Some rejection
+
+        walk [] state ops
+
+    /// The rejection of the first op of the sequence that would not apply, if one would not.
+    let private dryRunAll
+        (dryRun: 'Op -> 'State -> Result<'State, 'Rej>)
+        (ops: 'Op list)
+        (state: 'State)
+        : 'Rej option =
+        snd (along dryRun ops state)
 
     /// `submit` behind the registry's gate and a dry run (Phase 318). Every op's decision is
     /// `decideGuarded` — the domain's policy joined with the registry's decision for each capability
@@ -649,7 +766,17 @@ module Proposals =
         (q: ProposalQueue<'Op>)
         (state: 'State)
         : SubmitOutcome<'State, 'Op, 'Rej> =
-        submitWith gw.Surface (decideGuarded gw registry ctx author) (Some(dryRunAll gw)) author at intent ops q state
+        submitWith
+            gw.Surface
+            (PolicyDecision.all (ops |> List.map (decideGuarded gw registry ctx author)))
+            (fun () -> dryRunAll gw.DryRun ops state)
+            author
+            at
+            intent
+            ops
+            ops
+            q
+            state
 
     /// `approve` behind the registry's gate and a dry run (Phase 318). The approver may not be the
     /// author (`SelfApproval`); every op's guarded decision for the APPROVER through `registry`,
@@ -674,7 +801,112 @@ module Proposals =
         (q: ProposalQueue<'Op>)
         (state: 'State)
         : Result<ProposalQueue<'Op> * 'State, ApprovalFailure<'Rej>> =
-        approveWith gw.Surface (decideThrough true gw registry ctx approver) (Some(dryRunAll gw)) approver at id q state
+        let judge (p: Proposal<'Op>) =
+            Ok(
+                PolicyDecision.all (
+                    p.Ops
+                    |> List.map (fun op -> decideThrough true gw.Surface registry ctx approver op (gw.EffectsOf op))
+                ),
+                dryRunAll gw.DryRun p.Ops state
+            )
+
+        approveWith gw.Surface (fun op -> op) (fun failure -> failure) judge approver at id q state
+
+    /// `submitGuarded` over the state-aware form (Phase 643). The sequence is decided WHOLE and
+    /// before anything is applied: the dry run is walked from `state`, and each op it reaches is
+    /// decided by `decideGuardedIn` at the state it would be applied to, so the invocations are the
+    /// ones it would make there, in order. The sequence's decision is the join over those ops. A
+    /// `Deny` refuses it (`SubmitDenied`, the first denial's guidance); an op that would not apply
+    /// refuses it (`SubmitOpRejected`) — the ops after it reach no state and are not decided; a
+    /// `NeedsApproval` parks it whole, each op beside the invocations it was decided with
+    /// (`StagedOp`), which is what an approval covers; otherwise the ops apply in order.
+    ///
+    /// Over `StateAwareGuardedWitness.ofGuarded gw` it decides as `submitGuarded gw` wherever the
+    /// sequence's dry run passes. Where an op would not apply, both refuse; the present form reports a
+    /// denial of an op after it, which this form does not decide.
+    let submitGuardedIn
+        (sw: StateAwareGuardedWitness<'State, 'Op, 'Rej>)
+        (registry: CapabilityRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (author: string)
+        (at: string)
+        (intent: string option)
+        (ops: 'Op list)
+        (q: ProposalQueue<StagedOp<'Op>>)
+        (state: 'State)
+        : SubmitOutcome<'State, StagedOp<'Op>, 'Rej> =
+        let walked, rejection = along sw.DryRun ops state
+
+        let staged =
+            walked
+            |> List.map (fun (op, s) ->
+                { Op = op
+                  Invocations = sw.EffectsOf op s })
+
+        let decision =
+            staged
+            |> List.map (fun st -> decideThrough false sw.Surface registry ctx author st.Op st.Invocations)
+            |> PolicyDecision.all
+
+        submitWith sw.Surface decision (fun () -> rejection) author at intent ops staged q state
+
+    /// `approveGuarded` over the state-aware form (Phase 643). The approver may not be the author
+    /// (`SelfApproval`). The dry run is walked again from `state`, the state the approval would apply
+    /// the proposal to, and each op's invocations are computed there: an op whose invocations differ
+    /// from the ones it was submitted with refuses the proposal as stale (`StaleEffects`), because the
+    /// approval covers what it was shown. Then each op is decided for the APPROVER under `ctx` with
+    /// the grant for each of its invocations presented, through the gate: a `Deny` refuses
+    /// (`ApprovalDenied`), and no grant lifts it. An op that no longer applies is `OpNoLongerApplies`.
+    /// Only then do the ops apply, in order. Every refusal leaves the proposal pending and nothing
+    /// applied.
+    ///
+    /// On success it answers, beside the queue and the state, the grant for each invocation the
+    /// approval covers, in order (`Capability.grant`): what the host presents when it dispatches
+    /// those invocations through the registry, which then runs them through the gate.
+    let approveGuardedIn
+        (sw: StateAwareGuardedWitness<'State, 'Op, 'Rej>)
+        (registry: CapabilityRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (approver: string)
+        (at: string)
+        (id: int)
+        (q: ProposalQueue<StagedOp<'Op>>)
+        (state: 'State)
+        : Result<ProposalQueue<StagedOp<'Op>> * 'State * Grant list, StagedApprovalFailure<'Rej>> =
+        let judge (p: Proposal<StagedOp<'Op>>) =
+            let walked, rejection = along sw.DryRun (p.Ops |> List.map _.Op) state
+
+            let stale =
+                List.zip (List.truncate walked.Length p.Ops) walked
+                |> List.indexed
+                |> List.tryPick (fun (i, (st, (op, s))) ->
+                    let now = sw.EffectsOf op s
+
+                    if now = st.Invocations then
+                        None
+                    else
+                        Some(StagedApprovalFailure.StaleEffects(id, i, st.Invocations, now)))
+
+            match stale with
+            | Some failure -> Error failure
+            | None ->
+                let decision =
+                    List.truncate walked.Length p.Ops
+                    |> List.map (fun st -> decideThrough true sw.Surface registry ctx approver st.Op st.Invocations)
+                    |> PolicyDecision.all
+
+                Ok(decision, rejection)
+
+        approveWith sw.Surface _.Op StagedApprovalFailure.Refused judge approver at id q state
+        |> Result.map (fun (q', next) ->
+            let grants =
+                q'.Proposals
+                |> List.filter (fun p -> p.Id = id)
+                |> List.collect _.Ops
+                |> List.collect _.Invocations
+                |> List.choose (fun (cid, args) -> grantFor registry cid args)
+
+            q', next, grants)
 
     /// Render guidance as agent-readable text: the message plus the enumerated
     /// alternatives (one per line), so a refused agent repairs instead of

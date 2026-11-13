@@ -14,3 +14,4 @@ EvaluatorWitness: Surface, Model, Deps, EvalNode, Change
 RefWitness: RefsOf, DeclsOf
 SanitizeWitness: SanitizeUrl, SanitizeUrlOrBlank, IsAllowedAttributeKey, IsSafeAttributeValue, SanitizeAttributes, ScrubMarkdown
 GuardedSurfaceWitness: Surface, DryRun, EffectsOf
+StateAwareGuardedWitness: Surface, DryRun, EffectsOf

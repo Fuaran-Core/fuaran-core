@@ -3,6 +3,322 @@ namespace Fuaran.Core
 /// The Phase 318 gates: the policy gate, the write gate and the keyed capture journal — `SeamLaws`
 /// until the Phase 388 split along its banners.
 module internal PolicySeamLaws =
+    // ---- the state-aware guarded witness (Phase 643) ----
+
+    /// The reference domain's operations: a note list keyed by string id, whose operations apply in
+    /// every state and invoke different capabilities in different states. `Put` writes a note,
+    /// replacing one of the same id, and is refused for an empty text; `Drop` removes a note and does
+    /// nothing for an id the list does not hold.
+    type private NoteStep =
+        | Put of id: string * text: string
+        | Drop of id: string
+
+    /// The guarded-surface laws of Phase 643, over the kit's own note-list reference domain: the
+    /// state-aware form decides as the present form wherever effects do not depend on the state, a
+    /// sequence is applied, parked or refused whole, nothing is applied when an invocation is denied,
+    /// an approval by the author is refused, a sequence whose effects changed between submission and
+    /// approval is refused as stale, and an approval answers a grant for exactly each invocation it
+    /// covered, which the gate then runs.
+    let private stateAwareLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
+        let lifted =
+            LawKit.LawCell
+                "over StateAwareGuardedWitness.ofGuarded the state-aware form decides every op as the present form does, in every state, and every sequence whose dry run passes as submitGuarded does; where it does not, both refuse"
+
+        let whole =
+            LawKit.LawCell
+                "submitGuardedIn applies a sequence whole, parks it whole with each op's invocations at the state the dry run reaches it in, or refuses it whole with nothing applied"
+
+        let noneOnDeny =
+            LawKit.LawCell
+                "a sequence one of whose invocations, at the state its op would be applied to, is denied is refused SubmitDenied and nothing is applied"
+
+        let byAuthor =
+            LawKit.LawCell "approveGuardedIn by the proposal's author is refused SelfApproval and nothing is applied"
+
+        let stale =
+            LawKit.LawCell
+                "approveGuardedIn refuses a proposal as StaleEffects exactly when an op's invocations at the approval's state differ from the ones it was submitted with, naming the first such op"
+
+        let granted =
+            LawKit.LawCell
+                "an approval through approveGuardedIn answers the grant for exactly each invocation it covered, in order, and each dispatches through the gate with its grant"
+
+        let holds (id: string) (s: (string * string) list) = s |> List.exists (fun (k, _) -> k = id)
+
+        let apply (op: NoteStep) (s: (string * string) list) : Result<(string * string) list, string> =
+            match op with
+            | Put(id, "") -> Error("an empty note for " + id)
+            | Put(id, text) when holds id s -> Ok(s |> List.map (fun (k, v) -> if k = id then k, text else k, v))
+            | Put(id, text) -> Ok(s @ [ id, text ])
+            | Drop id -> Ok(s |> List.filter (fun (k, _) -> k <> id))
+
+        let effectsAt (op: NoteStep) (s: (string * string) list) =
+            match op with
+            | Put(id, _) when holds id s -> [ "overwrite-note", [ "id", id ] ]
+            | Put(id, _) -> [ "store-note", [ "id", id ] ]
+            | Drop id when holds id s -> [ "delete-note", [ "id", id ] ]
+            | Drop _ -> []
+
+        let noteCap (id: string) : Capability =
+            Capability.create
+                id
+                { Name = id
+                  Holes =
+                    [ { Addr = "id"
+                        Name = "id"
+                        Kind = ValueHole AnyString
+                        Required = true } ]
+                  Effect = Effect.pureDeterministic }
+                BuildTime
+                (Returns.Value AnyString)
+
+        // Storing is allowed, overwriting and deleting wait on an approval, and the note `z` is never
+        // deleted: the three decisions, each reached by a state-dependent invocation.
+        let registry: CapabilityRegistry<unit> =
+            [ noteCap "store-note"; noteCap "overwrite-note"; noteCap "delete-note" ]
+            |> List.fold (fun r c -> CapabilityRegistry.register c r |> Result.defaultValue r) CapabilityRegistry.empty
+            |> CapabilityRegistry.withGate
+                { Policy = "notes"
+                  Decide =
+                    fun () c args ->
+                        match c.Id with
+                        | "store-note" -> PolicyDecision.Allow
+                        | "delete-note" when List.contains ("id", "z") args -> PolicyDecision.deny "z is kept"
+                        | _ -> PolicyDecision.NeedsApproval }
+
+        let mutable applied = 0
+
+        let surface: AiSurfaceWitness<(string * string) list, NoteStep, string> =
+            { ReadTools = []
+              OpKinds = []
+              KindOfOp =
+                function
+                | Put _ -> "put"
+                | Drop _ -> "drop"
+              Patterns = []
+              Decide = fun _ _ -> PolicyDecision.Allow
+              Apply =
+                fun op s ->
+                    applied <- applied + 1
+                    apply op s
+              Explain = fun m -> { Message = m; Alternatives = [] } }
+
+        let stateAware: StateAwareGuardedWitness<(string * string) list, NoteStep, string> =
+            { Surface = surface
+              DryRun = apply
+              EffectsOf = effectsAt }
+
+        // The present witness can only answer from the op: it reports what the op invokes in the
+        // state where it invokes the most, so its lift is a domain whose effects ignore the state.
+        let present: GuardedSurfaceWitness<(string * string) list, NoteStep, string> =
+            { Surface = surface
+              DryRun = apply
+              EffectsOf =
+                function
+                | Put(id, _) -> [ "store-note", [ "id", id ] ]
+                | Drop id -> [ "delete-note", [ "id", id ] ] }
+
+        let liftedW = StateAwareGuardedWitness.ofGuarded present
+
+        let ids = [ "a"; "b"; "z" ]
+
+        let states =
+            [ []
+              [ "a", "1" ]
+              [ "a", "1"; "b", "2" ]
+              [ "z", "9" ]
+              [ "b", "2"; "z", "9" ] ]
+
+        let genOp (rng: LawKit.Draws) : NoteStep =
+            let id = rng.Choose ids
+
+            match rng.IntBelow 5 with
+            | 0 -> Put(id, "")
+            | 1
+            | 2 -> Put(id, "x" + string (rng.IntBelow 3))
+            | _ -> Drop id
+
+        /// Each op beside the state the dry run reaches it in, up to and including the first refused.
+        let walk (ops: NoteStep list) (s0: (string * string) list) =
+            let rec go acc s rest =
+                match rest with
+                | [] -> List.rev acc, true
+                | op :: tail ->
+                    match apply op s with
+                    | Ok next -> go ((op, s) :: acc) next tail
+                    | Error _ -> List.rev ((op, s) :: acc), false
+
+            go [] s0 ops
+
+        let submitIn w ops s =
+            Proposals.submitGuardedIn w registry () "agent" "t0" None ops Proposals.Queue.empty s
+
+        let outcomeClass (o: Proposals.SubmitOutcome<_, _, _>) =
+            match o with
+            | Proposals.SubmitApplied _ -> 0
+            | Proposals.SubmitProposed _ -> 1
+            | Proposals.SubmitDenied _
+            | Proposals.SubmitOpRejected _ -> 2
+
+        LawKit.run (runner.Fork 643) iterations (fun rng _ at ->
+            let ops = List.init (1 + rng.IntBelow 3) (fun _ -> genOp rng)
+            let s0 = rng.Choose states
+            let walked, passes = walk ops s0
+
+            // ---- the lift ----
+            let perOp =
+                ops
+                |> List.forall (fun op ->
+                    states
+                    |> List.forall (fun s ->
+                        Proposals.decideGuardedIn liftedW registry () "agent" op s = Proposals.decideGuarded
+                            present
+                            registry
+                            ()
+                            "agent"
+                            op))
+
+            let viaLift = submitIn liftedW ops s0
+
+            let viaPresent =
+                Proposals.submitGuarded present registry () "agent" "t0" None ops Proposals.Queue.empty s0
+
+            let sameOutcome =
+                match viaLift, viaPresent with
+                | Proposals.SubmitApplied a, Proposals.SubmitApplied b -> a = b
+                | Proposals.SubmitProposed(q, i), Proposals.SubmitProposed(q0, i0) ->
+                    i = i0
+                    && (q.Proposals |> List.collect (fun p -> p.Ops |> List.map _.Op)) = (q0.Proposals
+                                                                                          |> List.collect _.Ops)
+                | Proposals.SubmitDenied g, Proposals.SubmitDenied g0 -> g = g0
+                | Proposals.SubmitOpRejected r, Proposals.SubmitOpRejected r0 -> r = r0
+                | _ -> false
+
+            lifted.Check(
+                perOp
+                && (if passes then
+                        sameOutcome
+                    else
+                        outcomeClass viaLift = 2 && outcomeClass viaPresent = 2),
+                fun () -> at (sprintf "%A at %A: the lift gave %A, the present form %A" ops s0 viaLift viaPresent)
+            )
+
+            // ---- whole, and nothing applied on a denial ----
+            applied <- 0
+            let outcome = submitIn stateAware ops s0
+            let appliedNow = applied
+
+            let denied =
+                walked
+                |> List.exists (fun (op, s) ->
+                    match Proposals.decideGuardedIn stateAware registry () "agent" op s with
+                    | PolicyDecision.Deny _ -> true
+                    | _ -> false)
+
+            let expectedFinal =
+                ops |> List.fold (fun acc op -> acc |> Result.bind (apply op)) (Ok s0)
+
+            let wholeHolds =
+                match outcome with
+                | Proposals.SubmitApplied next -> passes && Ok next = expectedFinal && appliedNow = ops.Length
+                | Proposals.SubmitProposed(q, i) ->
+                    passes
+                    && appliedNow = 0
+                    && (q.Proposals
+                        |> List.map (fun p -> p.Id, p.Ops |> List.map (fun st -> st.Op, st.Invocations))) = [ i,
+                                                                                                              walked
+                                                                                                              |> List.map
+                                                                                                                  (fun
+                                                                                                                      (op,
+                                                                                                                       s) ->
+                                                                                                                      op,
+                                                                                                                      effectsAt
+                                                                                                                          op
+                                                                                                                          s) ]
+                | Proposals.SubmitDenied _
+                | Proposals.SubmitOpRejected _ -> appliedNow = 0
+
+            whole.Check(wholeHolds, fun () -> at (sprintf "%A at %A: %A after %d applies" ops s0 outcome appliedNow))
+
+            if denied then
+                noneOnDeny.Check(
+                    (match outcome with
+                     | Proposals.SubmitDenied _ -> true
+                     | _ -> false)
+                    && appliedNow = 0,
+                    fun () -> at (sprintf "%A at %A holds a denied invocation and gave %A" ops s0 outcome)
+                )
+
+            // ---- approval: built so every arm is reached every iteration ----
+            // Parked at a state without `a` and with `b`: the put stores `a`, the drop deletes `b`.
+            // Approved at a drawn state: stale exactly where the walk's invocations differ.
+            let s1 = [ "b", "2" ]
+            let built = [ Put("a", "x"); Drop "b" ]
+
+            match submitIn stateAware built s1 with
+            | Proposals.SubmitProposed(q, pid) ->
+                applied <- 0
+
+                let bySelf = Proposals.approveGuardedIn stateAware registry () "agent" "t1" pid q s1
+
+                byAuthor.Check(
+                    (match bySelf with
+                     | Error(Proposals.StagedApprovalFailure.Refused(Proposals.SelfApproval(i, "agent"))) -> i = pid
+                     | _ -> false)
+                    && applied = 0,
+                    fun () -> at (sprintf "the author's own approval gave %A" bySelf)
+                )
+
+                let sa = rng.Choose(s1 :: states)
+                let staged = (q.Proposals |> List.find (fun p -> p.Id = pid)).Ops
+                let walkedAt, _ = walk built sa
+
+                let firstChanged =
+                    List.zip (List.truncate walkedAt.Length staged) walkedAt
+                    |> List.indexed
+                    |> List.tryPick (fun (i, (st, (op, s))) ->
+                        if effectsAt op s = st.Invocations then
+                            None
+                        else
+                            Some(i, st.Invocations, effectsAt op s))
+
+                applied <- 0
+
+                let approval =
+                    Proposals.approveGuardedIn stateAware registry () "approver" "t1" pid q sa
+
+                stale.Check(
+                    (match approval, firstChanged with
+                     | Error(Proposals.StagedApprovalFailure.StaleEffects(i, k, submitted, now)), Some(k0, s0', n0) ->
+                         i = pid && k = k0 && submitted = s0' && now = n0 && applied = 0
+                     | Error(Proposals.StagedApprovalFailure.StaleEffects _), None -> false
+                     | _, Some _ -> false
+                     | _, None -> true),
+                    fun () -> at (sprintf "approval at %A gave %A (first changed op: %A)" sa approval firstChanged)
+                )
+
+                match approval with
+                | Ok(_, _, grants) ->
+                    let covered = staged |> List.collect _.Invocations
+
+                    let dispatched =
+                        List.zip covered grants
+                        |> List.forall (fun ((cid, args), g) ->
+                            CapabilityRegistry.dispatch registry () (Some g) cid args (fun _ () -> Ready()) = Ok(
+                                Ready()
+                            ))
+
+                    granted.Check(
+                        grants.Length = covered.Length
+                        && grants = (covered |> List.map (fun (cid, args) -> Capability.grant (noteCap cid) args))
+                        && dispatched,
+                        fun () -> at (sprintf "approval at %A answered %A for %A" sa grants covered)
+                    )
+                | Error _ -> ()
+            | other -> byAuthor.Check(false, fun () -> at (sprintf "the built sequence was not parked: %A" other)))
+
+        LawKit.results [ lifted; whole; noneOnDeny; byAuthor; stale; granted ]
+
     // ---- the policy gate (Phase 318) ----
 
     /// The policy-gate laws (Phase 318). Self-contained: it builds its own capabilities, queries and
@@ -29,6 +345,9 @@ module internal PolicySeamLaws =
     ///    grant for another capability it does not; a `Deny` is lifted by no grant; an `Allow` is
     ///    unchanged by any; an unregistered id is refused whatever is presented; and the decision
     ///    is the same on every asking.
+    ///  - **the state-aware guarded witness** (Phase 643) — over the kit's note-list reference
+    ///    domain, whose operations invoke different capabilities in different states: the six laws
+    ///    of `stateAwareLaws`.
     let policyLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let lattice =
             LawKit.LawCell
@@ -513,6 +832,7 @@ module internal PolicySeamLaws =
               pipelineAdmits
               contexts
               grants ]
+        @ stateAwareLaws runner iterations
 
     /// The no-unapproved-write law and the dry run's agreement with `Apply`, at a DOMAIN's guarded
     /// AI surface (Phase 318). Runs the domain's OWN `Decide` (never a kit policy), joined with the

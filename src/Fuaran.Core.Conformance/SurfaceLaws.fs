@@ -568,7 +568,7 @@ module internal SurfaceLaws =
 
     /// The frozen witness records and their pinned field lists: the six core records Phase 232
     /// froze, the six conformance-kit inputs Phase 330 brought in, and the records frozen at birth
-    /// since (Phases 298, 313, 318, 349). The freeze POLICY — what each record may carry.
+    /// since (Phases 298, 313, 318, 349, 643). The freeze POLICY — what each record may carry.
     let private frozenPins: (string * string list) list =
         [ "IdWitness", [ "ToString"; "OfString"; "Equals" ]
           "NodeWitness", [ "Id"; "KindTag"; "Children"; "ReplaceChildren" ]
@@ -606,7 +606,11 @@ module internal SurfaceLaws =
           // Phase 318 — the AI surface's composing witness, frozen at birth: it EMBEDS the frozen
           // `AiSurfaceWitness` and adds the dry run and the effects accessor, the "compose, never
           // grow" route STABILITY prescribes, and a domain constructs it by name.
-          "GuardedSurfaceWitness", [ "Surface"; "DryRun"; "EffectsOf" ] ]
+          "GuardedSurfaceWitness", [ "Surface"; "DryRun"; "EffectsOf" ]
+          // Phase 643 — the guarded witness's state-aware form, frozen at birth on the same terms: it
+          // sits beside `GuardedSurfaceWitness` rather than growing it, and a domain constructs it by
+          // name (or lifts the present one into it).
+          "StateAwareGuardedWitness", [ "Surface"; "DryRun"; "EffectsOf" ] ]
 
     /// The frozen witness records and their field sets, by name and in declaration order — the
     /// freeze STABILITY.md states, as data (Phase 232).
@@ -783,7 +787,8 @@ module internal SurfaceLaws =
           "EvaluatorWitness", typeof<EvaluatorWitness<obj, obj>>
           "RefWitness", typeof<RefWitness<obj, obj>>
           "SanitizeWitness", typeof<SanitizeWitness>
-          "GuardedSurfaceWitness", typeof<GuardedSurfaceWitness<obj, obj, obj>> ]
+          "GuardedSurfaceWitness", typeof<GuardedSurfaceWitness<obj, obj, obj>>
+          "StateAwareGuardedWitness", typeof<StateAwareGuardedWitness<obj, obj, obj>> ]
 
     /// Every public type in the kit's own assembly and in the Fuaran.Core assemblies it references,
     /// transitively. A Fable-compiled program has no assembly to enumerate, which is why this and

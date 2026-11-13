@@ -8,7 +8,9 @@ attribute Fuaran.Core.AiSurface+ReadToolFailure RequireQualifiedAccess
 attribute Fuaran.Core.AiSurface+ReadToolFailureModule RequireQualifiedAccess
 attribute Fuaran.Core.Proposals+ProposalStatus RequireQualifiedAccess
 attribute Fuaran.Core.Proposals+ProposeFailure RequireQualifiedAccess
+attribute Fuaran.Core.Proposals+StagedApprovalFailure`1 RequireQualifiedAccess
 attribute Fuaran.Core.RejectionCodec RequireQualifiedAccess
+attribute Fuaran.Core.StateAwareGuardedWitness RequireQualifiedAccess
 ctor Fuaran.Core.AiSurfaceWitness`3..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ReadTool`1<!0>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpKindCard>, Microsoft.FSharp.Core.FSharpFunc`2<!1, System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PatternCard`1<!1>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<!1, Fuaran.Core.PolicyDecision>>, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, !2>>>, Microsoft.FSharp.Core.FSharpFunc`2<!2, Fuaran.Core.RejectionGuidance>)
 ctor Fuaran.Core.GuardedSurfaceWitness`3..ctor(Fuaran.Core.AiSurfaceWitness`3<!0, !1, !2>, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, !2>>>, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>>>)
 ctor Fuaran.Core.Intent..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>)
@@ -16,7 +18,9 @@ ctor Fuaran.Core.OpKindCard..ctor(System.String, System.String, Fuaran.Core.JVal
 ctor Fuaran.Core.PatternCard`1..ctor(System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Core.FSharpFunc`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<!0>, System.String>>)
 ctor Fuaran.Core.Proposals+ProposalQueue`1..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Proposals+Proposal`1<!0>>)
 ctor Fuaran.Core.Proposals+Proposal`1..ctor(System.Int32, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<!0>, Fuaran.Core.Proposals+ProposalStatus)
+ctor Fuaran.Core.Proposals+StagedOp`1..ctor(!0, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>>)
 ctor Fuaran.Core.ReadTool`1..ctor(System.String, System.String, Microsoft.FSharp.Core.FSharpFunc`2<!0, Fuaran.Core.JVal>)
+ctor Fuaran.Core.StateAwareGuardedWitness`3..ctor(Fuaran.Core.AiSurfaceWitness`3<!0, !1, !2>, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, !2>>>, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>>>>)
 field Fuaran.Core.Proposals+ApprovalFailure`1+Tags.ApprovalDenied : System.Int32 (literal)
 field Fuaran.Core.Proposals+ApprovalFailure`1+Tags.NotPending : System.Int32 (literal)
 field Fuaran.Core.Proposals+ApprovalFailure`1+Tags.OpNoLongerApplies : System.Int32 (literal)
@@ -25,6 +29,8 @@ field Fuaran.Core.Proposals+ApprovalFailure`1+Tags.UnknownProposal : System.Int3
 field Fuaran.Core.Proposals+ProposalStatus+Tags.Approved : System.Int32 (literal)
 field Fuaran.Core.Proposals+ProposalStatus+Tags.Pending : System.Int32 (literal)
 field Fuaran.Core.Proposals+ProposalStatus+Tags.Rejected : System.Int32 (literal)
+field Fuaran.Core.Proposals+StagedApprovalFailure`1+Tags.Refused : System.Int32 (literal)
+field Fuaran.Core.Proposals+StagedApprovalFailure`1+Tags.StaleEffects : System.Int32 (literal)
 field Fuaran.Core.Proposals+SubmitOutcome`3+Tags.SubmitApplied : System.Int32 (literal)
 field Fuaran.Core.Proposals+SubmitOutcome`3+Tags.SubmitDenied : System.Int32 (literal)
 field Fuaran.Core.Proposals+SubmitOutcome`3+Tags.SubmitOpRejected : System.Int32 (literal)
@@ -40,14 +46,17 @@ method Fuaran.Core.PatternBank.resolve`3(Fuaran.Core.AiSurfaceWitness`3<!!0, !!1
 method Fuaran.Core.Proposals+Queue.empty`1() : Fuaran.Core.Proposals+ProposalQueue`1<!!0>
 method Fuaran.Core.Proposals+Queue.nextId`1(Fuaran.Core.Proposals+ProposalQueue`1<!!0>) : System.Int32
 method Fuaran.Core.Proposals+Queue.pending`1(Fuaran.Core.Proposals+ProposalQueue`1<!!0>) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Proposals+Proposal`1<!!0>>
+method Fuaran.Core.Proposals.approveGuardedIn`4(Fuaran.Core.StateAwareGuardedWitness`3<!!0, !!1, !!2>, Fuaran.Core.CapabilityRegistry`1<!!3>, !!3, System.String, System.String, System.Int32, Fuaran.Core.Proposals+ProposalQueue`1<Fuaran.Core.Proposals+StagedOp`1<!!1>>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`3<Fuaran.Core.Proposals+ProposalQueue`1<Fuaran.Core.Proposals+StagedOp`1<!!1>>, !!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Grant>>, Fuaran.Core.Proposals+StagedApprovalFailure`1<!!2>>
 method Fuaran.Core.Proposals.approveGuarded`4(Fuaran.Core.GuardedSurfaceWitness`3<!!0, !!1, !!2>, Fuaran.Core.CapabilityRegistry`1<!!3>, !!3, System.String, System.String, System.Int32, Fuaran.Core.Proposals+ProposalQueue`1<!!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<Fuaran.Core.Proposals+ProposalQueue`1<!!1>, !!0>, Fuaran.Core.Proposals+ApprovalFailure`1<!!2>>
 method Fuaran.Core.Proposals.approve`3(Fuaran.Core.AiSurfaceWitness`3<!!0, !!1, !!2>, System.String, System.String, System.Int32, Fuaran.Core.Proposals+ProposalQueue`1<!!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<Fuaran.Core.Proposals+ProposalQueue`1<!!1>, !!0>, Fuaran.Core.Proposals+ApprovalFailure`1<!!2>>
+method Fuaran.Core.Proposals.decideGuardedIn`4(Fuaran.Core.StateAwareGuardedWitness`3<!!0, !!1, !!2>, Fuaran.Core.CapabilityRegistry`1<!!3>, !!3, System.String, !!1, !!0) : Fuaran.Core.PolicyDecision
 method Fuaran.Core.Proposals.decideGuarded`4(Fuaran.Core.GuardedSurfaceWitness`3<!!0, !!1, !!2>, Fuaran.Core.CapabilityRegistry`1<!!3>, !!3, System.String, !!1) : Fuaran.Core.PolicyDecision
 method Fuaran.Core.Proposals.explainRejection`3(Fuaran.Core.AiSurfaceWitness`3<!!0, !!1, !!2>, !!2) : System.String
 method Fuaran.Core.Proposals.proposeWithId`1(System.String, System.String, System.Int32, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<!!0>, Fuaran.Core.Proposals+ProposalQueue`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Proposals+ProposalQueue`1<!!0>, Fuaran.Core.Proposals+ProposeFailure>
 method Fuaran.Core.Proposals.propose`1(System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<!!0>, Fuaran.Core.Proposals+ProposalQueue`1<!!0>) : System.Tuple`2<Fuaran.Core.Proposals+ProposalQueue`1<!!0>, System.Int32>
 method Fuaran.Core.Proposals.reject`2(System.String, System.String, System.Int32, System.String, Fuaran.Core.Proposals+ProposalQueue`1<!!0>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Proposals+ProposalQueue`1<!!0>, Fuaran.Core.Proposals+ApprovalFailure`1<!!1>>
 method Fuaran.Core.Proposals.renderGuidance(Fuaran.Core.RejectionGuidance) : System.String
+method Fuaran.Core.Proposals.submitGuardedIn`4(Fuaran.Core.StateAwareGuardedWitness`3<!!0, !!1, !!2>, Fuaran.Core.CapabilityRegistry`1<!!3>, !!3, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<!!1>, Fuaran.Core.Proposals+ProposalQueue`1<Fuaran.Core.Proposals+StagedOp`1<!!1>>, !!0) : Fuaran.Core.Proposals+SubmitOutcome`3<!!0, Fuaran.Core.Proposals+StagedOp`1<!!1>, !!2>
 method Fuaran.Core.Proposals.submitGuarded`4(Fuaran.Core.GuardedSurfaceWitness`3<!!0, !!1, !!2>, Fuaran.Core.CapabilityRegistry`1<!!3>, !!3, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<!!1>, Fuaran.Core.Proposals+ProposalQueue`1<!!1>, !!0) : Fuaran.Core.Proposals+SubmitOutcome`3<!!0, !!1, !!2>
 method Fuaran.Core.Proposals.submit`3(Fuaran.Core.AiSurfaceWitness`3<!!0, !!1, !!2>, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<!!1>, Fuaran.Core.Proposals+ProposalQueue`1<!!1>, !!0) : Fuaran.Core.Proposals+SubmitOutcome`3<!!0, !!1, !!2>
 method Fuaran.Core.Proposals.toOpScript`2(Fuaran.Core.Proposals+Proposal`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>) : Fuaran.Core.OpScriptProposal`2<!!0, !!1>
@@ -55,6 +64,7 @@ method Fuaran.Core.RejectionCodec.render`1(Microsoft.FSharp.Core.FSharpFunc`2<!!
 method Fuaran.Core.RejectionSeamCodec.decodeRejectionStrict`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Rejection`1<!!0>, Fuaran.Core.DecodeError>
 method Fuaran.Core.RejectionSeamCodec.decodeRejection`1(Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.JVal, Microsoft.FSharp.Core.FSharpResult`2<!!0, Fuaran.Core.DecodeError>>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Rejection`1<!!0>, Fuaran.Core.DecodeError>
 method Fuaran.Core.RejectionSeamCodec.encodeRejection`1(Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.JVal>, Fuaran.Core.Rejection`1<!!0>) : Fuaran.Core.JVal
+method Fuaran.Core.StateAwareGuardedWitness.ofGuarded`3(Fuaran.Core.GuardedSurfaceWitness`3<!!0, !!1, !!2>) : Fuaran.Core.StateAwareGuardedWitness`3<!!0, !!1, !!2>
 record-field Fuaran.Core.AiSurfaceWitness`3.Apply #5 : Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, !2>>>
 record-field Fuaran.Core.AiSurfaceWitness`3.Decide #4 : Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<!1, Fuaran.Core.PolicyDecision>>
 record-field Fuaran.Core.AiSurfaceWitness`3.Explain #6 : Microsoft.FSharp.Core.FSharpFunc`2<!2, Fuaran.Core.RejectionGuidance>
@@ -81,9 +91,14 @@ record-field Fuaran.Core.Proposals+Proposal`1.Intent #3 : Microsoft.FSharp.Core.
 record-field Fuaran.Core.Proposals+Proposal`1.Ops #4 : Microsoft.FSharp.Collections.FSharpList`1<!0>
 record-field Fuaran.Core.Proposals+Proposal`1.ProposedAt #2 : System.String
 record-field Fuaran.Core.Proposals+Proposal`1.Status #5 : Fuaran.Core.Proposals+ProposalStatus
+record-field Fuaran.Core.Proposals+StagedOp`1.Invocations #1 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>>
+record-field Fuaran.Core.Proposals+StagedOp`1.Op #0 : !0
 record-field Fuaran.Core.ReadTool`1.Description #1 : System.String
 record-field Fuaran.Core.ReadTool`1.Name #0 : System.String
 record-field Fuaran.Core.ReadTool`1.Run #2 : Microsoft.FSharp.Core.FSharpFunc`2<!0, Fuaran.Core.JVal>
+record-field Fuaran.Core.StateAwareGuardedWitness`3.DryRun #1 : Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, !2>>>
+record-field Fuaran.Core.StateAwareGuardedWitness`3.EffectsOf #2 : Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>>>>
+record-field Fuaran.Core.StateAwareGuardedWitness`3.Surface #0 : Fuaran.Core.AiSurfaceWitness`3<!0, !1, !2>
 type Fuaran.Core.AiSurface (module)
 type Fuaran.Core.AiSurface+ReadToolFailure (union)
 type Fuaran.Core.AiSurface+ReadToolFailureModule (module)
@@ -109,6 +124,11 @@ type Fuaran.Core.Proposals+ProposalStatus+Tags (type)
 type Fuaran.Core.Proposals+Proposal`1 (record)
 type Fuaran.Core.Proposals+ProposeFailure (union)
 type Fuaran.Core.Proposals+Queue (module)
+type Fuaran.Core.Proposals+StagedApprovalFailure`1 (union)
+type Fuaran.Core.Proposals+StagedApprovalFailure`1+Refused (type)
+type Fuaran.Core.Proposals+StagedApprovalFailure`1+StaleEffects (type)
+type Fuaran.Core.Proposals+StagedApprovalFailure`1+Tags (type)
+type Fuaran.Core.Proposals+StagedOp`1 (record)
 type Fuaran.Core.Proposals+SubmitOutcome`3 (union)
 type Fuaran.Core.Proposals+SubmitOutcome`3+SubmitApplied (type)
 type Fuaran.Core.Proposals+SubmitOutcome`3+SubmitDenied (type)
@@ -118,6 +138,8 @@ type Fuaran.Core.Proposals+SubmitOutcome`3+Tags (type)
 type Fuaran.Core.ReadTool`1 (record)
 type Fuaran.Core.RejectionCodec (module)
 type Fuaran.Core.RejectionSeamCodec (module)
+type Fuaran.Core.StateAwareGuardedWitness (module)
+type Fuaran.Core.StateAwareGuardedWitness`3 (record)
 union-case Fuaran.Core.AiSurface+ReadToolFailure.NewUnknownReadTool #0(name: System.String, available: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.Proposals+ApprovalFailure`1.NewApprovalDenied #4(id: System.Int32, guidance: Fuaran.Core.RejectionGuidance)
 union-case Fuaran.Core.Proposals+ApprovalFailure`1.NewNotPending #1(id: System.Int32, status: Fuaran.Core.Proposals+ProposalStatus)
@@ -128,6 +150,8 @@ union-case Fuaran.Core.Proposals+ProposalStatus.NewApproved #1(approver: System.
 union-case Fuaran.Core.Proposals+ProposalStatus.NewRejected #2(approver: System.String, at: System.String, reason: System.String)
 union-case Fuaran.Core.Proposals+ProposalStatus.Pending #0()
 union-case Fuaran.Core.Proposals+ProposeFailure.NewDuplicateProposal #0(id: System.Int32, held: Microsoft.FSharp.Collections.FSharpList`1<System.Int32>)
+union-case Fuaran.Core.Proposals+StagedApprovalFailure`1.NewRefused #0(Item: Fuaran.Core.Proposals+ApprovalFailure`1<!0>)
+union-case Fuaran.Core.Proposals+StagedApprovalFailure`1.NewStaleEffects #1(id: System.Int32, index: System.Int32, submitted: Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>>, now: Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>>)
 union-case Fuaran.Core.Proposals+SubmitOutcome`3.NewSubmitApplied #0(Item: !0)
 union-case Fuaran.Core.Proposals+SubmitOutcome`3.NewSubmitDenied #2(guidance: Fuaran.Core.RejectionGuidance)
 union-case Fuaran.Core.Proposals+SubmitOutcome`3.NewSubmitOpRejected #3(Item: !2)
