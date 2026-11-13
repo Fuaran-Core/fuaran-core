@@ -387,7 +387,7 @@ families credit are credited over nested batches as well as flat ones.
 <!-- operation-coverage:begin — generated from ../api/*.txt, ../proofs.json, the kit's operation roster and coverage-exclusions.json by `render proofs-readme`; held by the Proofs.Ladder family -->
 | Package | Operations | Ladder | Law family | trivial | forward | obsolete | host-seam | measured-elsewhere |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| `Fuaran.Core.AiSurface` | 26 | 0 | 14 | 1 | 0 | 0 | 0 | 11 |
+| `Fuaran.Core.AiSurface` | 30 | 0 | 18 | 1 | 0 | 0 | 0 | 11 |
 | `Fuaran.Core.Column` | 127 | 50 | 51 | 3 | 0 | 0 | 0 | 23 |
 | `Fuaran.Core.Conformance` | 165 | 2 | 107 | 2 | 6 | 0 | 0 | 48 |
 | `Fuaran.Core.ContentAddress` | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 |
@@ -408,7 +408,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 64 | 0 | 25 | 3 | 0 | 0 | 0 | 36 |
 | `Fuaran.Core.Wire` | 193 | 116 | 11 | 3 | 4 | 0 | 0 | 59 |
-| **Total** | 1387 | 384 | 429 | 38 | 15 | 0 | 3 | 518 |
+| **Total** | 1391 | 384 | 433 | 38 | 15 | 0 | 3 | 518 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

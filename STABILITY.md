@@ -633,11 +633,11 @@ host in the same change-set — whatever the caller count in this repository say
 
 ## Witness-record field freeze (the 1.0 contract)
 
-The sixteen public witness records (`IdWitness`, `NodeWitness`, `StreamWitness`, `ArtifactWitness`,
-`AiSurfaceWitness`, `ProjectionWitness`, since Phase 330 the six conformance-kit inputs
-`CapabilitySeamWitness`, `QuerySeamWitness`, `CapabilityPipelineWitness`, `ConstructWitness`,
-`KeyedWitness`, `EvaluatorWitness`, since Phase 313 `RefWitness`, since Phase 298 `ObserverWitness`, since
-Phase 349 `SanitizeWitness` and since Phase 318 `GuardedSurfaceWitness`, each frozen at birth) are
+The seventeen public witness records (`IdWitness`, `NodeWitness`, `StreamWitness`, `ArtifactWitness`, `AiSurfaceWitness`, `ProjectionWitness`,
+since Phase 330 the six conformance-kit inputs `CapabilitySeamWitness`, `QuerySeamWitness`, `CapabilityPipelineWitness`, `ConstructWitness`,
+`KeyedWitness`, `EvaluatorWitness`, since Phase 313 `RefWitness`, since Phase 298 `ObserverWitness`, since Phase 349 `SanitizeWitness`, since
+Phase 318 `GuardedSurfaceWitness` and since Phase 643 `StateAwareGuardedWitness` — the guarded witness's state-aware form, composed beside it
+with `StateAwareGuardedWitness.ofGuarded` as the lift and the `Proposals.…GuardedIn` verbs over it, additive, D254 — each frozen at birth) are
 **plain records**: adding a field is a compile-break for *every* adopter's construction site, with no
 gradual-migration path. At `1.0` their field sets **freeze**. (The freeze originally named only the
 four base records; `AiSurfaceWitness` and `ProjectionWitness` are equally public, equally
@@ -669,7 +669,7 @@ is reserved for the case where a *frozen* witness is found fundamentally insuffi
 "a new layer wants more," which composition already covers. That is a major-version event and must be
 justified against why composition could not express it.
 
-**Enforcement.** New `Fuaran.Core.*` code that adds a field to any of the sixteen frozen records is a
+**Enforcement.** New `Fuaran.Core.*` code that adds a field to any of the seventeen frozen records is a
 review-blocking regression (the same class as introducing a concrete node type, per *The load-bearing
 invariant* above). The mechanical backstop is the law family **`Conformance.witnessSurfaceLaws`**
 (Phase 232), which this repository's suite runs on every gate: one law per frozen record, holding
