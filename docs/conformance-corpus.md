@@ -120,14 +120,13 @@ an edit made once, by hand), and the result must parse to the original with only
 replaced. The in-suite leg "the corpus laws/manifest.json rows describe the files beside them" holds
 each row to the file beside it, wherever a corpus is present, under the same ask as the copy legs.
 
-**The capability copy lags by ruling, until fuaran#1860.** Phase 225 changed every capture key's
-value, and `capability-laws.json` pins literal keys. The committed file here carries this kit's keys;
-the corpus copy still carries the `0.30.0` ones the TS and Go ports and the UI tier's pinned kit
-certify against, and it is re-synced with both ports at the UI tier's Core pin raise (fuaran#1860).
-Until then the registry names the copy stale, and the in-suite leg reads it as that recorded lag
-rather than failing: every line must be byte-identical to this renderer's output except the stamp and
-the `key` value of the `invocationKey` vectors, so the move itself stays pinned byte for byte, and
-any other difference is reported as a divergence.
+**The capability copy is held byte for byte, with no exception (Phase 661).** Phase 225 changed every
+capture key's value, and `capability-laws.json` pins literal keys, so for a while the corpus copy carried
+the old keys the TS and Go ports and the UI tier's pinned kit certified against, and the in-suite leg
+admitted exactly that lag. fuaran#1860 re-synced the copy, and from then it was this renderer's output:
+the copy at pin `d33b87d` was byte-identical to the render before Phase 642. The exception admitted
+nothing, and Phase 661 removed it. The leg now holds the copy to the render as the other `laws/` legs do,
+and names a stamp-only difference as one, since that is the other of the two readings below.
 
 Every file is EMITTED, never hand-edited: each expectation is computed by calling the reference
 evaluator or `Ops.apply`, and the suite holds the committed bytes to a fresh render on every run.
@@ -278,6 +277,16 @@ cannot be closed (two repositories, two permission sets), but it now starts at a
 knows about — and since Phase 394 it cannot red this repository's `main` at all: until the pin
 moves, CI reads the corpus the pin names, and the pin moves in the commit that also moves
 `<Version>`.
+
+**A law whose vectors move takes the same steps** (Phase 661). A change to what the exporter renders, with
+no `<Version>` move at all, restales the corpus copy exactly as a version move does: re-emit the source of
+truth (step 1), re-emit the copy into a corpus checkout of its own (step 2), push the corpus first (step 3),
+and move the pin in the commit that changed the render (step 4). Phase 642 changed the capability vectors
+and did step 1 only; the leg reported the divergence on every local run and stayed green, because a
+finding fails only where the leg is asked for, and CI asks. So **run the leg asked for before the push**
+whenever a render moved: the local run reports what CI fails, and only the asked-for run fails on it
+(`$env:FUARAN_CORE_CORPUS_FRESHNESS = '1'`, with `FUARAN_CORE_CORPUS_DIR` naming the corpus checkout, as in
+"Bumping the pin" below).
 
 **Two readings, and they are never merged into one sentence.** A copy whose **vectors** differ
 records answers this kit's reference evaluator no longer gives — a content divergence, on the file

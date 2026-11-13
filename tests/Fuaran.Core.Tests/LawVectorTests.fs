@@ -519,28 +519,17 @@ let private checkDecimalVector (v: JVal) : string option =
 //  Phase 235 — the corpus copy of capability-laws.json, pinned byte for byte.
 // ---------------------------------------------------------------------------
 //  The move carried the renderer over unchanged, and this is the pin that says so: the corpus copy
-//  (written by the UI tier's exporter at its Core pin) must be what THIS renderer produces, line for
-//  line and byte for byte — with exactly one recorded exception. Phase 225 made `invocationKey`
-//  injective, which changed every key VALUE; the copy is re-synced with the TS and Go ports at the
-//  UI tier's Core pin raise (fuaran#1860), and until then it legitimately carries the old keys under
-//  the old stamp. So a differing line is admitted only if it is the `kitVersion` line or an
-//  `invocationKey` vector's line that becomes identical once its `key` value is put back. Anything
-//  else — a verdict, a declaration, the description, a vector added or dropped — is a real
-//  divergence and is reported as one. Once the copy is re-synced the reading is simply `Fresh`, and
-//  the exception admits nothing.
+//  must be what THIS renderer produces, line for line and byte for byte, with no exception. Until
+//  Phase 661 it admitted one — the invocation keys Phase 225 moved, while the copy waited for the UI
+//  tier's Core pin raise (fuaran#1860). That re-sync landed, and from then the copy was this kit's
+//  render, so the exception admitted nothing and went. A copy that differs is reported with the line
+//  where it parts from the render, and as a stamp-only difference when the `kitVersion` line is all
+//  that differs (Phase 216's two readings): both are divergences, and both are fatal where asked.
 
 type private CapabilityCopyReading =
     | CapabilityFresh
     | CapabilityCopyMissing
-    /// Identical but for the stamp and the invocation keys Phase 225 moved: `keys` lines differ.
-    | KeyLag of keys: int * copyStamp: string * kitStamp: string
     | CapabilityDiffers of detail: string
-
-let private keyPattern =
-    System.Text.RegularExpressions.Regex(
-        "\"key\": \"[^\"]*\"",
-        System.Text.RegularExpressions.RegexOptions.CultureInvariant
-    )
 
 let private classifyCapabilityCopy (copyText: string) (kitText: string) : CapabilityCopyReading =
     let copy = fingerprintLines copyText
@@ -551,38 +540,35 @@ let private classifyCapabilityCopy (copyText: string) (kitText: string) : Capabi
     elif copy.Length <> kit.Length then
         CapabilityDiffers(sprintf "the corpus copy has %d lines, this kit renders %d" copy.Length kit.Length)
     else
-        let explained (i: int) =
-            if isStampLine copy[i] && isStampLine kit[i] then
-                Some false
-            elif copy[i].Contains "\"case\": \"invocationKey\"" then
-                match keyPattern.Match copy[i] with
-                | m when m.Success && keyPattern.Replace(kit[i], m.Value.Replace("$", "$$"), 1) = copy[i] -> Some true
-                | _ -> None
-            else
-                None
-
         let differing =
             [ for i in 0 .. copy.Length - 1 do
                   if copy[i] <> kit[i] then
                       yield i ]
 
-        match differing |> List.tryFind (fun i -> (explained i).IsNone) with
-        | Some i ->
+        if differing |> List.forall (fun i -> isStampLine copy[i] && isStampLine kit[i]) then
+            CapabilityDiffers(
+                sprintf
+                    "only the stamp differs: the corpus copy carries kitVersion %s, this kit renders %s"
+                    (stampOf copyText |> Option.defaultValue "?")
+                    (stampOf kitText |> Option.defaultValue "?")
+            )
+        else
+            let i =
+                differing
+                |> List.find (fun i -> not (isStampLine copy[i] && isStampLine kit[i]))
+
             let col = firstDivergence copy[i] kit[i]
 
             CapabilityDiffers(
                 sprintf
-                    "line %d parts at character %d, and it is neither the stamp nor an invocation key —\n    corpus copy: %s\n    this kit:    %s"
+                    "line %d parts at character %d —
+    corpus copy: %s
+    this kit:    %s"
                     (i + 1)
                     (col + 1)
                     (window col copy[i])
                     (window col kit[i])
             )
-        | None ->
-            let keys =
-                differing |> List.filter (fun i -> explained i = Some true) |> List.length
-
-            KeyLag(keys, stampOf copyText |> Option.defaultValue "?", stampOf kitText |> Option.defaultValue "?")
 
 [<Tests>]
 let tests =
@@ -823,8 +809,7 @@ let tests =
                           failures
                           (sprintf "the committed capability vectors disagree with this kit: %A" failures)
 
-          testCase
-              "the corpus copy of laws/capability-laws.json is this renderer's output byte for byte, but for the invocation keys fuaran#1860 re-syncs"
+          testCase "the corpus copy of laws/capability-laws.json is this renderer's output byte for byte"
           <| fun _ ->
               match SiblingCorpus.freshness LawVectorExport.familyDirName with
               | SiblingCorpus.NotChecked(why, true) -> failtest why
@@ -843,23 +828,6 @@ let tests =
 
                   match reading with
                   | CapabilityFresh -> ()
-                  | KeyLag(keys, copyStamp, kitStamp) ->
-                      // The recorded lag, never fatal: the copy is the file five hosts certify against,
-                      // and re-syncing it ahead of the TS and Go ports would redden them. It is still
-                      // SAID, on every run that can see it.
-                      printfn
-                          "%s"
-                          (banner
-                              "CAPABILITY CORPUS COPY LAGS — the invocation keys Phase 225 moved (fuaran#1860 re-syncs it)"
-                              [ sprintf "copy             %s" copy
-                                sprintf "its kitVersion   %s" copyStamp
-                                sprintf "this kit renders %s" kitStamp
-                                sprintf "%d invocation-key lines differ in their `key` value and in nothing else;" keys
-                                "every other line is byte-identical to this renderer's output."
-                                "The re-sync lands with the TS and Go ports at the UI tier's Core pin raise:"
-                                "    " + emitCopy ])
-
-                      Console.Out.Flush()
                   | CapabilityCopyMissing ->
                       announce
                           (banner
@@ -871,7 +839,7 @@ let tests =
                   | CapabilityDiffers detail ->
                       announce
                           (banner
-                              "CAPABILITY CORPUS COPY DIFFERS — beyond the recorded invocation-key lag"
+                              "CAPABILITY CORPUS COPY DIFFERS"
                               [ sprintf "copy  %s" copy
                                 SiblingCorpus.pinSummary root
                                 ""
@@ -881,43 +849,28 @@ let tests =
                                 "    " + emitCopy ])
                           fatal
 
-          testCase "the capability copy reading admits the key lag and nothing else"
+          testCase "the capability copy reading admits no lag: a moved stamp or a moved invocation key is a divergence"
           <| fun _ ->
-              // The go-red both ways, hermetically: a copy whose invocation keys (and stamp) moved reads
-              // as the lag; the same copy with one verdict perturbed as well reads as a divergence.
+              // The go-red, hermetically. Since Phase 661 nothing is admitted: the two moves the
+              // retired key-lag reading excused are each a divergence, and the stamp-only one says so.
               let kit = LawVectorExport.Capabilities.render ()
-
-              let keysMoved =
-                  keyPattern
-                      .Replace(kit, (fun (m: System.Text.RegularExpressions.Match) -> m.Value.Replace("#", "#00")))
-                      .Replace("\"kitVersion\": \"", "\"kitVersion\": \"old-")
 
               Expect.equal (classifyCapabilityCopy kit kit) CapabilityFresh "an unperturbed copy is fresh"
 
-              match classifyCapabilityCopy keysMoved kit with
-              | KeyLag(keys, _, _) ->
-                  Expect.equal keys LawVectorExport.Capabilities.iterations "one moved key per iteration"
-              | other -> failtestf "a key-and-stamp-only copy read as %A" other
+              match classifyCapabilityCopy (kit.Replace("\"kitVersion\": \"", "\"kitVersion\": \"old-")) kit with
+              | CapabilityDiffers detail -> Expect.stringContains detail "only the stamp differs" "named as stamp-only"
+              | other -> failtestf "a stamp-only copy read as %A" other
 
-              let alsoVerdict =
-                  match keysMoved.IndexOf("\"verdict\": \"accept\"", StringComparison.Ordinal) with
-                  | -1 -> failtest "no accept verdict to perturb"
-                  | i ->
-                      keysMoved.Substring(0, i)
-                      + "\"verdict\": \"reject\""
-                      + keysMoved.Substring(i + 19)
+              let keyMoved =
+                  System.Text.RegularExpressions
+                      .Regex("\"key\": \"[^\"]*\"", System.Text.RegularExpressions.RegexOptions.CultureInvariant)
+                      .Replace(kit, (fun (m: System.Text.RegularExpressions.Match) -> m.Value.Replace("#", "#00")), 1)
 
-              match classifyCapabilityCopy alsoVerdict kit with
-              | CapabilityDiffers _ -> ()
-              | other -> failtestf "a perturbed verdict hidden behind the key lag read as %A" other
+              Expect.notEqual keyMoved kit "the perturbation moved an invocation key"
 
-              // A key moved on a line that is NOT an invocation-key vector is not the lag either.
-              let declarationMoved =
-                  kit.Replace("\"id\": \"capability-0-accept\"", "\"id\": \"capability-0-accepted\"")
-
-              match classifyCapabilityCopy declarationMoved kit with
-              | CapabilityDiffers _ -> ()
-              | other -> failtestf "a moved vector id read as %A" other
+              match classifyCapabilityCopy keyMoved kit with
+              | CapabilityDiffers detail -> Expect.stringContains detail "parts at character" "named by its line"
+              | other -> failtestf "a copy whose invocation key moved read as %A" other
 
           // ---- Phase 276: the exact decimal's documents ----------------------------------------
 
