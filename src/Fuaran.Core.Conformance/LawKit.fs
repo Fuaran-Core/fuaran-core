@@ -651,11 +651,12 @@ module internal LawKit =
     /// refusal.
     type SeamAdapter<'Entry, 'Args, 'v, 'Err> =
         {
-            /// The registry's lookup: the entry under an id, or the registry's own not-found refusal
-            /// naming the ids it holds.
-            Lookup: string -> Result<'Entry, 'Err>
-            /// The registry's argument validation for an entry.
-            Validate: 'Entry -> 'Args -> Result<unit, 'Err>
+            /// What the registry admits (Phase 650): `Ok ()` for a call its NAMED decision allows,
+            /// and otherwise the refusal its dispatch gives — its own not-found refusal naming the ids
+            /// it holds, its validation refusal, or the policy refusal the named decision is, the
+            /// deciding gate's name included. Read from the registry's named read, which tells no
+            /// observer, never by dispatching it.
+            Admitted: string -> 'Args -> Result<unit, 'Err>
             /// The domain's body at a call's arguments, in the shape the runner counts: the runner
             /// wraps it so that every run is recorded before the answer is handed back.
             Body: 'Args -> 'Entry -> Deferred<'v>
@@ -673,8 +674,9 @@ module internal LawKit =
     /// counted, and the runner certifies the three laws the rendering names: every dispatch settles,
     /// stays pending or is refused typed (`Ok(Failed _)` never escapes, and the body-failure error
     /// carries the body's own failure); a typed refusal ran no body and a dispatched call ran it
-    /// exactly once; and a call reaches the body iff the registry admits it, a refused call carrying
-    /// the registry's own error. Guarded on the three outcomes ("dispatch outcome"); the second and
+    /// exactly once; and a call reaches the body iff the registry admits it — its named decision
+    /// under the witness's context is `Allow` (Phase 650) — a refused call carrying the registry's own
+    /// error, the policy refusal its named decision is included. Guarded on the three outcomes ("dispatch outcome"); the second and
     /// third laws are asserted only on a dispatch that returned, so a run in which they assert
     /// nothing is one the guard counts nothing in, and they read through it (covered cells).
     let seamLaws (adapter: SeamAdapter<'Entry, 'Args, 'v, 'Err>) (runner: Runner) (iterations: int) : LawResult list =
@@ -761,10 +763,7 @@ module internal LawKit =
                 | Ok(Failed _) -> ()
 
                 // ---- the host is the registry's ----
-                let admitted =
-                    match adapter.Lookup id with
-                    | Error e -> Error e
-                    | Ok entry -> adapter.Validate entry args
+                let admitted = adapter.Admitted id args
 
                 let expected =
                     match admitted, answered.Value with
