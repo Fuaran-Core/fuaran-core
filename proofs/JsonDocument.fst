@@ -13,7 +13,11 @@
        own arms; `JDoc.toJVal`'s number arm, which reads a number text by the scanner's own
        classification (`Json.readNumberToken`, `classify_number` in `JsonParse.fst`), and the
        conversion as a whole (section 3, over the parser's value; section 5, over the decode
-       layer's, with its refusals at their paths); `JDocDecoder.ofDecoder` (section 5).
+       layer's, with its refusals at their paths); `JDocDecoder.ofDecoder` (section 5); and
+       `JDocDecoder` itself (section 6, Phase 658): the decode algebra `DecodeLayer.fst` states
+       once over a carrier view, instantiated at the document's carrier as production
+       instantiates `DecodeOver`, with the readers the document owns (`nullable`, `bool`,
+       `numberText`, `int`, `float`) and the compositions it spells itself.
      - `Json.isFloatToken` — the flag the conversion recomputes from a number text, proved to be the
        flag the scanner records while it scans the token (section 3).
 
@@ -25,18 +29,21 @@
        strict limited parse accepts exactly the documents whose lossless reading converts, with the
        value the conversion answers; so a document the lossless reader refuses is one the strict
        parse refuses (`lossless_refusal_is_a_parse_refusal`).
-     - `of_decoder_is_sound` — the decode layer is parametric in its two NUMERIC carriers, not in
-       its value type, which has no null; a document reaches it through the conversion, and every
-       decoder `DecodeLayer` proves sound refuses a document only at a path that resolves IN THE
-       DOCUMENT (or names a member a resolving object of it lacks), the conversion's own refusals
-       (a null, a number past the carrier) included.
+     - `of_decoder_is_sound` — a decoder over `JVal` reaches a document through the conversion,
+       and every decoder `DecodeLayer` proves sound refuses a document only at a path that
+       resolves IN THE DOCUMENT (or names a member a resolving object of it lacks), the
+       conversion's own refusals (a null, a number past the carrier) included.
+     - `document_refusal_paths_resolve` and one `jd_*_sound` lemma per `JDocDecoder` block — the
+       document decoder's OWN combinators, the null reader and the number readers among them, are
+       sound by the same law at the same paths as `Decoder`'s: each is `DecodeLayer`'s generic
+       lemma at the document's carrier (`dcarrier`), through the carrier's faithfulness
+       (`d_ok_at_is_over`), or proved here for a reader the document owns.
 
-   WHAT IS NOT MODELLED. `JDocDecoder`'s own combinators over a document: they are `DecodeOver`,
-   the one algebra `Decoder` instantiates over `JVal`, whose `JVal` instance is `DecodeLayer.fst`'s
-   model; the document instance is held to the `JVal` one by the differential
-   (`JsonDocumentTests.fs`, "JDocDecoder is Decoder's algebra"). The writer (`JDoc.tryWrite`) and
-   `JDoc.ofJVal`, which the round-trip tests hold. The breach's path and the re-scan after a shape
-   mismatch, as in `JsonParse.fst` section 14.
+   WHAT IS NOT MODELLED. The writer (`JDoc.tryWrite`) and `JDoc.ofJVal`, which the round-trip
+   tests hold. The breach's path and the re-scan after a shape mismatch, as in `JsonParse.fst`
+   section 14. `JDocDecoder.read`, which is `JDoc.read` then a decoder. The production
+   differential "JDocDecoder is Decoder's algebra" (`JsonDocumentTests.fs`) stays, as the check
+   that both production instances are the one code the model describes.
 
    HOW TO READ IT. Every definition names its F# counterpart in the comment above it. The parser's
    alphabet, its scans and its messages are `JsonParse`'s, opened under `P`; the decode layer's
@@ -600,8 +607,8 @@ let lossless_refusal_is_a_parse_refusal
    5. The decode layer over the document (F#: `JDoc.toJVal` with its refusals, and
       `JDocDecoder.ofDecoder`).
 
-      `DecodeLayer` is parametric in its two NUMERIC carriers (`num`, `flt`) over a value with
-      no null. The document reaches it through the conversion: `lower` is `JDoc.toJVal` over the
+      A decoder over `JVal` (`DecodeLayer`'s `dec`, parametric in its two NUMERIC carriers over a
+      value with no null) reads a document through the conversion: `lower` is `JDoc.toJVal` over the
       decode layer's value, a null refused `NotAdmitted` and a number its carrier cannot hold
       `OutOfRange`, each AT ITS PATH, the first in document order; `nd` is the host's reading of a
       number text, which answers a NUMBER (`numval`) or nothing.
@@ -669,19 +676,12 @@ let of_decoder (#t #num #flt: eqtype) (#a: Type0) (nd: t -> option (numval num f
 
 (* ---- paths into a document: `DecodeLayer`'s, over the document ---- *)
 
-let rec dmemb (#t: eqtype) (k: string) (fs: list (string & ddoc t)) : Tot (option (ddoc t)) (decreases fs) =
-  match fs with
-  | [] -> None
-  | (n, v) :: rest -> if n = k then Some v else dmemb k rest
-
-let rec dhas_key (#t: eqtype) (k: string) (fs: list (string & ddoc t)) : Tot bool (decreases fs) =
-  match fs with
-  | [] -> false
-  | (n, _) :: rest -> n = k || dhas_key k rest
+(* A member is `DecodeLayer.memb` (the FIRST of a name) and a name's presence `DecodeLayer.has_key`,
+   both generic in what a member holds. *)
 
 let dstep (#t: eqtype) (s: D.seg) (d: ddoc t) : Tot (option (ddoc t)) =
   match s, d with
-  | D.Key k, DObj fs -> dmemb k fs
+  | D.Key k, DObj fs -> D.memb k fs
   | D.Index i, DArr xs -> if i >= 0 then D.try_item i xs else None
   | _, _ -> None
 
@@ -701,7 +701,7 @@ let d_resolves_in (#t: eqtype) (d: ddoc t) (e: D.derr) : Tot bool =
     (match W.rev e.D.path with
      | D.Key k :: parent_rev ->
        (match dresolve (W.rev parent_rev) d with
-        | Some (DObj fields) -> not (dhas_key k fields)
+        | Some (DObj fields) -> not (D.has_key k fields)
         | _ -> false)
      | _ -> false)
   | _ ->
@@ -758,7 +758,7 @@ and lower_fields_refusal_resolves (#t #num #flt: eqtype) (nd: t -> option (numva
                     | D.Error e -> (e.D.code = D.NotAdmitted \/ e.D.code = D.OutOfRange) /\
                                    (match e.D.path with
                                     | D.Key k :: p ->
-                                      (match dmemb k fs with
+                                      (match D.memb k fs with
                                        | Some y -> Some? (dresolve p y)
                                        | None -> False) /\
                                       (mem k seen ==> p == [])
@@ -778,9 +778,9 @@ let rec memb_lowers (#t #num #flt: eqtype) (nd: t -> option (numval num flt)) (k
   (seen: list string) (fs: list (string & ddoc t)) (gs: list (string & W.jval num flt))
   : Lemma (requires lower_fields nd seen fs == D.Ok gs)
           (ensures (match D.memb k gs with
-                    | Some w -> (match dmemb k fs with Some y -> lower nd y == D.Ok w | None -> False)
+                    | Some w -> (match D.memb k fs with Some y -> lower nd y == D.Ok w | None -> False)
                     | None -> True) /\
-                   dhas_key k fs == D.has_key k gs)
+                   D.has_key k fs == D.has_key k gs)
           (decreases fs) =
   match fs with
   | [] -> ()
@@ -830,7 +830,7 @@ let rec resolve_lowers (#t #num #flt: eqtype) (nd: t -> option (numval num flt))
      | W.JObj gs ->
        lowers_to_object nd x gs;
        memb_lowers nd k [] (DObj?.fields x) gs;
-       (match D.memb k gs, dmemb k (DObj?.fields x) with
+       (match D.memb k gs, D.memb k (DObj?.fields x) with
         | Some w, Some y -> resolve_lowers nd rest y w
         | _ -> ())
      | _ -> ())
@@ -877,6 +877,396 @@ let of_decoder_is_sound (#t #num #flt: eqtype) (#a: Type0) (nd: t -> option (num
         | _ -> ()))
 
 (* ======================================================================================
+   6. The document decoder (F#: `JDocDecoder`, Document.fs) — the decode algebra at the
+      document's own carrier, and theorem 3 for it (Phase 658).
+
+      `JDocDecoder` is `DecodeOver` instantiated at `JDoc`, as `Decoder` is at `JVal`; so is the
+      model: every combinator below is `DecodeLayer`'s generic one at `dcarrier`, except the
+      readers the document owns — `json`, `nullable` (the one reader of a null as a value),
+      `bool`, `numberText` (a number AS WRITTEN), `int` and `float` (a number by the host's
+      reading of its text, `nd`, the reading the conversion uses, refused `OutOfRange` AT THE
+      NUMBER) — and the compositions `JDocDecoder` spells itself (`pair`, `fieldOr`, `list`,
+      `closed`). The statement is section 5's `d_good`: a refusal names a path that resolves IN
+      THE DOCUMENT (`dresolve`), or a member a resolving object of it lacks, and is never
+      `InvalidJson`. The carrier law between the algebra's path reading and `dresolve` is
+      faithfulness (`d_ok_at_is_over`), proved here.
+   ====================================================================================== *)
+
+(* F#: `JDocDecoder`'s private `carrier`, its three views. *)
+let dmembers (#t: eqtype) (d: ddoc t) : Tot (option (list (string & ddoc t))) =
+  match d with
+  | DObj fields -> Some fields
+  | _ -> None
+
+let ditems (#t: eqtype) (d: ddoc t) : Tot (option (list (ddoc t))) =
+  match d with
+  | DArr xs -> Some xs
+  | _ -> None
+
+let dtext (#t: eqtype) (d: ddoc t) : Tot (option string) =
+  match d with
+  | DStr s -> Some s
+  | _ -> None
+
+let dcarrier (#t: eqtype) : D.carrier (ddoc t) = { D.members_of = dmembers; D.items_of = ditems; D.text_of = dtext }
+
+(* F#: `JDocDecoder<'T> = JDoc -> Result<'T, DecodeError>`. *)
+let jdec (t: eqtype) (a: Type0) = D.dec_over (ddoc t) a
+
+(* F#: `JDocDecoder.succeed`. *)
+let jd_succeed (#t: eqtype) (#a: Type0) (v: a) : jdec t a = fun _ -> D.Ok v
+
+(* F#: `JDocDecoder.fail`. *)
+let jd_fail (#t: eqtype) (#a: Type0) (c: D.root_code) : jdec t a = fun el -> D.fail_over c el
+
+(* F#: `JDocDecoder.map`. *)
+let jd_map (#t: eqtype) (#a #b: Type0) (g: a -> b) (d: jdec t a) : jdec t b = fun el -> D.map_over g d el
+
+(* F#: `JDocDecoder.bind`. *)
+let jd_bind (#t: eqtype) (#a #b: Type0) (g: a -> jdec t b) (d: jdec t a) : jdec t b = fun el -> D.bind_over g d el
+
+(* F#: `JDocDecoder.pair` — `a |> bind (fun x -> b |> map (f x))`. *)
+let jd_pair (#t: eqtype) (#a #b #c: Type0) (da: jdec t a) (db: jdec t b) (f: a -> b -> c) : jdec t c =
+  jd_bind (fun (x: a) -> jd_map (f x) db) da
+
+(* F#: `JDocDecoder.andThen`. *)
+let jd_and_then (#t: eqtype) (#a #b: Type0) (g: a -> D.result b D.root_code) (d: jdec t a) : jdec t b =
+  fun el -> D.and_then_over g d el
+
+(* F#: `JDocDecoder.json`. *)
+let jd_json (#t: eqtype) : jdec t (ddoc t) = fun el -> D.Ok el
+
+(* F#: `JDocDecoder.nullable` — `None` for a null, else `d`'s answer under `Some`. *)
+let jd_nullable (#t: eqtype) (#a: Type0) (d: jdec t a) : jdec t (option a) =
+  fun el ->
+    match el with
+    | DNull -> D.Ok None
+    | other -> (match d other with D.Ok x -> D.Ok (Some x) | D.Error e -> D.Error e)
+
+(* F#: `JDocDecoder.str`. *)
+let jd_str (#t: eqtype) : jdec t string = fun el -> D.text_over dcarrier el
+
+(* F#: `JDocDecoder.bool`. *)
+let jd_bool (#t: eqtype) : jdec t bool =
+  fun el ->
+    match el with
+    | DBool b -> D.Ok b
+    | other -> D.Error (D.wrong_kind_over dcarrier other)
+
+(* F#: `JDocDecoder.numberText` — the token, exactly as written. *)
+let jd_number_text (#t: eqtype) : jdec t t =
+  fun el ->
+    match el with
+    | DNum n -> D.Ok n
+    | other -> D.Error (D.wrong_kind_over dcarrier other)
+
+(* F#: `JDocDecoder.int` — `JDoc.tryInt32`, the number's reading as `ReadsInt`; any other reading
+   (a float token, an integer past the carrier, a text outside the grammar) is `OutOfRange` AT THE
+   NUMBER. `nd` is the host's reading of a number text, the one `lower` uses. *)
+let jd_int (#t #num #flt: eqtype) (nd: t -> option (numval num flt)) : jdec t num =
+  fun el ->
+    match el with
+    | DNum n ->
+        (match nd n with
+         | Some (W.JInt i) -> D.Ok i
+         | _ -> D.Error (D.make D.OutOfRange))
+    | other -> D.Error (D.wrong_kind_over dcarrier other)
+
+(* F#: `JDocDecoder.float` — `JDoc.tryFloat`: an integer reading widened by `to_flt` (F#:
+   `float i`), a float reading as it is, nothing else; a number with no reading is `OutOfRange`
+   at the number. *)
+let jd_float (#t #num #flt: eqtype) (nd: t -> option (numval num flt)) (to_flt: num -> flt) : jdec t flt =
+  fun el ->
+    match el with
+    | DNum n ->
+        (match nd n with
+         | Some (W.JInt i) -> D.Ok (to_flt i)
+         | Some (W.JFloat f) -> D.Ok f
+         | _ -> D.Error (D.make D.OutOfRange))
+    | other -> D.Error (D.wrong_kind_over dcarrier other)
+
+(* F#: `JDocDecoder.items`, `obj`. *)
+let jd_items (#t: eqtype) : jdec t (list (ddoc t)) = fun el -> D.items_over dcarrier el
+let jd_obj (#t: eqtype) : jdec t (list (string & ddoc t)) = fun el -> D.members_over dcarrier el
+
+(* F#: `JDocDecoder.field` — a member whose value is `null` is PRESENT, and `d` reads the null. *)
+let jd_field (#t: eqtype) (#a: Type0) (name: string) (d: jdec t a) : jdec t a =
+  fun el -> D.field_over dcarrier name d el
+
+(* F#: `JDocDecoder.optField`. *)
+let jd_opt_field (#t: eqtype) (#a: Type0) (name: string) (d: jdec t a) : jdec t (option a) =
+  fun el -> D.opt_field_over dcarrier name d el
+
+(* F#: `JDocDecoder.fieldOr`. *)
+let jd_field_or (#t: eqtype) (#a: Type0) (name: string) (fallback: a) (d: jdec t a) : jdec t a =
+  jd_map (fun (o: option a) -> match o with Some x -> x | None -> fallback) (jd_opt_field name d)
+
+(* F#: `JDocDecoder.at`. *)
+let jd_at (#t: eqtype) (#a: Type0) (path: list D.seg) (d: jdec t a) : jdec t a =
+  fun el -> D.at_over dcarrier path d el
+
+(* F#: `JDocDecoder.mapListIndexed`, `list`, `boundedList`, `listAll`. *)
+let jd_map_list_indexed (#t: eqtype) (#a: Type0) (g: int -> jdec t a) : jdec t (list a) =
+  fun el -> D.map_list_indexed_over dcarrier g el
+
+let jd_list (#t: eqtype) (#a: Type0) (d: jdec t a) : jdec t (list a) = jd_map_list_indexed (fun _ -> d)
+
+let jd_bounded_list (#t: eqtype) (#a: Type0) (max_items: int) (d: jdec t a) : jdec t (list a) =
+  fun el -> D.bounded_list_over dcarrier max_items d el
+
+let jd_list_all (#t: eqtype) (#a: Type0) (d: jdec t a) (el: ddoc t) : Tot (D.result (list a) (list D.derr)) =
+  D.list_all_over dcarrier d el
+
+(* F#: `JDocDecoder.sequence`, `all`. *)
+let jd_sequence (#t: eqtype) (#a: Type0) (ds: list (jdec t a)) : jdec t (list a) = fun el -> D.sequence_over ds el
+
+let jd_all (#t: eqtype) (#a: Type0) (ds: list (jdec t a)) (el: ddoc t) : Tot (D.result (list a) (list D.derr)) =
+  D.all_over ds el
+
+(* F#: `JDocDecoder.oneOf`, `tagDispatch`. *)
+let jd_one_of (#t: eqtype) (#a: Type0) (cases: list (string & a)) : jdec t a = fun el -> D.one_of_over dcarrier cases el
+
+let jd_tag_dispatch (#t: eqtype) (#a: Type0) (key: string) (cases: list (string & jdec t a)) : jdec t a =
+  fun el -> D.tag_dispatch_over dcarrier key cases el
+
+(* F#: `JDocDecoder.undeclared`, `members`, `closed`. *)
+let jd_undeclared (#t: eqtype) (known: list string) (el: ddoc t) : Tot (list D.derr) =
+  D.undeclared_over dcarrier known el
+
+let jd_members (#t: eqtype) (known: list string) : jdec t unit = fun el -> D.members_only_over dcarrier known el
+
+let jd_closed (#t: eqtype) (#a: Type0) (known: list string) (d: jdec t a) : jdec t a =
+  jd_bind (fun () -> d) (jd_members known)
+
+(* ---- what a document decoder owes the document: `d_good` (section 5), quantified ---- *)
+
+[@@ noextract_to "FSharp"]
+let d_sound (#t: eqtype) (#a: Type0) (dd: jdec t a) : prop = forall (x: ddoc t). d_good x (dd x)
+
+[@@ noextract_to "FSharp"]
+let rec d_all_ok (#t: eqtype) (x: ddoc t) (es: list D.derr) : Tot bool =
+  match es with
+  | [] -> true
+  | e :: rest -> d_ok_at x e && d_all_ok x rest
+
+[@@ noextract_to "FSharp"]
+let d_good_all (#t: eqtype) (#a: Type0) (x: ddoc t) (r: D.result a (list D.derr)) : bool =
+  match r with
+  | D.Ok _ -> true
+  | D.Error es -> (match es with [] -> false | _ -> d_all_ok x es)
+
+[@@ noextract_to "FSharp"]
+let d_sound_all (#t: eqtype) (#a: Type0) (rd: ddoc t -> D.result a (list D.derr)) : prop =
+  forall (x: ddoc t). d_good_all x (rd x)
+
+(* ---- FAITHFULNESS of the document's carrier: its view is the document's own object, array and
+   string, so the algebra's path law at `dcarrier` is `dresolve`, and `d_ok_at` is `ok_at_over`. ---- *)
+
+[@@ noextract_to "FSharp"]
+let rec dresolve_is_over (#t: eqtype) (p: list D.seg) (x: ddoc t)
+  : Lemma (ensures dresolve p x == D.resolve_over dcarrier p x) (decreases p) =
+  match p with
+  | [] -> ()
+  | s :: rest -> (match dstep s x with Some y -> dresolve_is_over rest y | None -> ())
+
+let d_ok_at_is_over (#t: eqtype) (x: ddoc t) (e: D.derr) : Lemma (d_ok_at x e == D.ok_at_over dcarrier x e) =
+  dresolve_is_over e.D.path x;
+  match W.rev e.D.path with
+  | D.Key k :: parent_rev -> dresolve_is_over (W.rev parent_rev) x
+  | _ -> ()
+
+[@@ noextract_to "FSharp"]
+let rec d_all_ok_is_over (#t: eqtype) (x: ddoc t) (es: list D.derr)
+  : Lemma (ensures d_all_ok x es == D.all_ok_over dcarrier x es) =
+  match es with
+  | [] -> ()
+  | e :: rest -> d_ok_at_is_over x e; d_all_ok_is_over x rest
+
+[@@ noextract_to "FSharp"]
+let d_sound_is_over (#t: eqtype) (#a: Type0) (dd: jdec t a) : Lemma (d_sound dd <==> D.sound_over dcarrier dd) =
+  let pf (x: ddoc t) : Lemma (d_good x (dd x) == D.good_over dcarrier x (dd x)) =
+    match dd x with
+    | D.Ok _ -> ()
+    | D.Error e -> d_ok_at_is_over x e in
+  FStar.Classical.forall_intro pf
+
+[@@ noextract_to "FSharp"]
+let d_sound_all_is_over (#t: eqtype) (#a: Type0) (rd: ddoc t -> D.result a (list D.derr))
+  : Lemma (d_sound_all rd <==> D.sound_all_over dcarrier rd) =
+  let pf (x: ddoc t) : Lemma (d_good_all x (rd x) == D.good_all_over dcarrier x (rd x)) =
+    match rd x with
+    | D.Ok _ -> ()
+    | D.Error es -> d_all_ok_is_over x es in
+  FStar.Classical.forall_intro pf
+
+[@@ noextract_to "FSharp"]
+let d_sound_to_over (#t: eqtype) (#a: Type0) (dd: jdec t a)
+  : Lemma (requires d_sound dd) (ensures D.sound_over dcarrier dd) = d_sound_is_over dd
+
+[@@ noextract_to "FSharp"]
+let d_sound_of_over (#t: eqtype) (#a: Type0) (dd: jdec t a)
+  : Lemma (requires D.sound_over dcarrier dd) (ensures d_sound dd) = d_sound_is_over dd
+
+[@@ noextract_to "FSharp"]
+let d_sound_elim (#t: eqtype) (#a: Type0) (dd: jdec t a) (x: ddoc t)
+  : Lemma (requires d_sound dd) (ensures d_good x (dd x)) = ()
+
+(* ---- theorem 3 for `JDocDecoder`, block by block ---- *)
+
+let jd_succeed_sound (#t: eqtype) (#a: Type0) (v: a) : Lemma (d_sound (jd_succeed #t v)) = ()
+
+let jd_fail_sound (#t: eqtype) (#a: Type0) (c: D.root_code) : Lemma (d_sound (jd_fail #t #a c)) =
+  D.fail_sound_over #(ddoc t) #a dcarrier c; d_sound_of_over (jd_fail #t #a c)
+
+let jd_map_sound (#t: eqtype) (#a #b: Type0) (g: a -> b) (d: jdec t a)
+  : Lemma (requires d_sound d) (ensures d_sound (jd_map g d)) =
+  d_sound_to_over d; D.map_sound_over dcarrier g d; d_sound_of_over (jd_map g d)
+
+let jd_bind_sound (#t: eqtype) (#a #b: Type0) (g: a -> jdec t b) (d: jdec t a)
+  : Lemma (requires d_sound d /\ (forall (v: a). d_sound (g v))) (ensures d_sound (jd_bind g d)) =
+  d_sound_to_over d;
+  let each (v: a) : Lemma (D.sound_over dcarrier (g v)) = d_sound_to_over (g v) in
+  FStar.Classical.forall_intro each;
+  D.bind_sound_over dcarrier g d;
+  d_sound_of_over (jd_bind g d)
+
+let jd_pair_sound (#t: eqtype) (#a #b #c: Type0) (da: jdec t a) (db: jdec t b) (f: a -> b -> c)
+  : Lemma (requires d_sound da /\ d_sound db) (ensures d_sound (jd_pair da db f)) =
+  let each (x: a) : Lemma (d_sound (jd_map (f x) db)) = jd_map_sound (f x) db in
+  FStar.Classical.forall_intro each;
+  jd_bind_sound (fun (x: a) -> jd_map (f x) db) da
+
+let jd_and_then_sound (#t: eqtype) (#a #b: Type0) (g: a -> D.result b D.root_code) (d: jdec t a)
+  : Lemma (requires d_sound d) (ensures d_sound (jd_and_then g d)) =
+  d_sound_to_over d; D.and_then_sound_over dcarrier g d; d_sound_of_over (jd_and_then g d)
+
+let jd_json_sound (#t: eqtype) : Lemma (d_sound (jd_json #t)) = ()
+
+(* A null is a value: `nullable` reads it as `None`, and every other refusal is `d`'s. *)
+let jd_nullable_sound (#t: eqtype) (#a: Type0) (d: jdec t a)
+  : Lemma (requires d_sound d) (ensures d_sound (jd_nullable d)) =
+  let pf (x: ddoc t) : Lemma (d_good x (jd_nullable d x)) = d_sound_elim d x in
+  FStar.Classical.forall_intro pf
+
+let jd_str_sound (#t: eqtype) : Lemma (d_sound (jd_str #t)) =
+  D.text_sound_over (dcarrier #t); d_sound_of_over (jd_str #t)
+
+let jd_bool_sound (#t: eqtype) : Lemma (d_sound (jd_bool #t)) = ()
+
+let jd_number_text_sound (#t: eqtype) : Lemma (d_sound (jd_number_text #t)) = ()
+
+(* The number readers are sound for EVERY reading of a number text: a number with no reading is
+   refused at the number itself, which the document holds. *)
+let jd_int_sound (#t #num #flt: eqtype) (nd: t -> option (numval num flt)) : Lemma (d_sound (jd_int nd)) = ()
+
+let jd_float_sound (#t #num #flt: eqtype) (nd: t -> option (numval num flt)) (to_flt: num -> flt)
+  : Lemma (d_sound (jd_float nd to_flt)) = ()
+
+let jd_items_sound (#t: eqtype) : Lemma (d_sound (jd_items #t)) =
+  D.items_sound_over (dcarrier #t); d_sound_of_over (jd_items #t)
+
+let jd_obj_sound (#t: eqtype) : Lemma (d_sound (jd_obj #t)) =
+  D.members_sound_over (dcarrier #t); d_sound_of_over (jd_obj #t)
+
+let jd_field_sound (#t: eqtype) (#a: Type0) (name: string) (d: jdec t a)
+  : Lemma (requires d_sound d) (ensures d_sound (jd_field name d)) =
+  d_sound_to_over d; D.field_sound_over dcarrier name d; d_sound_of_over (jd_field name d)
+
+let jd_opt_field_sound (#t: eqtype) (#a: Type0) (name: string) (d: jdec t a)
+  : Lemma (requires d_sound d) (ensures d_sound (jd_opt_field name d)) =
+  d_sound_to_over d; D.opt_field_sound_over dcarrier name d; d_sound_of_over (jd_opt_field name d)
+
+let jd_field_or_sound (#t: eqtype) (#a: Type0) (name: string) (fallback: a) (d: jdec t a)
+  : Lemma (requires d_sound d) (ensures d_sound (jd_field_or name fallback d)) =
+  jd_opt_field_sound name d;
+  jd_map_sound (fun (o: option a) -> match o with Some x -> x | None -> fallback) (jd_opt_field name d)
+
+let jd_at_sound (#t: eqtype) (#a: Type0) (p: list D.seg) (d: jdec t a)
+  : Lemma (requires d_sound d) (ensures d_sound (jd_at p d)) =
+  d_sound_to_over d; D.at_sound_over dcarrier p d; d_sound_of_over (jd_at p d)
+
+let jd_map_list_indexed_sound (#t: eqtype) (#a: Type0) (g: int -> jdec t a)
+  : Lemma (requires forall (i: int). d_sound (g i)) (ensures d_sound (jd_map_list_indexed g)) =
+  let each (i: int) : Lemma (D.sound_over dcarrier (g i)) = d_sound_to_over (g i) in
+  FStar.Classical.forall_intro each;
+  D.map_list_indexed_sound_over dcarrier g;
+  d_sound_of_over (jd_map_list_indexed g)
+
+let jd_list_sound (#t: eqtype) (#a: Type0) (d: jdec t a)
+  : Lemma (requires d_sound d) (ensures d_sound (jd_list d)) =
+  jd_map_list_indexed_sound #t #a (fun _ -> d)
+
+let jd_bounded_list_sound (#t: eqtype) (#a: Type0) (max_items: int) (d: jdec t a)
+  : Lemma (requires d_sound d) (ensures d_sound (jd_bounded_list max_items d)) =
+  d_sound_to_over d; D.bounded_list_sound_over dcarrier max_items d; d_sound_of_over (jd_bounded_list max_items d)
+
+let jd_list_all_sound (#t: eqtype) (#a: Type0) (d: jdec t a)
+  : Lemma (requires d_sound d) (ensures d_sound_all (jd_list_all d)) =
+  d_sound_to_over d; D.list_all_sound_over dcarrier d; d_sound_all_is_over (jd_list_all d)
+
+[@@ noextract_to "FSharp"]
+let rec d_all_sound (#t: eqtype) (#a: Type0) (ds: list (jdec t a)) : prop =
+  match ds with
+  | [] -> True
+  | d :: rest -> d_sound d /\ d_all_sound rest
+
+[@@ noextract_to "FSharp"]
+let rec d_all_sound_to_over (#t: eqtype) (#a: Type0) (ds: list (jdec t a))
+  : Lemma (requires d_all_sound ds) (ensures D.all_sound_over dcarrier ds) =
+  match ds with
+  | [] -> ()
+  | d :: rest -> d_sound_to_over d; d_all_sound_to_over rest
+
+let jd_sequence_sound (#t: eqtype) (#a: Type0) (ds: list (jdec t a))
+  : Lemma (requires d_all_sound ds) (ensures d_sound (jd_sequence ds)) =
+  d_all_sound_to_over ds; D.sequence_sound_over dcarrier ds; d_sound_of_over (jd_sequence ds)
+
+let jd_all_sound (#t: eqtype) (#a: Type0) (ds: list (jdec t a))
+  : Lemma (requires d_all_sound ds) (ensures d_sound_all (jd_all ds)) =
+  d_all_sound_to_over ds; D.all_d_sound_over dcarrier ds; d_sound_all_is_over (jd_all ds)
+
+let jd_one_of_sound (#t: eqtype) (#a: Type0) (cases: list (string & a)) : Lemma (d_sound (jd_one_of #t cases)) =
+  D.one_of_sound_over (dcarrier #t) cases; d_sound_of_over (jd_one_of #t cases)
+
+[@@ noextract_to "FSharp"]
+let rec d_table_sound (#t: eqtype) (#a: Type0) (cases: list (string & jdec t a)) : prop =
+  match cases with
+  | [] -> True
+  | (_, d) :: rest -> d_sound d /\ d_table_sound rest
+
+[@@ noextract_to "FSharp"]
+let rec d_table_sound_to_over (#t: eqtype) (#a: Type0) (cases: list (string & jdec t a))
+  : Lemma (requires d_table_sound cases) (ensures D.table_sound_over dcarrier cases) =
+  match cases with
+  | [] -> ()
+  | (_, d) :: rest -> d_sound_to_over d; d_table_sound_to_over rest
+
+let jd_tag_dispatch_sound (#t: eqtype) (#a: Type0) (key: string) (cases: list (string & jdec t a))
+  : Lemma (requires d_table_sound cases) (ensures d_sound (jd_tag_dispatch key cases)) =
+  d_table_sound_to_over cases; D.tag_dispatch_sound_over dcarrier key cases; d_sound_of_over (jd_tag_dispatch key cases)
+
+let jd_undeclared_sound (#t: eqtype) (known: list string) (x: ddoc t) : Lemma (d_all_ok x (jd_undeclared known x)) =
+  D.undeclared_sound_over dcarrier known x; d_all_ok_is_over x (jd_undeclared known x)
+
+let jd_members_sound (#t: eqtype) (known: list string) : Lemma (d_sound (jd_members #t known)) =
+  D.members_only_sound_over (dcarrier #t) known; d_sound_of_over (jd_members #t known)
+
+let jd_closed_sound (#t: eqtype) (#a: Type0) (known: list string) (d: jdec t a)
+  : Lemma (requires d_sound d) (ensures d_sound (jd_closed known d)) =
+  jd_members_sound #t known;
+  jd_bind_sound (fun () -> d) (jd_members known)
+
+(* THEOREM 3 FOR THE DOCUMENT DECODER, the statement a caller reads: a document decoder built from
+   `JDocDecoder`'s blocks, each sound by its lemma above, refuses a document only at a path that
+   resolves IN THE DOCUMENT, or names a member a resolving object of it lacks, and never with
+   `InvalidJson` — the same law, by the same step rule, as `DecodeLayer.refusal_paths_resolve`
+   states for `JVal`. *)
+let document_refusal_paths_resolve (#t: eqtype) (#a: Type0) (d: jdec t a) (x: ddoc t)
+  : Lemma (requires d_sound d)
+          (ensures (match d x with D.Error e -> d_resolves_in x e /\ e.D.code <> D.InvalidJson | D.Ok _ -> True)) =
+  d_sound_elim d x
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
    is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
@@ -907,6 +1297,24 @@ let lower_refuses_the_null: bool =
   match lower #string #string #string (fun _ -> None) (DArr [ DBool true; DNull ]) with
   | D.Error e -> e.D.code = D.NotAdmitted && e.D.path = [ D.Index 1 ]
   | D.Ok _ -> false
+(* `{"id":null,"qty":412000.00,"tags":[null,"x"]}`, read through the document decoder's own blocks. *)
+let foreign_doc : ddoc string = DObj [ ("id", DNull); ("qty", DNum "412000.00"); ("tags", DArr [ DNull; DStr "x" ]) ]
+
+let jd_null_member_is_wrong_kind_at_its_path: bool =
+  match jd_field "id" jd_str foreign_doc with
+  | D.Error e -> e.D.code = D.WrongKind && e.D.path = [ D.Key "id" ] && d_resolves_in foreign_doc e
+  | D.Ok _ -> false
+
+let jd_nullable_reads_the_nulls: bool =
+  jd_field "tags" (jd_list (jd_nullable jd_str)) foreign_doc = D.Ok [ None; Some "x" ]
+
+let jd_number_text_keeps_the_scale: bool = jd_field "qty" jd_number_text foreign_doc = D.Ok "412000.00"
+
+let jd_int_refuses_at_the_number: bool =
+  match jd_field "qty" (jd_int #string #int #bool (fun _ -> None)) foreign_doc with
+  | D.Error e -> e.D.code = D.OutOfRange && e.D.path = [ D.Key "qty" ] && d_resolves_in foreign_doc e
+  | D.Ok _ -> false
+
 let twins : list twin = [
   { tname = "the-lossless-reading-keeps-a-null-and-a-number-as-written";
     tholds = (fun () -> null_doc_reads_as_written) };
@@ -919,6 +1327,14 @@ let twins : list twin = [
   { tname = "the-float-flag-of-an-integer-is-false";
     tholds = (fun () -> is_float_tok [ P.CMinus; P.CD1; P.CD2 ] = false) };
   { tname = "lower-refuses-a-null-not-admitted";
-    tholds = (fun () -> lower_refuses_the_null) } ]
+    tholds = (fun () -> lower_refuses_the_null) };
+  { tname = "the-document-decoder-refuses-a-null-member-as-wrong-kind-at-it";
+    tholds = (fun () -> jd_null_member_is_wrong_kind_at_its_path) };
+  { tname = "nullable-reads-each-null-as-none";
+    tholds = (fun () -> jd_nullable_reads_the_nulls) };
+  { tname = "number-text-keeps-the-scale";
+    tholds = (fun () -> jd_number_text_keeps_the_scale) };
+  { tname = "int-refuses-a-number-it-cannot-read-at-the-number";
+    tholds = (fun () -> jd_int_refuses_at_the_number) } ]
 
 let _ = assert_norm (twins_hold twins == true)

@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 413 claims — 300 proved (299 across 38 models, 1 a host's own proof), 67 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
+**The ladder, counted:** 415 claims — 301 proved (300 across 38 models, 1 a host's own proof), 68 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -4168,13 +4168,17 @@ numeric carriers, as there):
 first-member `step`.
 - `src/Fuaran.Core.Wire/DecodeError.fs` — `DecodeCode`, `RootDecodeCode` (Phase 443),
 `DecodeError.make` / `under` / `within` / `resolvesIn`.
-- `src/Fuaran.Core.Wire/Decoder.fs` — every combinator but the two that are not over a value
-(`parse`, which starts from TEXT and is `Json.read` with its refusal lifted, and
-`describing`, which answers the sentence): `succeed`, `fail`, `map`, `bind`, `andThen`, `wrongKind`,
-`missing`, `tryMember`, the six kind readers, `field` / `optField` / `fieldOr`, `at`,
-`mapListIndexed` / `list` / `boundedList` / `listAll`, `sequence` / `all`, `oneOf`,
-`tagDispatch` / `tagDispatchWith` / `kindDispatch`, `intRange`, `undeclared` / `members` /
-`closed`.
+- `src/Fuaran.Core.Wire/Decoder.fs` — the carrier view `DecodeCarrier<'V>` and the algebra
+written once over it, `DecodeOver` (Phase 640), modelled ONCE over any carrier (Phase 658,
+section 2b and 3a), and `Decoder` as its instance at `jval` (section 3b): every combinator
+but the two that are not over a value (`parse`, which starts from TEXT and is `Json.read`
+with its refusal lifted, and `describing`, which answers the sentence) and the two Phase
+509 helpers held elsewhere (`pair` and `strings`, `coverage-exclusions.json`): `succeed`,
+`fail`, `map`, `bind`, `andThen`, `wrongKind`, `missing`, `tryMember`, the six kind
+readers, `field` / `optField` / `fieldOr`, `at`, `mapListIndexed` / `list` /
+`boundedList` / `listAll`, `sequence` / `all`, `oneOf`, `tagDispatch` /
+`tagDispatchWith` / `kindDispatch`, `intRange`, `undeclared` / `members` / `closed`. The
+algebra's instance at the lossless document (`JDocDecoder`) is `JsonDocument.fst`'s.
 - `src/Fuaran.Core.Wire/Codec.fs` and `CodecDeclarationFault.fs` — `Codec<'T>`'s `Write` and
 `ReadAll`, `CodecDeclarationFault.under`, `make` / `ofDecoder` / `decoder`, the five
 leaves, `enum`, `list`, `map`, `refine`, `record` / `field` / `optField` / `build`,
@@ -4201,9 +4205,9 @@ leaves, `enum`, `list`, `map`, `refine`, `record` / `field` / `optField` / `buil
 
 - <a id="row-decode-layer-refusals-resolve"></a>**`decode-layer-refusals-resolve`** — `refusal_paths_resolve` · fuaran-core#436
 
-  EVERY REFUSAL CARRIES A PATH THAT RESOLVES TO THE OFFENDING PART OF THE INPUT. `DecodePath.resolve` and `DecodeError.resolvesIn` are modelled clause for clause, `List.rev` and all; a decoder is `sound` when every refusal it answers over a value satisfies `resolvesIn` there and is not `InvalidJson` (the parser's code, which names only a root and so cannot survive a step). Every `Decoder` combinator that starts from a `JVal` is proved to PRESERVE soundness (`field_sound`, `at_sound`, `map_list_indexed_sound`, `list_all_sound`, `tag_dispatch_sound`, `closed_sound` and the rest), and so is every codec block's collecting reader (`list_codec_sound`, `field_codec_sound`, `build_sound`, `union_sound`, `decoder_sound`, ...), so a decoder or a codec a domain composes from them refuses only at paths that resolve (`refusal_paths_resolve`). The content is the transport lemma `ok_at_under`: a refusal owed to the value one step reaches is owed, one step longer, to the value the step started from — for a `MissingField` because the absent member is the path's LAST step, so the step is prepended to the parent the law resolves (`rev_cons`, `rev_snoc`). Measured red with `Decoder.field`'s refusal not taken under its member (`| Some v -> d v`): `field_sound` fails. No block carries a premise on the caller's code: `Decoder.fail` takes a `RootDecodeCode`, which carries neither `MissingField` nor `InvalidJson`, so `fail_sound` holds for every code it accepts; and `Decoder.andThen`'s function refuses with that same root code, raised at the value as `fail` raises it, so `and_then_sound` holds for every function (`and_then_needs_root_refusals` states the pathed refusal it does not take, which is unsound). A check that points inside the value is `bind` to `at <path> (fail ...)`, sound by `bind_sound`, `at_sound` and `fail_sound`.
+  EVERY REFUSAL CARRIES A PATH THAT RESOLVES TO THE OFFENDING PART OF THE INPUT. `DecodePath.resolve` and `DecodeError.resolvesIn` are modelled clause for clause, `List.rev` and all; a decoder is `sound` when every refusal it answers over a value satisfies `resolvesIn` there and is not `InvalidJson` (the parser's code, which names only a root and so cannot survive a step). Every `Decoder` combinator that starts from a `JVal` is proved to PRESERVE soundness (`field_sound`, `at_sound`, `map_list_indexed_sound`, `list_all_sound`, `tag_dispatch_sound`, `closed_sound` and the rest). Since Phase 658 each combinator production writes once over a carrier (`DecodeOver`) is proved once, over ANY carrier view and with no premise on it (`field_sound_over`, `at_sound_over`, `map_list_indexed_sound_over`, `tag_dispatch_sound_over`, ...), and each `JVal` lemma is that lemma at `JVal`'s carrier through the carrier's faithfulness (`ok_at_is_over`: the view's members and items are `JVal`'s own object and array, so the path law read through it is `DecodePath.resolve`), its statement unchanged; the same lemmas at the document's carrier are `document-decoder-refusals-resolve`. So is every codec block's collecting reader (`list_codec_sound`, `field_codec_sound`, `build_sound`, `union_sound`, `decoder_sound`, ...), so a decoder or a codec a domain composes from them refuses only at paths that resolve (`refusal_paths_resolve`). The content is the transport lemma `ok_at_under`: a refusal owed to the value one step reaches is owed, one step longer, to the value the step started from — for a `MissingField` because the absent member is the path's LAST step, so the step is prepended to the parent the law resolves (`rev_cons`, `rev_snoc`). Measured red with `DecodeOver.field`'s refusal not taken under its member (`| Some x -> d x`): `field_sound_over` fails (Phase 658; before it, `field_sound`). No block carries a premise on the caller's code: `Decoder.fail` takes a `RootDecodeCode`, which carries neither `MissingField` nor `InvalidJson`, so `fail_sound` holds for every code it accepts; and `Decoder.andThen`'s function refuses with that same root code, raised at the value as `fail` raises it, so `and_then_sound` holds for every function (`and_then_needs_root_refusals` states the pathed refusal it does not take, which is unsound). A check that points inside the value is `bind` to `at <path> (fail ...)`, sound by `bind_sound`, `at_sound` and `fail_sound`.
 
-  _With:_ `ok_at_under`, `ok_at_within`, `rev_cons`, `rev_snoc`, `field_sound`, `at_sound`, `map_list_indexed_sound`, `list_all_sound`, `tag_dispatch_sound`, `closed_sound`, `list_codec_sound`, `field_codec_sound`, `build_sound`, `union_sound`, `decoder_sound`, `fail_sound`, `and_then_sound`, `bind_sound`, `root_excludes`, `and_then_needs_root_refusals`, `root_missing_never_resolves`, `root_invalid_json_stops_resolving`.
+  _With:_ `ok_at_under`, `ok_at_within`, `ok_at_under_over`, `ok_at_is_over`, `field_sound_over`, `at_sound_over`, `rev_cons`, `rev_snoc`, `field_sound`, `at_sound`, `map_list_indexed_sound`, `list_all_sound`, `tag_dispatch_sound`, `closed_sound`, `list_codec_sound`, `field_codec_sound`, `build_sound`, `union_sound`, `decoder_sound`, `fail_sound`, `and_then_sound`, `bind_sound`, `root_excludes`, `and_then_needs_root_refusals`, `root_missing_never_resolves`, `root_invalid_json_stops_resolving`.
 
   _Boundary:_ For decoders and codecs composed from the blocks; what the caller still supplies is the reader handed to `Codec.make` / `ofDecoder`, whose obligation is `decode-layer-refusal-premises`. Within the model; the correspondence to production is the differential's (`decode-layer-differential`) and the extractor's (premise `extractor-and-compiler-trusted`). Two refuted readings stay in the model as statements about refusals no block can now mint: a `MissingField` at the empty path names no member and resolves in no document (`root_missing_never_resolves`), and an `InvalidJson` resolves at the root and stops resolving one member down (`root_invalid_json_stops_resolving`).
 
@@ -4378,11 +4382,15 @@ container by the scanner's own member and item loops, a string or a literal by t
 own arms; `JDoc.toJVal`'s number arm, which reads a number text by the scanner's own
 classification (`Json.readNumberToken`, `classify_number` in `JsonParse.fst`), and the
 conversion as a whole (section 3, over the parser's value; section 5, over the decode
-layer's, with its refusals at their paths); `JDocDecoder.ofDecoder` (section 5).
+layer's, with its refusals at their paths); `JDocDecoder.ofDecoder` (section 5); and
+`JDocDecoder` itself (section 6, Phase 658): the decode algebra `DecodeLayer.fst` states
+once over a carrier view, instantiated at the document's carrier as production
+instantiates `DecodeOver`, with the readers the document owns (`nullable`, `bool`,
+`numberText`, `int`, `float`) and the compositions it spells itself.
 - `Json.isFloatToken` — the flag the conversion recomputes from a number text, proved to be the
 flag the scanner records while it scans the token (section 3).
 
-**Proved** (2)
+**Proved** (3)
 
 - <a id="row-lossless-reader-rebuilds-the-parse"></a>**`lossless-reader-rebuilds-the-parse`** — `lossless_reader_rebuilds_the_parse` · fuaran-core#640
 
@@ -4394,13 +4402,21 @@ flag the scanner records while it scans the token (section 3).
 
 - <a id="row-document-decodes-soundly-through-the-layer"></a>**`document-decodes-soundly-through-the-layer`** — `of_decoder_is_sound` · fuaran-core#640
 
-  A SOUND DECODER READS A DOCUMENT SOUNDLY. `DecodeLayer.fst` is parametric in its two NUMERIC carriers over a value with no null, not in its value type, so a document reaches it through the conversion: `lower` is `JDoc.toJVal` over the decode layer's value, a null refused `NotAdmitted`, a number the host's reading cannot hold `OutOfRange` and a repeated member name `NotAdmitted` at the repeated member, each AT ITS PATH, the first in document order; `of_decoder` is `JDocDecoder.ofDecoder`. `of_decoder_is_sound` says that every decoder the decode layer proves `sound` (`decode-layer-refusals-resolve`) — so every decoder a domain composes from its blocks — refuses a document only at a path that resolves IN THE DOCUMENT, or that names a member a resolving object of it lacks, and never with `InvalidJson`: the conversion's own refusals resolve at the value they name (`lower_refusal_resolves`), and a path that resolves in the lowered value resolves in the document to a value that lowers to it (`resolve_lowers`, through the first member of each name, which the repeated-name refusal makes the member meant).
+  A SOUND DECODER READS A DOCUMENT SOUNDLY THROUGH THE CONVERSION. A `Decoder` reads a `JVal`, which has no null, so `JDocDecoder.ofDecoder` reaches a document through the conversion: `lower` is `JDoc.toJVal` over the decode layer's value, a null refused `NotAdmitted`, a number the host's reading cannot hold `OutOfRange` and a repeated member name `NotAdmitted` at the repeated member, each AT ITS PATH, the first in document order; `of_decoder` is `JDocDecoder.ofDecoder`. `of_decoder_is_sound` says that every decoder the decode layer proves `sound` (`decode-layer-refusals-resolve`) — so every decoder a domain composes from its blocks — refuses a document only at a path that resolves IN THE DOCUMENT, or that names a member a resolving object of it lacks, and never with `InvalidJson`: the conversion's own refusals resolve at the value they name (`lower_refusal_resolves`), and a path that resolves in the lowered value resolves in the document to a value that lowers to it (`resolve_lowers`, through the first member of each name, which the repeated-name refusal makes the member meant).
 
   _With:_ `lower_refusal_resolves`, `resolve_lowers`, `memb_lowers`, `item_lowers`, `lowers_to_object`.
 
-  _Boundary:_ For decoders run through `ofDecoder`. `JDocDecoder`'s own combinators over a document are the shared `DecodeOver` code whose `JVal` instance `DecodeLayer.fst` models; their document instance is held to the `JVal` one by `JsonDocumentTests.fs` (`JDocDecoder is Decoder's algebra`), not proved. Within the model; premise `extractor-and-compiler-trusted`.
+  _Boundary:_ For decoders run through `ofDecoder`, the conversion bridge. `JDocDecoder`'s own combinators, which read the document directly, are `document-decoder-refusals-resolve`'s (Phase 658); neither theorem implies the other, since a decoder through the bridge refuses a null wherever it stands and the document's own `field` reads one as present. Within the model; premise `extractor-and-compiler-trusted`.
 
-**Tested** (2)
+- <a id="row-document-decoder-refusals-resolve"></a>**`document-decoder-refusals-resolve`** — `document_refusal_paths_resolve` · fuaran-core#658
+
+  THE DOCUMENT DECODER'S OWN COMBINATORS REFUSE ONLY AT PATHS THAT RESOLVE IN THE DOCUMENT. `JDocDecoder` is production's decode algebra (`DecodeOver`) instantiated at the lossless document, and so is the model: `DecodeLayer.fst` states the algebra ONCE over a carrier view (`carrier`: an object's members, an array's items, a string's text) with its soundness lemmas proved there with no premise on the carrier (`field_sound_over`, `at_sound_over`, `map_list_indexed_sound_over`, `tag_dispatch_sound_over`, ...), and `JsonDocument.fst` instantiates it at the document's carrier (`dcarrier`), with the readers the document owns: `nullable`, the one reader of a null as a value; `numberText`, a number as written; `int` and `float`, a number by the host's reading of its text, the one the conversion uses, refused `OutOfRange` AT THE NUMBER where it has no reading; `bool`, `json`; and the compositions `JDocDecoder` spells itself (`pair`, `fieldOr`, `list`, `closed`). One soundness lemma per block (`jd_field_sound`, `jd_nullable_sound`, `jd_int_sound`, `jd_at_sound`, `jd_list_all_sound`, `jd_tag_dispatch_sound`, `jd_closed_sound`, ...) and the caller's statement, `document_refusal_paths_resolve`: a document decoder built from sound blocks refuses only at a path that resolves IN THE DOCUMENT, or names a member a resolving object of it lacks, and never with `InvalidJson` — the law `decode-layer-refusals-resolve` states for `JVal`, by the same step rule (the first member of a name, a non-negative index). The one law between the algebra's path reading and the document's own (`dresolve`, `d_resolves_in`) is the carrier's FAITHFULNESS — its view is the document's own object, array and string — proved, not assumed (`d_ok_at_is_over`). A null is a leaf: a refusal at a null is at the null's own path, and a member whose value is null is present. The number readers are sound for EVERY reading of a number text. Measured red, one perturbation per run with the lemma checked alone: each `JDocDecoder` block's model re-pathed or made to refuse fails that block's lemma (`jd_int` refusing below the number fails `jd_int_sound`, `jd_nullable` re-pathing its part's refusal fails `jd_nullable_sound`, ...), and the document's carrier hiding an object's members fails `dresolve_is_over`.
+
+  _With:_ `d_ok_at_is_over`, `dresolve_is_over`, `jd_field_sound`, `jd_opt_field_sound`, `jd_at_sound`, `jd_nullable_sound`, `jd_number_text_sound`, `jd_int_sound`, `jd_float_sound`, `jd_map_list_indexed_sound`, `jd_bounded_list_sound`, `jd_list_all_sound`, `jd_sequence_sound`, `jd_all_sound`, `jd_tag_dispatch_sound`, `jd_undeclared_sound`, `jd_members_sound`, `jd_closed_sound`, `jd_pair_sound`.
+
+  _Boundary:_ For decoders composed from `JDocDecoder`'s blocks, each sound by its lemma; the lemmas carry the premises `decode-layer-refusals-resolve`'s do (every part sound) and no other. Within the model; the correspondence to production is the extracted model's differential beside `JDocDecoder` (`document-decoder-differential`), the production differential between the two instances (`lossless-document-suite`, "JDocDecoder is Decoder's algebra"), and the extractor (premise `extractor-and-compiler-trusted`). The refusal's prose, the carrier's kind name with it, is dropped (`decode-layer-model-bridge`); the host's reading of a number text is a parameter, compared with production's own. Not claimed: which value an accepted document decodes to, which is the definitions' and the differential's; `JDocDecoder.read`, which is `JDoc.read` then a decoder.
+
+**Tested** (3)
 
 - <a id="row-lossless-reader-differential"></a>**`lossless-reader-differential`** — `Proofs.Oracle`, 4 cases · fuaran-core#640
 
@@ -4408,15 +4424,21 @@ flag the scanner records while it scans the token (section 3).
 
   _Boundary:_ Agreement over the pool only, never over all inputs; the lowering is compared with the host's number reading supplied by production.
 
+- <a id="row-document-decoder-differential"></a>**`document-decoder-differential`** — `Proofs.Oracle`, 2 cases · fuaran-core#658
+
+  The extracted document decoder agrees with the shipped one. Over the documents the lossless reader reads from its pool, and constructed documents with nulls, numbers past Int32, float tokens and repeated names, every block of `JDocDecoder` — the null and number readers among them, under production's own reading of a number text — and the extracted model of it (`proofs/JsonDocument.fst` section 6, the decode algebra at the document's carrier) answer the same value or the same refusal, by code and path. The go-red is a BLIND carrier that presents no object to the extracted algebra, which loses on every document carrying the member read and on no other.
+
+  _Boundary:_ Agreement over the documents compared only, never over all inputs; a refusal is compared by its code and its path, never its sentence.
+
 - <a id="row-lossless-document-suite"></a>**`lossless-document-suite`** — `Suite:JsonDocumentTests.tests`, 11 cases · fuaran-core#640
 
   The document's writer, accessors, conversions and decode algebra, held by their suite. `JDoc.tryWrite` writes every document the reader reads to text that reads back to it, writes a value's `JDoc.ofJVal` to `Json.tryRender`'s bytes, round-trips compact foreign JSON with nulls and numbers of any length and scale byte for byte, and refuses a number text outside the grammar, a lone surrogate and a repeated name at their paths; `toJVal` and `ofJVal` refuse exactly what the other side cannot hold, at the path; the accessors read a number by the scanner's own rule and the index takes the first member; `JDocDecoder` decodes a foreign document with the decode algebra's refusals at their paths, and over the pool's values its structural combinators answer as `Decoder`'s do, code and path alike; a constructed document of any depth is written and converted.
 
-  _Boundary:_ Production code held by its suite over the reader's pool and hand-picked documents, never proved: the writer and `ofJVal` are outside the model, and `JDocDecoder`'s combinators are the shared `DecodeOver` code whose `JVal` instance `DecodeLayer.fst` models (`document-decodes-soundly-through-the-layer` covers only `ofDecoder`).
+  _Boundary:_ Production code held by its suite over the reader's pool and hand-picked documents, never proved: the writer and `ofJVal` are outside the model, and the production differential between `Decoder` and `JDocDecoder` stays as the check that both instances are the one code the model describes; what `JDocDecoder`'s combinators refuse, and where, is proved (`document-decoder-refusals-resolve`) and held to the extracted model (`document-decoder-differential`).
 
-**Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed).
+**Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`decode-layer-model-bridge`](#row-decode-layer-model-bridge) (assumed).
 
-**Inherited through the models it opens:** [`parser-float-readback-opaque`](#row-parser-float-readback-opaque) (assumed), [`parser-alphabet-bridge`](#row-parser-alphabet-bridge) (assumed), [`decode-layer-round-trip-premises`](#row-decode-layer-round-trip-premises) (assumed), [`decode-layer-refusal-premises`](#row-decode-layer-refusal-premises) (assumed), [`decode-layer-model-bridge`](#row-decode-layer-model-bridge) (assumed).
+**Inherited through the models it opens:** [`parser-float-readback-opaque`](#row-parser-float-readback-opaque) (assumed), [`parser-alphabet-bridge`](#row-parser-alphabet-bridge) (assumed), [`decode-layer-round-trip-premises`](#row-decode-layer-round-trip-premises) (assumed), [`decode-layer-refusal-premises`](#row-decode-layer-refusal-premises) (assumed).
 
 ### Assumed, policy, and tested beyond a model
 
@@ -4706,7 +4728,7 @@ The rows no model section carries. An `assumed` row is classed in the contract t
 
 - <a id="row-decode-layer-model-bridge"></a>**`decode-layer-model-bridge`** — `model-bridge` · closes: `permanent` · fuaran-core#436
 
-  WHAT THE DECODE-LAYER MODEL IS HANDED RATHER THAN DERIVES. A refusal keeps its `Code` and its `Path` and drops `Expected` and `Message`, as `WireColumn.fst` drops its refusals' prose; the codec's `Schema` (and a field's `Properties` / `Required`) is dropped as descriptive; `intRange lo hi`'s comparison is a host predicate over the opaque integer carrier and `float`'s widening a parameter, as in `WireDecode.fst`; production's filter-then-map (`undeclared`) and its `List.mapi` / `List.choose` / `List.collect` passes are written as the direct recursions they equal.
+  WHAT THE DECODE-LAYER MODEL IS HANDED RATHER THAN DERIVES. A refusal keeps its `Code` and its `Path` and drops `Expected` and `Message`, as `WireColumn.fst` drops its refusals' prose, and the carrier view drops `KindName`, which feeds only that prose; the codec's `Schema` (and a field's `Properties` / `Required`) is dropped as descriptive; `intRange lo hi`'s comparison is a host predicate over the opaque integer carrier and `float`'s widening a parameter, as in `WireDecode.fst`; production's filter-then-map (`undeclared`) and its `List.mapi` / `List.choose` / `List.collect` passes are written as the direct recursions they equal.
 
   _Assumes:_ the dropped refusal prose and codec schema, the host range predicate, and the fused list passes are as the model takes them.
 

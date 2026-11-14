@@ -329,7 +329,7 @@ let under : seg  ->  derr  ->  derr = (fun ( s  :  seg ) ( e  :  derr ) -> {code
 let within : Prims.list<seg>  ->  derr  ->  derr = (fun ( p  :  Prims.list<seg> ) ( e  :  derr ) -> {code = e.code; path = (ListAlgebra.app p e.path)})
 
 
-let rec memb = (fun ( k  :  Prims.string ) ( fs  :  Prims.list<(Prims.string * WireDecode.jval<'num, 'flt>)> ) -> (match (fs) with
+let rec memb = (fun ( k  :  Prims.string ) ( fs  :  Prims.list<(Prims.string * 'a)> ) -> (match (fs) with
 | [] -> begin
      FStar_Pervasives_Native.None
      end
@@ -389,7 +389,7 @@ let rec resolve = (fun ( p  :  Prims.list<seg> ) ( doc  :  WireDecode.jval<'num,
      end))
 
 
-let rec has_key = (fun ( k  :  Prims.string ) ( fs  :  Prims.list<(Prims.string * WireDecode.jval<'num, 'flt>)> ) -> (match (fs) with
+let rec has_key = (fun ( k  :  Prims.string ) ( fs  :  Prims.list<(Prims.string * 'a)> ) -> (match (fs) with
 | [] -> begin
      false
      end
@@ -433,37 +433,137 @@ let resolves_in = (fun ( doc  :  WireDecode.jval<'num, 'flt> ) ( e  :  derr ) ->
      end)
      end))
 
-
-type dec<'num, 'flt, 'a> = WireDecode.jval<'num, 'flt>  ->  result<'a, derr>
-
-
-let succeed = (fun ( v  :  'a ) ( uu___  :  WireDecode.jval<'num, 'flt> ) -> Ok (v))
+type carrier<'v> = {members_of : 'v  ->  FStar_Pervasives_Native.option<Prims.list<(Prims.string * 'v)>>; items_of : 'v  ->  FStar_Pervasives_Native.option<Prims.list<'v>>; text_of : 'v  ->  FStar_Pervasives_Native.option<Prims.string>}
 
 
-let fail = (fun ( c  :  root_code ) ( uu___  :  WireDecode.jval<'num, 'flt> ) -> Error ((make (root c))))
+let __proj__Mkcarrier__item__members_of = (fun ( projectee  :  carrier<'v> ) -> (match (projectee) with
+| {members_of = members_of; items_of = items_of; text_of = text_of} -> begin
+     members_of
+     end))
 
 
-let map = (fun ( g  :  'a  ->  'b ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match ((d el)) with
-| Ok (v) -> begin
-     Ok ((g v))
+let __proj__Mkcarrier__item__items_of = (fun ( projectee  :  carrier<'v> ) -> (match (projectee) with
+| {members_of = members_of; items_of = items_of; text_of = text_of} -> begin
+     items_of
+     end))
+
+
+let __proj__Mkcarrier__item__text_of = (fun ( projectee  :  carrier<'v> ) -> (match (projectee) with
+| {members_of = members_of; items_of = items_of; text_of = text_of} -> begin
+     text_of
+     end))
+
+
+let step_over = (fun ( c  :  carrier<'v> ) ( s  :  seg ) ( x  :  'v ) -> (match (s) with
+| Key (k) -> begin
+     (match ((c.members_of x)) with
+| FStar_Pervasives_Native.Some (fs) -> begin
+     (memb k fs)
+     end
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end)
+     end
+| Index (i) -> begin
+     (match ((c.items_of x)) with
+| FStar_Pervasives_Native.Some (xs) -> begin
+      
+if (i >= (Prims.parse_int "0")) then begin
+     (try_item i xs)
+     end else begin
+     FStar_Pervasives_Native.None
+     end
+     end
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end)
+     end))
+
+
+let rec resolve_over = (fun ( c  :  carrier<'v> ) ( p  :  Prims.list<seg> ) ( doc  :  'v ) -> (match (p) with
+| [] -> begin
+     FStar_Pervasives_Native.Some (doc)
+     end
+| (s)::rest -> begin
+     (match ((step_over c s doc)) with
+| FStar_Pervasives_Native.Some (x) -> begin
+     (resolve_over c rest x)
+     end
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end)
+     end))
+
+
+let resolves_in_over = (fun ( c  :  carrier<'v> ) ( doc  :  'v ) ( e  :  derr ) -> (match (e.code) with
+| InvalidJson -> begin
+     (match (e.path) with
+| [] -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)
+     end
+| MissingField -> begin
+     (match ((WireDecode.rev e.path)) with
+| (Key (k))::parent_rev -> begin
+     (match ((resolve_over c (WireDecode.rev parent_rev) doc)) with
+| FStar_Pervasives_Native.Some (o) -> begin
+     (match ((c.members_of o)) with
+| FStar_Pervasives_Native.Some (fields) -> begin
+     (not ((has_key k fields)))
+     end
+| FStar_Pervasives_Native.None -> begin
+     false
+     end)
+     end
+| FStar_Pervasives_Native.None -> begin
+     false
+     end)
+     end
+| uu___ -> begin
+     false
+     end)
+     end
+| uu___ -> begin
+     (match ((resolve_over c e.path doc)) with
+| FStar_Pervasives_Native.Some (uu___1) -> begin
+     true
+     end
+| FStar_Pervasives_Native.None -> begin
+     false
+     end)
+     end))
+
+
+type dec_over<'v, 'a> = 'v  ->  result<'a, derr>
+
+
+let fail_over = (fun ( c  :  root_code ) ( uu___  :  'v ) -> Error ((make (root c))))
+
+
+let map_over = (fun ( g  :  'a  ->  'b ) ( d  :  dec_over<'v, 'a> ) ( el  :  'v ) -> (match ((d el)) with
+| Ok (x) -> begin
+     Ok ((g x))
      end
 | Error (e) -> begin
      Error (e)
      end))
 
 
-let bind = (fun ( g  :  'a  ->  dec<'num, 'flt, 'b> ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match ((d el)) with
-| Ok (v) -> begin
-     (g v el)
+let bind_over = (fun ( g  :  'a  ->  dec_over<'v, 'b> ) ( d  :  dec_over<'v, 'a> ) ( el  :  'v ) -> (match ((d el)) with
+| Ok (x) -> begin
+     (g x el)
      end
 | Error (e) -> begin
      Error (e)
      end))
 
 
-let and_then = (fun ( g  :  'a  ->  result<'b, root_code> ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match ((d el)) with
-| Ok (v) -> begin
-     (match ((g v)) with
+let and_then_over = (fun ( g  :  'a  ->  result<'b, root_code> ) ( d  :  dec_over<'v, 'a> ) ( el  :  'v ) -> (match ((d el)) with
+| Ok (x) -> begin
+     (match ((g x)) with
 | Ok (u) -> begin
      Ok (u)
      end
@@ -476,31 +576,393 @@ let and_then = (fun ( g  :  'a  ->  result<'b, root_code> ) ( d  :  dec<'num, 'f
      end))
 
 
-let wrong_kind = (fun ( found  :  WireDecode.jval<'num, 'flt> ) -> (make WrongKind))
+let wrong_kind_over = (fun ( c  :  carrier<'v> ) ( found  :  'v ) -> (make WrongKind))
 
 
 let missing : Prims.string  ->  derr = (fun ( name  :  Prims.string ) -> {code = MissingField; path = (Key (name))::[]})
 
 
-let try_member = (fun ( name  :  Prims.string ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (el) with
-| WireDecode.JObj (fields) -> begin
+let try_member_over = (fun ( c  :  carrier<'v> ) ( name  :  Prims.string ) ( el  :  'v ) -> (match ((c.members_of el)) with
+| FStar_Pervasives_Native.Some (fields) -> begin
      (memb name fields)
+     end
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let text_over = (fun ( c  :  carrier<'v> ) ( el  :  'v ) -> (match ((c.text_of el)) with
+| FStar_Pervasives_Native.Some (s) -> begin
+     Ok (s)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((wrong_kind_over c el))
+     end))
+
+
+let items_over = (fun ( c  :  carrier<'v> ) ( el  :  'v ) -> (match ((c.items_of el)) with
+| FStar_Pervasives_Native.Some (xs) -> begin
+     Ok (xs)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((wrong_kind_over c el))
+     end))
+
+
+let members_over = (fun ( c  :  carrier<'v> ) ( el  :  'v ) -> (match ((c.members_of el)) with
+| FStar_Pervasives_Native.Some (fields) -> begin
+     Ok (fields)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((wrong_kind_over c el))
+     end))
+
+
+let field_over = (fun ( c  :  carrier<'v> ) ( name  :  Prims.string ) ( d  :  dec_over<'v, 'a> ) ( el  :  'v ) -> (match ((c.members_of el)) with
+| FStar_Pervasives_Native.Some (uu___) -> begin
+     (match ((try_member_over c name el)) with
+| FStar_Pervasives_Native.Some (x) -> begin
+     (map_err (under (Key (name))) (d x))
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((missing name))
+     end)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((wrong_kind_over c el))
+     end))
+
+
+let opt_field_over = (fun ( c  :  carrier<'v> ) ( name  :  Prims.string ) ( d  :  dec_over<'v, 'a> ) ( el  :  'v ) -> (match ((c.members_of el)) with
+| FStar_Pervasives_Native.Some (uu___) -> begin
+     (match ((try_member_over c name el)) with
+| FStar_Pervasives_Native.Some (x) -> begin
+     (match ((d x)) with
+| Ok (y) -> begin
+     Ok (FStar_Pervasives_Native.Some (y))
+     end
+| Error (e) -> begin
+     Error ((under (Key (name)) e))
+     end)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Ok (FStar_Pervasives_Native.None)
+     end)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((wrong_kind_over c el))
+     end))
+
+
+let rec at_go_over = (fun ( c  :  carrier<'v> ) ( d  :  dec_over<'v, 'a> ) ( done_rev  :  Prims.list<seg> ) ( rest  :  Prims.list<seg> ) ( x  :  'v ) -> (
+
+let here = (WireDecode.rev done_rev)
+in (match (rest) with
+| [] -> begin
+     (map_err (within here) (d x))
+     end
+| (Key (k))::tail -> begin
+     (match ((c.members_of x)) with
+| FStar_Pervasives_Native.Some (uu___) -> begin
+     (match ((try_member_over c k x)) with
+| FStar_Pervasives_Native.Some (y) -> begin
+     (at_go_over c d ((Key (k))::done_rev) tail y)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((within here (missing k)))
+     end)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((within here (wrong_kind_over c x)))
+     end)
+     end
+| (Index (i))::tail -> begin
+     (match ((c.items_of x)) with
+| FStar_Pervasives_Native.Some (xs) -> begin
+     (match ( 
+if (i >= (Prims.parse_int "0")) then begin
+     (try_item i xs)
+     end else begin
+     FStar_Pervasives_Native.None
+     end) with
+| FStar_Pervasives_Native.Some (y) -> begin
+     (at_go_over c d ((Index (i))::done_rev) tail y)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((within here (make OutOfRange)))
+     end)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((within here (wrong_kind_over c x)))
+     end)
+     end)))
+
+
+let at_over = (fun ( c  :  carrier<'v> ) ( path  :  Prims.list<seg> ) ( d  :  dec_over<'v, 'a> ) ( el  :  'v ) -> (at_go_over c d [] path el))
+
+
+let rec mli_go = (fun ( g  :  Prims.int  ->  dec_over<'v, 'a> ) ( i  :  Prims.int ) ( acc  :  Prims.list<'a> ) ( xs  :  Prims.list<'v> ) -> (match (xs) with
+| [] -> begin
+     Ok ((WireDecode.rev acc))
+     end
+| (x)::rest -> begin
+     (match ((g i x)) with
+| Ok (y) -> begin
+     (mli_go g (i + (Prims.parse_int "1")) ((y)::acc) rest)
+     end
+| Error (e) -> begin
+     Error ((under (Index (i)) e))
+     end)
+     end))
+
+
+let map_list_indexed_over = (fun ( c  :  carrier<'v> ) ( g  :  Prims.int  ->  dec_over<'v, 'a> ) ( el  :  'v ) -> (match ((c.items_of el)) with
+| FStar_Pervasives_Native.Some (xs) -> begin
+     (mli_go g (Prims.parse_int "0") [] xs)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((wrong_kind_over c el))
+     end))
+
+
+let bounded_list_over = (fun ( c  :  carrier<'v> ) ( max_items  :  Prims.int ) ( d  :  dec_over<'v, 'a> ) ( el  :  'v ) -> (match ((c.items_of el)) with
+| FStar_Pervasives_Native.Some (xs) -> begin
+      
+if ((ListAlgebra.len xs) > max_items) then begin
+     Error ((make LimitExceeded))
+     end else begin
+     (map_list_indexed_over c (fun ( uu___  :  Prims.int ) -> d) el)
+     end
+     end
+| FStar_Pervasives_Native.None -> begin
+     (map_list_indexed_over c (fun ( uu___  :  Prims.int ) -> d) el)
+     end))
+
+
+let rec errors_of = (fun ( rs  :  Prims.list<result<'a, derr>> ) -> (match (rs) with
+| [] -> begin
+     []
+     end
+| (Error (e))::t -> begin
+     (e)::(errors_of t)
+     end
+| (Ok (uu___))::t -> begin
+     (errors_of t)
+     end))
+
+
+let rec oks_of = (fun ( rs  :  Prims.list<result<'a, 'e>> ) -> (match (rs) with
+| [] -> begin
+     []
+     end
+| (Ok (v))::t -> begin
+     (v)::(oks_of t)
+     end
+| (Error (uu___))::t -> begin
+     (oks_of t)
+     end))
+
+
+let rec mapi_d = (fun ( d  :  dec_over<'v, 'a> ) ( i  :  Prims.int ) ( xs  :  Prims.list<'v> ) -> (match (xs) with
+| [] -> begin
+     []
+     end
+| (x)::t -> begin
+     ((map_err (under (Index (i))) (d x)))::(mapi_d d (i + (Prims.parse_int "1")) t)
+     end))
+
+
+let list_all_over = (fun ( c  :  carrier<'v> ) ( d  :  dec_over<'v, 'a> ) ( el  :  'v ) -> (match ((c.items_of el)) with
+| FStar_Pervasives_Native.Some (xs) -> begin
+     (
+
+let rs = (mapi_d d (Prims.parse_int "0") xs)
+in (match ((errors_of rs)) with
+| [] -> begin
+     Ok ((oks_of rs))
+     end
+| errs -> begin
+     Error (errs)
+     end))
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error (((wrong_kind_over c el))::[])
+     end))
+
+
+let rec seq_go = (fun ( el  :  'v ) ( acc  :  Prims.list<'a> ) ( ds  :  Prims.list<dec_over<'v, 'a>> ) -> (match (ds) with
+| [] -> begin
+     Ok ((WireDecode.rev acc))
+     end
+| (d)::rest -> begin
+     (match ((d el)) with
+| Ok (x) -> begin
+     (seq_go el ((x)::acc) rest)
+     end
+| Error (e) -> begin
+     Error (e)
+     end)
+     end))
+
+
+let sequence_over = (fun ( ds  :  Prims.list<dec_over<'v, 'a>> ) ( el  :  'v ) -> (seq_go el [] ds))
+
+
+let rec run_all = (fun ( ds  :  Prims.list<dec_over<'v, 'a>> ) ( el  :  'v ) -> (match (ds) with
+| [] -> begin
+     []
+     end
+| (d)::t -> begin
+     ((d el))::(run_all t el)
+     end))
+
+
+let all_over = (fun ( ds  :  Prims.list<dec_over<'v, 'a>> ) ( el  :  'v ) -> (
+
+let rs = (run_all ds el)
+in (match ((errors_of rs)) with
+| [] -> begin
+     Ok ((oks_of rs))
+     end
+| errs -> begin
+     Error (errs)
+     end)))
+
+
+let rec find_case = (fun ( s  :  Prims.string ) ( cases  :  Prims.list<(Prims.string * 'a)> ) -> (match (cases) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| ((k, v))::t -> begin
+      
+if (Prims.op_Equals k s) then begin
+     FStar_Pervasives_Native.Some (v)
+     end else begin
+     (find_case s t)
+     end
+     end))
+
+
+let one_of_over = (fun ( c  :  carrier<'v> ) ( cases  :  Prims.list<(Prims.string * 'a)> ) ( el  :  'v ) -> (match ((c.text_of el)) with
+| FStar_Pervasives_Native.Some (s) -> begin
+     (match ((find_case s cases)) with
+| FStar_Pervasives_Native.Some (x) -> begin
+     Ok (x)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((make UnknownTag))
+     end)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((wrong_kind_over c el))
+     end))
+
+
+let tag_dispatch_over = (fun ( c  :  carrier<'v> ) ( key  :  Prims.string ) ( cases  :  Prims.list<(Prims.string * dec_over<'v, 'a>)> ) ( el  :  'v ) -> (match ((field_over c key (text_over c) el)) with
+| Error (e) -> begin
+     Error (e)
+     end
+| Ok (t) -> begin
+     (match ((find_case t cases)) with
+| FStar_Pervasives_Native.Some (d) -> begin
+     (d el)
+     end
+| FStar_Pervasives_Native.None -> begin
+     Error ((under (Key (key)) (make UnknownTag)))
+     end)
+     end))
+
+
+let rec undeclared_go = (fun ( known  :  Prims.list<Prims.string> ) ( fields  :  Prims.list<(Prims.string * 'v)> ) -> (match (fields) with
+| [] -> begin
+     []
+     end
+| ((k, uu___))::t -> begin
+      
+if (ListAlgebra.mem k known) then begin
+     (undeclared_go known t)
+     end else begin
+     ((under (Key (k)) (make UndeclaredMember)))::(undeclared_go known t)
+     end
+     end))
+
+
+let undeclared_over = (fun ( c  :  carrier<'v> ) ( known  :  Prims.list<Prims.string> ) ( el  :  'v ) -> (match ((c.members_of el)) with
+| FStar_Pervasives_Native.Some (fields) -> begin
+     (undeclared_go known fields)
+     end
+| FStar_Pervasives_Native.None -> begin
+     []
+     end))
+
+
+let members_only_over = (fun ( c  :  carrier<'v> ) ( known  :  Prims.list<Prims.string> ) ( el  :  'v ) -> (match ((undeclared_over c known el)) with
+| [] -> begin
+     Ok (())
+     end
+| (e)::uu___ -> begin
+     Error (e)
+     end))
+
+
+type dec<'num, 'flt, 'a> = dec_over<WireDecode.jval<'num, 'flt>, 'a>
+
+
+let jmembers = (fun ( x  :  WireDecode.jval<'num, 'flt> ) -> (match (x) with
+| WireDecode.JObj (fields) -> begin
+     FStar_Pervasives_Native.Some (fields)
      end
 | uu___ -> begin
      FStar_Pervasives_Native.None
      end))
 
 
+let jitems = (fun ( x  :  WireDecode.jval<'num, 'flt> ) -> (match (x) with
+| WireDecode.JArr (xs) -> begin
+     FStar_Pervasives_Native.Some (xs)
+     end
+| uu___ -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let jtext = (fun ( x  :  WireDecode.jval<'num, 'flt> ) -> (match (x) with
+| WireDecode.JStr (s) -> begin
+     FStar_Pervasives_Native.Some (s)
+     end
+| uu___ -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let jcarrier = (fun ( uu___  :  unit ) -> {members_of = jmembers; items_of = jitems; text_of = jtext})
+
+
+let succeed = (fun ( v  :  'a ) ( uu___  :  WireDecode.jval<'num, 'flt> ) -> Ok (v))
+
+
+let fail = (fun ( c  :  root_code ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (fail_over c el))
+
+
+let map = (fun ( g  :  'a  ->  'b ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (map_over g d el))
+
+
+let bind = (fun ( g  :  'a  ->  dec<'num, 'flt, 'b> ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (bind_over g d el))
+
+
+let and_then = (fun ( g  :  'a  ->  result<'b, root_code> ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (and_then_over g d el))
+
+
+let wrong_kind = (fun ( found  :  WireDecode.jval<'num, 'flt> ) -> (wrong_kind_over (jcarrier ()) found))
+
+
+let try_member = (fun ( name  :  Prims.string ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (try_member_over (jcarrier ()) name el))
+
+
 let json = (fun ( el  :  WireDecode.jval<'num, 'flt> ) -> Ok (el))
 
 
-let str = (fun ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (el) with
-| WireDecode.JStr (s) -> begin
-     Ok (s)
-     end
-| other -> begin
-     Error ((wrong_kind other))
-     end))
+let str = (fun ( el  :  WireDecode.jval<'num, 'flt> ) -> (text_over (jcarrier ()) el))
 
 
 let int_d = (fun ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (el) with
@@ -533,58 +995,16 @@ let bool_d = (fun ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (el) with
      end))
 
 
-let items = (fun ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (el) with
-| WireDecode.JArr (xs) -> begin
-     Ok (xs)
-     end
-| other -> begin
-     Error ((wrong_kind other))
-     end))
+let items = (fun ( el  :  WireDecode.jval<'num, 'flt> ) -> (items_over (jcarrier ()) el))
 
 
-let obj = (fun ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (el) with
-| WireDecode.JObj (fields) -> begin
-     Ok (fields)
-     end
-| other -> begin
-     Error ((wrong_kind other))
-     end))
+let obj = (fun ( el  :  WireDecode.jval<'num, 'flt> ) -> (members_over (jcarrier ()) el))
 
 
-let field = (fun ( name  :  Prims.string ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (el) with
-| WireDecode.JObj (uu___) -> begin
-     (match ((try_member name el)) with
-| FStar_Pervasives_Native.Some (v) -> begin
-     (map_err (under (Key (name))) (d v))
-     end
-| FStar_Pervasives_Native.None -> begin
-     Error ((missing name))
-     end)
-     end
-| other -> begin
-     Error ((wrong_kind other))
-     end))
+let field = (fun ( name  :  Prims.string ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (field_over (jcarrier ()) name d el))
 
 
-let opt_field = (fun ( name  :  Prims.string ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (el) with
-| WireDecode.JObj (uu___) -> begin
-     (match ((try_member name el)) with
-| FStar_Pervasives_Native.Some (v) -> begin
-     (match ((d v)) with
-| Ok (x) -> begin
-     Ok (FStar_Pervasives_Native.Some (x))
-     end
-| Error (e) -> begin
-     Error ((under (Key (name)) e))
-     end)
-     end
-| FStar_Pervasives_Native.None -> begin
-     Ok (FStar_Pervasives_Native.None)
-     end)
-     end
-| other -> begin
-     Error ((wrong_kind other))
-     end))
+let opt_field = (fun ( name  :  Prims.string ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (opt_field_over (jcarrier ()) name d el))
 
 
 let field_or = (fun ( name  :  Prims.string ) ( fallback  :  'a ) ( d  :  dec<'num, 'flt, 'a> ) -> (map (fun ( o  :  FStar_Pervasives_Native.option<'a> ) -> (match (o) with
@@ -596,226 +1016,31 @@ let field_or = (fun ( name  :  Prims.string ) ( fallback  :  'a ) ( d  :  dec<'n
      end)) (opt_field name d)))
 
 
-let rec at_go = (fun ( d  :  dec<'num, 'flt, 'a> ) ( done_rev  :  Prims.list<seg> ) ( rest  :  Prims.list<seg> ) ( v  :  WireDecode.jval<'num, 'flt> ) -> (
-
-let here = (WireDecode.rev done_rev)
-in (match (rest) with
-| [] -> begin
-     (map_err (within here) (d v))
-     end
-| (Key (k))::tail -> begin
-     (match (v) with
-| WireDecode.JObj (uu___) -> begin
-     (match ((try_member k v)) with
-| FStar_Pervasives_Native.Some (x) -> begin
-     (at_go d ((Key (k))::done_rev) tail x)
-     end
-| FStar_Pervasives_Native.None -> begin
-     Error ((within here (missing k)))
-     end)
-     end
-| other -> begin
-     Error ((within here (wrong_kind other)))
-     end)
-     end
-| (Index (i))::tail -> begin
-     (match (v) with
-| WireDecode.JArr (xs) -> begin
-     (match ( 
-if (i >= (Prims.parse_int "0")) then begin
-     (try_item i xs)
-     end else begin
-     FStar_Pervasives_Native.None
-     end) with
-| FStar_Pervasives_Native.Some (x) -> begin
-     (at_go d ((Index (i))::done_rev) tail x)
-     end
-| FStar_Pervasives_Native.None -> begin
-     Error ((within here (make OutOfRange)))
-     end)
-     end
-| other -> begin
-     Error ((within here (wrong_kind other)))
-     end)
-     end)))
+let at = (fun ( path  :  Prims.list<seg> ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (at_over (jcarrier ()) path d el))
 
 
-let at = (fun ( path  :  Prims.list<seg> ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (at_go d [] path el))
-
-
-let rec mli_go = (fun ( g  :  Prims.int  ->  dec<'num, 'flt, 'a> ) ( i  :  Prims.int ) ( acc  :  Prims.list<'a> ) ( xs  :  Prims.list<WireDecode.jval<'num, 'flt>> ) -> (match (xs) with
-| [] -> begin
-     Ok ((WireDecode.rev acc))
-     end
-| (x)::rest -> begin
-     (match ((g i x)) with
-| Ok (v) -> begin
-     (mli_go g (i + (Prims.parse_int "1")) ((v)::acc) rest)
-     end
-| Error (e) -> begin
-     Error ((under (Index (i)) e))
-     end)
-     end))
-
-
-let map_list_indexed = (fun ( g  :  Prims.int  ->  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (el) with
-| WireDecode.JArr (xs) -> begin
-     (mli_go g (Prims.parse_int "0") [] xs)
-     end
-| other -> begin
-     Error ((wrong_kind other))
-     end))
+let map_list_indexed = (fun ( g  :  Prims.int  ->  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (map_list_indexed_over (jcarrier ()) g el))
 
 
 let list_d = (fun ( d  :  dec<'num, 'flt, 'a> ) -> (map_list_indexed (fun ( uu___  :  Prims.int ) -> d)))
 
 
-let bounded_list = (fun ( max_items  :  Prims.int ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (el) with
-| WireDecode.JArr (xs) -> begin
-      
-if ((ListAlgebra.len xs) > max_items) then begin
-     Error ((make LimitExceeded))
-     end else begin
-     (list_d d el)
-     end
-     end
-| uu___ -> begin
-     (list_d d el)
-     end))
+let bounded_list = (fun ( max_items  :  Prims.int ) ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (bounded_list_over (jcarrier ()) max_items d el))
 
 
-let rec errors_of = (fun ( rs  :  Prims.list<result<'a, derr>> ) -> (match (rs) with
-| [] -> begin
-     []
-     end
-| (Error (e))::t -> begin
-     (e)::(errors_of t)
-     end
-| (Ok (uu___))::t -> begin
-     (errors_of t)
-     end))
+let list_all = (fun ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (list_all_over (jcarrier ()) d el))
 
 
-let rec oks_of = (fun ( rs  :  Prims.list<result<'a, 'e>> ) -> (match (rs) with
-| [] -> begin
-     []
-     end
-| (Ok (v))::t -> begin
-     (v)::(oks_of t)
-     end
-| (Error (uu___))::t -> begin
-     (oks_of t)
-     end))
+let sequence = (fun ( ds  :  Prims.list<dec<'num, 'flt, 'a>> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (sequence_over ds el))
 
 
-let rec mapi_d = (fun ( d  :  dec<'num, 'flt, 'a> ) ( i  :  Prims.int ) ( xs  :  Prims.list<WireDecode.jval<'num, 'flt>> ) -> (match (xs) with
-| [] -> begin
-     []
-     end
-| (x)::t -> begin
-     ((map_err (under (Index (i))) (d x)))::(mapi_d d (i + (Prims.parse_int "1")) t)
-     end))
+let all_d = (fun ( ds  :  Prims.list<dec<'num, 'flt, 'a>> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (all_over ds el))
 
 
-let list_all = (fun ( d  :  dec<'num, 'flt, 'a> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (el) with
-| WireDecode.JArr (xs) -> begin
-     (
-
-let rs = (mapi_d d (Prims.parse_int "0") xs)
-in (match ((errors_of rs)) with
-| [] -> begin
-     Ok ((oks_of rs))
-     end
-| errs -> begin
-     Error (errs)
-     end))
-     end
-| other -> begin
-     Error (((wrong_kind other))::[])
-     end))
+let one_of = (fun ( cases  :  Prims.list<(Prims.string * 'a)> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (one_of_over (jcarrier ()) cases el))
 
 
-let rec seq_go = (fun ( el  :  WireDecode.jval<'num, 'flt> ) ( acc  :  Prims.list<'a> ) ( ds  :  Prims.list<dec<'num, 'flt, 'a>> ) -> (match (ds) with
-| [] -> begin
-     Ok ((WireDecode.rev acc))
-     end
-| (d)::rest -> begin
-     (match ((d el)) with
-| Ok (v) -> begin
-     (seq_go el ((v)::acc) rest)
-     end
-| Error (e) -> begin
-     Error (e)
-     end)
-     end))
-
-
-let sequence = (fun ( ds  :  Prims.list<dec<'num, 'flt, 'a>> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (seq_go el [] ds))
-
-
-let rec run_all = (fun ( ds  :  Prims.list<dec<'num, 'flt, 'a>> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (ds) with
-| [] -> begin
-     []
-     end
-| (d)::t -> begin
-     ((d el))::(run_all t el)
-     end))
-
-
-let all_d = (fun ( ds  :  Prims.list<dec<'num, 'flt, 'a>> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (
-
-let rs = (run_all ds el)
-in (match ((errors_of rs)) with
-| [] -> begin
-     Ok ((oks_of rs))
-     end
-| errs -> begin
-     Error (errs)
-     end)))
-
-
-let rec find_case = (fun ( s  :  Prims.string ) ( cases  :  Prims.list<(Prims.string * 'a)> ) -> (match (cases) with
-| [] -> begin
-     FStar_Pervasives_Native.None
-     end
-| ((k, v))::t -> begin
-      
-if (Prims.op_Equals k s) then begin
-     FStar_Pervasives_Native.Some (v)
-     end else begin
-     (find_case s t)
-     end
-     end))
-
-
-let one_of = (fun ( cases  :  Prims.list<(Prims.string * 'a)> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (el) with
-| WireDecode.JStr (s) -> begin
-     (match ((find_case s cases)) with
-| FStar_Pervasives_Native.Some (v) -> begin
-     Ok (v)
-     end
-| FStar_Pervasives_Native.None -> begin
-     Error ((make UnknownTag))
-     end)
-     end
-| other -> begin
-     Error ((wrong_kind other))
-     end))
-
-
-let tag_dispatch = (fun ( key  :  Prims.string ) ( cases  :  Prims.list<(Prims.string * dec<'num, 'flt, 'a>)> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match ((field key str el)) with
-| Error (e) -> begin
-     Error (e)
-     end
-| Ok (t) -> begin
-     (match ((find_case t cases)) with
-| FStar_Pervasives_Native.Some (d) -> begin
-     (d el)
-     end
-| FStar_Pervasives_Native.None -> begin
-     Error ((under (Key (key)) (make UnknownTag)))
-     end)
-     end))
+let tag_dispatch = (fun ( key  :  Prims.string ) ( cases  :  Prims.list<(Prims.string * dec<'num, 'flt, 'a>)> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (tag_dispatch_over (jcarrier ()) key cases el))
 
 
 let tag_dispatch_with = (fun ( what  :  Prims.string ) ( key  :  Prims.string ) ( cases  :  Prims.list<(Prims.string * dec<'num, 'flt, 'a>)> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (tag_dispatch key cases el))
@@ -838,36 +1063,10 @@ if (in_range i) then begin
      end))
 
 
-let rec undeclared_go = (fun ( known  :  Prims.list<Prims.string> ) ( fields  :  Prims.list<(Prims.string * WireDecode.jval<'num, 'flt>)> ) -> (match (fields) with
-| [] -> begin
-     []
-     end
-| ((k, uu___))::t -> begin
-      
-if (ListAlgebra.mem k known) then begin
-     (undeclared_go known t)
-     end else begin
-     ((under (Key (k)) (make UndeclaredMember)))::(undeclared_go known t)
-     end
-     end))
+let undeclared = (fun ( known  :  Prims.list<Prims.string> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (undeclared_over (jcarrier ()) known el))
 
 
-let undeclared = (fun ( known  :  Prims.list<Prims.string> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match (el) with
-| WireDecode.JObj (fields) -> begin
-     (undeclared_go known fields)
-     end
-| uu___ -> begin
-     []
-     end))
-
-
-let members = (fun ( known  :  Prims.list<Prims.string> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (match ((undeclared known el)) with
-| [] -> begin
-     Ok (())
-     end
-| (e)::uu___ -> begin
-     Error (e)
-     end))
+let members = (fun ( known  :  Prims.list<Prims.string> ) ( el  :  WireDecode.jval<'num, 'flt> ) -> (members_only_over (jcarrier ()) known el))
 
 
 let closed = (fun ( known  :  Prims.list<Prims.string> ) ( d  :  dec<'num, 'flt, 'a> ) -> (bind (fun ( uu___  :  unit ) -> d) (members known)))
