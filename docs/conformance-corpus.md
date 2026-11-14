@@ -19,6 +19,7 @@ conformance/
   laws/decimal-laws.json       the exact decimal's documents (`render laws`, since Phase 276)
   laws/field-laws.json         the schema field's documents (`render laws`, since Phase 427)
   laws/propagation-laws.json   the propagation vectors (`render laws`, since Phase 538)
+  laws/capability-gate-laws.json the registry's gate, decision context and grant as data (`render laws`, since Phase 650; no corpus copy yet)
   laws/manifest.json           the law families' own index + per-host adoption (`render laws`, since Phase 564; never the corpus's laws/manifest.json)
   apply/skeleton-apply.json    the skeleton-op apply contract (`render apply`)
   apply/manifest.json          the apply family's own index + per-host adoption (`render apply`)
@@ -48,6 +49,31 @@ the tool's `render laws` (`LawVectorExport.emitted` in `tests/Fuaran.Core.Tests.
 | `decimal` | `laws/decimal-laws.json` | AUTHORED documents — inputs chosen to reach every behaviour DECISIONS.md D72 pins, each answer computed by the kit; no seed |
 | `fieldLaws` | `laws/field-laws.json` | AUTHORED documents — the schema field's canonical bytes, decode and refusals (Phase 427); no seed |
 | `propagationLaws` | `laws/propagation-laws.json` | a DRAWN family — the cases `propagationEvalLaws` draws from its seed, by the families' own generator, each answer computed by calling `Fuaran.Core.Propagation` (Phase 538) |
+| `capabilityGateLaws` | `laws/capability-gate-laws.json` | AUTHORED documents over a DECLARED gate table — a grant's identity, the named decisions and the dispatch outcomes (Phase 650); no seed; in this repository's corpus only (below) |
+
+#### The `capabilityGateLaws` family: what a port must reproduce
+
+A port that follows the registry's gate (Phase 638, DECISIONS.md D249) certifies against
+`laws/capability-gate-laws.json` (D255). A gate is a function, so the file DECLARES its gates as data in its head:
+`registry` (three capability declarations), `contexts` (two opaque labels) and `gates`, in run order, each a policy
+name and rules `{ context, capability, decision }`. A gate answers its rule's decision for a (context, capability)
+pair and `allow` for any other; the registry's decision is the join in run order, and the deciding gate is the first
+of the greatest rank (`""` when every gate allows). The four cases:
+
+| `case` | Input | A port must answer | Stamped by |
+|---|---|---|---|
+| `invocationIdentity` | `capability`, `args` | the `identity` a grant is bound to: the id, then each binding's address and canonical spelling, address sorted, each field escaped and terminated, no hash | the model (`invocation_identity`) |
+| `grantCovers` | `capability`, `args`, `grant` (absent for none) | whether the grant is for exactly this invocation: its identity equals the invocation's | the model (`granted`) |
+| `decideNamed` | `context`, `capability`, `args`, `grant` | the named decision (`decided`, the gate and the decision; a needs-approval the grant covers is `allow` and keeps the gate's name, and no grant lifts a deny) or, where no gate decided, the refusal a dispatch gives | the reference |
+| `dispatch` | `context`, `capability`, `args`, `grant` | `performed` (the performer ran once) or `refused` with `policyRefused` / `approvalRequired` naming the gate, or `noSuchCapability` whatever is presented | the reference |
+
+The file's `referenceOnly` member gives the reason for the last two: the model's join, lift and gated dispatch are
+proved and not extracted. **The shared corpus does not carry this family yet** (D255.1). Every codec host gates its
+family coverage on the corpus's manifests and fails on a row it does not declare, and three of them fail on a `case`
+they do not know in `capability-laws.json`, so neither a corpus row nor a section of that file can land before the
+hosts declare it. The ports of the spine read this repository's `conformance/` directly, as they read
+`canonicalFormLaws`. The corpus copy, its `laws/manifest.json` row and its producer record land together with the
+first codec host that reads the family.
 
 #### The `propagationLaws` family: what a host must reproduce
 
@@ -722,6 +748,7 @@ is red:
 | `laws/decimal-laws.json` | `WireColumn` | `column-codec-differential` | 7 of 75 (`codecDecode`, `codecEncode`) |
 | `laws/field-laws.json` | `WireColumn` | `field-codec-differential` | 24 of 43 (`fieldEncode`, `codecDecode`) |
 | `laws/capability-laws.json` | `Capability` | `capability-differential` | 48 of 72 (`validateArgs`, `invocationKey`) |
+| `laws/capability-gate-laws.json` | `Capability` | `capability-differential` | 14 of 41 (`invocationIdentity`, `grantCovers`) |
 | `apply/skeleton-apply.json` | `TreeOps` | `tree-differential` | 25 of 25 |
 | `refusals/codec-refusals.json` | `JsonParse` | `parser-differential` | 59 of 101 (every `json` vector, and 3 `column` parse refusals) |
 | `refusals/codec-refusals.json` | `WireColumn` | `column-codec-differential` | 13 of 101 (`column`) |
