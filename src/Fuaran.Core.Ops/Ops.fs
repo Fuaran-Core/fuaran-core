@@ -350,9 +350,14 @@ module Ops =
 
     /// The node whose STRUCTURAL child list holds `target`, over every node the locate walk reaches:
     /// `Tree.parentOf w` in the plain scope, and below keyed positions too in the keyed one.
+    /// The first such node in preorder, and the walk stops there (Phase 607).
     let internal structuralParentOf (s: Walks<'Node, 'Id>) (target: 'Id) (root: 'Node) : 'Node option =
-        Tree.preorder s.Locate root
-        |> List.tryFind (fun n -> s.Edit.Children n |> List.exists (fun c -> s.Ids.Equals (s.Edit.Id c) target))
+        root
+        |> Tree.tryPick s.Locate (fun n ->
+            if s.Edit.Children n |> List.exists (fun c -> s.Ids.Equals (s.Edit.Id c) target) then
+                Some n
+            else
+                None)
 
     /// What `op` finds in `root` (Phase 512) — one match on the op, one locate. It refuses nothing.
     let internal view (s: Walks<'Node, 'Id>) (op: SkeletonOp<'Node, 'Id>) (root: 'Node) : OpView<'Node, 'Id> =
@@ -375,8 +380,8 @@ module Ops =
                 let keyed =
                     match parent, s.Keyed with
                     | None, Some keyedOf ->
-                        Tree.preorder s.Locate root
-                        |> List.tryPick (fun n ->
+                        root
+                        |> Tree.tryPick s.Locate (fun n ->
                             keyedOf n
                             |> List.tryFindIndex (fun c -> s.Ids.Equals (s.Edit.Id c) target)
                             |> Option.map (fun i -> n, i))

@@ -4,6 +4,34 @@ open Expecto
 open Fuaran.Core
 open Fuaran.Core.Tests.Reference
 
+/// A tree of 1-40 nodes, shaped by `seed`, whose ids are drawn from `idPool width`: a narrow pool gives
+/// repeated ids, which is what the first-match rule is about (Phase 607).
+let private idPool (width: int) =
+    [ for i in 0 .. width - 1 -> sprintf "n%d" i ]
+
+let private generatedTree (seed: int) (width: int) : RNode =
+    let rng = System.Random seed
+    let pool = idPool width |> Array.ofList
+    let pick () = pool.[rng.Next pool.Length]
+
+    let rec build (budget: int) (depth: int) : RNode * int =
+        let kids = if depth >= 5 || budget <= 1 then 0 else rng.Next 4
+
+        let children, used =
+            List.fold
+                (fun (acc, used) _ ->
+                    if budget - used > 1 then
+                        let c, n = build (budget - used - 1) (depth + 1)
+                        c :: acc, used + n
+                    else
+                        acc, used)
+                ([], 1)
+                [ 1..kids ]
+
+        RNode.node (pick ()) "section" (List.rev children), used
+
+    build (1 + rng.Next 40) 0 |> fst
+
 [<Tests>]
 let tests =
     testList
@@ -207,4 +235,94 @@ let tests =
               Expect.equal
                   (Tree.encodeHash nodew withIds flat)
                   (Hash.fnv1a (Tree.encodePreimage nodew withIds flat))
-                  "encodeHash is the FNV-1a of encodePreimage" ]
+                  "encodeHash is the FNV-1a of encodePreimage"
+
+          // Phase 607: the lookups stop at the first preorder match, and the graft check keys the graft rather
+          // than the tree. Both are held against the implementations they replaced, which are still expressible
+          // through the public surface: a scan of `Tree.preorder`, and `Tree.firstRepeatedId` over the tree's
+          // ids and the graft's. The trees draw ids from a small pool, so most carry repeats: the first-match
+          // rule is what is under test, and an id-unique tree would hold it vacuously.
+          testCase "the lookups answer the node the preorder scan answers, on generated trees"
+          <| fun _ ->
+              let mutable repeated = 0
+
+              for seed in 1..300 do
+                  let t = generatedTree seed 4
+                  let order = Tree.preorder nodew t
+
+                  if List.length order <> (order |> List.distinctBy _.Id |> List.length) then
+                      repeated <- repeated + 1
+
+                  for target in "absent" :: idPool 4 do
+                      let same what (actual: RNode option) (expected: RNode option) =
+                          match actual, expected with
+                          | Some a, Some e ->
+                              Expect.isTrue
+                                  (obj.ReferenceEquals(a, e))
+                                  (sprintf "%s %s, seed %d: not the same node" what target seed)
+                          | None, None -> ()
+                          | _ ->
+                              failtestf "%s %s, seed %d: %A where the scan answered %A" what target seed actual expected
+
+                      let scanFind = order |> List.tryFind (fun n -> n.Id = target)
+
+                      let scanParent =
+                          order
+                          |> List.tryFind (fun n -> n.Children |> List.exists (fun c -> c.Id = target))
+
+                      same "tryFind" (Tree.tryFind nodew idw target t) scanFind
+                      same "subtree" (Tree.subtree nodew idw target t) scanFind
+                      same "parentOf" (Tree.parentOf nodew idw target t) scanParent
+
+                      same "tryPick" (Tree.tryPick nodew (fun n -> if n.Id = target then Some n else None) t) scanFind
+
+                      Expect.equal
+                          (Tree.exists nodew idw target t)
+                          scanFind.IsSome
+                          (sprintf "exists %s, seed %d" target seed)
+
+                  Expect.equal
+                      (Tree.fold nodew (fun acc (n: RNode) -> n.Id :: acc) [] t)
+                      (order |> List.map _.Id |> List.rev)
+                      (sprintf "fold visits in preorder, seed %d" seed)
+
+              Expect.isGreaterThan repeated 100 "most generated trees carry a repeated id"
+
+          testCase "the graft check names the offender firstRepeatedId names over the whole tree, on generated trees"
+          <| fun _ ->
+              let mutable refused = 0
+              let mutable accepted = 0
+
+              for seed in 1..400 do
+                  // a pool wide enough that a graft is sometimes clean, narrow enough that it often is not
+                  let t = generatedTree seed 30
+                  let g = generatedTree (seed + 100000) 30
+
+                  let expected =
+                      match Tree.firstRepeatedId idw (Tree.ids nodew t) (Tree.ids nodew g) with
+                      | Some d -> Tree.RepeatedId d
+                      | None -> Tree.Structural
+
+                  let actual = Tree.graftWellFormed nodew idw g t
+                  Expect.equal actual expected (sprintf "seed %d" seed)
+
+                  match actual with
+                  | Tree.RepeatedId _ -> refused <- refused + 1
+                  | Tree.Structural -> accepted <- accepted + 1
+
+                  // and a graft drawn from ids the tree cannot carry is clean exactly when it repeats nothing itself
+                  let fresh =
+                      Tree.map nodew (fun n -> { n with Id = "g-" + n.Id }) (generatedTree (seed + 200000) 30)
+
+                  let expectedFresh =
+                      match Tree.firstRepeatedId idw (Tree.ids nodew t) (Tree.ids nodew fresh) with
+                      | Some d -> Tree.RepeatedId d
+                      | None -> Tree.Structural
+
+                  Expect.equal
+                      (Tree.graftWellFormed nodew idw fresh t)
+                      expectedFresh
+                      (sprintf "fresh graft, seed %d" seed)
+
+              Expect.isGreaterThan refused 50 "some grafts repeat an id"
+              Expect.isGreaterThan accepted 50 "some grafts are clean" ]
