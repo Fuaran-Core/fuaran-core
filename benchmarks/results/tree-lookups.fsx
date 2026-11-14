@@ -287,10 +287,15 @@ let run (case: string) (size: int) =
         let genesis = leaf "root" "roadmap"
 
         let build () =
-            ops
-            |> List.fold
-                (fun t op -> Result.bind (IndexedTree.apply Policy.none op) t)
-                (IndexedTree.ofTree scope genesis)
+            match IndexedTree.ofTree scope genesis with
+            | Error e -> Error(sprintf "%A" e)
+            | Ok start ->
+                ops
+                |> List.fold
+                    (fun t op ->
+                        t
+                        |> Result.bind (IndexedTree.apply Policy.none op >> Result.mapError (sprintf "%A")))
+                    (Ok start)
 
         match build () with
         | Ok t when Tree.count nodew t.Tree = List.length ops + 1 -> ()
