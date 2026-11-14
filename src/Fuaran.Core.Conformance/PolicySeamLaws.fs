@@ -346,6 +346,12 @@ module internal PolicySeamLaws =
     ///    grant for another capability it does not; a `Deny` is lifted by no grant; an `Allow` is
     ///    unchanged by any; an unregistered id is refused whatever is presented; and the decision
     ///    is the same on every asking.
+    ///  - **the named decision is the refusal dispatch makes** (Phase 650) — on the capability and
+    ///    query registries, over two gates, under both contexts and every grant, and for a registered,
+    ///    an unregistered and an invalid call: where `decideNamed` answers the seam's refusal dispatch
+    ///    answers it, a `Deny` is `PolicyRefused` naming the deciding gate, a `NeedsApproval`
+    ///    `ApprovalRequired` naming it, and an `Allow` reaches the performer exactly once; its
+    ///    decision is `decide`'s; and the read tells no observer.
     ///  - **the state-aware guarded witness** (Phase 643) — over the kit's note-list reference
     ///    domain, whose operations invoke different capabilities in different states: the six laws
     ///    of `stateAwareLaws`.
@@ -366,6 +372,10 @@ module internal PolicySeamLaws =
                 "withGate never lowers decide's rank, a union refuses what either side refused, and restrict, register and unregister carry the policy through equality"
 
         let agrees = LawKit.LawCell "the body runs exactly when decide answers Allow"
+
+        let namedDecision =
+            LawKit.LawCell
+                "the named decision is the refusal dispatch makes: on the capability and query registries, under each context and grant, decideNamed's Deny is PolicyRefused naming its gate, its NeedsApproval ApprovalRequired naming its gate, its refusal dispatch's own, and an Allow reaches the performer once; the read tells no observer"
 
         let contexts =
             LawKit.LawCell
@@ -603,6 +613,132 @@ module internal PolicySeamLaws =
                     fun () -> at (sprintf "the grant law failed for %s under %A" target verdict)
                 )
 
+                // ---- Phase 650: the named decision is the refusal dispatch makes ----
+                // Two gates, so the name is the deciding gate's and not the only one: the drawn gate
+                // decides the target under the untrusted context, and `second` parks another id there.
+                let namedReg =
+                    ctxReg
+                    |> CapabilityRegistry.withGate
+                        { Policy = "second"
+                          Decide =
+                            fun (trusted: bool) c _ ->
+                                if c.Id = otherId && not trusted then
+                                    PolicyDecision.NeedsApproval
+                                else
+                                    PolicyDecision.Allow }
+
+                let namedQueries =
+                    build QueryRegistry.register QueryRegistry.empty (ids |> List.map queryOf)
+                    |> QueryRegistry.withGate
+                        { Policy = gateName
+                          Decide = fun _ q _ -> decideFor q.Id }
+
+                let calls =
+                    [ target, cargs
+                      otherId, cargs
+                      target, otherArgs
+                      "missing", cargs
+                      target, [ "n", "99" ] ]
+
+                // What dispatch must answer for a named decision, and whether the performer runs.
+                let refusalOf
+                    (named: Result<string * PolicyDecision, 'e>)
+                    (refused: string -> RejectionGuidance -> 'e)
+                    (approval: string -> 'e)
+                    =
+                    match named with
+                    | Error e -> Some(Error e)
+                    | Ok(_, PolicyDecision.Allow) -> None
+                    | Ok(name, PolicyDecision.Deny g) -> Some(Error(refused name g))
+                    | Ok(name, PolicyDecision.NeedsApproval) -> Some(Error(approval name))
+
+                let capAgrees =
+                    [ for trusted in [ true; false ] do
+                          for grant in [ None; Some own; Some forOtherArgs ] do
+                              for cid, a in calls do
+                                  let named = CapabilityRegistry.decideNamed namedReg trusted grant cid a
+                                  let runs = ref 0
+
+                                  let out =
+                                      CapabilityRegistry.dispatch namedReg trusted grant cid a (fun _ () ->
+                                          runs.Value <- runs.Value + 1
+                                          Ready n)
+
+                                  let decided = CapabilityRegistry.decide namedReg trusted grant cid a
+
+                                  let agrees =
+                                      match
+                                          refusalOf
+                                              named
+                                              (fun name g -> PolicyRefused(name, g.Message, g.Alternatives))
+                                              ApprovalRequired
+                                      with
+                                      | Some refusal -> out = refusal && runs.Value = 0
+                                      | None -> out = Ok(Ready n) && runs.Value = 1
+
+                                  let sameDecision =
+                                      match named with
+                                      | Ok(_, d) -> d = decided
+                                      | Error _ -> rank decided = 2
+
+                                  let namesItsGate =
+                                      match named with
+                                      | Ok(name, PolicyDecision.Allow) ->
+                                          name = "" || name = gateName || name = "second"
+                                      | Ok(name, _) -> name = gateName || name = "second"
+                                      | Error _ -> true
+
+                                  yield (agrees && sameDecision && namesItsGate), (trusted, grant, cid, a, named, out) ]
+
+                let qAgrees =
+                    [ for qid, qa in
+                          [ target, [ "n", Int n ]
+                            otherId, [ "n", Int n ]
+                            "missing", [ "n", Int n ]
+                            target, [ "n", Str "x" ] ] do
+                          let named = QueryRegistry.decideNamed namedQueries qid qa
+                          let runs = ref 0
+
+                          let out =
+                              QueryRegistry.dispatch namedQueries qid qa (fun _ ->
+                                  runs.Value <- runs.Value + 1
+                                  Ready emptyResult)
+
+                          let agrees =
+                              match
+                                  refusalOf
+                                      named
+                                      (fun name g -> QueryPolicyRefused(name, g.Message, g.Alternatives))
+                                      QueryApprovalRequired
+                              with
+                              | Some refusal -> out = refusal && runs.Value = 0
+                              | None -> out = Ok(Ready emptyResult) && runs.Value = 1
+
+                          yield agrees, (qid, named, out) ]
+
+                // the read tells no observer, on either registry, whatever it decides
+                let toldBeforeRead, qToldBeforeRead = told.Count, qTold.Count
+                CapabilityRegistry.decideNamed capReg () None target cargs |> ignore
+                QueryRegistry.decideNamed qReg target [ "n", Int n ] |> ignore
+
+                namedDecision.Check(
+                    (capAgrees |> List.forall fst)
+                    && (qAgrees |> List.forall fst)
+                    && told.Count = toldBeforeRead
+                    && qTold.Count = qToldBeforeRead
+                    && CapabilityRegistry.decideNamed namedReg false None target cargs
+                       |> Result.map snd = Ok verdict,
+                    fun () ->
+                        at (
+                            sprintf
+                                "the named decision and dispatch disagree for %s under %A: %A / %A"
+                                target
+                                verdict
+                                (capAgrees |> List.filter (fst >> not) |> List.map snd)
+                                (qAgrees |> List.filter (fst >> not) |> List.map snd)
+                        )
+                )
+
                 let capOut =
                     CapabilityRegistry.dispatch capReg () None id [ "n", string n ] (fun _ () ->
                         ran.Add "capability"
@@ -832,7 +968,8 @@ module internal PolicySeamLaws =
               agrees
               pipelineAdmits
               contexts
-              grants ]
+              grants
+              namedDecision ]
         @ stateAwareLaws runner iterations
 
     /// The no-unapproved-write law and the dry run's agreement with `Apply`, at a DOMAIN's guarded

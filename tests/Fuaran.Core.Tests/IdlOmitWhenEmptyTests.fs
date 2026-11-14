@@ -1,7 +1,7 @@
 module Fuaran.Core.Tests.IdlOmitWhenEmptyTests
 
 // ============================================================================
-//  Phase 660 (DECISIONS.md D255) — an optional list declared omit-when-empty
+//  Phase 660 (DECISIONS.md D256) — an optional list declared omit-when-empty
 //  (`PresenceCondition.WhenNonEmpty`): `Some []` and `None` write the same bytes,
 //  an explicit `[]` reads as `None`, and the member's host type does not move.
 //  Held over `OmitWhenEmptyIdl`, a fixture shaped like the UI tier's `Binding`

@@ -787,7 +787,7 @@ module internal TypeScriptCodec =
 
         (Template.text "ts-decode-prelude.js").Replace("__DISC__", discLit)
 
-    /// Phase 660 (DECISIONS.md D255) — the one presence condition this codec applies, [[WhenNonEmpty]].
+    /// Phase 660 (DECISIONS.md D256) — the one presence condition this codec applies, [[WhenNonEmpty]].
     let applies (c: PresenceCondition) : bool = (c = WhenNonEmpty)
 
     /// Whether the vocabulary declares a [[WhenNonEmpty]] member anywhere, so [[tsNonEmptyHelper]] is

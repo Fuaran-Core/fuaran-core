@@ -1,7 +1,7 @@
 namespace Fuaran.Core.Tests
 
 // ============================================================================
-//  Phase 660 (DECISIONS.md D255) — the fixture vocabulary for an optional list
+//  Phase 660 (DECISIONS.md D256) — the fixture vocabulary for an optional list
 //  declared omit-when-empty (`PresenceCondition.WhenNonEmpty`). It is shaped like
 //  the consumer that asked for it: a generic `Binding<'T>` whose `Query`,
 //  `Transform` and `Expr` arms each carry an optional `dependsOn` or `params`

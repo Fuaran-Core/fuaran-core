@@ -72,7 +72,7 @@ module Gen =
         TypeScriptCodec.typescriptValueWith shape v
 
     /// Phase 539 (DECISIONS.md D190) — the TypeScript codec reads each member under its one name and
-    /// applies one presence condition, [[WhenNonEmpty]] (Phase 660, D255), so it REFUSES a vocabulary
+    /// applies one presence condition, [[WhenNonEmpty]] (Phase 660, D256), so it REFUSES a vocabulary
     /// that declares an alias or any other presence condition, naming the first, rather than emitting a
     /// codec that would read the canonical form differently from the F# host. The declarations leg is
     /// unaffected: neither shape moves a type.

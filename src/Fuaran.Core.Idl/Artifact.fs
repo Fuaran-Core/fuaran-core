@@ -921,7 +921,7 @@ module Artifact =
                   (Codec.record (fun s v -> s, v)
                    |> Codec.field "sibling" fst Codec.string
                    |> Codec.field "value" snd idlValue)
-              // Phase 660 (DECISIONS.md D255) — the member itself, read; no sibling to name.
+              // Phase 660 (DECISIONS.md D256) — the member itself, read; no sibling to name.
               bare "whenNonEmpty" WhenNonEmpty ]
         |> declared "presence"
 

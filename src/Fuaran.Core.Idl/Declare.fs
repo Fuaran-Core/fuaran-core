@@ -935,7 +935,7 @@ module Declare =
               for j, f in List.indexed fields do
                   match f.Presence with
                   | None -> ()
-                  // Phase 660 (DECISIONS.md D255) — the condition that reads the member itself: admitted
+                  // Phase 660 (DECISIONS.md D256) — the condition that reads the member itself: admitted
                   // only on an Optional list, the one member whose empty value is a spelling of its absence.
                   | Some WhenNonEmpty ->
                       match f.Opt, f.Type with

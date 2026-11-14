@@ -401,13 +401,15 @@ let tests =
                   for r in results do
                       Expect.isTrue r.Passed (sprintf "under %b: %s — %A" ctx r.Law r.Counterexample)
 
-          testCase "the capability seam family certifies a context only where its gate admits every drawn call"
+          testCase
+              "the seam families read the gate: under ctx certifies a context whose gate parks or denies a drawn call"
           <| fun () ->
-              // The finding t6 recorded (DECISIONS.md D254.6): `capabilityLawsAt` takes a call as
-              // admitted when its id is registered and its arguments validate, and reads no gate. So
-              // `under` certifies a context whose gate admits every drawn call, and a context whose
-              // gate parks one fails the agreement law although host and registry agree. This pins
-              // that, so the change that makes the family read the gate turns it red here.
+              // DECISIONS.md D254.6 found `capabilityLawsAt` reading no gate, so a context whose gate
+              // parked a call failed the agreement law although host and registry agreed. Since Phase
+              // 650 the family admits a call only when the registry's named decision under the
+              // witness's context is `Allow`, and expects a parked or denied call to be refused as
+              // that decision says. Under the untrusted context this gate parks every `flaky` call and
+              // denies `echo` at 7; the trusted context admits everything, as before.
               let byContext: CapabilityRegistry<bool> =
                   CapabilityRegistry.enumerate WitnessTakingFamiliesTests.capabilityRegistry
                   |> List.fold
@@ -416,25 +418,81 @@ let tests =
                   |> CapabilityRegistry.withGate
                       { Policy = "side"
                         Decide =
-                          fun trusted c _ ->
-                              if trusted || c.Id <> "flaky" then
+                          fun trusted c args ->
+                              if trusted then
                                   PolicyDecision.Allow
+                              elif c.Id = "flaky" then
+                                  PolicyDecision.NeedsApproval
+                              elif c.Id = "echo" && List.contains ("echo/n", "7") args then
+                                  PolicyDecision.denyWith "seven is withheld" [ "later" ]
                               else
-                                  PolicyDecision.NeedsApproval }
+                                  PolicyDecision.Allow }
 
-              let run (ctx: bool) =
+              let run
+                  (ctx: bool)
+                  (dispatch:
+                      string
+                          -> (string * string) list
+                          -> (Capability -> unit -> Deferred<string>)
+                          -> Result<Deferred<string>, InvokeError>)
+                  =
                   Conformance.capabilityLawsAt
                       { Registry = CapabilityRegistry.under ctx byContext
-                        Dispatch = CapabilityRegistry.dispatch byContext ctx None
+                        Dispatch = dispatch
                         GenCall = WitnessTakingFamiliesTests.genCapabilityCall }
                       WitnessTakingFamiliesTests.capabilityBody
                       2460
                       300
 
-              for r in run true do
-                  Expect.isTrue r.Passed (sprintf "under the admitting context: %s — %A" r.Law r.Counterexample)
+              for ctx in [ true; false ] do
+                  for r in run ctx (CapabilityRegistry.dispatch byContext ctx None) do
+                      Expect.isTrue r.Passed (sprintf "under %b: %s — %A" ctx r.Law r.Counterexample)
+
+              // The family has teeth: a host that runs the untrusted context's calls through the
+              // registry WITHOUT its gate admits what the named decision parks, and is named.
+              Expect.exists
+                  (run false (CapabilityRegistry.dispatch WitnessTakingFamiliesTests.capabilityRegistry () None))
+                  (fun r -> not r.Passed && r.Law.Contains "agrees with its registry")
+                  "a host that ignores the gate the registry decides with fails the agreement law"
+
+          testCase
+              "the query seam family reads the gate: a parked or denied query is expected refused as the named decision says"
+          <| fun () ->
+              let gated =
+                  WitnessTakingFamiliesTests.queryRegistry
+                  |> QueryRegistry.withGate
+                      { Policy = "stations"
+                        Decide =
+                          fun () _ args ->
+                              if
+                                  List.contains ("station", Str "ridge") args
+                                  && List.contains ("limit", Int 2) args
+                              then
+                                  PolicyDecision.NeedsApproval
+                              elif List.contains ("station", Str "offline") args then
+                                  PolicyDecision.deny "the station is closed"
+                              else
+                                  PolicyDecision.Allow }
+
+              let run
+                  (dispatch:
+                      string
+                          -> (string * Cell) list
+                          -> (Query -> Deferred<QueryResult>)
+                          -> Result<Deferred<QueryResult>, QueryError>)
+                  =
+                  Conformance.queryLawsAt
+                      { Queries = gated
+                        Dispatch = dispatch
+                        GenQuery = WitnessTakingFamiliesTests.genQueryCall }
+                      WitnessTakingFamiliesTests.queryResolver
+                      2461
+                      300
+
+              for r in run (QueryRegistry.dispatch gated) do
+                  Expect.isTrue r.Passed (sprintf "%s — %A" r.Law r.Counterexample)
 
               Expect.exists
-                  (run false)
-                  (fun r -> not r.Passed && r.Law.Contains "agrees with its registry")
-                  "under the parking context the family reads no gate, and its agreement law fails" ]
+                  (run (QueryRegistry.dispatch WitnessTakingFamiliesTests.queryRegistry))
+                  (fun r -> not r.Passed && r.Law.Contains "agrees with its query registry")
+                  "a host that ignores the gate fails the agreement law" ]

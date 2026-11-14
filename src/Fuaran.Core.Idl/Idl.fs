@@ -521,7 +521,7 @@ and PresenceCondition =
     | WhenAbsent of sibling: string
     /// Meaningful only when the sibling holds `value` — `Select.values` under `multiple = true`.
     | WhenEquals of sibling: string * value: IdlValue
-    /// **Meaningful only when the member ITSELF holds a non-empty list (Phase 660, DECISIONS.md D255)** —
+    /// **Meaningful only when the member ITSELF holds a non-empty list (Phase 660, DECISIONS.md D256)** —
     /// the one condition that reads no sibling. Admitted only on an `Optional` list member, whose
     /// canonical in-memory absence is `None`: `Some []` is a non-canonical spelling of it, so the encoder
     /// writes no member for `None` or `Some []`, the decoder reads an explicit `[]` as `None`, and the
