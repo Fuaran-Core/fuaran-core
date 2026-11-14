@@ -405,7 +405,7 @@ module internal FStarModel =
     /// admitted numeric default is refused as the model's boundary, not as a defect in the
     /// declaration.
     ///
-    /// Phase 656 — at the wider data universe's types (DECISIONS.md D258): a tuple is the F* tuple of
+    /// Phase 656 — at the wider data universe's types (DECISIONS.md D259): a tuple is the F* tuple of
     /// its items' literals and the empty set and keyed map are `[]` (the model's set and keyed map
     /// are their wire lists), so neither carries an obligation. A 64-bit integer, a decimal, bytes,
     /// a time of day and a duration are refused, by name, as the model's boundary: their model type

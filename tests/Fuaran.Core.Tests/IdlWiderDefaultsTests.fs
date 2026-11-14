@@ -1,7 +1,7 @@
 module Fuaran.Core.Tests.IdlWiderDefaultsTests
 
 // ============================================================================
-//  Phase 656 (DECISIONS.md D258) — a declared default at the wider data
+//  Phase 656 (DECISIONS.md D259) — a declared default at the wider data
 //  universe's eight types (Phase 639, D251). Before this phase the interpreter
 //  honoured one and every generator that prints a default refused it as
 //  `UnsupportedDefault` (D251.9). Now the one admissibility, `Decl.literal`,

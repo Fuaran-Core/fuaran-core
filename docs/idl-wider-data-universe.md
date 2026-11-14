@@ -56,7 +56,7 @@ each reader's to check. The F\* model refines each string-borne scalar by its gr
 types as an F\* tuple (and refuses one holding a declared type by name), and models a set and a keyed map as
 their wire arrays, the order outside a model whose numbers are opaque.
 
-**A declared default at one of these types** (Phase 656, DECISIONS.md D258) is admitted by the one admissibility
+**A declared default at one of these types** (Phase 656, DECISIONS.md D259) is admitted by the one admissibility
 every generator asks, on the rule the older types follow: a scalar in its canonical spelling, a tuple whose every
 item is admitted, and the EMPTY set and keyed map, where the member's own type is the collection (never inside a
 tuple or a union literal, where a literal stands in pattern position). A spelling that is not canonical is
