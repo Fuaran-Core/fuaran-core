@@ -209,6 +209,15 @@ let validateArgs (c: Capability) (args: (string * string) list) : Verdict =
 let invocationKey (c: Capability) (args: (string * string) list) : string =
     ModelCap.invocation_key keyRenderers (capToModel c) args
 
+/// `invocation_identity` (Phase 650), over production's key renderers: the identity a grant is for.
+let invocationIdentity (c: Capability) (args: (string * string) list) : string =
+    ModelCap.invocation_identity keyRenderers (capToModel c) args
+
+/// `granted` (Phase 650): whether a presented grant, modelled as the identity it carries, is for
+/// exactly this invocation.
+let granted (c: Capability) (args: (string * string) list) (grant: string option) : bool =
+    ModelCap.granted keyRenderers (capToModel c) args (toMOpt grant)
+
 /// `determinism_tag_of`.
 let determinismTag (c: Capability) : string =
     ModelCap.determinism_tag_of (capToModel c)
