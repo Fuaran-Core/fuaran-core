@@ -118,6 +118,39 @@ module Tree =
     /// Every id in the tree, in preorder.
     let ids (w: NodeWitness<'Node, 'Id>) (root: 'Node) : 'Id list = preorder w root |> List.map w.Id
 
+    /// The first `Some` of `chooser` in preorder, and the walk STOPS there (Phase 607): `preorder` builds the
+    /// whole list before a scan of it can answer, so a lookup that hits early paid for every node anyway. An
+    /// explicit stack (the Phase-19 posture: a deep tree cannot overflow) whose entries are sibling LISTS: a
+    /// node's children are pushed as the list `Children` already returns, never copied onto a work-list, and
+    /// the order is node, then each child subtree left to right, which is `preorder`'s.
+    let private pickPreorder (w: NodeWitness<'Node, 'Id>) (chooser: 'Node -> 'a option) (root: 'Node) : 'a option =
+        let rec loop (stack: 'Node list list) =
+            match stack with
+            | [] -> None
+            | [] :: rest -> loop rest
+            | (n :: siblings) :: rest ->
+                match chooser n with
+                | Some _ as hit -> hit
+                | None ->
+                    match w.Children n with
+                    | [] -> loop (siblings :: rest)
+                    | children -> loop (children :: siblings :: rest)
+
+        loop [ [ root ] ]
+
+    /// `pickPreorder`'s walk folded over every node, with no list of the nodes built (Phase 607).
+    let private foldPreorder (w: NodeWitness<'Node, 'Id>) (f: 'S -> 'Node -> 'S) (state: 'S) (root: 'Node) : 'S =
+        let rec loop (acc: 'S) (stack: 'Node list list) =
+            match stack with
+            | [] -> acc
+            | [] :: rest -> loop acc rest
+            | (n :: siblings) :: rest ->
+                match w.Children n with
+                | [] -> loop (f acc n) (siblings :: rest)
+                | children -> loop (f acc n) (children :: siblings :: rest)
+
+        loop state [ [ root ] ]
+
     // ---- structural validity (Phase 139) ----
 
     /// The verdict of `Tree.wellFormed` — Core's ONE definition of STRUCTURAL validity, named so a
@@ -201,29 +234,54 @@ module Tree =
     /// This is the question every insert validator asks; `Ops`'s reads it, so the accept path and
     /// this predicate cannot diverge. `Tree.graftWellFormedKeyed` asks it over the walk that
     /// includes a domain's keyed positions, on both sides of the graft (Phase 286).
+    ///
+    /// **The set is the graft's, not the tree's (Phase 607).** It is `firstRepeatedId idw (ids w root)
+    /// (ids w node)`, computed without keying the whole tree: the graft's keys are collected, the tree is
+    /// walked once keeping only the keys the graft also carries, and the graft is scanned seeded with those.
+    /// An id of the graft is in the seed exactly when the tree carries it, so the scan names the same
+    /// offender; an insert of a small graft into a large tree no longer builds a set of every id in it.
     let graftWellFormed
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
         (node: 'Node)
         (root: 'Node)
         : WellFormed<'Id> =
-        match firstRepeatedId idw (ids w root) (ids w node) with
+        let incoming = ids w node
+        let graft = incoming |> List.map idw.ToString |> Set.ofList
+
+        let held =
+            root
+            |> foldPreorder
+                w
+                (fun (acc: Set<string>) n ->
+                    let k = idw.ToString(w.Id n)
+                    if Set.contains k graft then Set.add k acc else acc)
+                Set.empty
+
+        match firstRepeat idw held incoming with
         | Some d -> RepeatedId d
         | None -> Structural
 
-    /// The node carrying `target`, if present.
+    /// The node carrying `target`, if present: the first in preorder, and the walk stops there.
     let tryFind (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (target: 'Id) (root: 'Node) : 'Node option =
-        preorder w root |> List.tryFind (fun n -> idw.Equals (w.Id n) target)
+        pickPreorder w (fun n -> if idw.Equals (w.Id n) target then Some n else None) root
 
     /// Whether any node the `Children` walk reaches carries `target` — a preorder scan under
-    /// `Equals`, O(n). A keyed position is reached only through `Tree.traversal`.
+    /// `Equals`, stopping at the first match. A keyed position is reached only through `Tree.traversal`.
     let exists (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (target: 'Id) (root: 'Node) : bool =
         tryFind w idw target root |> Option.isSome
 
-    /// The parent of `target` (None for the root or an absent id).
+    /// The parent of `target` (None for the root or an absent id): the first node in preorder whose
+    /// children carry it, and the walk stops there.
     let parentOf (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) (target: 'Id) (root: 'Node) : 'Node option =
-        preorder w root
-        |> List.tryFind (fun n -> w.Children n |> List.exists (fun c -> idw.Equals (w.Id c) target))
+        pickPreorder
+            w
+            (fun n ->
+                if w.Children n |> List.exists (fun c -> idw.Equals (w.Id c) target) then
+                    Some n
+                else
+                    None)
+            root
 
     /// The id-path from the root down to `target` (inclusive), if present. This is the
     /// lexical address used for capture-avoiding hole binding (hygiene): an absolute
@@ -521,7 +579,7 @@ module Tree =
 
     /// Preorder fold over the tree (node-then-children).
     let fold (w: NodeWitness<'Node, 'Id>) (f: 'State -> 'Node -> 'State) (state: 'State) (root: 'Node) : 'State =
-        preorder w root |> List.fold f state
+        foldPreorder w f state root
 
     /// The number of nodes in the tree.
     let count (w: NodeWitness<'Node, 'Id>) (root: 'Node) : int = preorder w root |> List.length
@@ -580,9 +638,9 @@ module Tree =
     let filter (w: NodeWitness<'Node, 'Id>) (pred: 'Node -> bool) (root: 'Node) : 'Node list =
         preorder w root |> List.filter pred
 
-    /// The first `Some` of `chooser` over the tree, in preorder.
+    /// The first `Some` of `chooser` over the tree, in preorder; the walk stops there (Phase 607).
     let tryPick (w: NodeWitness<'Node, 'Id>) (chooser: 'Node -> 'a option) (root: 'Node) : 'a option =
-        preorder w root |> List.tryPick chooser
+        pickPreorder w chooser root
 
     /// Rewrite every id in the tree through `rename`, using a caller-supplied `setId` to
     /// rebuild a node with its new id. `setId` is a per-call parameter, NOT a witness field
