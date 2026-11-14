@@ -311,27 +311,42 @@ module RegistryPolicy =
     let decide (p: RegistryPolicy<'Ctx, 'Decl, 'Args>) (ctx: 'Ctx) (decl: 'Decl) (args: 'Args) : PolicyDecision =
         decideNamed p ctx decl args |> snd
 
-    /// Run the gates for one invocation: `Ok ()` on `Allow`, and on a `NeedsApproval` that one of
-    /// `grants` covers (Phase 638: `invocation` renders this invocation's identity, and is read
-    /// only when the gates ask for an approval). Otherwise every observer
-    /// is told, in order, and the refusal is the seam's own — `refused policy guidance` for a
-    /// `Deny`, whatever is presented, and `approval policy` for a `NeedsApproval` no grant covers.
-    /// Internal: the registries' dispatch is the surface.
-    let internal admit
-        (refused: string -> RejectionGuidance -> 'E)
-        (approval: string -> 'E)
+    /// The named decision once a presented approval is read (Phase 650): `decideNamed`, with a
+    /// `NeedsApproval` that one of `grants` covers lifted to `Allow` (`PolicyDecision.lifted`) and the
+    /// name kept, so the name still says which gate's approval the grant answered. `invocation`
+    /// renders this invocation's identity and is read only when the gates ask for an approval. No
+    /// observer is told. The ONE computation the registries' named read, their `decide` and their
+    /// dispatch share: a dispatch's refusal is `refuse` of exactly this pair. Internal: the
+    /// registries' `decideNamed` is the surface.
+    let internal decideGranted
         (invocation: 'Decl -> 'Args -> string)
         (p: RegistryPolicy<'Ctx, 'Decl, 'Args>)
         (ctx: 'Ctx)
         (grants: Grant list)
-        (id: string)
         (decl: 'Decl)
         (args: 'Args)
-        : Result<unit, 'E> =
+        : string * PolicyDecision =
         match decideNamed p ctx decl args with
-        | _, PolicyDecision.Allow -> Ok()
-        | _, PolicyDecision.NeedsApproval when Grant.covers (invocation decl args) grants -> Ok()
-        | name, d ->
+        | name, (PolicyDecision.NeedsApproval as d) ->
+            name, PolicyDecision.lifted (Grant.covers (invocation decl args) grants) d
+        | named -> named
+
+    /// The refusal a named decision is (Phase 650): `Ok ()` for `Allow`; otherwise every observer is
+    /// told, in order, and the refusal is the seam's own — `refused policy guidance` for a `Deny` and
+    /// `approval policy` for a `NeedsApproval`, `policy` the name the decision carries. Internal: the
+    /// registries' dispatch is the surface.
+    let internal refuse
+        (refused: string -> RejectionGuidance -> 'E)
+        (approval: string -> 'E)
+        (p: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        (ctx: 'Ctx)
+        (id: string)
+        (args: 'Args)
+        (name: string, d: PolicyDecision)
+        : Result<unit, 'E> =
+        match d with
+        | PolicyDecision.Allow -> Ok()
+        | _ ->
             let denial =
                 { Policy = name
                   Context = ctx
@@ -345,3 +360,20 @@ module RegistryPolicy =
             match d with
             | PolicyDecision.Deny g -> Error(refused name g)
             | _ -> Error(approval name)
+
+    /// Run the gates for one invocation: `refuse` of `decideGranted` — `Ok ()` on `Allow` and on a
+    /// `NeedsApproval` one of `grants` covers (Phase 638), and otherwise the seam's own refusal with
+    /// every observer told. Internal: the registries' dispatch is the surface.
+    let internal admit
+        (refused: string -> RejectionGuidance -> 'E)
+        (approval: string -> 'E)
+        (invocation: 'Decl -> 'Args -> string)
+        (p: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        (ctx: 'Ctx)
+        (grants: Grant list)
+        (id: string)
+        (decl: 'Decl)
+        (args: 'Args)
+        : Result<unit, 'E> =
+        decideGranted invocation p ctx grants decl args
+        |> refuse refused approval p ctx id args

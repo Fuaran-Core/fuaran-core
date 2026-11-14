@@ -206,6 +206,8 @@
          Fable consumer runs on both pipelines. Reads nothing here, so it simply follows. -->
     <Compile Include="ParityVectorTests.fs" />
     <Compile Include="LawVectorTests.fs" />
+    <!-- Phase 650 — the capability gate family read back and decided by the production registry. -->
+    <Compile Include="CapabilityGateVectorTests.fs" />
     <!-- Phase 139 — the checks that keep the `apply/` family an oracle: a decode-and-recompute
          pass over every rendered vector, three go-reds proving the pass can fail, the sample's
          adequacy to its own description, and the byte comparison against the shared corpus.
@@ -523,6 +525,9 @@
          Appended (append-only). -->
     <Compile Include="IdlWiderUniverseTests.fs" />
     <Compile Include="CapabilityResultTests.fs" />
+    <!-- Phase 657 - one Tree.updateNode write allocates the path it rebuilds, pinned on the
+         241-node, 24-deep tree. Appended (append-only). -->
+    <Compile Include="TreeUpdateNodeAllocationTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>

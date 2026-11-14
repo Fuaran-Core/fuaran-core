@@ -444,10 +444,16 @@ module internal CapabilitySeamLaws =
     ///    body's own failure and nothing else;
     ///  - **a refusal precedes the body** — a typed refusal ran no body, and a settled, pending or
     ///    body-failed dispatch ran it exactly once;
-    ///  - **the host is the registry's** — a call reaches the body iff its id is registered and
-    ///    `Capability.validateArgs` accepts its arguments, and a refused call carries the error the
-    ///    registry itself gives (`NoSuchCapability` naming the registered ids, or the validation
-    ///    error), so a host can neither add a refusal nor drop one.
+    ///  - **the host is the registry's** — a call reaches the body iff the registry's NAMED decision
+    ///    for it (`CapabilityRegistry.decideNamed` under the witness's context, no grant presented)
+    ///    is `Allow`, and a refused call carries the error the registry itself gives
+    ///    (`NoSuchCapability` naming the registered ids, the validation error, or the policy refusal
+    ///    the named decision is: `PolicyRefused` naming the gate for a `Deny`, `ApprovalRequired`
+    ///    naming it for a `NeedsApproval`), so a host can neither add a refusal nor drop one. Since
+    ///    Phase 650 the family reads the gate, so `CapabilityRegistry.under ctx` certifies a context
+    ///    whose gate parks or denies a drawn call; a registry whose gate admits every drawn call is
+    ///    certified exactly as before. The read tells no observer, so the family never reports a
+    ///    call the host did not make.
     ///
     /// **Vacuity.** The guard counts settled, pending and refused-before-the-body dispatches over the
     /// drawn calls; a generator that never reaches one of the three is starved, and the family says
@@ -460,15 +466,14 @@ module internal CapabilitySeamLaws =
         (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        let known = CapabilityRegistry.enumerate w.Registry |> List.map _.Id
-
         LawKit.seamLaws
-            { Lookup =
-                fun id ->
-                    match CapabilityRegistry.tryFind id w.Registry with
-                    | None -> Error(NoSuchCapability(id, known))
-                    | Some c -> Ok c
-              Validate = Capability.validateArgs
+            { Admitted =
+                fun id args ->
+                    match CapabilityRegistry.decideNamed w.Registry () None id args with
+                    | Error e -> Error e
+                    | Ok(_, PolicyDecision.Allow) -> Ok()
+                    | Ok(name, PolicyDecision.Deny g) -> Error(PolicyRefused(name, g.Message, g.Alternatives))
+                    | Ok(name, PolicyDecision.NeedsApproval) -> Error(ApprovalRequired name)
               Body = body
               Dispatch = fun id args body -> w.Dispatch id args (fun c () -> body c)
               Gen = w.GenCall

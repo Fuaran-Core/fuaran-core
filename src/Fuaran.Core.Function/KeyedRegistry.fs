@@ -215,22 +215,32 @@ module internal KeyedRegistry =
         | Some x -> Ok x
         | None -> Error(v.NoSuch id (ids m))
 
-    /// Validate the arguments, then run the policy's gates under `ctx` — a policy refusal reaching
-    /// every `onDenied` observer, in the vocabulary's `Refused` / `Approval`. A `NeedsApproval` one
-    /// of `grants` covers admits the invocation, as an `Allow` does. `Ok ()` admits it.
-    let admit
+    /// Resolve the id, validate the arguments, and the policy's NAMED decision under `ctx` with the
+    /// grants read (`RegistryPolicy.decideGranted`, Phase 650): the ONE judgement `decideNamed`,
+    /// `decide` and every dispatch share, so a dispatch's refusal is built from exactly the decision
+    /// the named read answers. An id the map does not hold is the vocabulary's `NoSuch` naming every
+    /// id it holds, and arguments that do not validate are the validation refusal, before any gate.
+    /// No observer is told.
+    let private judge
         (v: SeamVocabulary<'Decl, 'Args, 'E>)
+        (gated: 'V -> 'Decl)
         (policy: RegistryPolicy<'Ctx, 'Decl, 'Args>)
         (ctx: 'Ctx)
         (grants: Grant list)
-        (decl: 'Decl)
+        (id: string)
         (args: 'Args)
-        : Result<unit, 'E> =
-        v.Validate decl args
-        |> Result.bind (fun () ->
-            RegistryPolicy.admit v.Refused v.Approval v.Invocation policy ctx grants (v.Id decl) decl args)
+        (m: Map<string, 'V>)
+        : Result<'V * (string * PolicyDecision), 'E> =
+        resolve v id m
+        |> Result.bind (fun x ->
+            let decl = gated x
 
-    /// Resolve, then admit: the entry an admitted invocation runs against.
+            v.Validate decl args
+            |> Result.map (fun () -> x, RegistryPolicy.decideGranted v.Invocation policy ctx grants decl args))
+
+    /// Resolve, then admit through the policy: the entry an admitted invocation runs against. A policy
+    /// refusal is `RegistryPolicy.refuse` of the named decision `judge` answers, reaching every
+    /// `onDenied` observer, in the vocabulary's `Refused` / `Approval`.
     let private admitted
         (v: SeamVocabulary<'Decl, 'Args, 'E>)
         (gated: 'V -> 'Decl)
@@ -241,15 +251,35 @@ module internal KeyedRegistry =
         (args: 'Args)
         (m: Map<string, 'V>)
         : Result<'V, 'E> =
-        resolve v id m
-        |> Result.bind (fun x -> admit v policy ctx grants (gated x) args |> Result.map (fun () -> x))
+        judge v gated policy ctx grants id args m
+        |> Result.bind (fun (x, named) ->
+            RegistryPolicy.refuse v.Refused v.Approval policy ctx (v.Id(gated x)) args named
+            |> Result.map (fun () -> x))
 
-    /// What the seam would decide for an invocation without dispatching it: an id the map does not
-    /// hold is a `Deny` whose guidance is the `NoSuch` sentence with the held ids as alternatives;
-    /// arguments that do not validate a `Deny` with the refusal's sentence; otherwise the gates'
-    /// join under `ctx`, with a `NeedsApproval` that one of `grants` covers lifted to `Allow`
-    /// (Phase 638). No observer is told. A total function of the entry, the arguments, the context
-    /// and the grants: it reads nothing else.
+    /// The seam's NAMED decision for an invocation, without dispatching it (Phase 650): `Ok` of the
+    /// deciding gate's name and the decision — the gates' join under `ctx`, the name the first gate
+    /// of the most restrictive rank (`""` when every gate allows), with a `NeedsApproval` one of
+    /// `grants` covers lifted to `Allow` and its name kept — or the seam's own refusal where no gate
+    /// decided: `NoSuch` for an id the map does not hold, the validation refusal for arguments that
+    /// do not validate. No observer is told. Advisory: a dispatch judges again, through the same
+    /// function, and is authoritative.
+    let decideNamed
+        (v: SeamVocabulary<'Decl, 'Args, 'E>)
+        (gated: 'V -> 'Decl)
+        (policy: RegistryPolicy<'Ctx, 'Decl, 'Args>)
+        (ctx: 'Ctx)
+        (grants: Grant list)
+        (id: string)
+        (args: 'Args)
+        (m: Map<string, 'V>)
+        : Result<string * PolicyDecision, 'E> =
+        judge v gated policy ctx grants id args m |> Result.map snd
+
+    /// What the seam would decide for an invocation without dispatching it: `decideNamed`'s decision,
+    /// and where no gate decided a `Deny` with the refusal's sentence — for an id the map does not
+    /// hold, with the held ids as its alternatives. A `NeedsApproval` one of `grants` covers is
+    /// lifted to `Allow` (Phase 638). No observer is told. A total function of the entry, the
+    /// arguments, the context and the grants: it reads nothing else.
     let decide
         (v: SeamVocabulary<'Decl, 'Args, 'E>)
         (gated: 'V -> 'Decl)
@@ -260,20 +290,10 @@ module internal KeyedRegistry =
         (args: 'Args)
         (m: Map<string, 'V>)
         : PolicyDecision =
-        match Map.tryFind id m with
-        | None ->
-            let known = ids m
-            PolicyDecision.denyWith (v.Describe(v.NoSuch id known)) known
-        | Some x ->
-            let decl = gated x
-
-            match v.Validate decl args with
-            | Error e -> PolicyDecision.deny (v.Describe e)
-            | Ok() ->
-                match RegistryPolicy.decide policy ctx decl args with
-                | PolicyDecision.NeedsApproval as d ->
-                    PolicyDecision.lifted (Grant.covers (v.Invocation decl args) grants) d
-                | d -> d
+        match decideNamed v gated policy ctx grants id args m with
+        | Ok(_, d) -> d
+        | Error e when Map.containsKey id m -> PolicyDecision.deny (v.Describe e)
+        | Error e -> PolicyDecision.denyWith (v.Describe e) (ids m)
 
     /// Resolve the id (default-deny), validate, admit through the policy, and only then `run` the
     /// resolved entry; `run`'s refusal is the seam's own.
@@ -535,6 +555,32 @@ module Seam =
         (args: 'Args)
         : PolicyDecision =
         KeyedRegistry.decide s.Vocabulary (fun (d: 'Decl) -> d) s.Policy ctx (Option.toList grant) id args s.Entries
+
+    /// The seam's NAMED decision for an invocation, without dispatching it (Phase 650): `Ok` of the
+    /// deciding gate's name and the decision `decide` answers (the name of the first gate of the most
+    /// restrictive rank, `""` when every gate allows, and kept when `grant` lifts a `NeedsApproval`),
+    /// or the seam's own refusal where no gate decided — `NoSuch` for an id it does not hold, the
+    /// validation refusal for arguments that do not validate. No observer is told. Advisory:
+    /// `dispatch` judges again through the same function and is authoritative, so its policy refusal
+    /// is `Refused name guidance` for `Ok(name, Deny guidance)` and `Approval name` for
+    /// `Ok(name, NeedsApproval)`, and it runs the declaration for `Ok(_, Allow)`.
+    [<MethodImpl(MethodImplOptions.NoInlining)>]
+    let decideNamed
+        (s: Seam<'Ctx, 'Decl, 'Args, 'E>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
+        (id: string)
+        (args: 'Args)
+        : Result<string * PolicyDecision, 'E> =
+        KeyedRegistry.decideNamed
+            s.Vocabulary
+            (fun (d: 'Decl) -> d)
+            s.Policy
+            ctx
+            (Option.toList grant)
+            id
+            args
+            s.Entries
 
     /// Dispatch an invocation: resolve the id (default-deny — an id the seam does not hold is
     /// `NoSuch`, whatever is presented), validate the arguments, run the policy's gates under `ctx`
