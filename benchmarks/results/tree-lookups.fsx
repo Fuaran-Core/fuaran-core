@@ -7,7 +7,8 @@
 //   dotnet fsi --optimize+ benchmarks/results/tree-lookups.fsx
 //
 // With no arguments the script runs every case at every size, EACH IN ITS OWN PROCESS (it re-invokes itself
-// with `-- <case> <size>`), and prints the results table. One case at one size is
+// with `-- <case> <size>`), and prints the results table (Phase 659 appended the indexed insert and the progressive
+// builds to it). One case at one size is
 // `dotnet fsi --optimize+ benchmarks/results/tree-lookups.fsx -- insert 20000`.
 //
 // The method: the input (the tree, the op, the DAG) is built OUTSIDE the timed closure; the closure is warmed
@@ -72,6 +73,23 @@ let tree (size: int) =
     { leaf "root" "roadmap" with
         Children = epochs }
 
+/// Phase 659: the ops that build `tree size`'s shape one node at a time, under a bare root — an epoch before
+/// every fiftieth phase, each phase followed by its four tasks.
+let progressiveOps (size: int) : SkeletonOp<N, string> list =
+    let phases = max 1 (size / 5)
+
+    [ for i in 0 .. phases - 1 do
+          let e = sprintf "e%d" (i / 50)
+
+          if i % 50 = 0 then
+              yield InsertChild("root", leaf e "epoch")
+
+          let p = sprintf "p%d" i
+          yield InsertChild(e, leaf p "phase")
+
+          for t in 1..4 do
+              yield InsertChild(p, leaf (sprintf "%s.t%d" p t) "task") ]
+
 let measure (name: string) (size: int) (minSamples: int) (warm: TimeSpan) (budget: TimeSpan) (f: unit -> unit) =
     let sw = Stopwatch.StartNew()
 
@@ -132,6 +150,21 @@ let run (case: string) (size: int) =
         | other -> fail (sprintf "insert did not apply: %A" (other |> Result.map ignore))
 
         measure "Ops.apply (InsertChild ...)" count 5 warm budget (fun () -> Ops.apply Policy.none scope op t |> ignore)
+    | "insert-indexed" ->
+        // Phase 659: the same insert through the indexed entry, over an index built outside the timed closure
+        let op = InsertChild(lastPhase, leaf "fresh" "task")
+
+        let indexed =
+            match IndexedTree.ofTree scope t with
+            | Ok ix -> ix
+            | Error e -> fail (sprintf "the tree did not index: %A" e)
+
+        match IndexedTree.apply Policy.none op indexed with
+        | Ok after when Tree.count nodew after.Tree = count + 1 -> ()
+        | other -> fail (sprintf "indexed insert did not apply: %A" (other |> Result.map ignore))
+
+        measure "IndexedTree.apply (InsertChild ...)" count 5 warm budget (fun () ->
+            IndexedTree.apply Policy.none op indexed |> ignore)
     | "graft" ->
         let g = leaf "fresh" "task"
 
@@ -226,6 +259,60 @@ let run (case: string) (size: int) =
             (TimeSpan.FromSeconds 1.0)
             (TimeSpan.FromSeconds 20.0)
             (fun () -> Dag.tryReplayTo sw genesis dag head |> ignore)
+    | "progressive" ->
+        // Phase 659: a progressive build of `size` nodes, one `Ops.apply` per node — the shape a caller that
+        // applies a script op by op (a replay, a UI tier's build frame by frame) pays.
+        let ops = progressiveOps size
+        let genesis = leaf "root" "roadmap"
+
+        let build () =
+            ops
+            |> List.fold (fun t op -> Result.bind (Ops.apply Policy.none scope op) t) (Ok genesis)
+
+        match build () with
+        | Ok t when Tree.count nodew t = List.length ops + 1 -> ()
+        | other -> fail (sprintf "progressive build did not complete: %A" (other |> Result.map (Tree.count nodew)))
+
+        measure
+            (sprintf "progressive build, Ops.apply per node")
+            (List.length ops + 1)
+            (if size > 2000 then 3 else 5)
+            (TimeSpan.FromSeconds 1.0)
+            (TimeSpan.FromSeconds 20.0)
+            (fun () -> build () |> ignore)
+    | "progressive-indexed" ->
+        // Phase 659: the same build through the indexed entry; the index of the bare root is built inside the
+        // timed closure, so the figure is the whole build's
+        let ops = progressiveOps size
+        let genesis = leaf "root" "roadmap"
+
+        let build () =
+            match IndexedTree.ofTree scope genesis with
+            | Error e -> Error(sprintf "%A" e)
+            | Ok start ->
+                ops
+                |> List.fold
+                    (fun t op ->
+                        t
+                        |> Result.bind (IndexedTree.apply Policy.none op >> Result.mapError (sprintf "%A")))
+                    (Ok start)
+
+        match build () with
+        | Ok t when Tree.count nodew t.Tree = List.length ops + 1 -> ()
+        | other ->
+            fail (
+                sprintf
+                    "indexed progressive build did not complete: %A"
+                    (other |> Result.map (fun t -> Tree.count nodew t.Tree))
+            )
+
+        measure
+            "progressive build, IndexedTree.apply per node"
+            (List.length ops + 1)
+            5
+            (TimeSpan.FromSeconds 1.0)
+            (TimeSpan.FromSeconds 20.0)
+            (fun () -> build () |> ignore)
     | other -> fail (sprintf "unknown case %s" other)
 
 let args = fsi.CommandLineArgs |> Array.skip 1
@@ -239,7 +326,11 @@ match args with
         [ for s in [ 2000; 20000 ] do
               for c in [ "insert"; "graft"; "tryFind"; "parentOf" ] -> c, s
           yield "replay", 2000
-          yield "replay", 8800 ]
+          yield "replay", 8800
+          // Phase 659: the indexed insert, and a progressive build through both entries
+          for s in [ 2000; 20000 ] -> "insert-indexed", s
+          for s in [ 1000; 10000 ] do
+              for c in [ "progressive"; "progressive-indexed" ] -> c, s ]
 
     printfn
         "machine: %s, %d logical processors, %s"

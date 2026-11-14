@@ -960,6 +960,12 @@ module Tree =
         /// neither keeps the value the index holds. The function cannot check the contract (that
         /// would cost the walk it exists to avoid); `afterOp` derives both lists from the op and
         /// verifies what it can, and `isFreshFor` answers whether the result describes a tree.
+        ///
+        /// **A link that stands is not rewritten (Phase 659).** A node on both sides keeps its
+        /// `ById` slot for the install to overwrite, and a child link the arriving node re-states —
+        /// the same child under the same parent — is neither withdrawn nor re-installed, so
+        /// re-indexing an ancestor whose child list did not change costs its children's reads and no
+        /// map writes. The maps are the ones withdrawing and re-installing every link would make.
         let rebind
             (w: NodeWitness<'Node, 'Id>)
             (idw: IdWitness<'Id>)
@@ -969,20 +975,41 @@ module Tree =
             : NodeIndex<'Node, 'Id> =
             let key (n: 'Node) = idw.ToString(w.Id n)
 
+            let restated = (Map.empty, arriving) ||> List.fold (fun m n -> Map.add (key n) n m)
+
             let withdrawn =
                 leaving
                 |> List.fold
                     (fun (byId: Map<string, 'Node>, parentOf: Map<string, 'Id>) n ->
-                        Map.remove (key n) byId,
-                        (parentOf, w.Children n) ||> List.fold (fun m c -> Map.remove (key c) m))
+                        match Map.tryFind (key n) restated with
+                        | None ->
+                            Map.remove (key n) byId,
+                            (parentOf, w.Children n) ||> List.fold (fun m c -> Map.remove (key c) m)
+                        | Some again ->
+                            let kept =
+                                System.Collections.Generic.HashSet<string>(w.Children again |> List.map key)
+
+                            byId,
+                            (parentOf, w.Children n)
+                            ||> List.fold (fun m c ->
+                                let ck = key c
+                                if kept.Contains ck then m else Map.remove ck m))
                     (ix.ById, ix.ParentOf)
 
             let byId, parentOf =
                 arriving
                 |> List.fold
                     (fun (byId: Map<string, 'Node>, parentOf: Map<string, 'Id>) n ->
+                        let p = w.Id n
+
                         Map.add (key n) n byId,
-                        (parentOf, w.Children n) ||> List.fold (fun m c -> Map.add (key c) (w.Id n) m))
+                        (parentOf, w.Children n)
+                        ||> List.fold (fun m c ->
+                            let ck = key c
+
+                            match Map.tryFind ck m with
+                            | Some held when idw.Equals held p -> m
+                            | _ -> Map.add ck p m))
                     withdrawn
 
             { ById = byId

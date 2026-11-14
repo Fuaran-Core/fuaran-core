@@ -8,6 +8,9 @@ attribute Fuaran.Core.Anchor`1 RequireQualifiedAccess
 attribute Fuaran.Core.Diff+ChangeKind`1 RequireQualifiedAccess
 attribute Fuaran.Core.FootprintModule RequireQualifiedAccess
 attribute Fuaran.Core.GatedApplyFailure`1 RequireQualifiedAccess
+attribute Fuaran.Core.IndexRefusal`1 RequireQualifiedAccess
+attribute Fuaran.Core.IndexedTreeModule RequireQualifiedAccess
+attribute Fuaran.Core.IndexedTree`2 Sealed
 attribute Fuaran.Core.Interference RequireQualifiedAccess
 attribute Fuaran.Core.NestRelation RequireQualifiedAccess
 attribute Fuaran.Core.OpScopeModule RequireQualifiedAccess
@@ -52,6 +55,8 @@ field Fuaran.Core.Diff+ChangeKind`1+Tags.Reordered : System.Int32 (literal)
 field Fuaran.Core.FootprintModule.childListSlot : System.String (literal)
 field Fuaran.Core.GatedApplyFailure`1+Tags.Denied : System.Int32 (literal)
 field Fuaran.Core.GatedApplyFailure`1+Tags.Rejected : System.Int32 (literal)
+field Fuaran.Core.IndexRefusal`1+Tags.RepeatedId : System.Int32 (literal)
+field Fuaran.Core.IndexRefusal`1+Tags.Stale : System.Int32 (literal)
 field Fuaran.Core.Interference+Tags.LeftSlotsRightNode : System.Int32 (literal)
 field Fuaran.Core.Interference+Tags.LeftUnknownParent : System.Int32 (literal)
 field Fuaran.Core.Interference+Tags.LeftWritesRightReads : System.Int32 (literal)
@@ -109,6 +114,11 @@ method Fuaran.Core.FootprintModule.slotNodes(Microsoft.FSharp.Collections.FSharp
 method Fuaran.Core.FootprintModule.slotsAgainstNode(Fuaran.Core.Footprint, Fuaran.Core.Footprint) : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
 method Fuaran.Core.FootprintModule.structural(Fuaran.Core.Footprint) : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
 method Fuaran.Core.FootprintModule.union(Fuaran.Core.Footprint, Fuaran.Core.Footprint) : Fuaran.Core.Footprint
+method Fuaran.Core.IndexedTreeModule.adopt`2(Fuaran.Core.OpScope`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, !!0, Fuaran.Core.Tree+NodeIndex`2<!!0, !!1>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.IndexedTree`2<!!0, !!1>, Fuaran.Core.IndexRefusal`1<!!1>>
+method Fuaran.Core.IndexedTreeModule.applyAll`2(Fuaran.Core.Policy`2<!!0, !!1>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.SkeletonOp`2<!!0, !!1>>, Fuaran.Core.IndexedTree`2<!!0, !!1>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.IndexedTree`2<!!0, !!1>, Fuaran.Core.ScriptRejection`2<Fuaran.Core.IndexedTree`2<!!0, !!1>, !!1>>
+method Fuaran.Core.IndexedTreeModule.apply`2(Fuaran.Core.Policy`2<!!0, !!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, Fuaran.Core.IndexedTree`2<!!0, !!1>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.IndexedTree`2<!!0, !!1>, Fuaran.Core.Rejection`1<!!1>>
+method Fuaran.Core.IndexedTreeModule.canApply`2(Fuaran.Core.Policy`2<!!0, !!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, Fuaran.Core.IndexedTree`2<!!0, !!1>) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Core.Unit, Fuaran.Core.Rejection`1<!!1>>
+method Fuaran.Core.IndexedTreeModule.ofTree`2(Fuaran.Core.OpScope`2<!!0, !!1>, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.IndexedTree`2<!!0, !!1>, Fuaran.Core.IndexRefusal`1<!!1>>
 method Fuaran.Core.OpScopeModule.contained`2(Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>) : Fuaran.Core.OpScope`2<!!0, !!1>
 method Fuaran.Core.OpScopeModule.ids`2(Fuaran.Core.OpScope`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpList`1<!!1>
 method Fuaran.Core.OpScopeModule.keyed`2(Fuaran.Core.KeyedWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.Boolean>, Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>) : Fuaran.Core.OpScope`2<!!0, !!1>
@@ -147,6 +157,9 @@ method Fuaran.Core.WriteGateModule.lockOnly(Microsoft.FSharp.Collections.FSharpL
 method Fuaran.Core.WriteGateModule.targetsOf`2(Fuaran.Core.OpScope`2<!!0, !!1>, Fuaran.Core.SkeletonOp`2<!!0, !!1>, !!0) : Microsoft.FSharp.Collections.FSharpSet`1<System.String>
 property Fuaran.Core.ArbitrationModule.staleSampleSize : System.Int32 { get }
 property Fuaran.Core.FootprintModule.empty : Fuaran.Core.Footprint { get }
+property Fuaran.Core.IndexedTree`2.Index : Fuaran.Core.Tree+NodeIndex`2<!0, !1> { get }
+property Fuaran.Core.IndexedTree`2.Scope : Fuaran.Core.OpScope`2<!0, !1> { get }
+property Fuaran.Core.IndexedTree`2.Tree : !0 { get }
 property Fuaran.Core.RejectionNounsModule.generic : Fuaran.Core.RejectionNouns { get }
 property Fuaran.Core.WriteGateModule.allowAll : Fuaran.Core.WriteGate { get }
 record-field Fuaran.Core.Arbitration`2.Accepted #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpScriptProposal`2<!0, !1>>
@@ -207,6 +220,11 @@ type Fuaran.Core.GatedApplyFailure`1 (union)
 type Fuaran.Core.GatedApplyFailure`1+Denied (type)
 type Fuaran.Core.GatedApplyFailure`1+Rejected (type)
 type Fuaran.Core.GatedApplyFailure`1+Tags (type)
+type Fuaran.Core.IndexRefusal`1 (union)
+type Fuaran.Core.IndexRefusal`1+RepeatedId (type)
+type Fuaran.Core.IndexRefusal`1+Tags (type)
+type Fuaran.Core.IndexedTreeModule (module)
+type Fuaran.Core.IndexedTree`2 (type)
 type Fuaran.Core.Interference (union)
 type Fuaran.Core.Interference+LeftSlotsRightNode (type)
 type Fuaran.Core.Interference+LeftUnknownParent (type)
@@ -284,6 +302,8 @@ union-case Fuaran.Core.Diff+ChangeKind`1.Removed #1()
 union-case Fuaran.Core.Diff+ChangeKind`1.Reordered #5()
 union-case Fuaran.Core.GatedApplyFailure`1.NewDenied #0(Item: Fuaran.Core.WriteDenial)
 union-case Fuaran.Core.GatedApplyFailure`1.NewRejected #1(Item: Fuaran.Core.Rejection`1<!0>)
+union-case Fuaran.Core.IndexRefusal`1.NewRepeatedId #0(Item: !0)
+union-case Fuaran.Core.IndexRefusal`1.Stale #1()
 union-case Fuaran.Core.Interference.NewLeftSlotsRightNode #7(nodes: Microsoft.FSharp.Collections.FSharpSet`1<System.String>)
 union-case Fuaran.Core.Interference.NewLeftUnknownParent #4(relocated: Microsoft.FSharp.Collections.FSharpSet`1<System.String>, structural: Microsoft.FSharp.Collections.FSharpSet`1<System.String>)
 union-case Fuaran.Core.Interference.NewLeftWritesRightReads #1(addresses: Microsoft.FSharp.Collections.FSharpSet`1<System.String>)
