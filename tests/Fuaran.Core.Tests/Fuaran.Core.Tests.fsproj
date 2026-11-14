@@ -456,6 +456,7 @@
          (compiled through IdlDeriveTests.Projected), the sampler, the validator, the artifact and
          the classifier. Appended (append-only). -->
     <Compile Include="IdlCanonicalFormTests.fs" />
+    <Compile Include="IdlOmitWhenEmptyTests.fs" />
     <!-- Phase 377 - the collecting decoders and the public per-spec entries: the reference vocabulary's
          generated module with the decoders requested (rendered by the tool's `render generated`, with a
          drift guard); the tests hold the collecting form to its order, its paths and its first-defect

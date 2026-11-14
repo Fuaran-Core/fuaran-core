@@ -360,6 +360,7 @@ module Declare =
                               (path @ [ key "presence" ])
                               (sprintf "%s: the presence condition names '%s', which holds no member of its own" label s)
                       | _ -> ()
+                  | Some WhenNonEmpty
                   | None -> ()
 
               let names = reserved @ members fields
@@ -934,6 +935,18 @@ module Declare =
               for j, f in List.indexed fields do
                   match f.Presence with
                   | None -> ()
+                  // Phase 660 (DECISIONS.md D255) — the condition that reads the member itself: admitted
+                  // only on an Optional list, the one member whose empty value is a spelling of its absence.
+                  | Some WhenNonEmpty ->
+                      match f.Opt, f.Type with
+                      | Optional, TList _ -> ()
+                      | _ ->
+                          fault
+                              (fieldAt j @ [ key "presence" ])
+                              (sprintf
+                                  "%s, field '%s': a non-empty condition needs an Optional list member — it reads the member itself, and only an optional list has an empty value that means its absence"
+                                  owner
+                                  f.Name)
                   | Some c ->
                       let path = fieldAt j @ [ key "presence" ]
                       let at = sprintf "%s, field '%s'" owner f.Name
@@ -943,6 +956,7 @@ module Declare =
                           | WhenPresent s
                           | WhenAbsent s
                           | WhenEquals(s, _) -> s
+                          | WhenNonEmpty -> f.Name
 
                       match f.Opt with
                       | Optional

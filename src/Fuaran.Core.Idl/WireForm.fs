@@ -341,10 +341,17 @@ module internal WireForm =
     let private fieldNamed (fields: IdlField list) (name: string) : IdlField option =
         fields |> List.tryFind (fun f -> f.Name = name)
 
-    /// Whether a presence condition holds over a WIRE object's members (the decoder's question). The
-    /// sibling is read under its spellings; an `OmitDefault` sibling the object does not carry holds its
-    /// default.
-    let holdsOnWire (idl: Idl) (fields: IdlField list) (c: PresenceCondition) (members: (string * JVal) list) : bool =
+    /// Whether a presence condition of the member `self` holds over a WIRE object's members (the
+    /// decoder's question). The sibling is read under its spellings; an `OmitDefault` sibling the object
+    /// does not carry holds its default. Phase 660 — [[WhenNonEmpty]] reads `self` and fails only on an
+    /// explicit EMPTY array, so a member of the wrong kind still reaches its decoder and is refused there.
+    let holdsOnWire
+        (idl: Idl)
+        (fields: IdlField list)
+        (self: IdlField)
+        (c: PresenceCondition)
+        (members: (string * JVal) list)
+        : bool =
         let held (name: string) =
             fieldNamed fields name
             |> Option.bind (fun f -> memberAt f members |> Option.map (fun (_, j) -> f, j))
@@ -357,10 +364,20 @@ module internal WireForm =
             | Some(f, j), _ -> scalarSpellings idl f.Type v |> List.contains j
             | None, Some { Opt = OmitDefault d } -> d = v
             | None, _ -> false
+        | WhenNonEmpty ->
+            match memberAt self members with
+            | Some(_, JArr []) -> false
+            | _ -> true
 
-    /// Whether a presence condition holds over AUTHORED members (the encoder's and the sampler's
-    /// question): an absent or `VAbsent` `OmitDefault` sibling holds its default.
-    let holdsAuthored (fields: IdlField list) (c: PresenceCondition) (authored: (string * IdlValue) list) : bool =
+    /// Whether a presence condition of the member named `self` holds over AUTHORED members (the
+    /// encoder's and the sampler's question): an absent or `VAbsent` `OmitDefault` sibling holds its
+    /// default. Phase 660 — [[WhenNonEmpty]] holds when `self` holds a non-empty list.
+    let holdsAuthored
+        (fields: IdlField list)
+        (self: string)
+        (c: PresenceCondition)
+        (authored: (string * IdlValue) list)
+        : bool =
         let held (name: string) =
             match authored |> List.tryFind (fun (n, _) -> n = name) with
             | Some(_, v) when v <> VAbsent -> Some v
@@ -373,6 +390,10 @@ module internal WireForm =
         | WhenPresent s -> (held s).IsSome
         | WhenAbsent s -> (held s).IsNone
         | WhenEquals(s, v) -> held s = Some v
+        | WhenNonEmpty ->
+            match held self with
+            | Some(VList(_ :: _)) -> true
+            | _ -> false
 
     // -----------------------------------------------------------------------
     // Phase 550 (DECISIONS.md D198) — the STRICT-MEMBERS policy's data: the members an object of a
@@ -386,7 +407,7 @@ module internal WireForm =
     /// carried it.
     let readMember (idl: Idl) (fields: IdlField list) (f: IdlField) (members: (string * JVal) list) : JVal option =
         match f.Presence with
-        | Some c when not (holdsOnWire idl fields c members) -> None
+        | Some c when not (holdsOnWire idl fields f c members) -> None
         | _ -> memberAt f members |> Option.map snd
 
     // -----------------------------------------------------------------------

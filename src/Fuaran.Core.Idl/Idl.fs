@@ -513,6 +513,7 @@ type Optionality =
 /// sibling that is itself unconditional, declared, not host-only and not the member itself; [[WhenPresent]]
 /// and [[WhenAbsent]] need an `Optional` sibling (no other kind of member can be absent), and
 /// [[WhenEquals]] a scalar value (a string, an int, a bool or an enum spelling) at the sibling's type.
+/// [[WhenNonEmpty]] (Phase 660) names no sibling: it reads the member itself.
 and PresenceCondition =
     /// Meaningful only when the sibling is present (an `Optional` sibling holding `Some`).
     | WhenPresent of sibling: string
@@ -520,6 +521,13 @@ and PresenceCondition =
     | WhenAbsent of sibling: string
     /// Meaningful only when the sibling holds `value` — `Select.values` under `multiple = true`.
     | WhenEquals of sibling: string * value: IdlValue
+    /// **Meaningful only when the member ITSELF holds a non-empty list (Phase 660, DECISIONS.md D255)** —
+    /// the one condition that reads no sibling. Admitted only on an `Optional` list member, whose
+    /// canonical in-memory absence is `None`: `Some []` is a non-canonical spelling of it, so the encoder
+    /// writes no member for `None` or `Some []`, the decoder reads an explicit `[]` as `None`, and the
+    /// member's host type stays `'T list option`. A dependency list or a parameter list that says nothing
+    /// when empty declares it, and a generated encoder is canonical for it with no step in front of it.
+    | WhenNonEmpty
 
 /// One named slot of a kind, op, union case, record or the node envelope — its wire member
 /// name, the type of its value, and when it appears on the wire.

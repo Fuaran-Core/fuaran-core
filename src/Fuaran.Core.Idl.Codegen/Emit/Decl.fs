@@ -664,19 +664,27 @@ module internal Decl =
         fieldOwners idl
         |> List.exists (fun (_, fields) -> fields |> List.exists (fun f -> widerType f.Type))
 
-    /// Each alias or presence condition the vocabulary declares, as a phrase naming it — `[]` for a
-    /// vocabulary that declares none.
-    let canonicalFormDeclarations (idl: Idl) : string list =
+    /// Each alias or presence condition the vocabulary declares that a backend applying the conditions
+    /// `applied` does not apply, as a phrase naming it — `[]` for a vocabulary that declares none
+    /// (Phase 660: the TypeScript codec applies [[WhenNonEmpty]] and refuses the rest).
+    let canonicalFormDeclarationsBeyond (applied: PresenceCondition -> bool) (idl: Idl) : string list =
         [ for owner, fields in fieldOwners idl do
               for f in fields do
                   if not (List.isEmpty f.Aliases) then
                       yield sprintf "the aliases of field '%s' of %s" f.Name owner
 
-                  if f.Presence.IsSome then
+                  match f.Presence with
+                  | Some c when not (applied c) ->
                       yield sprintf "the presence condition of field '%s' of %s" f.Name owner
+                  | _ -> ()
           for e in idl.Enums do
               if e.Aliases |> List.exists (fun (_, a) -> not (List.isEmpty a)) then
                   yield sprintf "the case aliases of enum '%s'" e.Name ]
+
+    /// Each alias or presence condition the vocabulary declares, as a phrase naming it — `[]` for a
+    /// vocabulary that declares none.
+    let canonicalFormDeclarations (idl: Idl) : string list =
+        canonicalFormDeclarationsBeyond (fun _ -> false) idl
 
     // -----------------------------------------------------------------------
     // Phase 525 — the ONE admissibility of a declared default (see [[Literal]]).

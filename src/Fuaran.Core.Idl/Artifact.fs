@@ -891,7 +891,8 @@ module Artifact =
         omitting Omit.annotations get annotations fs
 
     /// A field's presence condition (Phase 539, DECISIONS.md D190): `$type`-tagged by its test, the
-    /// sibling it reads, and for an equality test the value, written as every authored value is.
+    /// sibling it reads, and for an equality test the value, written as every authored value is;
+    /// `{"$type":"whenNonEmpty"}` (Phase 660) carries its tag alone.
     let internal presenceCondition: Codec<PresenceCondition> =
         Codec.union
             "$type"
@@ -919,7 +920,9 @@ module Artifact =
                   WhenEquals
                   (Codec.record (fun s v -> s, v)
                    |> Codec.field "sibling" fst Codec.string
-                   |> Codec.field "value" snd idlValue) ]
+                   |> Codec.field "value" snd idlValue)
+              // Phase 660 (DECISIONS.md D255) — the member itself, read; no sibling to name.
+              bare "whenNonEmpty" WhenNonEmpty ]
         |> declared "presence"
 
     /// One field object. Field lists keep their AUTHORED order (the module's ordering contract).

@@ -289,18 +289,24 @@ module internal TypeScriptCodec =
             fun src t d ->
                 tsIsDefault idl disc src t d
                 |> Result.map (fun pred present -> "(" + pred + " ? null : " + present + ")")
-          // Phase 539 — this codec does not apply a presence condition; [[Gen.typescriptModule]]
-          // refuses a vocabulary that declares one before any member is printed, and this refusal
-          // names it should one ever reach here.
+          // Phase 539 — this codec applies one presence condition, [[WhenNonEmpty]] (Phase 660): an
+          // optional list written only when it holds an item, so `[]` and `undefined` write the same
+          // bytes. [[Gen.typescriptModule]] refuses a vocabulary declaring any other before a member is
+          // printed, and this refusal names it should one ever reach here.
           When =
-            fun _ _ _ ->
-                Error(
-                    CodegenError.UnsupportedConstruct(
-                        "a presence condition",
-                        "GP5: a backend applies a canonical-form declaration or refuses it by name, never ignores it",
-                        "generate this vocabulary's codec with the F# backend, which applies it"
+            fun _ srcOf self c ->
+                match c with
+                | WhenNonEmpty ->
+                    let src = srcOf self.Name
+                    Ok(fun piece -> "(" + src + " !== undefined && " + src + ".length > 0 ? " + piece + " : null)")
+                | _ ->
+                    Error(
+                        CodegenError.UnsupportedConstruct(
+                            "a presence condition",
+                            "GP5: a backend applies a canonical-form declaration or refuses it by name, never ignores it",
+                            "generate this vocabulary's codec with the F# backend, which applies it"
+                        )
                     )
-                )
           // Phase 474 — this codec lays out no inline declaration: [[Gen.typescriptModule]] refuses a
           // vocabulary that declares one before any member is printed.
           Inline = fun _ _ -> None }
@@ -596,7 +602,13 @@ module internal TypeScriptCodec =
     let tsMemberDecPrinter (idl: Idl) (disc: string) : MemberDecPrinter =
         { Slot = tsDecPrinter
           Key = SourceLit.tsString
-          Object = fun _ _ -> "fs"
+          // Phase 660 — a member declared [[WhenNonEmpty]] is read from a view of the object without it
+          // when it holds an explicit empty array ([[tsNonEmptyHelper]]), so `[]` decodes as absent.
+          Object =
+            fun _ f ->
+                match f.Presence with
+                | Some WhenNonEmpty -> "dNonEmpty(fs, " + SourceLit.tsString f.Name + ")"
+                | _ -> "fs"
           Req = fun key o d -> "dReq(" + key + ", " + o + ", " + d + ")"
           Opt = fun key o d -> "dOpt(" + key + ", " + o + ", " + d + ")"
           Def = fun key o d lit -> "dDef(" + key + ", " + o + ", " + d + ", " + lit + ")"
@@ -774,6 +786,23 @@ module internal TypeScriptCodec =
         let discLit = SourceLit.tsStringSingle disc
 
         (Template.text "ts-decode-prelude.js").Replace("__DISC__", discLit)
+
+    /// Phase 660 (DECISIONS.md D255) — the one presence condition this codec applies, [[WhenNonEmpty]].
+    let applies (c: PresenceCondition) : bool = (c = WhenNonEmpty)
+
+    /// Whether the vocabulary declares a [[WhenNonEmpty]] member anywhere, so [[tsNonEmptyHelper]] is
+    /// emitted only then and every other module is byte-for-byte what it was.
+    let declaresNonEmpty (idl: Idl) : bool =
+        Decl.fieldOwners idl
+        |> List.exists (fun (_, fields) -> fields |> List.exists (fun f -> f.Presence = Some WhenNonEmpty))
+
+    /// Phase 660 — the decoder's view of an object for a member declared [[WhenNonEmpty]]: an explicit
+    /// EMPTY array is the member absent (an empty object stands for the view, read for that member
+    /// alone), and anything else, a member of the wrong kind included, reaches its decoder.
+    let tsNonEmptyHelper =
+        "// Phase 660 — an optional list declared non-empty: an explicit empty array reads as absent.
+"
+        + "const dNonEmpty = (fs, name) => hasOwn(fs, name) && Array.isArray(fs[name]) && fs[name].length === 0 ? {} : fs;"
 
     /// Phase 337 — the parse leg of the TypeScript `decodeNode`, held to the F# reader's
     /// answers (`Decoder.parse`): text the reader cannot parse is `InvalidJson` at the root, and
@@ -1117,6 +1146,7 @@ const plain = (pairs) =>
           [ kindDispatch ]
           Ok(tsDecodePrelude disc)
           :: (if decl.HostedFormat then [ Ok tsFormatHelper ] else [])
+          @ (if declaresNonEmpty idl then [ Ok tsNonEmptyHelper ] else [])
           @ (if Decl.reachesWider idl then
                  [ Ok(Template.text "ts-wider-helpers.js") ]
              else
