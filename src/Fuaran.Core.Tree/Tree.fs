@@ -350,6 +350,15 @@ module Tree =
     /// conformant witness (`ReplaceChildren` round-trips, per the witness laws) the result is the
     /// same tree. The FIRST preorder node carrying `target` is the one rewritten — on a
     /// well-formed tree (unique ids, `Tree.wellFormed`) it is the only one.
+    ///
+    /// **The search allocates per level, not per visited node (Phase 657).** It keeps ONE frame
+    /// per level of the path it is on — the ancestor, the index of the child being searched below
+    /// it, and that child's later siblings — in a frame stack reused across the walk: descending
+    /// pushes a frame, stepping to the next sibling overwrites the top frame in place, and a
+    /// finished subtree pops it. So a write costs the path it rebuilds plus the frame stack, where
+    /// the list-of-work-items search it replaces built two tuples and three list cells for every
+    /// child of every node it visited (48,816 B for one write on a 241-node, 24-deep tree against
+    /// 11,840 B now, Release; the 0.43.0 ledger). On a match the frames ARE the path.
     let updateNode
         (w: NodeWitness<'Node, 'Id>)
         (idw: IdWitness<'Id>)
@@ -357,21 +366,51 @@ module Tree =
         (f: 'Node -> 'Node)
         (root: 'Node)
         : 'Node option =
-        // each work item: a node, and its ancestors nearest-first with the child index taken at each
-        let rec find (stack: ('Node * ('Node * int) list) list) =
-            match stack with
-            | [] -> None
-            | (node, ancestors) :: rest ->
-                if idw.Equals (w.Id node) target then
-                    Some(node, ancestors)
-                else
-                    find ((w.Children node |> List.mapi (fun i c -> c, (node, i) :: ancestors)) @ rest)
+        let frames = ResizeArray<struct ('Node * int * 'Node list)>()
+        let mutable current = root
+        let mutable result = None
+        let mutable searching = true
 
-        find [ root, [] ]
-        |> Option.map (fun (node, ancestors) ->
-            (f node, ancestors)
-            ||> List.fold (fun child (parent, i) ->
-                w.ReplaceChildren parent (w.Children parent |> List.mapi (fun j c -> if j = i then child else c))))
+        while searching do
+            if idw.Equals (w.Id current) target then
+                // rebuild the path bottom-up: each ancestor with its one changed child
+                let mutable child = f current
+
+                for k in frames.Count - 1 .. -1 .. 0 do
+                    let struct (parent, i, _) = frames[k]
+                    let changed = child
+
+                    child <-
+                        w.ReplaceChildren
+                            parent
+                            (w.Children parent |> List.mapi (fun j c -> if j = i then changed else c))
+
+                result <- Some child
+                searching <- false
+            else
+                match w.Children current with
+                | c :: later ->
+                    frames.Add(struct (current, 0, later))
+                    current <- c
+                | [] ->
+                    // climb to the nearest ancestor with a later sibling still to search
+                    let mutable stepped = false
+
+                    while not stepped && frames.Count > 0 do
+                        let top = frames.Count - 1
+                        let struct (parent, i, later) = frames[top]
+
+                        match later with
+                        | s :: rest ->
+                            frames[top] <- struct (parent, i + 1, rest)
+                            current <- s
+                            stepped <- true
+                        | [] -> frames.RemoveAt top
+
+                    if not stepped then
+                        searching <- false
+
+        result
 
     /// The digest pre-image of a tree under a per-node labelling: every preorder node as TWO
     /// fields — its label, then its ARITY (`List.length (w.Children n)`, as a decimal) — through

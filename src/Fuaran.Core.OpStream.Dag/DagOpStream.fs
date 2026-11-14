@@ -2030,6 +2030,33 @@ module Dag =
                 closureInOrder reach sh notInBase |> List.map (fun id -> reach.Graph.Nodes[id])
             | _ -> between reach.Graph baseId head
 
+        /// The history above the node at slot `sn` in the closure of the head at slot `sh` (Phase 662):
+        /// `Ok` the ids in the head's closure and not in the node's, in the drain's order, or `Error` the
+        /// first of them that does not descend from the node — the answer `Dag.replayFrom`'s private
+        /// `above` gives over the head's order and the node's closure. Read from the two bitsets: their
+        /// words are compared in place and the region's slots sorted by drain position, so it allocates
+        /// in proportion to the region, never the history. A region node descends from the node exactly
+        /// when its own bitset holds the node's slot, which is `above`'s parent-by-parent check: the
+        /// drain places a descendant's path from the node before it, and that path lies in the region.
+        let internal above (reach: Reach<'Op>) (sn: int) (sh: int) : Result<string list, string> =
+            let bh = reach.Bits[sh]
+            let bn = reach.Bits[sn]
+            let region = ResizeArray<int>()
+
+            for k in 0 .. bh.Length - 1 do
+                let d = if k < bn.Length then bh[k] &&& ~~~bn[k] else bh[k]
+
+                if d <> 0 then
+                    for b in 0..31 do
+                        if ((d >>> b) &&& 1) = 1 then
+                            region.Add((k <<< 5) + b)
+
+            let ordered = region.ToArray() |> Array.sortBy (fun j -> reach.Pos[j])
+
+            match ordered |> Array.tryFind (fun j -> not (hasBit reach.Bits[j] sn)) with
+            | Some j -> Error reach.Ids[j]
+            | None -> Ok [ for j in ordered -> reach.Ids[j] ]
+
         /// The index for `dag'`, which is `reach`'s DAG with node `id` added (or already held) — the
         /// step `appendIndexed` / `mergeIndexed` take. The new node is a leaf, so the drain of the
         /// other nodes is unchanged: it enters at the first position after its last parent whose
@@ -2460,16 +2487,32 @@ module Dag =
         replayAbove w cp dag headId (fun () -> tryTopoOrder dag headId) (fun () -> ancestorsOf dag cp.Node)
 
     /// `replayFrom` over a reachability index (Phase 288, on Phase 289's `Reach`): the same answer on
-    /// `Reach.dag reach`, with the head's order and the checkpoint's closure read from the index — so on a
-    /// full history the walk the replay saves is not paid back in closure walks.
+    /// `Reach.dag reach`. Where the index holds both the checkpoint's node and the head, the history above
+    /// the checkpoint is read from their two bitsets (Phase 662) — neither the checkpoint's closure nor the
+    /// head's order is built — so a replay costs the region above the checkpoint, not the history below
+    /// it. Otherwise (a node on or below a cycle) the head's order and the checkpoint's closure are read
+    /// from the index and filtered as `replayFrom` does.
     let replayFromWith
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (cp: Checkpoint<'State>)
         (reach: Reach<'Op>)
         (headId: string)
         : Result<'State, CheckpointFault<'Rej>> =
-        replayAbove w cp reach.Graph headId (fun () -> Reach.tryTopoOrder reach headId) (fun () ->
-            Reach.ancestors reach cp.Node)
+        match Map.tryFind cp.Node reach.Slot, Map.tryFind headId reach.Slot with
+        | Some sn, Some sh ->
+            // a slotted id is held and a slotted head drains, so the first refusal that can apply is
+            // `Unreached`, then `Uncovered`, then the domain's — `replayAbove`'s order
+            if not (Reach.reaches reach cp.Node headId) then
+                Error(CheckpointFault.Unreached headId)
+            else
+                match Reach.above reach sn sh with
+                | Error id -> Error(CheckpointFault.Uncovered id)
+                | Ok delta ->
+                    fold w cp.State reach.Graph delta
+                    |> Result.mapError (ReplayFault.Rejected >> CheckpointFault.Replay)
+        | _ ->
+            replayAbove w cp reach.Graph headId (fun () -> Reach.tryTopoOrder reach headId) (fun () ->
+                Reach.ancestors reach cp.Node)
 
     /// Take a checkpoint at `nodeId` from an EARLIER checkpoint (Phase 288): `replayFrom w origin dag
     /// nodeId`, sealed — how a DAG that begins at a checkpoint takes its next one, since its history
