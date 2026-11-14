@@ -638,6 +638,28 @@ module CapabilityRegistry =
         : PolicyDecision =
         Seam.decide r.Seam ctx grant id args
 
+    /// The registry's NAMED decision for an invocation, read without dispatching it (Phase 650): `Ok`
+    /// of the name of the gate that made the decision and the decision `decide` answers — the first
+    /// gate of the most restrictive rank, `""` when every gate allows — or, where no gate decided, the
+    /// refusal `dispatch` gives: `NoSuchCapability` naming the registered ids for an unregistered
+    /// id, the validation refusal for arguments that do not validate. It reads `grant` as `decide`
+    /// does: a `NeedsApproval` `grant` is for exactly this invocation is lifted to `Allow`, and its
+    /// name is kept. No observer is told.
+    ///
+    /// **Advisory.** It answers what a dispatch made now would decide, from the one function a
+    /// dispatch judges by, so `dispatch` refuses `PolicyRefused(name, guidance)` for
+    /// `Ok(name, Deny guidance)` and `ApprovalRequired name` for `Ok(name, NeedsApproval)`, and runs
+    /// the body for `Ok(_, Allow)`. But `dispatch` decides again and is authoritative: a host never
+    /// admits a call on this read alone.
+    let decideNamed
+        (r: CapabilityRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
+        (id: string)
+        (args: (string * string) list)
+        : Result<string * PolicyDecision, InvokeError> =
+        Seam.decideNamed r.Seam ctx grant id args
+
     /// The capability registered under exactly `id` (ordinal, case-sensitive), or `None`.
     let tryFind (id: string) (r: CapabilityRegistry<'Ctx>) : Capability option = Seam.tryFind id r.Seam
 
