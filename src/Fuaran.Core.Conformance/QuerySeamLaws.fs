@@ -702,9 +702,11 @@ module internal QuerySeamLaws =
     /// with the domain's `resolver` (a per-call argument since Phase 391), counted, and the family certifies that a dispatch has exactly three
     /// outcomes (`Ok(Failed _)` never escapes, and an `ExecutionFailed` carries the resolver's own
     /// failure), that **a refused dispatch runs no resolver** (and a dispatched one runs it exactly
-    /// once), and that the host agrees with the registry: a call reaches the resolver iff its id is
-    /// registered and `Query.validateParams` accepts its arguments, and a refused call carries the
-    /// registry's own error. `queryLaws` beside it certifies Core's seam at Core's fixtures and
+    /// once), and that the host agrees with the registry: a call reaches the resolver iff the
+    /// registry's NAMED decision for it (`QueryRegistry.decideNamed`, Phase 650) is `Allow`, and a
+    /// refused call carries the registry's own error — `NoSuchQuery`, the validation refusal, or the
+    /// policy refusal the named decision is (`QueryPolicyRefused` / `QueryApprovalRequired` naming
+    /// the gate). The read tells no observer. `queryLaws` beside it certifies Core's seam at Core's fixtures and
     /// cannot see any of this.
     ///
     /// **Vacuity.** Guarded on the three outcomes — settled, pending and refused before the
@@ -717,8 +719,6 @@ module internal QuerySeamLaws =
         (runner: LawKit.Runner)
         (iterations: int)
         : LawResult list =
-        let known = QueryRegistry.enumerate w.Queries |> List.map _.Id
-
         // Phase 302 — the result law. Nothing bound a resolver's answer to the query's declared
         // `ResultSchema`: `Query.invoke` hands a `Ready` result back as the resolver built it, and the
         // seam laws compare the host with the registry, never the answer with the declaration — so a
@@ -762,12 +762,13 @@ module internal QuerySeamLaws =
 
         let seam =
             LawKit.seamLaws
-                { Lookup =
-                    fun id ->
-                        match QueryRegistry.tryFind id w.Queries with
-                        | None -> Error(NoSuchQuery(id, known))
-                        | Some q -> Ok q
-                  Validate = Query.validateParams
+                { Admitted =
+                    fun id args ->
+                        match QueryRegistry.decideNamed w.Queries id args with
+                        | Error e -> Error e
+                        | Ok(_, PolicyDecision.Allow) -> Ok()
+                        | Ok(name, PolicyDecision.Deny g) -> Error(QueryPolicyRefused(name, g.Message, g.Alternatives))
+                        | Ok(name, PolicyDecision.NeedsApproval) -> Error(QueryApprovalRequired name)
                   Body = resolver
                   Dispatch = w.Dispatch
                   Gen = w.GenQuery

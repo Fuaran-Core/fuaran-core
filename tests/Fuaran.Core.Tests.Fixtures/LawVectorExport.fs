@@ -6,7 +6,8 @@ namespace Fuaran.Core.Tests
 //  exact decimal's documents (`laws/decimal-laws.json`, Phase 276), the
 //  schema field's documents (`laws/field-laws.json`, Phase 427) and the
 //  propagation vectors (`laws/propagation-laws.json`, Phase 538, rendered by
-//  `PropagationVectorExport`).
+//  `PropagationVectorExport`) and the capability gate family
+//  (`laws/capability-gate-laws.json`, Phase 650).
 //
 //  Until Phase 258 this module also exported `Conformance.transformLaws`'
 //  reference answers (`laws/transform-laws.json`, fuaran#1479). Those answers
@@ -384,6 +385,376 @@ module LawVectorExport =
                       "seed", jint seed
                       "iterations", jint iterations
                       "description", jstr description ]
+                  Items = "vectors"
+                  Rows = allVectors () |> List.map renderVector }
+
+        let render () : string = renderAt (kitVersion ())
+
+    // -----------------------------------------------------------------------
+    //  the capability gate family (Phase 650)
+    // -----------------------------------------------------------------------
+    //  Phase 638 gave a gate a decision context and let a dispatch present a grant (DECISIONS.md
+    //  D249), and its laws hold in the conformance package; none of it was in the emitted vectors, so a
+    //  port had nothing to certify the grant against. This family emits it, in a file of its own
+    //  (D255.1): every host that reads `capability-laws.json` today fails on a `case` it does not know,
+    //  so a section of that file would turn them red.
+    //
+    //  A gate is a function and a vector is data, so the family DECLARES its gates: a table a port reads
+    //  and decides from. A gate answers its rule's decision for a (context, capability) pair it has a
+    //  rule for, and `allow` for every other; the registry joins the gates in order. The contexts are
+    //  two opaque labels, and the registry is three capabilities of the kit's own, over an integer, a
+    //  number and a string hole. Every `expected` is computed by CALLING the kit: the identity by
+    //  `Capability.invocationPreimage`, a decision by `CapabilityRegistry.decideNamed`, a dispatch by
+    //  `CapabilityRegistry.dispatch` with a performer that records whether it ran. No seed: nothing is
+    //  drawn.
+
+    module Gates =
+
+        let fileName = "capability-gate-laws.json"
+
+        let familyId = "capabilityGateLaws"
+
+        let private hole (addr: string) (space: ValueSpace) : SigEntry =
+            { Addr = addr
+              Name = addr
+              Kind = ValueHole space
+              Required = true }
+
+        let private cap (id: string) (holes: SigEntry list) (result: Returns) : Capability =
+            Capability.create
+                id
+                { Name = id
+                  Holes = holes
+                  Effect = Effect.pureDeterministic }
+                Server
+                result
+
+        /// The registry's three capabilities, in id order.
+        let capabilities: Capability list =
+            [ cap "erase" [ hole "n" (IntRange(0, 99)) ] Returns.Nothing
+              cap "read" [ hole "n" (IntRange(0, 99)) ] (Returns.Value(IntRange(0, 99)))
+              cap
+                  "write"
+                  [ hole "n" (IntRange(0, 99))
+                    hole "x" (FloatRange(0.0, 10.0))
+                    hole "s" AnyString ]
+                  Returns.Nothing ]
+
+        let private capOf (id: string) =
+            capabilities |> List.find (fun c -> c.Id = id)
+
+        /// The two decision contexts, as the opaque labels the gate table names.
+        let contexts = [ "trusted"; "untrusted" ]
+
+        /// One row of a gate's table: the decision it gives for one context and one capability.
+        type Rule =
+            { Context: string
+              Capability: string
+              Decision: PolicyDecision }
+
+        /// The gate table, in the order the registry runs the gates. Chosen so that every decision
+        /// appears under each context, a later gate of a higher rank takes the name (`erase`, trusted),
+        /// and two gates of one rank leave it with the first (`write`, untrusted).
+        let gates: (string * Rule list) list =
+            let rule ctx capability decision =
+                { Context = ctx
+                  Capability = capability
+                  Decision = decision }
+
+            [ "ceiling",
+              [ rule "untrusted" "write" PolicyDecision.NeedsApproval
+                rule "untrusted" "erase" (PolicyDecision.denyWith "erasing is not open to this context" [ "read" ])
+                rule "trusted" "erase" PolicyDecision.NeedsApproval ]
+              "audit",
+              [ rule "untrusted" "write" PolicyDecision.NeedsApproval
+                rule "untrusted" "erase" PolicyDecision.NeedsApproval
+                rule "trusted" "write" PolicyDecision.NeedsApproval
+                rule "trusted" "erase" (PolicyDecision.deny "an erase is held for the audit") ] ]
+
+        /// The production registry the table declares: the three capabilities, one gate per table, each
+        /// deciding its rule for the context and the capability and `Allow` otherwise.
+        let registry: CapabilityRegistry<string> =
+            let registered =
+                capabilities
+                |> List.fold (fun r c -> r |> Result.bind (CapabilityRegistry.register c)) (Ok CapabilityRegistry.empty)
+                |> Result.defaultWith (fun e -> failwithf "the gate family's registry did not build: %A" e)
+
+            gates
+            |> List.fold
+                (fun r (policy, rules) ->
+                    r
+                    |> CapabilityRegistry.withGate
+                        { Policy = policy
+                          Decide =
+                            fun ctx c _ ->
+                                rules
+                                |> List.tryFind (fun x -> x.Context = ctx && x.Capability = c.Id)
+                                |> Option.map _.Decision
+                                |> Option.defaultValue PolicyDecision.Allow })
+                registered
+
+        let private decisionCells (d: PolicyDecision) : (string * CorpusCell) list =
+            match d with
+            | PolicyDecision.Allow -> [ "decision", jstr "allow" ]
+            | PolicyDecision.NeedsApproval -> [ "decision", jstr "needsApproval" ]
+            | PolicyDecision.Deny g ->
+                [ "decision", jstr "deny"
+                  "message", jstr g.Message
+                  "alternatives", jarr (g.Alternatives |> List.map jstr) ]
+
+        let private argsJson (args: (string * string) list) : CorpusCell =
+            args
+            |> List.map (fun (addr, value) -> jobj [ "addr", jstr addr; "value", jstr value ])
+            |> jarr
+
+        /// The `grant` member: the identity a presented grant carries, and no member when none is
+        /// presented (the wire carries no null).
+        let private grantMember (grant: Grant option) : (string * CorpusCell) list =
+            match grant with
+            | Some g -> [ "grant", jstr g.Invocation ]
+            | None -> []
+
+        /// The refusals a named read or a dispatch answers, in the seam codec's member names.
+        let private refusalCells (e: InvokeError) : (string * CorpusCell) list =
+            match e with
+            | NoSuchCapability(id, known) ->
+                [ "error", jstr "noSuchCapability"
+                  "id", jstr id
+                  "known", jarr (known |> List.map jstr) ]
+            | ArgOutOfSpace(addr, _, _) -> [ "error", jstr "argOutOfSpace"; "addr", jstr addr ]
+            | PolicyRefused(policy, reason, allowed) ->
+                [ "error", jstr "policyRefused"
+                  "policy", jstr policy
+                  "reason", jstr reason
+                  "allowed", jarr (allowed |> List.map jstr) ]
+            | ApprovalRequired policy -> [ "error", jstr "approvalRequired"; "policy", jstr policy ]
+            | other -> [ "error", jstr "unexpected"; "detail", jstr (InvokeError.describe other) ]
+
+        // ---- the identity (t2): model-stamped, `invocation_identity` answers the whole of it ----
+
+        let private identity (id: string) (capability: string) (args: (string * string) list) : Vector =
+            let c = capOf capability
+            let reference = Capability.invocationPreimage c args
+
+            { Id = id
+              Case = "invocationIdentity"
+              Model = CapabilityOracle.answer [ "identity", jstr (CapabilityOracle.invocationIdentity c args) ]
+              Input = [ "capability", jstr capability; "args", argsJson args ]
+              Expected = [ "identity", jstr reference ] }
+
+        /// The arguments every decision and dispatch vector presents, per capability.
+        let argsFor (capability: string) : (string * string) list =
+            match capability with
+            | "write" -> [ "n", "7"; "x", "1.5"; "s", "a" ]
+            | _ -> [ "n", "3" ]
+
+        /// The same invocation with its integer binding moved by one: another invocation.
+        let otherArgsFor (capability: string) : (string * string) list =
+            argsFor capability
+            |> List.map (fun (a, v) -> if a = "n" then a, string (int v + 1) else a, v)
+
+        let internal identityVectors () : Vector list =
+            let w = argsFor "write"
+
+            [ identity "gate-identity-write" "write" w
+              identity "gate-identity-integer-spelling" "write" [ "n", "07"; "x", "1.5"; "s", "a" ]
+              identity "gate-identity-number-spelling" "write" [ "n", "7"; "x", "1.50"; "s", "a" ]
+              identity "gate-identity-out-of-address-order" "write" [ "s", "a"; "x", "1.5"; "n", "7" ]
+              identity "gate-identity-holds-the-separator" "write" [ "n", "7"; "x", "1.5"; "s", "a\u0001b" ]
+              identity "gate-identity-holds-the-escape" "write" [ "n", "7"; "x", "1.5"; "s", "a\u0010\u0001" ]
+              identity "gate-identity-one-binding-differs" "write" (otherArgsFor "write")
+              identity "gate-identity-read" "read" (argsFor "read")
+              identity "gate-identity-other-capability" "erase" (argsFor "erase") ]
+
+        // ---- the grant (t3/t4): model-stamped, `granted` answers the whole of it ----
+
+        let private covers (id: string) (capability: string) (args: (string * string) list) (grant: Grant option) =
+            let c = capOf capability
+
+            { Id = id
+              Case = "grantCovers"
+              Model =
+                CapabilityOracle.answer
+                    [ "covers",
+                      CorpusCell.Value(JBool(CapabilityOracle.granted c args (grant |> Option.map _.Invocation))) ]
+              Input = [ "capability", jstr capability; "args", argsJson args ] @ grantMember grant
+              Expected =
+                [ "covers",
+                  CorpusCell.Value(JBool(Grant.covers (Capability.invocationPreimage c args) (Option.toList grant))) ] }
+
+        let internal grantVectors () : Vector list =
+            let w = argsFor "write"
+            let own = Capability.grant (capOf "write") w
+
+            [ covers "gate-grant-own" "write" w (Some own)
+              // the same invocation, spelled otherwise: the grant minted for it covers it
+              covers "gate-grant-own-other-spelling" "write" [ "n", "07"; "x", "1.50"; "s", "a" ] (Some own)
+              covers
+                  "gate-grant-other-arguments"
+                  "write"
+                  w
+                  (Some(Capability.grant (capOf "write") (otherArgsFor "write")))
+              covers
+                  "gate-grant-other-capability"
+                  "read"
+                  (argsFor "read")
+                  (Some(Capability.grant (capOf "erase") (argsFor "erase")))
+              covers "gate-grant-none" "write" w None ]
+
+        // ---- the decision and the dispatch (t3): reference-only ----
+        //  The model states the gates' join (`decide_named`), the lift (`grant_lifted`) and the gated
+        //  dispatch (`dispatch_gated`) and proves them, but none is extracted, so no oracle function can
+        //  answer these vectors; they are declared reference-only in the file's head with that reason.
+
+        /// The three grants a decision is asked under: none, the grant for this invocation, and a grant
+        /// for another invocation of the same capability.
+        let private grantsFor (capability: string) : (string * Grant option) list =
+            let c = capOf capability
+
+            [ "none", None
+              "own", Some(Capability.grant c (argsFor capability))
+              "other", Some(Capability.grant c (otherArgsFor capability)) ]
+
+        let private namedCells (named: Result<string * PolicyDecision, InvokeError>) : (string * CorpusCell) list =
+            match named with
+            | Ok(policy, d) -> [ "verdict", jstr "decided"; "policy", jstr policy ] @ decisionCells d
+            | Error e -> ("verdict", jstr "refused") :: refusalCells e
+
+        let private decision
+            (id: string)
+            (ctx: string)
+            (capability: string)
+            (args: (string * string) list)
+            (grant: Grant option)
+            : Vector =
+            { Id = id
+              Case = "decideNamed"
+              Model = None
+              Input =
+                [ "context", jstr ctx; "capability", jstr capability; "args", argsJson args ]
+                @ grantMember grant
+              Expected = namedCells (CapabilityRegistry.decideNamed registry ctx grant capability args) }
+
+        let internal decisionVectors () : Vector list =
+            [ for ctx in contexts do
+                  for c in capabilities do
+                      for label, grant in grantsFor c.Id do
+                          yield
+                              decision
+                                  (sprintf "gate-decide-%s-%s-grant-%s" ctx c.Id label)
+                                  ctx
+                                  c.Id
+                                  (argsFor c.Id)
+                                  grant
+              yield
+                  decision
+                      "gate-decide-unregistered"
+                      "untrusted"
+                      "missing"
+                      (argsFor "read")
+                      (Some(Capability.grant (capOf "read") (argsFor "read")))
+              yield decision "gate-decide-invalid-arguments" "untrusted" "erase" [ "n", "100" ] None ]
+
+        let private dispatch
+            (id: string)
+            (ctx: string)
+            (capability: string)
+            (args: (string * string) list)
+            (grant: Grant option)
+            : Vector =
+            let ran = ref 0
+
+            let outcome =
+                CapabilityRegistry.dispatch registry ctx grant capability args (fun _ () ->
+                    ran.Value <- ran.Value + 1
+                    Ready "performed")
+
+            let expected =
+                match outcome with
+                | Ok(Ready _) when ran.Value = 1 -> [ "outcome", jstr "performed" ]
+                | Error e when ran.Value = 0 -> ("outcome", jstr "refused") :: refusalCells e
+                | other ->
+                    [ "outcome", jstr "unexpected"
+                      "detail", jstr (sprintf "%A after %d run(s)" other ran.Value) ]
+
+            { Id = id
+              Case = "dispatch"
+              Model = None
+              Input =
+                [ "context", jstr ctx; "capability", jstr capability; "args", argsJson args ]
+                @ grantMember grant
+              Expected = expected }
+
+        let internal dispatchVectors () : Vector list =
+            let own c =
+                Some(Capability.grant (capOf c) (argsFor c))
+
+            let other c =
+                Some(Capability.grant (capOf c) (otherArgsFor c))
+
+            [ dispatch "gate-dispatch-denied" "untrusted" "erase" (argsFor "erase") (own "erase")
+              dispatch "gate-dispatch-denied-trusted" "trusted" "erase" (argsFor "erase") (own "erase")
+              dispatch "gate-dispatch-parked" "untrusted" "write" (argsFor "write") None
+              dispatch "gate-dispatch-parked-other-grant" "untrusted" "write" (argsFor "write") (other "write")
+              dispatch "gate-dispatch-granted" "untrusted" "write" (argsFor "write") (own "write")
+              dispatch "gate-dispatch-allowed" "trusted" "read" (argsFor "read") None
+              dispatch "gate-dispatch-unregistered" "untrusted" "missing" (argsFor "write") (own "write") ]
+
+        let internal allVectors () : Vector list =
+            identityVectors () @ grantVectors () @ decisionVectors () @ dispatchVectors ()
+
+        /// The cases no extracted model answers, each with its reason: a host reads it beside the
+        /// `answeredBy` stamp each such vector carries.
+        let referenceOnly: (string * string) list =
+            [ "decideNamed",
+              "the model states the gates' join and the grant's lift (decide_named, grant_lifted in proofs/Capability.fst) and proves them, but neither is extracted, so no oracle function answers a decision"
+              "dispatch",
+              "the model's gated dispatch (dispatch_gated) is stated and proved over the same unextracted join, and no oracle function runs it" ]
+
+        let private ruleCell (r: Rule) : CorpusCell =
+            jobj (
+                [ "context", jstr r.Context; "capability", jstr r.Capability ]
+                @ decisionCells r.Decision
+            )
+
+        let private description =
+            "The capability registry's gate, decision context and grant (Phase 638, DECISIONS.md D249), as data a port decides from (Phase 650, D255). "
+            + "Authored inputs, each `expected` computed by calling the pinned kit; no seed. `registry` holds the three capability declarations, each a canonical "
+            + "declaration as a JSON string. `contexts` names the two decision contexts, opaque labels. `gates` is the gate table in the order the registry runs it: "
+            + "a gate answers the `decision` of its rule for the (context, capability) pair, and `allow` for any pair it has no rule for. The registry's decision is "
+            + "the join over every gate in order (allow < needsApproval < deny, a deny keeping its message and alternatives), and the gate that made it is the FIRST "
+            + "gate whose decision has the greatest rank; `policy` is \"\" when every gate allows. `invocationIdentity` vectors expect the identity a grant is bound "
+            + "to: the fields id, then for each binding its address and its value's canonical spelling in its hole's space (an integer without sign or leading zeros, "
+            + "a number in its shortest round-trip form, a string as given), the bindings sorted by address (ordinal), each field written with every U+0010 and U+0001 "
+            + "it holds preceded by U+0010, then terminated by U+0001; no hash is taken. `grantCovers` vectors expect whether a presented grant (the `grant` member, an identity; "
+            + "absent when none is presented) is for exactly this invocation: it is when the two identities are equal as strings. `decideNamed` vectors expect the registry's named decision for "
+            + "an invocation under a context with a grant presented: `decided` with the deciding gate and the decision, where a needsApproval a covering grant lifts "
+            + "is `allow` and keeps the gate's name, and no grant lifts a deny; or, where no gate decided, `refused` with the refusal a dispatch gives (an unregistered "
+            + "id is `noSuchCapability` with the registered ids, an argument out of its space `argOutOfSpace`). `dispatch` vectors expect `performed` when the performer "
+            + "ran, exactly once, or `refused` with the refusal: `policyRefused` naming the gate with its reason and alternatives for a deny, `approvalRequired` naming "
+            + "the gate for a needsApproval no grant lifts, `noSuchCapability` for an unregistered id whatever is presented; a refused dispatch never runs the performer. "
+            + "`referenceOnly` names the cases no extracted model answers, with the reason."
+
+        /// Rendered with an explicit `kitVersion`, as every law file is (Phase 560).
+        let renderAt (stamp: string) : string =
+            CorpusFile.render
+                { Head =
+                    [ "family", jstr familyId
+                      "kitVersion", jstr stamp
+                      "description", jstr description
+                      "registry", jarr (capabilities |> List.map (CapabilityCodec.encode >> jstr))
+                      "contexts", jarr (contexts |> List.map jstr)
+                      "gates",
+                      jarr (
+                          gates
+                          |> List.map (fun (policy, rules) ->
+                              jobj [ "policy", jstr policy; "rules", jarr (rules |> List.map ruleCell) ])
+                      )
+                      "referenceOnly",
+                      jarr (
+                          referenceOnly
+                          |> List.map (fun (case, why) -> jobj [ "case", jstr case; "reason", jstr why ])
+                      ) ]
                   Items = "vectors"
                   Rows = allVectors () |> List.map renderVector }
 
@@ -1016,6 +1387,9 @@ module LawVectorExport =
     let canonicalFormPath (corpusDir: string) : string =
         Path.Combine(familyDir corpusDir, CanonicalFormVectorExport.fileName)
 
+    let gatePath (corpusDir: string) : string =
+        Path.Combine(familyDir corpusDir, Gates.fileName)
+
     /// Every law file under `corpusDir`, rendered with `stamp` as its `kitVersion` (Phase 560): opening
     /// a version slot stamps the version it opens, which is not yet the version this kit was built at.
     let emittedAt (stamp: string) (corpusDir: string) : (string * string) list =
@@ -1023,7 +1397,8 @@ module LawVectorExport =
           decimalPath corpusDir, Decimals.renderAt stamp
           fieldPath corpusDir, Fields.renderAt stamp
           propagationPath corpusDir, PropagationVectorExport.renderAt stamp
-          canonicalFormPath corpusDir, CanonicalFormVectorExport.renderAt stamp ]
+          canonicalFormPath corpusDir, CanonicalFormVectorExport.renderAt stamp
+          gatePath corpusDir, Gates.renderAt stamp ]
 
     /// Every law file under `corpusDir`, stamped with this kit's own version.
     let emitted (corpusDir: string) : (string * string) list = emittedAt (kitVersion ()) corpusDir

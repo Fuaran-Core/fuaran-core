@@ -79,6 +79,7 @@ let modelStamps: (string * (string * int)) list =
       "decode/decode-rejects.json", ("DecodeLayer", 28)
       "escape/string-escape.json", ("WireCanon", 1)
       "laws/capability-laws.json", ("Capability", 96)
+      "laws/capability-gate-laws.json", ("Capability", 14)
       "laws/decimal-laws.json", ("DecimalText", 49)
       "laws/decimal-laws.json", ("WireColumn", 7)
       "laws/field-laws.json", ("WireColumn", 24)
