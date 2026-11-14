@@ -55,6 +55,101 @@ let private agrees (dag: Dag.T<CounterOp>) (reach: Dag.Reach<CounterOp>) (ids: s
                 (Dag.between dag x y |> nodeIds)
                 (sprintf "between %s %s" x y)
 
+// ---- Phase 662: the indexed checkpoint replay reads the region above the checkpoint ----
+
+/// A witness whose state is every op it folded, newest first, so two replays agree on the state only when
+/// they folded the same ops in the same order.
+let private recording: StreamWitness<CounterOp, string list, string> =
+    { Apply = fun op s -> Ok(sw.Encode op :: s)
+      Encode = sw.Encode
+      Decode = sw.Decode }
+
+/// `recording`, rejecting every op whose count is a multiple of 11, so a replay can stop part way.
+let private rejecting: StreamWitness<CounterOp, string list, string> =
+    { recording with
+        Apply =
+            fun op s ->
+                match op with
+                | Inc n when n % 11 = 0 -> Error(sprintf "refused %d" n)
+                | _ -> Ok(sw.Encode op :: s) }
+
+/// A lane DAG grown through `appendIndexed` / `mergeIndexed` — so the index's slots and its drain
+/// positions part — from a seed: forks off any held node, appends onto a lane, merges of two lanes, and
+/// criss-cross twins (two lanes merged both ways from the same two heads). Returns the extended index
+/// and how many criss-crosses it holds.
+let private grown (seed: int) (steps: int) : Dag.Reach<CounterOp> * int =
+    let s = OpStream.canonical h sw
+    let rng = Random(seed)
+
+    let take (r: Result<Dag.IndexedAppend<CounterOp>, DagAppendFault>) =
+        match r with
+        | Ok x -> Some(x.Written.Id, x.Reach)
+        | Error _ -> None
+
+    let g, r0 =
+        (Dag.appendIndexed s (Human "g") (Inc 1) "" (Dag.Reach.ofDag Dag.empty) |> take).Value
+
+    let mutable reach = r0
+    let heads = ResizeArray [ g ]
+    let mutable k = 1
+    let mutable crisscrosses = 0
+
+    let two () =
+        let i = rng.Next heads.Count
+        i, (i + 1 + rng.Next(heads.Count - 1)) % heads.Count
+
+    for _ in 1..steps do
+        k <- k + 2
+
+        match rng.Next 5 with
+        | 0 ->
+            let ids = (Dag.Reach.dag reach).Nodes |> Map.toArray |> Array.map fst
+
+            match take (Dag.appendIndexed s (Human "f") (Inc k) ids[rng.Next ids.Length] reach) with
+            | Some(id, r) ->
+                reach <- r
+                heads.Add id
+            | None -> ()
+        | 1 when heads.Count >= 2 ->
+            let i, j = two ()
+
+            match take (Dag.mergeIndexed s (Human "m") (Inc k) heads[i] heads[j] reach) with
+            | Some(id, r) ->
+                reach <- r
+                heads[i] <- id
+            | None -> ()
+        | 2 when heads.Count >= 2 ->
+            let i, j = two ()
+            let a, b = heads[i], heads[j]
+
+            match take (Dag.mergeIndexed s (Human "m") (Inc k) a b reach) with
+            | Some(x, r) ->
+                match take (Dag.mergeIndexed s (Human "n") (Inc(k + 1)) b a r) with
+                | Some(y, r') ->
+                    reach <- r'
+                    heads[i] <- x
+                    heads[j] <- y
+                    crisscrosses <- crisscrosses + 1
+                | None -> reach <- r
+            | None -> ()
+        | _ ->
+            let i = rng.Next heads.Count
+
+            match take (Dag.appendIndexed s (Human "a") (Inc k) heads[i] reach) with
+            | Some(id, r) ->
+                reach <- r
+                heads[i] <- id
+            | None -> ()
+
+    reach, crisscrosses
+
+/// One call's allocation on this thread, after a warm-up call.
+let private allocated (f: unit -> 'b) : int64 =
+    f () |> ignore
+    let before = GC.GetAllocatedBytesForCurrentThread()
+    f () |> ignore
+    GC.GetAllocatedBytesForCurrentThread() - before
+
 // ---- the measurement leg (opt-in, not a gate) ----
 
 /// The variable that asks for the measurement leg. Unset, the leg is skipped by name.
@@ -302,6 +397,88 @@ module Measure =
 
         report (extensionRow ())
 
+/// The variable that asks for the checkpoint-replay measurement (Phase 662): the shared history's
+/// length, one size per process. Unset, the leg is skipped by name.
+let replayFromMeasureVariable = "FUARAN_CORE_MEASURE_REPLAY_FROM"
+
+/// Phase 662 — the cost of one indexed replay from a checkpoint.
+module ReplayFromMeasure =
+
+    /// `shared` records of linear history (genesis included), a checkpoint at its tip — the fork — two
+    /// lanes of `divergence` appends each off the fork, and their merge: the region above the
+    /// checkpoint is `2 * divergence + 1` nodes whatever `shared` is. Built under SHA-256, so no 32-bit
+    /// collision skips a step, through `append` / `merge`, then indexed once. Returns the index, the
+    /// checkpoint's node and the head.
+    let build (shared: int) (divergence: int) : Dag.Reach<CounterOp> * string * string =
+        let s = OpStream.canonical OpStream.sha256Hash sw
+
+        let step (r: Result<Dag.Written<CounterOp>, DagAppendFault>) =
+            match r with
+            | Ok x -> x.Id, x.Dag
+            | Error f -> failwith ("measurement DAG refused a node: " + DagAppendFault.toString f)
+
+        let mutable tip, dag = step (Dag.append s (Human "x") (Inc 0) "" Dag.empty)
+
+        for i in 1 .. shared - 1 do
+            let id, d = step (Dag.append s (Human "x") (Inc i) tip dag)
+            tip <- id
+            dag <- d
+
+        let fork = tip
+
+        let lane (name: string) =
+            let mutable head = fork
+
+            for i in 1..divergence do
+                let id, d = step (Dag.append s (Human name) (Inc(shared + i)) head dag)
+                head <- id
+                dag <- d
+
+            head
+
+        let left = lane "left"
+        let right = lane "right"
+        let head, d = step (Dag.merge s (Human "x") (Inc -1) left right dag)
+        Dag.Reach.ofDag d, fork, head
+
+    /// Allocation of one call, after three warm-up calls, and the mean microseconds over `n` calls.
+    let measure (n: int) (f: unit -> 'b) : int64 * float =
+        for _ in 1..3 do
+            f () |> ignore
+
+        let before = GC.GetAllocatedBytesForCurrentThread()
+        f () |> ignore
+        let bytes = GC.GetAllocatedBytesForCurrentThread() - before
+        let t = Diagnostics.Stopwatch.StartNew()
+
+        for _ in 1..n do
+            f () |> ignore
+
+        bytes, t.Elapsed.TotalMilliseconds * 1000.0 / float n
+
+    /// The leg: one `replayFromWith` from the checkpoint at the fork to the merge head, and, beside it,
+    /// the ancestor set the replay built before Phase 662 (`Reach.ancestors` at the checkpoint), each
+    /// as one call's allocation and a mean time.
+    let run (shared: int) (report: string -> unit) : unit =
+        let divergence = 50
+        let reach, fork, head = build shared divergence
+
+        let cp: Dag.Checkpoint<int> =
+            { Node = fork
+              State = shared * (shared - 1) / 2
+              Hash = "" }
+
+        let expected = Dag.tryReplayToWith sw 0 reach head
+
+        match Dag.replayFromWith sw cp reach head, expected with
+        | Ok a, Ok b when a = b -> ()
+        | got, want -> failwithf "the checkpoint replay disagrees with the full replay: %A vs %A" got want
+
+        let rb, rt = measure 50 (fun () -> Dag.replayFromWith sw cp reach head)
+        let ab, at = measure 50 (fun () -> Dag.Reach.ancestors reach fork)
+
+        report (sprintf "| %d | %d | %d | %.1f | %d | %.1f |" shared (2 * divergence + 1) rb rt ab at)
+
 [<Tests>]
 let tests =
     testList
@@ -461,6 +638,104 @@ let tests =
                                   (Dag.reconcileMany sw fp dag baseId 0 hs)
                                   (sprintf "base %s heads %A" baseId hs)
 
+          testCase
+              "replayFromWith folds the ops replayFrom folds, in its order, on generated DAGs with forks, merges and criss-crosses (Phase 662)"
+          <| fun _ ->
+              let mutable resumed = 0
+              let mutable uncovered = 0
+              let mutable unreached = 0
+              let mutable rejected = 0
+              let mutable crisscrosses = 0
+
+              for seed in 1..8 do
+                  let extended, cc = grown (6620 + seed) 40
+                  crisscrosses <- crisscrosses + cc
+                  let dag = Dag.Reach.dag extended
+                  let ids = (dag.Nodes |> Map.toList |> List.map fst) @ [ "absent" ]
+
+                  for reach in [ extended; Dag.Reach.ofDag dag ] do
+                      for node in ids do
+                          for head in ids do
+                              for w in [ recording; rejecting ] do
+                                  let cp: Dag.Checkpoint<string list> =
+                                      { Node = node
+                                        State = [ "checkpoint" ]
+                                        Hash = "" }
+
+                                  let indexed = Dag.replayFromWith w cp reach head
+                                  let unindexed = Dag.replayFrom w cp dag head
+                                  Expect.equal indexed unindexed (sprintf "seed %d node %s head %s" seed node head)
+
+                                  match indexed with
+                                  | Ok st when st.Length > 1 -> resumed <- resumed + 1
+                                  | Error(Dag.CheckpointFault.Uncovered _) -> uncovered <- uncovered + 1
+                                  | Error(Dag.CheckpointFault.Unreached _) -> unreached <- unreached + 1
+                                  | Error(Dag.CheckpointFault.Replay(Dag.ReplayFault.Rejected _)) ->
+                                      rejected <- rejected + 1
+                                  | _ -> ()
+
+              // the vacuity guards: every class the equality speaks about was met
+              Expect.isGreaterThan crisscrosses 0 "a criss-cross was built"
+              Expect.isGreaterThan resumed 0 "a replay resumed above a checkpoint"
+              Expect.isGreaterThan uncovered 0 "a replay was refused as uncovered"
+              Expect.isGreaterThan unreached 0 "a replay was refused as unreached"
+              Expect.isGreaterThan rejected 0 "a replay was rejected by the domain"
+
+          testCase "replayFromWith on a cyclic load answers as replayFrom (Phase 662)"
+          <| fun _ ->
+              let g, a, _, _, m, dag = forkMerge ()
+              let template = dag.Nodes[g]
+
+              let forged: Dag.T<CounterOp> =
+                  [ "cx", [ "cy"; a ]; "cy", [ "cx" ]; "cz", [ "cx" ]; "cw", [ m ] ]
+                  |> List.fold
+                      (fun nodes (id, ps) -> Map.add id { template with Id = id; Parents = ps } nodes)
+                      dag.Nodes
+                  |> DagOf.nodes
+
+              let reach = Dag.Reach.ofDag forged
+              let ids = (Map.toList forged.Nodes |> List.map fst) @ [ "absent" ]
+
+              for node in ids do
+                  for head in ids do
+                      let cp: Dag.Checkpoint<string list> = { Node = node; State = []; Hash = "" }
+
+                      Expect.equal
+                          (Dag.replayFromWith recording cp reach head)
+                          (Dag.replayFrom recording cp forged head)
+                          (sprintf "node %s head %s" node head)
+
+          testCase "a checkpointed replay's allocation follows the region above it, not the history below (Phase 662)"
+          <| fun _ ->
+              // the same divergence over 500 and 4,000 records of shared history; before Phase 662 the
+              // replay built the checkpoint's whole closure, about 6.5 times larger at the second size
+              let cost (shared: int) =
+                  let reach, fork, head = ReplayFromMeasure.build shared 50
+                  let cp: Dag.Checkpoint<int> = { Node = fork; State = 0; Hash = "" }
+
+                  match Dag.replayFromWith sw cp reach head with
+                  | Ok _ -> ()
+                  | Error f -> failtestf "the replay was refused: %A" f
+
+                  allocated (fun () -> Dag.replayFromWith sw cp reach head),
+                  allocated (fun () -> Dag.Reach.ancestors reach fork)
+
+              let small, _ = cost 500
+              let large, closure = cost 4000
+
+              Expect.isLessThan
+                  (float large)
+                  (1.25 * float small)
+                  (sprintf "the replay allocated %d bytes at 4,000 records and %d at 500" large small)
+
+              Expect.isLessThan
+                  large
+                  (closure / 10L)
+                  (sprintf
+                      "the replay (%d bytes) costs far less than the closure it no longer builds (%d)"
+                      large
+                      closure)
+
           testCase "reachLaws certify the reference stream witness green"
           <| fun _ ->
               let results =
@@ -526,4 +801,21 @@ let tests =
 
                   Measure.run (TimeSpan.FromSeconds(float seconds)) (fun line ->
                       printfn "%s" line
-                      Console.Out.Flush()) ]
+                      Console.Out.Flush())
+
+          testCase "the checkpoint replay measurement (opt-in: FUARAN_CORE_MEASURE_REPLAY_FROM; not a gate)"
+          <| fun _ ->
+              match Environment.GetEnvironmentVariable replayFromMeasureVariable with
+              | null
+              | "" ->
+                  skiptest (
+                      replayFromMeasureVariable
+                      + " is not set; the measurement leg runs only when asked for"
+                  )
+              | v ->
+                  match Int32.TryParse v with
+                  | true, shared when shared > 1 ->
+                      ReplayFromMeasure.run shared (fun line ->
+                          printfn "%s" line
+                          Console.Out.Flush())
+                  | _ -> failwithf "%s must name the shared history's length, got %s" replayFromMeasureVariable v ]
