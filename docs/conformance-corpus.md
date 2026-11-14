@@ -40,8 +40,10 @@ conformance/
 ### Which law sets Core emits — all of them, and the UI tier emits none
 
 Core is the reference for every law family it ships, so it emits every law set a host certifies a
-reimplementation against. Since Phase 538 that is **four** families under `laws/`, all written by
-the tool's `render laws` (`LawVectorExport.emitted` in `tests/Fuaran.Core.Tests.Fixtures/`):
+reimplementation against. Since Phase 650 that is **six** families under `laws/`, all written by
+the tool's `render laws` (`LawVectorExport.emitted` in `tests/Fuaran.Core.Tests.Fixtures/`); the shared
+corpus carries the first four, and `canonicalFormLaws` (Phase 539, the IDL's canonical-form declarations)
+and `capabilityGateLaws` are read from this repository's own `conformance/`:
 
 | Family | File | Shape |
 |---|---|---|
@@ -747,7 +749,7 @@ is red:
 | `laws/decimal-laws.json` | `DecimalText` | `decimal-text-differential` | 49 of 75 (`canonical`, `compare`, `add`) |
 | `laws/decimal-laws.json` | `WireColumn` | `column-codec-differential` | 7 of 75 (`codecDecode`, `codecEncode`) |
 | `laws/field-laws.json` | `WireColumn` | `field-codec-differential` | 24 of 43 (`fieldEncode`, `codecDecode`) |
-| `laws/capability-laws.json` | `Capability` | `capability-differential` | 48 of 72 (`validateArgs`, `invocationKey`) |
+| `laws/capability-laws.json` | `Capability` | `capability-differential` | 96 of 144 (`validateArgs`, `invocationKey`, `declarationRefused`) |
 | `laws/capability-gate-laws.json` | `Capability` | `capability-differential` | 14 of 41 (`invocationIdentity`, `grantCovers`) |
 | `apply/skeleton-apply.json` | `TreeOps` | `tree-differential` | 25 of 25 |
 | `refusals/codec-refusals.json` | `JsonParse` | `parser-differential` | 59 of 101 (every `json` vector, and 3 `column` parse refusals) |
