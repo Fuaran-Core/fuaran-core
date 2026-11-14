@@ -104,6 +104,24 @@ module QueryRegistry =
     let decide (r: QueryRegistry) (id: string) (args: (string * Cell) list) : PolicyDecision =
         Seam.decide r.Seam () None id args
 
+    /// The registry's NAMED decision for an invocation, read without dispatching it (Phase 650), at
+    /// the context this registry has (`unit`, no grant presented): `Ok` of the name of the gate that
+    /// made the decision and the decision `decide` answers — the first gate of the most restrictive
+    /// rank, `""` when every gate allows — or, where no gate decided, the refusal `dispatch` gives:
+    /// `NoSuchQuery` naming the registered ids for an unregistered id, the validation refusal for
+    /// parameters that do not validate. No observer is told.
+    ///
+    /// **Advisory.** It is computed by the one function a dispatch judges by, so `dispatch` refuses
+    /// `QueryPolicyRefused(name, …)` for `Ok(name, Deny guidance)` and `QueryApprovalRequired name`
+    /// for `Ok(name, NeedsApproval)`, and runs the resolver for `Ok(_, Allow)`. But `dispatch`
+    /// decides again and is authoritative.
+    let decideNamed
+        (r: QueryRegistry)
+        (id: string)
+        (args: (string * Cell) list)
+        : Result<string * PolicyDecision, QueryError> =
+        Seam.decideNamed r.Seam () None id args
+
     /// Dispatch an invocation through the registry: resolve the id (default-deny — an unregistered id
     /// is `NoSuchQuery`), validate the parameters, run the policy's gates (Phase 318 —
     /// `QueryPolicyRefused` / `QueryApprovalRequired`, reaching every `onDenied` observer), then the
