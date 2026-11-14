@@ -368,8 +368,14 @@ type internal MemberEncPrinter =
         OmitAt: string -> IdlType -> IdlValue -> Result<string -> string, CodegenError>
         /// Phase 539 — a member's presence condition over its siblings in `fields` (each read from
         /// the expression the name maps to): a wrapper around the member's piece that omits it
-        /// whenever the condition fails.
-        When: IdlField list -> (string -> string) -> PresenceCondition -> Result<string -> string, CodegenError>
+        /// whenever the condition fails. Phase 660 — the guarded member is passed too, for the
+        /// condition that reads the member itself ([[WhenNonEmpty]]).
+        When:
+            IdlField list
+                -> (string -> string)
+                -> IdlField
+                -> PresenceCondition
+                -> Result<string -> string, CodegenError>
         /// Phase 474 — a field holding an INLINE declaration ([[InlineSlot]]), its value read from
         /// `src`: the piece that lays its members onto the object, or `None` for any other field.
         Inline: string -> IdlField -> string option
@@ -427,7 +433,7 @@ module internal MemberEncTraversal =
             match f.Presence with
             | None -> Ok piece
             | Some c ->
-                p.When fields sibling c
+                p.When fields sibling f c
                 |> Result.map (fun guard -> MemberPiece.Conditional(guard (print p piece))))
 
     /// Every member of an object read off the bound variable `recv`, in declaration order.

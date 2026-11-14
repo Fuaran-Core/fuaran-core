@@ -317,8 +317,8 @@ let private encFloat (f: float) : JVal =
           // Phase 539 — a member whose presence condition fails is omitted whatever it holds, as the
           // interpreter omits it.
           When =
-            fun fields srcOf c ->
-                presenceTest idl fields srcOf c
+            fun fields srcOf self c ->
+                presenceTest idl fields srcOf self c
                 |> Result.map (fun test piece -> sprintf "(if %s then %s else None)" test piece)
           // Phase 474 — an inline field's members, spliced into the piece list.
           Inline = fun src f -> inlineEncPiece idl src f }

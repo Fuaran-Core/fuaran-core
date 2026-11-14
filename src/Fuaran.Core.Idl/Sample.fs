@@ -379,7 +379,9 @@ module Sample =
             drawn
             |> List.map (fun (name, v) ->
                 match fields |> List.tryFind (fun f -> f.Name = name) with
-                | Some({ Keyed = false; Presence = Some c } as f) when not (WireForm.holdsAuthored fields c drawn) ->
+                | Some({ Keyed = false; Presence = Some c } as f) when
+                    not (WireForm.holdsAuthored fields f.Name c drawn)
+                    ->
                     match f.Opt with
                     | OmitDefault d -> name, d
                     | _ -> name, VAbsent

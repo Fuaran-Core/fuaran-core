@@ -19,16 +19,20 @@ module internal FSharpCanonicalForm =
     /// sibling of `fields` is read from. A presence test reads an `Optional` sibling's option; an
     /// equality test compares the sibling's host value with the scalar's literal (wrapped in `Some`
     /// for an `Optional` sibling) — scalars and enum cases carry equality, which is why
-    /// [[Declare.errors]] admits nothing else there.
+    /// [[Declare.errors]] admits nothing else there. Phase 660 — a non-empty test reads the guarded
+    /// member `self`, an `Optional` list, by pattern, so it needs no equality at the element type and
+    /// `Some []` fails it as `None` does: the member is then written as absent.
     let presenceTest
         (idl: Idl)
         (fields: IdlField list)
         (srcOf: string -> string)
+        (self: IdlField)
         (c: PresenceCondition)
         : Result<string, CodegenError> =
         match c with
         | WhenPresent s -> Ok(sprintf "Option.isSome (%s)" (srcOf s))
         | WhenAbsent s -> Ok(sprintf "Option.isNone (%s)" (srcOf s))
+        | WhenNonEmpty -> Ok(sprintf "(match %s with | Some(_ :: _) -> true | _ -> false)" (srcOf self.Name))
         | WhenEquals(s, v) ->
             match fields |> List.tryFind (fun g -> g.Name = s) with
             | Some g ->
@@ -83,6 +87,10 @@ module internal FSharpCanonicalForm =
                     (pick s)
                     (spellings |> List.map FSharpDefaults.fsJValLit |> String.concat "; ")
                     (if absent then "true" else "false")
+            // Phase 660 — the member itself: an explicit EMPTY array is its absence, and anything else
+            // (a member of the wrong kind included) reaches its decoder.
+            | Some WhenNonEmpty ->
+                sprintf "(fun __o -> match %s with | Some(JArr []) -> false | _ -> true)" (pick f.Name)
 
         if List.isEmpty f.Aliases && f.Presence.IsNone then
             None
