@@ -10,7 +10,9 @@
     <Compile Include="RejectionNouns.fs" />
     <Compile Include="Rejection.fs" />
     <Compile Include="Footprint.fs" />
+    <Compile Include="SkeletonOp.fs" />
     <Compile Include="Ops.fs" />
+    <Compile Include="IndexedTree.fs" />
     <Compile Include="TreePlacement.fs" />
     <Compile Include="Diff.fs" />
     <Compile Include="Arbitration.fs" />

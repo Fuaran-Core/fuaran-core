@@ -155,16 +155,16 @@ let run (case: string) (size: int) =
         let op = InsertChild(lastPhase, leaf "fresh" "task")
 
         let indexed =
-            match Ops.indexTree scope t with
+            match IndexedTree.ofTree scope t with
             | Ok ix -> ix
             | Error e -> fail (sprintf "the tree did not index: %A" e)
 
-        match Ops.applyIndexed Policy.none op indexed with
+        match IndexedTree.apply Policy.none op indexed with
         | Ok after when Tree.count nodew after.Tree = count + 1 -> ()
         | other -> fail (sprintf "indexed insert did not apply: %A" (other |> Result.map ignore))
 
-        measure "Ops.applyIndexed (InsertChild ...)" count 5 warm budget (fun () ->
-            Ops.applyIndexed Policy.none op indexed |> ignore)
+        measure "IndexedTree.apply (InsertChild ...)" count 5 warm budget (fun () ->
+            IndexedTree.apply Policy.none op indexed |> ignore)
     | "graft" ->
         let g = leaf "fresh" "task"
 
@@ -288,7 +288,9 @@ let run (case: string) (size: int) =
 
         let build () =
             ops
-            |> List.fold (fun t op -> Result.bind (Ops.applyIndexed Policy.none op) t) (Ops.indexTree scope genesis)
+            |> List.fold
+                (fun t op -> Result.bind (IndexedTree.apply Policy.none op) t)
+                (IndexedTree.ofTree scope genesis)
 
         match build () with
         | Ok t when Tree.count nodew t.Tree = List.length ops + 1 -> ()
@@ -300,7 +302,7 @@ let run (case: string) (size: int) =
             )
 
         measure
-            "progressive build, Ops.applyIndexed per node"
+            "progressive build, IndexedTree.apply per node"
             (List.length ops + 1)
             5
             (TimeSpan.FromSeconds 1.0)

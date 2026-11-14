@@ -1,7 +1,7 @@
 module Fuaran.Core.Tests.IndexedApplyTests
 
 // Phase 659 — `Ops.apply` has an entry that reads a `Tree.Index`. The indexed entries
-// (`applyIndexed`, `canApplyIndexed`, `applyAllIndexed`) thread an `IndexedTree` — a tree, its scope
+// (`IndexedTree.apply`, `canApply`, `applyAll`) thread an `IndexedTree` — a tree, its scope
 // and the index that describes it — and answer exactly what `apply`, `canApply` and `applyAll`
 // answer under the same policy and scope: the same tree, or the same `Rejection`. The index they
 // hand back is `Tree.Index.build` of the tree they hand back. And the work of one insert does not
@@ -156,16 +156,16 @@ let private agree
     (op: SkeletonOp<'N, string>)
     (pre: 'N)
     : Result<'N, Rejection<string>> =
-    let ix = built (Ops.indexTree scope pre)
+    let ix = built (IndexedTree.ofTree scope pre)
     let plain = Ops.apply policy scope op pre
-    let indexed = Ops.applyIndexed policy op ix
+    let indexed = IndexedTree.apply policy op ix
 
-    Expect.equal (indexed |> Result.map _.Tree) plain (sprintf "%s: applyIndexed = apply for %A" label op)
+    Expect.equal (indexed |> Result.map _.Tree) plain (sprintf "%s: IndexedTree.apply = Ops.apply for %A" label op)
 
     Expect.equal
-        (Ops.canApplyIndexed policy op ix)
+        (IndexedTree.canApply policy op ix)
         (Ops.canApply policy scope op pre)
-        (sprintf "%s: canApplyIndexed = canApply for %A" label op)
+        (sprintf "%s: IndexedTree.canApply = Ops.canApply for %A" label op)
 
     match indexed with
     | Ok after ->
@@ -189,7 +189,7 @@ let tests =
     testList
         "Phase 659 — the indexed apply entries"
         [ testCase
-              "applyIndexed and canApplyIndexed answer what apply and canApply answer, over every op kind and both verdicts"
+              "IndexedTree.apply and canApply answer what apply and canApply answer, over every op kind and both verdicts"
           <| fun () ->
               let rng = Rng 6591
               let mutable arms: Map<string, int> = Map.empty
@@ -306,7 +306,8 @@ let tests =
                       5
                       (sprintf "%s was reached: %A" a arms)
 
-          testCase "applyAllIndexed answers what applyAll answers, and a refusal carries the prefix's indexed tree"
+          testCase
+              "IndexedTree.applyAll answers what Ops.applyAll answers, and a refusal carries the prefix's indexed tree"
           <| fun () ->
               let rng = Rng 6594
               let mutable refused = 0
@@ -328,9 +329,9 @@ let tests =
 
                             yield op ]
 
-                  let ix = built (Ops.indexTree contained pre)
+                  let ix = built (IndexedTree.ofTree contained pre)
 
-                  match Ops.applyAll Policy.none contained ops pre, Ops.applyAllIndexed Policy.none ops ix with
+                  match Ops.applyAll Policy.none contained ops pre, IndexedTree.applyAll Policy.none ops ix with
                   | Ok a, Ok b ->
                       completed <- completed + 1
                       Expect.equal b.Tree a (sprintf "script %d: the same tree" i)
@@ -351,7 +352,7 @@ let tests =
                           (sprintf "script %d: the prefix's index" i)
                   | a, b ->
                       failtestf
-                          "script %d: applyAll %A, applyAllIndexed %A"
+                          "script %d: Ops.applyAll %A, IndexedTree.applyAll %A"
                           i
                           (Result.map ignore a)
                           (Result.map ignore b)
@@ -359,7 +360,7 @@ let tests =
               Expect.isGreaterThan refused 50 "scripts were refused part-way"
               Expect.isGreaterThan completed 50 "scripts completed"
 
-          testCase "a base carrying an id twice: indexTree refuses it with the id apply refuses it with"
+          testCase "a base carrying an id twice: IndexedTree.ofTree refuses it with the id apply refuses it with"
           <| fun () ->
               let twice =
                   RNode.node
@@ -375,23 +376,23 @@ let tests =
                   (Error(DuplicateId "a"))
                   "apply refuses the base"
 
-              match Ops.indexTree scope twice with
+              match IndexedTree.ofTree scope twice with
               | Error(IndexRefusal.RepeatedId d) -> Expect.equal d "a" "the same id"
-              | other -> failtestf "indexTree made %A" (Result.map ignore other)
+              | other -> failtestf "IndexedTree.ofTree made %A" (Result.map ignore other)
 
-          testCase "adoptIndex: a fresh index is adopted; a stale one is the typed refusal Stale, never read"
+          testCase "IndexedTree.adopt: a fresh index is adopted; a stale one is the typed refusal Stale, never read"
           <| fun () ->
               let scope = OpScope.plain nodew idw
               let t = sample ()
               let ix = Result.defaultWith failwith (Tree.Index.build nodew idw t)
 
               // fresh: adopted, and the indexed entry then answers what apply answers
-              match Ops.adoptIndex scope encNode t ix with
+              match IndexedTree.adopt scope encNode t ix with
               | Ok adopted ->
                   let op = InsertChild("b", RNode.leaf "b2" "para" "w")
 
                   Expect.equal
-                      (Ops.applyIndexed Policy.none op adopted |> Result.map _.Tree)
+                      (IndexedTree.apply Policy.none op adopted |> Result.map _.Tree)
                       (Ops.apply Policy.none scope op t)
                       "the adopted index answers what apply answers"
               | Error e -> failtestf "a fresh index was refused: %A" e
@@ -409,7 +410,7 @@ let tests =
                   [ "moved", moved
                     "revalued", revalued
                     "another tree", RNode.leaf "root" "doc" "" ] do
-                  match Ops.adoptIndex scope encNode tree ix with
+                  match IndexedTree.adopt scope encNode tree ix with
                   | Error IndexRefusal.Stale -> ()
                   | other -> failtestf "%s: a stale index was not refused: %A" label (Result.map ignore other)
 
@@ -448,13 +449,13 @@ let tests =
                             ) ]
 
                   if indexedEntry then
-                      let start = built (Ops.indexTree scope (tree ballast))
+                      let start = built (IndexedTree.ofTree scope (tree ballast))
                       calls.Value <- 0
 
                       let final =
                           (start, ops)
                           ||> List.fold (fun t op ->
-                              Ops.applyIndexed Policy.none op t |> Result.defaultWith (failwithf "%A"))
+                              IndexedTree.apply Policy.none op t |> Result.defaultWith (failwithf "%A"))
 
                       Expect.isTrue
                           (sameIndex final.Index (Result.defaultWith failwith (Tree.Index.build nodew idw final.Tree)))
