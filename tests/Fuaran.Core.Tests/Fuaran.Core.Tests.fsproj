@@ -528,6 +528,9 @@
     <!-- Phase 657 - one Tree.updateNode write allocates the path it rebuilds, pinned on the
          241-node, 24-deep tree. Appended (append-only). -->
     <Compile Include="TreeUpdateNodeAllocationTests.fs" />
+    <!-- Phase 659 - the indexed apply entries answer what apply answers, carry the index to the tree
+         they return, and cost an insert the op. Appended (append-only). -->
+    <Compile Include="IndexedApplyTests.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
   <ItemGroup>
