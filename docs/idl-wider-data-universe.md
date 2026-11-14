@@ -54,5 +54,25 @@ its case names. `idl.json` refuses `{"$type":"localDateTime"}` as `NotAdmitted`,
 set's distinctness by `uniqueItems`; it has no vocabulary for an order over items, so the canonical order is
 each reader's to check. The F\* model refines each string-borne scalar by its grammar, models a tuple of leaf
 types as an F\* tuple (and refuses one holding a declared type by name), and models a set and a keyed map as
-their wire arrays, the order outside a model whose numbers are opaque. A declared default at one of these types
-is refused by every generator.
+their wire arrays, the order outside a model whose numbers are opaque.
+
+**A declared default at one of these types** (Phase 656, DECISIONS.md D258) is admitted by the one admissibility
+every generator asks, on the rule the older types follow: a scalar in its canonical spelling, a tuple whose every
+item is admitted, and the EMPTY set and keyed map, where the member's own type is the collection (never inside a
+tuple or a union literal, where a literal stands in pattern position). A spelling that is not canonical is
+refused (`UnsupportedDefault`) and never repaired, as the encoder and `Declare` refuse it; a set or a keyed map
+with items stays refused, as a list or a map with items is. What each generator prints:
+
+| Type | F# | TypeScript | F\* model |
+|---|---|---|---|
+| 64-bit integer | `9007199254740993L` | `9007199254740993n` | refused (`UnmodellableInFStar`) |
+| decimal, time of day, duration | the canonical text, `"-12.5"` | the canonical text | refused |
+| bytes | `[\| 1uy; 2uy \|]` | `new Uint8Array([1, 2])`, tested through `encBytes` | refused |
+| tuple | `(-5L, "a")`, tested by pattern | `[-5n, "a"]`, tested item by item | the F\* tuple, where every item is spelled |
+| empty set | `Set.empty`, tested by `Set.isEmpty` | `[]`, tested by length | `[]` |
+| empty keyed map | `Map.empty`, tested by `Map.isEmpty` | `[]`, tested by length | `[]` |
+
+The F\* model refines each string-borne scalar by its grammar, so a literal there carries a proof obligation the
+emitted terms do not discharge; the model refuses it by name, as its vectors refuse a value at those types. The
+JSON Schema states no default, as it never has. A vocabulary that declares no such default generates exactly what
+it did.

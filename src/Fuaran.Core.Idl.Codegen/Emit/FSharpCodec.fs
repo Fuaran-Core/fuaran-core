@@ -289,7 +289,12 @@ let private encFloat (f: float) : JVal =
                     // simply the better test: it needs no constraint, and reads as what it is.
                     // Phase 124 — this is also why a value-carrying default works at all: the
                     // rendered literal is a legal PATTERN as well as a legal expression.
-                    | TUnion _ -> sprintf "(match %s with | %s -> None | _ -> %s)" src dexpr present
+                    //
+                    // Phase 656 — a TUPLE default is tested by pattern-match for the same reason: a
+                    // component's literal is a legal pattern ([[LiteralTraversal]] prints its items as
+                    // a union literal's members), and a component that reaches a closure has no `=`.
+                    | TUnion _
+                    | TTuple _ -> sprintf "(match %s with | %s -> None | _ -> %s)" src dexpr present
                     // Phase 1080 — a LIST default is tested with `List.isEmpty`, never with
                     // `= []`, and for the same reason the union arm above exists: an element
                     // type that reaches a closure carries no equality, so `SrcSetEntry`
@@ -301,6 +306,9 @@ let private encFloat (f: float) : JVal =
                     // Phase 539 — the empty-map default, tested as the list one is (`Map.isEmpty`
                     // needs no equality at the value type; [[Decl.literal]] admits only the EMPTY map).
                     | TMap _ -> sprintf "(if Map.isEmpty %s then None else %s)" src present
+                    // Phase 656 — the empty set and the empty keyed map, tested as the map is.
+                    | TSet _ -> sprintf "(if Set.isEmpty %s then None else %s)" src present
+                    | TKeyedMap _ -> sprintf "(if Map.isEmpty %s then None else %s)" src present
                     // Phase 539 — a JSON default is compared as the interpreter compares it, by
                     // canonical bytes, so a value holding the default's members in another order is
                     // still at it.

@@ -36,14 +36,49 @@ module internal TypeScriptCodec =
         else
             SourceLit.tsString disc
 
-    /// Emit a TypeScript value literal for an authored `IdlValue` under the
-    /// vocabulary's DECLARED wire shape (Phases 108/109) — unions/nodes become
-    /// discriminator-tagged objects (matching the generated encoder's dispatch),
-    /// fields keyed by name; a flat vocabulary's node is ONE object. Builds the
-    /// conformance fixtures the node harness runs.
-    let rec internal typescriptValueWith (shape: WireShape) (v: IdlValue) : string =
-        let go = typescriptValueWith shape
+    /// Phase 656 — bytes as this host's `Uint8Array` literal, from their canonical base64 text.
+    let internal tsBytesLit (text: string) : string =
+        "new Uint8Array(["
+        + (System.Convert.FromBase64String text |> Array.map string |> String.concat ", ")
+        + "])"
+
+    /// A TypeScript value literal for an authored `IdlValue` under the vocabulary's DECLARED wire
+    /// shape (Phases 108/109) — unions/nodes become discriminator-tagged objects (matching the
+    /// generated encoder's dispatch), fields keyed by name; a flat vocabulary's node is ONE object.
+    /// `at` is the type the value is read at where it is known, and `memberAt` a member's type
+    /// under its owner's (Phase 656): only a 64-bit integer, bytes and a tuple read it, so a value
+    /// read at no type prints as it always has.
+    let rec private tsValueAt
+        (shape: WireShape)
+        (memberAt: IdlType -> IdlValue -> string -> IdlType option)
+        (at: IdlType option)
+        (v: IdlValue)
+        : string =
+        match at, v with
+        // Phase 656 — a value whose TYPE is known and whose host shape is not its wire shape: a
+        // 64-bit integer is a `bigint`, bytes a `Uint8Array`, a tuple's items each at its component.
+        | Some TInt64, VStr s -> s + "n"
+        | Some TBytes, VStr s -> tsBytesLit s
+        | Some(TTuple cs), VList xs when List.length cs = List.length xs ->
+            "["
+            + (List.map2 (fun c x -> tsValueAt shape memberAt (Some c) x) cs xs
+               |> String.concat ", ")
+            + "]"
+        | _ -> tsValueOf shape memberAt at v
+
+    /// [[tsValueAt]] at a value whose host shape is its wire shape; a union's or a record's members
+    /// are read at their declared types where the owner's is known.
+    and private tsValueOf
+        (shape: WireShape)
+        (memberAt: IdlType -> IdlValue -> string -> IdlType option)
+        (at: IdlType option)
+        (v: IdlValue)
+        : string =
+        let go = tsValueAt shape memberAt None
         let disc = tsDiscKey shape.Discriminator
+
+        let mem (n: string) (fv: IdlValue) =
+            tsValueAt shape memberAt (at |> Option.bind (fun t -> memberAt t v n)) fv
 
         match v with
         | VStr s -> SourceLit.tsString s
@@ -57,14 +92,14 @@ module internal TypeScriptCodec =
             + ": "
             + SourceLit.tsString tag
             + (fields
-               |> List.map (fun (n, fv) -> ", " + SourceLit.tsKey n + ": " + go fv)
+               |> List.map (fun (n, fv) -> ", " + SourceLit.tsKey n + ": " + mem n fv)
                |> String.concat "")
             + " }"
         | VList xs -> "[" + (xs |> List.map go |> String.concat ", ") + "]"
         | VRecord fields ->
             "{ "
             + (fields
-               |> List.map (fun (n, fv) -> SourceLit.tsKey n + ": " + go fv)
+               |> List.map (fun (n, fv) -> SourceLit.tsKey n + ": " + mem n fv)
                |> String.concat ", ")
             + " }"
         | VMap entries ->
@@ -147,6 +182,35 @@ module internal TypeScriptCodec =
         | VOpaque -> "(() => undefined)"
         // Phase 676 — a JSON value emits as its canonical literal.
         | VJson j -> Canonical.write Rendering.CrossHost j
+
+    /// Emit a TypeScript value literal for an authored `IdlValue` under the vocabulary's DECLARED wire
+    /// shape, reading no type (see [[tsValueAt]]): the conformance fixtures' value emitter.
+    let internal typescriptValueWith (shape: WireShape) (v: IdlValue) : string =
+        tsValueAt shape (fun _ _ _ -> None) None v
+
+    /// Phase 656 — a declared literal's VALUE at the type `t` it is declared at: [[typescriptValueWith]]'s
+    /// rendering, read through the vocabulary's declarations wherever a member's type decides its host
+    /// shape (a 64-bit integer, bytes, a tuple). Every value that reaches none of those prints exactly
+    /// as [[typescriptValueWith]] prints it.
+    let internal tsLiteralValue (idl: Idl) (t: IdlType) (v: IdlValue) : string =
+        let memberAt (owner: IdlType) (value: IdlValue) (name: string) : IdlType option =
+            let typeIn (subst: Map<string, IdlType>) (fields: IdlField list) =
+                fields
+                |> List.tryFind (fun f -> f.Name = name)
+                |> Option.map (fun f -> TypeParams.substitute subst f.Type)
+
+            match owner, value with
+            | TRecord n, _ ->
+                CodegenLookup.tryRecord idl n
+                |> Option.bind (fun r -> typeIn Map.empty r.Fields)
+            | TUnion(n, args), VUnion(tag, _) ->
+                CodegenLookup.tryUnion idl n
+                |> Option.bind (fun u ->
+                    u.CaseByWireTag tag
+                    |> Option.bind (fun c -> typeIn (TypeParams.bind u args |> Option.defaultValue Map.empty) c.Fields))
+            | _ -> None
+
+        tsValueAt idl.Wire memberAt (Some t) v
 
     /// Phase 524 — the TypeScript ENCODER printer over the one slot traversal ([[SlotTraversal]]):
     /// `enc<Name>` functions writing canonical JSON text.
@@ -260,9 +324,23 @@ module internal TypeScriptCodec =
                 (tsDiscProp disc src + " === " + SourceLit.tsString (u.WireTagOf c.Tag))
                 :: (members |> List.map snd)
                 |> String.concat " && "
+          // Phase 656 — the wider data universe: a `bigint` compared as one, bytes by the JSON text
+          // their encoder writes (`encBytes`, which every module reaching bytes carries), a tuple item
+          // by item, and the empty set and keyed map (arrays) by their length.
+          Int64 = fun src i -> src + " === " + string i + "n"
+          Bytes =
+            fun src text _ ->
+                "encBytes("
+                + src
+                + ") === "
+                + SourceLit.tsString (Canonical.write Rendering.CrossHost (JStr text))
+          Tuple = fun _ items -> String.concat " && " items
+          EmptySet = fun src -> src + ".length === 0"
+          EmptyKeyedMap = fun src -> src + ".length === 0"
           Some = id
           Absent = fun src -> src + " === undefined"
-          Path = fun src f -> src + "." + f.Name }
+          Path = fun src f -> src + "." + f.Name
+          Item = fun src i -> src + "[" + string i + "]" }
 
     /// TS boolean predicate: is `src` at the omit-when-default field's identity default? Printed by
     /// [[tsPredicatePrinter]]. **This predicate decides what the TS backend admits as a default**,
@@ -594,7 +672,7 @@ module internal TypeScriptCodec =
         // Phase 1080 — an absent repeated slot decodes to the EMPTY ARRAY, never to
         // `undefined` or `null`: the missing-list-field decode class, pinned here
         // rather than left to each host's own reading of an absent key.
-        |> Result.map (fun _ -> typescriptValueWith idl.Wire d)
+        |> Result.map (fun _ -> tsLiteralValue idl t d)
 
     /// Phase 524 — the TypeScript printer of a member READ back out
     /// ([[MemberTraversal.decMember]]): a sentinel slot decodes to `null`, a host-only member to

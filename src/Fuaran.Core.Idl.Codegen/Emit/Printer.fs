@@ -544,12 +544,25 @@ type internal LiteralPrinter =
         Record: string -> IdlRecord -> (IdlField * string) list -> string
         /// A union case literal from its declared members, printed in declaration order.
         Union: string -> IdlUnion -> IdlUnionCase -> (IdlField * string) list -> string
+        /// Phase 656 — a 64-bit integer.
+        Int64: string -> int64 -> string
+        /// Phase 656 — bytes, from their canonical base64 text and the bytes it spells.
+        Bytes: string -> string -> byte[] -> string
+        /// Phase 656 — a tuple from its items, each printed at its component.
+        Tuple: string -> string list -> string
+        /// Phase 656 — the empty set.
+        EmptySet: string -> string
+        /// Phase 656 — the empty keyed map.
+        EmptyKeyedMap: string -> string
         /// An optional member carrying a value, from the value printed.
         Some: string -> string
         /// An optional member carrying none.
         Absent: string -> string
         /// Where a member's value is read from, under the object read from `src`.
         Path: string -> IdlField -> string
+        /// Phase 656 — where a tuple's item is read from, by its position, under the tuple read from
+        /// `src`.
+        Item: string -> int -> string
     }
 
 /// Phase 524 (511.t4) — the one traversal over a declared literal: [[Decl.literal]] decides what is
@@ -563,6 +576,13 @@ type internal LiteralPrinter =
 /// or the JSON slot, and refused as a member of a record or union-case literal: neither has a
 /// PATTERN spelling, and the union encoder's omit test matches a default as a pattern. Refused
 /// here, once, so the F# literal and the TypeScript test agree on it by construction.
+///
+/// Phase 656 — the empty set and the empty keyed map are admitted on the same terms, for the same
+/// reason. A tuple's items are printed as a literal's members are (nested), so a tuple holding a
+/// collection or a JSON value is refused at any depth: a tuple literal stands in pattern position
+/// in the F# omit test, as a union literal does. A decimal, a time of day and a duration are bound
+/// to their canonical text in every host that prints a literal (D251.4, D251.6), so they print as a
+/// string does.
 module internal LiteralTraversal =
 
     let rec private printAt
@@ -577,7 +597,18 @@ module internal LiteralTraversal =
         |> Result.bind (fun l ->
             match l with
             | Literal.EmptyMap
+            | Literal.EmptySet
+            | Literal.EmptyKeyedMap
             | Literal.Json _ when nested -> Error(CodegenError.UnsupportedDefault(t, v))
+            | Literal.EmptySet -> Ok(p.EmptySet src)
+            | Literal.EmptyKeyedMap -> Ok(p.EmptyKeyedMap src)
+            | Literal.Int64 i -> Ok(p.Int64 src i)
+            | Literal.Text(_, s) -> Ok(p.Str src s)
+            | Literal.Bytes(text, bytes) -> Ok(p.Bytes src text bytes)
+            | Literal.Tuple(components, items) ->
+                List.mapi2 (fun i c x -> printAt true p idl (p.Item src i) c x) components items
+                |> sequenceR
+                |> Result.map (p.Tuple src)
             | Literal.EmptyMap -> Ok(p.EmptyMap src)
             | Literal.Json j -> Ok(p.Json src j)
             | Literal.Str s -> Ok(p.Str src s)

@@ -96,6 +96,21 @@ type internal Literal =
     | Json of JVal
     | Record of IdlRecord * authored: (string * IdlValue) list
     | Union of IdlUnion * args: IdlType list * IdlUnionCase * authored: (string * IdlValue) list
+    /// Phase 656 — a 64-bit integer (D251.3), read from its canonical decimal text.
+    | Int64 of int64
+    /// Phase 656 — a string-borne scalar every host binds to its canonical text: a decimal, a time
+    /// of day or a duration (D251.4, D251.6). The type is carried for the target that refines the
+    /// text by the type's grammar (the F* model).
+    | Text of scalar: IdlType * text: string
+    /// Phase 656 — bytes (D251.5): the canonical base64 text and the bytes it spells.
+    | Bytes of text: string * bytes: byte[]
+    /// Phase 656 — a tuple at its declared arity. Its items stay as authored, as a record's members
+    /// do: each is admitted at its component type by the traversal that prints it.
+    | Tuple of components: IdlType list * items: IdlValue list
+    /// Phase 656 — the EMPTY set and the EMPTY keyed map, admitted where the member's own type is the
+    /// collection and never nested, as the empty map is (Phase 539).
+    | EmptySet
+    | EmptyKeyedMap
 
 /// Phase 524 (carried from 511.t4) — WHERE a member's value is asked for. The sites differ in
 /// exactly two policies, and this is where they are stated, once: what a HOST-ONLY member takes,
@@ -697,9 +712,13 @@ module internal Decl =
     /// the empty list; the empty map and a JSON value at a `TJson` slot whose strings are well-formed
     /// and whose numbers are finite (Phase 539); a declared record; a declared union case at the
     /// declared arity that is not the union's declared TRANSPARENT case (the 2026-09-13 ruling: the
-    /// case encodes bare, so no host can test for it on the wire). Everything else — a non-empty map,
-    /// a closure or hosted value, a non-empty list, an unpaired surrogate, a non-finite float — is
-    /// refused.
+    /// case encodes bare, so no host can test for it on the wire). Phase 656 — at the wider data
+    /// universe's types (D251): a 64-bit integer, a decimal, bytes, a time of day and a duration in
+    /// the ONE canonical spelling its reader admits ([[ScalarText]]); a tuple at its declared arity
+    /// (each item admitted at its component); the empty set and the empty keyed map. A spelling that
+    /// is not canonical is refused and never repaired, as the encoder refuses it. Everything else — a
+    /// non-empty map, set or keyed map, a closure or hosted value, a non-empty list, an unpaired
+    /// surrogate, a non-finite float — is refused.
     let literal (idl: Idl) (t: IdlType) (v: IdlValue) : Result<Literal, CodegenError> =
         let refuse () =
             Error(CodegenError.UnsupportedDefault(t, v))
@@ -726,6 +745,15 @@ module internal Decl =
             | None -> refuse ()
         | TList _, VList [] -> Ok Literal.EmptyList
         | TMap _, VMap [] -> Ok Literal.EmptyMap
+        | TInt64, VStr s when ScalarText.isInt64 s ->
+            Ok(Literal.Int64(System.Int64.Parse(s, System.Globalization.CultureInfo.InvariantCulture)))
+        | (TDecimal, VStr s) when ScalarText.isDecimal s -> Ok(Literal.Text(t, s))
+        | (TTimeOfDay, VStr s) when ScalarText.isTimeOfDay s -> Ok(Literal.Text(t, s))
+        | (TDuration, VStr s) when ScalarText.isDuration s -> Ok(Literal.Text(t, s))
+        | TBytes, VStr s when ScalarText.isBytes s -> Ok(Literal.Bytes(s, System.Convert.FromBase64String s))
+        | TTuple cs, VList xs when List.length cs = List.length xs -> Ok(Literal.Tuple(cs, xs))
+        | TSet _, VList [] -> Ok Literal.EmptySet
+        | TKeyedMap _, VList [] -> Ok Literal.EmptyKeyedMap
         | TJson, VJson j when spellable j -> Ok(Literal.Json j)
         | TRecord n, VRecord authored ->
             match CodegenLookup.tryRecord idl n with

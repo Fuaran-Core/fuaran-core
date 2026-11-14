@@ -85,7 +85,9 @@ module internal FSharpDefaults =
     /// Phase 524 — the F# printer of a declared literal ([[LiteralTraversal]]): the F# source form
     /// of a declared default VALUE — enums (`ToneVariant.Default`), scalars, the EMPTY LIST (Phase
     /// 1080), a nullary union case (`CellFormat.None`) and, since Phase 124, a VALUE-CARRYING union
-    /// case (`Slot.Fixed(0.0)`, `Binding.Static(Some 0)`) and a record, nested to any depth.
+    /// case (`Slot.Fixed(0.0)`, `Binding.Static(Some 0)`) and a record, nested to any depth; since
+    /// Phase 656 the wider data universe's literals (`5L`, `"1.5"`, `[| 1uy |]`, `(5L, "a")`,
+    /// `Set.empty`).
     let fsLiteralPrinter: LiteralPrinter =
         { Str = fun _ s -> SourceLit.fsString s
           Int = fun _ i -> string i
@@ -105,9 +107,25 @@ module internal FSharpDefaults =
                 match members with
                 | [] -> u.Name + "." + c.Tag
                 | ps -> sprintf "%s.%s(%s)" u.Name c.Tag (ps |> List.map snd |> String.concat ", ")
+          // Phase 656 — the wider data universe in the host types this backend binds (D251): an
+          // `int64` (`-9223372036854775808L` is a legal literal), a `byte[]` (an array literal is a
+          // legal pattern too), a tuple, and the empty `Set` and `Map`.
+          Int64 = fun _ i -> string i + "L"
+          Bytes =
+            fun _ _ bytes ->
+                if Array.isEmpty bytes then
+                    "[||]"
+                else
+                    "[| "
+                    + (bytes |> Array.map (fun b -> string b + "uy") |> String.concat "; ")
+                    + " |]"
+          Tuple = fun _ items -> "(" + String.concat ", " items + ")"
+          EmptySet = fun _ -> "Set.empty"
+          EmptyKeyedMap = fun _ -> "Map.empty"
           Some = fun e -> "Some(" + e + ")"
           Absent = fun _ -> "None"
-          Path = fun _ _ -> "" }
+          Path = fun _ _ -> ""
+          Item = fun _ _ -> "" }
 
     /// The F# source form of a declared default value, printed by [[fsLiteralPrinter]].
     ///

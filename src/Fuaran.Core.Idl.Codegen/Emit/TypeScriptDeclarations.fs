@@ -62,14 +62,7 @@ module internal TypeScriptDeclarations =
                     // Phase 639 (D251) — the wider data universe, in this host's shapes: a `bigint`, a
                     // `Uint8Array`, the canonical text, and arrays (a keyed map's entries as pairs).
                     | TInt64, VStr s when ScalarText.isInt64 s -> Some(Ok(s + "n"))
-                    | TBytes, VStr s when ScalarText.isBytes s ->
-                        Some(
-                            Ok(
-                                "new Uint8Array(["
-                                + (System.Convert.FromBase64String s |> Array.map string |> String.concat ", ")
-                                + "])"
-                            )
-                        )
+                    | TBytes, VStr s when ScalarText.isBytes s -> Some(Ok(tsBytesLit s))
                     | TDecimal, VStr s when ScalarText.isDecimal s -> Some(Ok(SourceLit.tsString s))
                     | TTimeOfDay, VStr s when ScalarText.isTimeOfDay s -> Some(Ok(SourceLit.tsString s))
                     | TDuration, VStr s when ScalarText.isDuration s -> Some(Ok(SourceLit.tsString s))
@@ -121,12 +114,20 @@ module internal TypeScriptDeclarations =
               // Every omit-at-default member is PRESENT, filled from its declared default; an
               // absent optional and a host-only member (never on the wire, and `undefined` in the
               // decoder's shape) are absent.
+              //
+              // Phase 656 — an omit-at-default member's identity default is a DECLARED literal, so it is
+              // admitted by [[Decl.literal]] (through the codec's own test, [[tsIsDefault]]) before it
+              // is walked, as the F# scaffold admits it ([[fsDefaultLit]]): until then this was the one
+              // printer of a default that never asked, and admitted a set with items the codec refuses.
               Member =
-                fun _ mv walk ->
+                fun f mv walk ->
                     match mv with
                     | MemberValue.Carries v
-                    | MemberValue.Optional v
-                    | MemberValue.IdentityDefault v -> walk v |> Result.map Some
+                    | MemberValue.Optional v -> walk v |> Result.map Some
+                    | MemberValue.IdentityDefault v ->
+                        tsIsDefault idl idl.Wire.Discriminator "__probe" f.Type v
+                        |> Result.bind (fun _ -> walk v)
+                        |> Result.map Some
                     | _ -> Ok None
               Record = fun _ members -> objectOf (keyed members)
               Union = fun u c members -> objectOf ((disc, SourceLit.tsString (u.WireTagOf c.Tag)) :: keyed members)

@@ -35,15 +35,6 @@ module internal FStarVectors =
     let private intLit (i: int) : string =
         if i < 0 then "(" + string i + ")" else string i
 
-    let private seqR (rs: Result<string, CodegenError> list) : Result<string list, CodegenError> =
-        let rec go acc rest =
-            match rest with
-            | [] -> Ok(List.rev acc)
-            | Ok x :: t -> go (x :: acc) t
-            | Error e :: _ -> Error e
-
-        go [] rs
-
     let private pairTerm (kl: Result<string, CodegenError>) (vt: Result<string, CodegenError>) =
         match kl, vt with
         | Ok k, Ok v -> Ok("(" + k + ", " + v + ")")
@@ -60,12 +51,12 @@ module internal FStarVectors =
         | JArr xs ->
             xs
             |> List.map (jsonTerm where)
-            |> seqR
+            |> sequenceR
             |> Result.map (fun ts -> "(JArr [" + String.concat "; " ts + "])")
         | JObj fs ->
             fs
             |> List.map (fun (k, v) -> pairTerm (strLit where k) (jsonTerm where v))
-            |> seqR
+            |> sequenceR
             |> Result.map (fun ts -> "(JObj [" + String.concat "; " ts + "])")
 
     /// The MODEL value of an interpreter-decoded value, as an F* term qualified by `q` (the
@@ -98,12 +89,12 @@ module internal FStarVectors =
         | SList inner, VList xs ->
             xs
             |> List.map (valueTerm idl m q where inner)
-            |> seqR
+            |> sequenceR
             |> Result.map (fun ts -> "[" + String.concat "; " ts + "]")
         | SMap inner, VMap entries ->
             entries
             |> List.map (fun (k, ev) -> pairTerm (strLit where k) (valueTerm idl m q where inner ev))
-            |> seqR
+            |> sequenceR
             |> Result.map (fun ts -> "[" + String.concat "; " ts + "]")
         | SRecord n, VRecord fs ->
             match m.Members.TryFind(slotName s) with
@@ -130,7 +121,7 @@ module internal FStarVectors =
         | SText n, _ -> unmodellable (sprintf "a '%s' value, whose refinement the facts do not discharge" n) where
         | STuple cs, VList xs when List.length cs = List.length xs ->
             List.map2 (valueTerm idl m q where) cs xs
-            |> seqR
+            |> sequenceR
             |> Result.map (fun ts -> "(" + String.concat ", " ts + ")")
         | _ -> unmodellable (sprintf "a value that does not fit its slot: %A" v) where
 
@@ -176,7 +167,7 @@ module internal FStarVectors =
             | None, None -> unmodellable ("a value omitting the required member '" + mb.Name + "'") where
             | Some fv, Some None -> valueTerm idl m q where mb.Slot fv |> Result.map (fun t -> "(Some " + t + ")")
             | Some fv, _ -> valueTerm idl m q where mb.Slot fv |> Result.map (fun t -> "(" + t + ")"))
-        |> seqR
+        |> sequenceR
 
     and private nodeTerm
         (idl: Idl)
@@ -215,7 +206,7 @@ module internal FStarVectors =
                 match lookup k with
                 | None -> unmodellable ("the undeclared member '" + k + "' in the interpreter's bytes") where
                 | Some slot -> pairTerm (strLit where k) (wireTerm idl m where slot v))
-            |> seqR
+            |> sequenceR
             |> Result.map (fun ts -> "(JObj [" + String.concat "; " ts + "])")
 
         let disc = idl.Wire.Discriminator
@@ -240,14 +231,14 @@ module internal FStarVectors =
         | (SStr | SSentinel _ | SEnum _ | SText _), JStr t -> strLit where t |> Result.map (fun l -> "(JStr " + l + ")")
         | STuple cs, JArr xs when List.length cs = List.length xs ->
             List.map2 (wireTerm idl m where) cs xs
-            |> seqR
+            |> sequenceR
             |> Result.map (fun ts -> "(JArr [" + String.concat "; " ts + "])")
         | SInt, JInt i -> Ok("(JInt " + intLit i + ")")
         | SBool, JBool b -> Ok(if b then "(JBool true)" else "(JBool false)")
         | SList inner, JArr xs ->
             xs
             |> List.map (wireTerm idl m where inner)
-            |> seqR
+            |> sequenceR
             |> Result.map (fun ts -> "(JArr [" + String.concat "; " ts + "])")
         | SMap inner, JObj fs -> objectOf (fun _ -> Some inner) fs
         | SRecord n, JObj fs ->
@@ -299,7 +290,7 @@ module internal FStarVectors =
                         match memberSlot ems k with
                         | None -> unmodellable ("the undeclared envelope member '" + k + "'") where
                         | Some slot -> pairTerm (strLit where k) (wireTerm idl m where slot v))
-                |> seqR
+                |> sequenceR
                 |> Result.map (fun ts -> "(JObj [" + String.concat "; " ts + "])")
         | _ -> unmodellable (sprintf "interpreter bytes that do not fit their slot: %A" j) where
 
@@ -363,7 +354,7 @@ module internal FStarVectors =
                                     i
                                     jt
                             ))
-                |> seqR)
+                |> sequenceR)
             |> Result.map (fun defs ->
                 let facts =
                     vm.Wires
@@ -375,7 +366,7 @@ module internal FStarVectors =
 
         models
         |> List.map block
-        |> seqR
+        |> sequenceR
         |> Result.map (fun blocks ->
             let header =
                 [ "(*"

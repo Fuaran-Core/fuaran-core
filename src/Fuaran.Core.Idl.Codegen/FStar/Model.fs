@@ -404,6 +404,14 @@ module internal FStarModel =
     /// OPAQUE, so there is no F* literal for a number whose carrier is a type parameter, and an
     /// admitted numeric default is refused as the model's boundary, not as a defect in the
     /// declaration.
+    ///
+    /// Phase 656 — at the wider data universe's types (DECISIONS.md D258): a tuple is the F* tuple of
+    /// its items' literals and the empty set and keyed map are `[]` (the model's set and keyed map
+    /// are their wire lists), so neither carries an obligation. A 64-bit integer, a decimal, bytes,
+    /// a time of day and a duration are refused, by name, as the model's boundary: their model type
+    /// is a string REFINED by its grammar, so a literal there must be proved to satisfy it, which no
+    /// term this emitter prints discharges — the boundary the vectors already state for a value at
+    /// those types ([[FStarVectors]]).
     let rec private defaultLit (idl: Idl) (where: string) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
         Decl.literal idl t v
         |> Result.bind (fun l ->
@@ -419,6 +427,20 @@ module internal FStarModel =
             // default is a `jval` term, spellable unless it holds a number (the opaque numeric
             // boundary the scalar arms above already state).
             | Literal.EmptyMap -> Ok "[]"
+            | Literal.EmptySet
+            | Literal.EmptyKeyedMap -> Ok "[]"
+            | Literal.Int64 _
+            | Literal.Text _
+            | Literal.Bytes _ ->
+                unmodellable
+                    (sprintf
+                        "a declared default at a string-borne scalar, whose refinement the model does not discharge: %A"
+                        v)
+                    where
+            | Literal.Tuple(components, items) ->
+                List.map2 (defaultLit idl where) components items
+                |> sequenceR
+                |> Result.map (fun xs -> "(" + String.concat ", " xs + ")")
             | Literal.Json j ->
                 let rec term (j: JVal) : string option =
                     let all (xs: string option list) =
