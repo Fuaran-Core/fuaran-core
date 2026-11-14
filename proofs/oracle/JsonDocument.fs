@@ -577,32 +577,9 @@ let of_decoder = (fun ( nd  :  't  ->  FStar_Pervasives_Native.option<numval<'nu
      end))
 
 
-let rec dmemb = (fun ( k  :  Prims.string ) ( fs  :  Prims.list<(Prims.string * ddoc<'t>)> ) -> (match (fs) with
-| [] -> begin
-     FStar_Pervasives_Native.None
-     end
-| ((n, v))::rest -> begin
-      
-if (Prims.op_Equals n k) then begin
-     FStar_Pervasives_Native.Some (v)
-     end else begin
-     (dmemb k rest)
-     end
-     end))
-
-
-let rec dhas_key = (fun ( k  :  Prims.string ) ( fs  :  Prims.list<(Prims.string * ddoc<'t>)> ) -> (match (fs) with
-| [] -> begin
-     false
-     end
-| ((n, uu___))::rest -> begin
-     ((Prims.op_Equals n k) || (dhas_key k rest))
-     end))
-
-
 let dstep = (fun ( s  :  DecodeLayer.seg ) ( d  :  ddoc<'t> ) -> (match (((s), (d))) with
 | (DecodeLayer.Key (k), DObj (fs)) -> begin
-     (dmemb k fs)
+     (DecodeLayer.memb k fs)
      end
 | (DecodeLayer.Index (i), DArr (xs)) -> begin
       
@@ -647,7 +624,7 @@ let d_resolves_in = (fun ( d  :  ddoc<'t> ) ( e  :  DecodeLayer.derr ) -> (match
 | (DecodeLayer.Key (k))::parent_rev -> begin
      (match ((dresolve (WireDecode.rev parent_rev) d)) with
 | FStar_Pervasives_Native.Some (DObj (fields)) -> begin
-     (not ((dhas_key k fields)))
+     (not ((DecodeLayer.has_key k fields)))
      end
 | uu___ -> begin
      false
@@ -666,6 +643,186 @@ let d_resolves_in = (fun ( d  :  ddoc<'t> ) ( e  :  DecodeLayer.derr ) -> (match
      false
      end)
      end))
+
+
+let dmembers = (fun ( d  :  ddoc<'t> ) -> (match (d) with
+| DObj (fields) -> begin
+     FStar_Pervasives_Native.Some (fields)
+     end
+| uu___ -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let ditems = (fun ( d  :  ddoc<'t> ) -> (match (d) with
+| DArr (xs) -> begin
+     FStar_Pervasives_Native.Some (xs)
+     end
+| uu___ -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let dtext = (fun ( d  :  ddoc<'t> ) -> (match (d) with
+| DStr (s) -> begin
+     FStar_Pervasives_Native.Some (s)
+     end
+| uu___ -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let dcarrier = (fun ( uu___  :  unit ) -> {DecodeLayer.members_of = dmembers; DecodeLayer.items_of = ditems; DecodeLayer.text_of = dtext})
+
+
+type jdec<'t, 'a> = DecodeLayer.dec_over<ddoc<'t>, 'a>
+
+
+let jd_succeed = (fun ( v  :  'a ) ( uu___  :  ddoc<'t> ) -> DecodeLayer.Ok (v))
+
+
+let jd_fail = (fun ( c  :  DecodeLayer.root_code ) ( el  :  ddoc<'t> ) -> (DecodeLayer.fail_over c el))
+
+
+let jd_map = (fun ( g  :  'a  ->  'b ) ( d  :  jdec<'t, 'a> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.map_over g d el))
+
+
+let jd_bind = (fun ( g  :  'a  ->  jdec<'t, 'b> ) ( d  :  jdec<'t, 'a> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.bind_over g d el))
+
+
+let jd_pair = (fun ( da  :  jdec<'t, 'a> ) ( db  :  jdec<'t, 'b> ) ( f  :  'a  ->  'b  ->  'c ) -> (jd_bind (fun ( x  :  'a ) -> (jd_map (f x) db)) da))
+
+
+let jd_and_then = (fun ( g  :  'a  ->  DecodeLayer.result<'b, DecodeLayer.root_code> ) ( d  :  jdec<'t, 'a> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.and_then_over g d el))
+
+
+let jd_json = (fun ( el  :  ddoc<'t> ) -> DecodeLayer.Ok (el))
+
+
+let jd_nullable = (fun ( d  :  jdec<'t, 'a> ) ( el  :  ddoc<'t> ) -> (match (el) with
+| DNull -> begin
+     DecodeLayer.Ok (FStar_Pervasives_Native.None)
+     end
+| other -> begin
+     (match ((d other)) with
+| DecodeLayer.Ok (x) -> begin
+     DecodeLayer.Ok (FStar_Pervasives_Native.Some (x))
+     end
+| DecodeLayer.Error (e) -> begin
+     DecodeLayer.Error (e)
+     end)
+     end))
+
+
+let jd_str = (fun ( el  :  ddoc<'t> ) -> (DecodeLayer.text_over (dcarrier ()) el))
+
+
+let jd_bool = (fun ( el  :  ddoc<'t> ) -> (match (el) with
+| DBool (b) -> begin
+     DecodeLayer.Ok (b)
+     end
+| other -> begin
+     DecodeLayer.Error ((DecodeLayer.wrong_kind_over (dcarrier ()) other))
+     end))
+
+
+let jd_number_text = (fun ( el  :  ddoc<'t> ) -> (match (el) with
+| DNum (n) -> begin
+     DecodeLayer.Ok (n)
+     end
+| other -> begin
+     DecodeLayer.Error ((DecodeLayer.wrong_kind_over (dcarrier ()) other))
+     end))
+
+
+let jd_int = (fun ( nd  :  't  ->  FStar_Pervasives_Native.option<numval<'num, 'flt>> ) ( el  :  ddoc<'t> ) -> (match (el) with
+| DNum (n) -> begin
+     (match ((nd n)) with
+| FStar_Pervasives_Native.Some (WireDecode.JInt (i)) -> begin
+     DecodeLayer.Ok (i)
+     end
+| uu___ -> begin
+     DecodeLayer.Error ((DecodeLayer.make DecodeLayer.OutOfRange))
+     end)
+     end
+| other -> begin
+     DecodeLayer.Error ((DecodeLayer.wrong_kind_over (dcarrier ()) other))
+     end))
+
+
+let jd_float = (fun ( nd  :  't  ->  FStar_Pervasives_Native.option<numval<'num, 'flt>> ) ( to_flt  :  'num  ->  'flt ) ( el  :  ddoc<'t> ) -> (match (el) with
+| DNum (n) -> begin
+     (match ((nd n)) with
+| FStar_Pervasives_Native.Some (WireDecode.JInt (i)) -> begin
+     DecodeLayer.Ok ((to_flt i))
+     end
+| FStar_Pervasives_Native.Some (WireDecode.JFloat (f)) -> begin
+     DecodeLayer.Ok (f)
+     end
+| uu___ -> begin
+     DecodeLayer.Error ((DecodeLayer.make DecodeLayer.OutOfRange))
+     end)
+     end
+| other -> begin
+     DecodeLayer.Error ((DecodeLayer.wrong_kind_over (dcarrier ()) other))
+     end))
+
+
+let jd_items = (fun ( el  :  ddoc<'t> ) -> (DecodeLayer.items_over (dcarrier ()) el))
+
+
+let jd_obj = (fun ( el  :  ddoc<'t> ) -> (DecodeLayer.members_over (dcarrier ()) el))
+
+
+let jd_field = (fun ( name  :  Prims.string ) ( d  :  jdec<'t, 'a> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.field_over (dcarrier ()) name d el))
+
+
+let jd_opt_field = (fun ( name  :  Prims.string ) ( d  :  jdec<'t, 'a> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.opt_field_over (dcarrier ()) name d el))
+
+
+let jd_field_or = (fun ( name  :  Prims.string ) ( fallback  :  'a ) ( d  :  jdec<'t, 'a> ) -> (jd_map (fun ( o  :  FStar_Pervasives_Native.option<'a> ) -> (match (o) with
+| FStar_Pervasives_Native.Some (x) -> begin
+     x
+     end
+| FStar_Pervasives_Native.None -> begin
+     fallback
+     end)) (jd_opt_field name d)))
+
+
+let jd_at = (fun ( path  :  Prims.list<DecodeLayer.seg> ) ( d  :  jdec<'t, 'a> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.at_over (dcarrier ()) path d el))
+
+
+let jd_map_list_indexed = (fun ( g  :  Prims.int  ->  jdec<'t, 'a> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.map_list_indexed_over (dcarrier ()) g el))
+
+
+let jd_list = (fun ( d  :  jdec<'t, 'a> ) -> (jd_map_list_indexed (fun ( uu___  :  Prims.int ) -> d)))
+
+
+let jd_bounded_list = (fun ( max_items  :  Prims.int ) ( d  :  jdec<'t, 'a> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.bounded_list_over (dcarrier ()) max_items d el))
+
+
+let jd_list_all = (fun ( d  :  jdec<'t, 'a> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.list_all_over (dcarrier ()) d el))
+
+
+let jd_sequence = (fun ( ds  :  Prims.list<jdec<'t, 'a>> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.sequence_over ds el))
+
+
+let jd_all = (fun ( ds  :  Prims.list<jdec<'t, 'a>> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.all_over ds el))
+
+
+let jd_one_of = (fun ( cases  :  Prims.list<(Prims.string * 'a)> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.one_of_over (dcarrier ()) cases el))
+
+
+let jd_tag_dispatch = (fun ( key  :  Prims.string ) ( cases  :  Prims.list<(Prims.string * jdec<'t, 'a>)> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.tag_dispatch_over (dcarrier ()) key cases el))
+
+
+let jd_undeclared = (fun ( known  :  Prims.list<Prims.string> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.undeclared_over (dcarrier ()) known el))
+
+
+let jd_members = (fun ( known  :  Prims.list<Prims.string> ) ( el  :  ddoc<'t> ) -> (DecodeLayer.members_only_over (dcarrier ()) known el))
+
+
+let jd_closed = (fun ( known  :  Prims.list<Prims.string> ) ( d  :  jdec<'t, 'a> ) -> (jd_bind (fun ( uu___  :  unit ) -> d) (jd_members known)))
 
 
 let null_doc : Prims.list<JsonParse.ch> = (JsonParse.CLBrace)::(JsonParse.CQuote)::(JsonParse.CLa)::(JsonParse.CQuote)::(JsonParse.CColon)::(JsonParse.CLn)::(JsonParse.CLu)::(JsonParse.CLl)::(JsonParse.CLl)::(JsonParse.CComma)::(JsonParse.CQuote)::(JsonParse.CLb)::(JsonParse.CQuote)::(JsonParse.CColon)::(JsonParse.CMinus)::(JsonParse.CD1)::(JsonParse.CD2)::(JsonParse.CDot)::(JsonParse.CD5)::(JsonParse.CD0)::(JsonParse.CRBrace)::[]
@@ -701,7 +858,34 @@ let lower_refuses_the_null : Prims.bool = (match ((lower (fun ( uu___  :  Prims.
      end)
 
 
-let twins : Prims.list<Twin.twin> = ({Twin.tname = "the-lossless-reading-keeps-a-null-and-a-number-as-written"; Twin.tholds = (fun ( uu___  :  unit ) -> null_doc_reads_as_written)})::({Twin.tname = "a-document-with-a-null-does-not-convert"; Twin.tholds = (fun ( uu___  :  unit ) -> null_doc_converts_to_nothing)})::({Twin.tname = "a-converting-document-is-the-parse"; Twin.tholds = (fun ( uu___  :  unit ) -> num_doc_agrees)})::({Twin.tname = "the-float-flag-reads-the-exponent"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_float_tok ((JsonParse.CD1)::(JsonParse.CUe)::(JsonParse.CD2)::[])) true))})::({Twin.tname = "the-float-flag-of-an-integer-is-false"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_float_tok ((JsonParse.CMinus)::(JsonParse.CD1)::(JsonParse.CD2)::[])) false))})::({Twin.tname = "lower-refuses-a-null-not-admitted"; Twin.tholds = (fun ( uu___  :  unit ) -> lower_refuses_the_null)})::[]
+let foreign_doc : ddoc<Prims.string> = DObj (((("id"), (DNull)))::((("qty"), (DNum ("412000.00"))))::((("tags"), (DArr ((DNull)::(DStr ("x"))::[]))))::[])
+
+
+let jd_null_member_is_wrong_kind_at_its_path : Prims.bool = (match ((jd_field "id" jd_str foreign_doc)) with
+| DecodeLayer.Error (e) -> begin
+     (((Prims.op_Equals e.code DecodeLayer.WrongKind) && (Prims.op_Equals e.path ((DecodeLayer.Key ("id"))::[]))) && (d_resolves_in foreign_doc e))
+     end
+| DecodeLayer.Ok (uu___) -> begin
+     false
+     end)
+
+
+let jd_nullable_reads_the_nulls : Prims.bool = (Prims.op_Equals (jd_field "tags" (jd_list (jd_nullable jd_str)) foreign_doc) (DecodeLayer.Ok ((FStar_Pervasives_Native.None)::(FStar_Pervasives_Native.Some ("x"))::[])))
+
+
+let jd_number_text_keeps_the_scale : Prims.bool = (Prims.op_Equals (jd_field "qty" jd_number_text foreign_doc) (DecodeLayer.Ok ("412000.00")))
+
+
+let jd_int_refuses_at_the_number : Prims.bool = (match ((jd_field "qty" (jd_int (fun ( uu___  :  Prims.string ) -> FStar_Pervasives_Native.None)) foreign_doc)) with
+| DecodeLayer.Error (e) -> begin
+     (((Prims.op_Equals e.code DecodeLayer.OutOfRange) && (Prims.op_Equals e.path ((DecodeLayer.Key ("qty"))::[]))) && (d_resolves_in foreign_doc e))
+     end
+| DecodeLayer.Ok (uu___) -> begin
+     false
+     end)
+
+
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "the-lossless-reading-keeps-a-null-and-a-number-as-written"; Twin.tholds = (fun ( uu___  :  unit ) -> null_doc_reads_as_written)})::({Twin.tname = "a-document-with-a-null-does-not-convert"; Twin.tholds = (fun ( uu___  :  unit ) -> null_doc_converts_to_nothing)})::({Twin.tname = "a-converting-document-is-the-parse"; Twin.tholds = (fun ( uu___  :  unit ) -> num_doc_agrees)})::({Twin.tname = "the-float-flag-reads-the-exponent"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_float_tok ((JsonParse.CD1)::(JsonParse.CUe)::(JsonParse.CD2)::[])) true))})::({Twin.tname = "the-float-flag-of-an-integer-is-false"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (is_float_tok ((JsonParse.CMinus)::(JsonParse.CD1)::(JsonParse.CD2)::[])) false))})::({Twin.tname = "lower-refuses-a-null-not-admitted"; Twin.tholds = (fun ( uu___  :  unit ) -> lower_refuses_the_null)})::({Twin.tname = "the-document-decoder-refuses-a-null-member-as-wrong-kind-at-it"; Twin.tholds = (fun ( uu___  :  unit ) -> jd_null_member_is_wrong_kind_at_its_path)})::({Twin.tname = "nullable-reads-each-null-as-none"; Twin.tholds = (fun ( uu___  :  unit ) -> jd_nullable_reads_the_nulls)})::({Twin.tname = "number-text-keeps-the-scale"; Twin.tholds = (fun ( uu___  :  unit ) -> jd_number_text_keeps_the_scale)})::({Twin.tname = "int-refuses-a-number-it-cannot-read-at-the-number"; Twin.tholds = (fun ( uu___  :  unit ) -> jd_int_refuses_at_the_number)})::[]
 
 
 

@@ -5,7 +5,7 @@ module Fuaran.Core.Tests.IndexedApplyTests
 // and the index that describes it — and answer exactly what `apply`, `canApply` and `applyAll`
 // answer under the same policy and scope: the same tree, or the same `Rejection`. The index they
 // hand back is `Tree.Index.build` of the tree they hand back. And the work of one insert does not
-// grow with the tree. The law is a tested law, not a modelled one (DECISIONS.md D257).
+// grow with the tree. The law is a tested law, not a modelled one (DECISIONS.md D258).
 
 open Expecto
 open Fuaran.Core

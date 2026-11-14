@@ -1610,7 +1610,7 @@
         "IndexedTree.ofTree"
       ],
       "class": "measured-elsewhere",
-      "reason": "The indexed apply entries (Phase 659, DECISIONS.md D257): on a fresh index each answers what `Ops.apply`, `Ops.canApply` or `Ops.applyAll` answers, over the algebra's op sample, and carries the index to `Tree.Index.build` of its result; the agreement rests on the modelled lookups (`fresh_index_agrees`) and on `afterOp`'s tested law.",
+      "reason": "The indexed apply entries (Phase 659, DECISIONS.md D258): on a fresh index each answers what `Ops.apply`, `Ops.canApply` or `Ops.applyAll` answers, over the algebra's op sample, and carries the index to `Tree.Index.build` of its result; the agreement rests on the modelled lookups (`fresh_index_agrees`) and on `afterOp`'s tested law.",
       "standIn": "tests/Fuaran.Core.Tests/IndexedApplyTests.fs"
     },
     {

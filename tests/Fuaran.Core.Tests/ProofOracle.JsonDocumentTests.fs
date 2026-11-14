@@ -194,6 +194,135 @@ let private onDeepStack (f: unit -> unit) =
     | Some e -> raise e
     | None -> ()
 
+// ---- the document decoder (section 6, Phase 658): the extracted model of `JDocDecoder` beside it ----
+
+/// An answer of either side, as both are compared: the value rendered, or the refusal's code and path.
+let private prodDoc (render: 'a -> string) (r: Result<'a, DecodeError>) : string =
+    match r with
+    | Ok v -> "ok " + render v
+    | Error e -> showProdErr e
+
+let private modelDoc (render: 'a -> string) (r: DecodeLayer.result<'a, DecodeLayer.derr>) : string =
+    match r with
+    | DecodeLayer.Ok v -> "ok " + render v
+    | DecodeLayer.Error e -> showModelErr e
+
+let private modelAll (render: 'a -> string) (r: DecodeLayer.result<'a, Prims.list<DecodeLayer.derr>>) : string =
+    match r with
+    | DecodeLayer.Ok v -> "ok " + render v
+    | DecodeLayer.Error es -> es |> List.map showModelErr |> String.concat " "
+
+let private prodAll (render: 'a -> string) (r: Result<'a, DecodeError list>) : string =
+    match r with
+    | Ok v -> "ok " + render v
+    | Error es -> es |> List.map showProdErr |> String.concat " "
+
+let private modelOption (o: FStar_Pervasives_Native.option<'a>) : 'a option =
+    match o with
+    | FStar_Pervasives_Native.Some x -> Some x
+    | FStar_Pervasives_Native.None -> None
+
+let private rootCode: DecodeLayer.root_code = DecodeLayer.ROutOfRange
+
+/// The shapes both sides decode: every block `JDocDecoder` has, the null and the number readers
+/// among them, each production decoder beside the model's (`proofs/JsonDocument.fst` section 6).
+let private documentShapes: (string * (JDoc -> string) * (M.jdoc<string, string> -> string)) list =
+    let strs (xs: string list) = String.concat "|" xs
+    let opt (o: string option) = sprintf "%A" o
+
+    [ "succeed", (JDocDecoder.succeed "s" >> prodDoc id), (M.jd_succeed "s" >> modelDoc id)
+      "fail", (JDocDecoder.fail RootDecodeCode.OutOfRange "e" "d" >> prodDoc id), (M.jd_fail rootCode >> modelDoc id)
+      "str", (JDocDecoder.str >> prodDoc id), (M.jd_str >> modelDoc id)
+      "bool", (JDocDecoder.bool >> prodDoc string), (M.jd_bool >> modelDoc string)
+      "numberText", (JDocDecoder.numberText >> prodDoc id), (M.jd_number_text >> modelDoc id)
+      "int", (JDocDecoder.int >> prodDoc string), (M.jd_int numberOf >> modelDoc string)
+      "float", (JDocDecoder.float >> prodDoc string), (M.jd_float numberOf float >> modelDoc string)
+      "nullable str",
+      (JDocDecoder.nullable JDocDecoder.str >> prodDoc opt),
+      (M.jd_nullable M.jd_str >> modelDoc (modelOption >> opt))
+      "items", (JDocDecoder.items >> prodDoc (List.length >> string)), (M.jd_items >> modelDoc (List.length >> string))
+      "obj", (JDocDecoder.obj >> prodDoc (List.map fst >> strs)), (M.jd_obj >> modelDoc (List.map fst >> strs))
+      "field k0 nullable numberText",
+      (JDocDecoder.field "k0" (JDocDecoder.nullable JDocDecoder.numberText)
+       >> prodDoc opt),
+      (M.jd_field "k0" (M.jd_nullable M.jd_number_text)
+       >> modelDoc (modelOption >> opt))
+      "optField k1 str",
+      (JDocDecoder.optField "k1" JDocDecoder.str >> prodDoc opt),
+      (M.jd_opt_field "k1" M.jd_str >> modelDoc (modelOption >> opt))
+      "fieldOr k1 str",
+      (JDocDecoder.fieldOr "k1" "fallback" JDocDecoder.str >> prodDoc id),
+      (M.jd_field_or "k1" "fallback" M.jd_str >> modelDoc id)
+      "at k0.0 int",
+      (JDocDecoder.at [ PathSegment.Key "k0"; PathSegment.Index 0 ] JDocDecoder.int
+       >> prodDoc string),
+      (M.jd_at [ DecodeLayer.Key "k0"; DecodeLayer.Index 0 ] (M.jd_int numberOf)
+       >> modelDoc string)
+      "list nullable float",
+      (JDocDecoder.list (JDocDecoder.nullable JDocDecoder.float)
+       >> prodDoc (List.map (sprintf "%A") >> strs)),
+      (M.jd_list (M.jd_nullable (M.jd_float numberOf float))
+       >> modelDoc (List.map (modelOption >> sprintf "%A") >> strs))
+      "mapListIndexed str",
+      (JDocDecoder.mapListIndexed (fun _ -> JDocDecoder.str) >> prodDoc strs),
+      (M.jd_map_list_indexed (fun _ -> M.jd_str) >> modelDoc strs)
+      "boundedList 2 str",
+      (JDocDecoder.boundedList 2 JDocDecoder.str >> prodDoc strs),
+      (M.jd_bounded_list 2 M.jd_str >> modelDoc strs)
+      "listAll int",
+      (JDocDecoder.listAll JDocDecoder.int >> prodAll (List.map string >> strs)),
+      (M.jd_list_all (M.jd_int numberOf) >> modelAll (List.map string >> strs))
+      "sequence",
+      (JDocDecoder.sequence
+          [ JDocDecoder.field "k0" JDocDecoder.numberText
+            JDocDecoder.field "k1" JDocDecoder.str ]
+       >> prodDoc strs),
+      (M.jd_sequence [ M.jd_field "k0" M.jd_number_text; M.jd_field "k1" M.jd_str ]
+       >> modelDoc strs)
+      "all",
+      (JDocDecoder.all
+          [ JDocDecoder.field "k0" JDocDecoder.numberText
+            JDocDecoder.field "k1" JDocDecoder.str ]
+       >> prodAll strs),
+      (M.jd_all [ M.jd_field "k0" M.jd_number_text; M.jd_field "k1" M.jd_str ]
+       >> modelAll strs)
+      "pair",
+      (JDocDecoder.pair (JDocDecoder.optField "k0" JDocDecoder.json) JDocDecoder.obj (fun a b ->
+          a.IsSome, List.length b)
+       >> prodDoc string),
+      (M.jd_pair (M.jd_opt_field "k0" M.jd_json) M.jd_obj (fun a b -> (modelOption a).IsSome, List.length b)
+       >> modelDoc string)
+      "andThen",
+      (JDocDecoder.str
+       |> JDocDecoder.andThen (fun s ->
+           if s.Length > 1 then
+               Ok s.Length
+           else
+               Error(RootDecodeCode.OutOfRange, "e", "d"))
+       >> prodDoc string),
+      (M.jd_and_then
+          (fun (s: string) ->
+              if s.Length > 1 then
+                  DecodeLayer.Ok s.Length
+              else
+                  DecodeLayer.Error rootCode)
+          M.jd_str
+       >> modelDoc string)
+      "oneOf",
+      (JDocDecoder.oneOf [ "a", "A"; "bcd", "B" ] >> prodDoc id),
+      (M.jd_one_of [ "a", "A"; "bcd", "B" ] >> modelDoc id)
+      "tagDispatch k1",
+      (JDocDecoder.tagDispatch "k1" [ "a", JDocDecoder.succeed "A"; "x", JDocDecoder.field "k0" JDocDecoder.str ]
+       >> prodDoc id),
+      (M.jd_tag_dispatch "k1" [ "a", M.jd_succeed "A"; "x", M.jd_field "k0" M.jd_str ]
+       >> modelDoc id)
+      "undeclared",
+      (JDocDecoder.undeclared [ "k0" ] >> List.map showProdErr >> String.concat " "),
+      (M.jd_undeclared [ "k0" ] >> List.map showModelErr >> String.concat " ")
+      "closed",
+      (JDocDecoder.closed [ "k0"; "k1" ] (JDocDecoder.succeed "ok") >> prodDoc id),
+      (M.jd_closed [ "k0"; "k1" ] (M.jd_succeed "ok") >> modelDoc id) ]
+
 [<Tests>]
 let tests =
     testList
@@ -304,4 +433,78 @@ let tests =
                   Expect.notEqual (modelAnswer JsonParseDiff.toChsBlind atCap input) (prodAnswer atCap input) input
 
               for input in [ "null"; "1.50"; "\"x\""; "true" ] do
-                  Expect.equal (modelAnswer JsonParseDiff.toChsBlind atCap input) (prodAnswer atCap input) input ]
+                  Expect.equal (modelAnswer JsonParseDiff.toChsBlind atCap input) (prodAnswer atCap input) input
+
+          testCase "the extracted document decoder answers what JDocDecoder answers, block by block, code and path"
+          <| fun _ ->
+              onDeepStack (fun () ->
+                  let constructed =
+                      [ DObj [ "k0", DNull; "k1", DStr "x" ]
+                        DObj [ "k0", DArr [ DNum "1"; DNull; DNum "1.50" ]; "k1", DStr "a" ]
+                        DObj [ "k0", DNum "412000.00"; "k1", DNum "12345678901234567890" ]
+                        DObj [ "k0", DArr [ DNum "2147483648"; DNum "-0"; DNum "1e400" ]; "k1", DBool true ]
+                        DObj [ "k0", DStr "first"; "k0", DNum "1"; "k2", DNull ]
+                        DObj [ "k1", DStr "x"; "k0", DStr "payload" ]
+                        DArr [ DNull; DStr "bcd"; DNum "7"; DBool false ]
+                        DNull
+                        DNum "01"
+                        DStr "bcd" ]
+
+                  let docs =
+                      constructed
+                      @ (Fuaran.Core.Tests.JsonDocumentTests.pool
+                         |> List.choose (fun input -> JDoc.read atCap input |> Result.toOption))
+
+                  let mutable compared = 0
+                  let mutable refused = 0
+
+                  for d in docs do
+                      let md = toModelDoc d
+
+                      for name, onProd, onModel in documentShapes do
+                          compared <- compared + 1
+                          let p = onProd d
+                          let m = onModel md
+
+                          if not (p.StartsWith "ok ") then
+                              refused <- refused + 1
+
+                          if m <> p then
+                              failtestf
+                                  "%s over %s: production %s, model %s"
+                                  name
+                                  (JDoc.tryWrite d |> Result.defaultValue "(unwritable)")
+                                  p
+                                  m
+
+                  Expect.isGreaterThan compared 10000 "answers compared"
+                  Expect.isGreaterThan refused 1000 "refusals compared")
+
+          testCase
+              "a document decoder over a blind carrier disagrees on every document carrying the member - the go-red"
+          <| fun _ ->
+              let real = M.dcarrier ()
+
+              let blind: DecodeLayer.carrier<M.jdoc<string, string>> =
+                  { DecodeLayer.members_of = (fun _ -> FStar_Pervasives_Native.None)
+                    DecodeLayer.items_of = real.items_of
+                    DecodeLayer.text_of = real.text_of }
+
+              let carrying =
+                  [ DObj [ "k0", DStr "x" ]
+                    DObj [ "k0", DNull ]
+                    DObj [ "k1", DNum "1"; "k0", DArr [] ] ]
+
+              let notObjects = [ DNull; DStr "k0"; DArr [ DObj [ "k0", DStr "x" ] ]; DNum "1" ]
+
+              let onProd (d: JDoc) =
+                  prodDoc (fun _ -> "member") (JDocDecoder.field "k0" JDocDecoder.json d)
+
+              let onBlind (d: JDoc) =
+                  modelDoc (fun _ -> "member") (DecodeLayer.field_over blind "k0" M.jd_json (toModelDoc d))
+
+              for d in carrying do
+                  Expect.notEqual (onBlind d) (onProd d) "the blind carrier loses the object"
+
+              for d in notObjects do
+                  Expect.equal (onBlind d) (onProd d) "and agrees where there is no object to lose" ]

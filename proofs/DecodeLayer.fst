@@ -9,13 +9,17 @@
        first-member `step`.
      - `src/Fuaran.Core.Wire/DecodeError.fs` — `DecodeCode`, `RootDecodeCode` (Phase 443),
        `DecodeError.make` / `under` / `within` / `resolvesIn`.
-     - `src/Fuaran.Core.Wire/Decoder.fs` — every combinator but the two that are not over a value
-       (`parse`, which starts from TEXT and is `Json.read` with its refusal lifted, and
-       `describing`, which answers the sentence): `succeed`, `fail`, `map`, `bind`, `andThen`, `wrongKind`,
-       `missing`, `tryMember`, the six kind readers, `field` / `optField` / `fieldOr`, `at`,
-       `mapListIndexed` / `list` / `boundedList` / `listAll`, `sequence` / `all`, `oneOf`,
-       `tagDispatch` / `tagDispatchWith` / `kindDispatch`, `intRange`, `undeclared` / `members` /
-       `closed`.
+     - `src/Fuaran.Core.Wire/Decoder.fs` — the carrier view `DecodeCarrier<'V>` and the algebra
+       written once over it, `DecodeOver` (Phase 640), modelled ONCE over any carrier (Phase 658,
+       section 2b and 3a), and `Decoder` as its instance at `jval` (section 3b): every combinator
+       but the two that are not over a value (`parse`, which starts from TEXT and is `Json.read`
+       with its refusal lifted, and `describing`, which answers the sentence) and the two Phase
+       509 helpers held elsewhere (`pair` and `strings`, `coverage-exclusions.json`): `succeed`,
+       `fail`, `map`, `bind`, `andThen`, `wrongKind`, `missing`, `tryMember`, the six kind
+       readers, `field` / `optField` / `fieldOr`, `at`, `mapListIndexed` / `list` /
+       `boundedList` / `listAll`, `sequence` / `all`, `oneOf`, `tagDispatch` /
+       `tagDispatchWith` / `kindDispatch`, `intRange`, `undeclared` / `members` / `closed`. The
+       algebra's instance at the lossless document (`JDocDecoder`) is `JsonDocument.fst`'s.
      - `src/Fuaran.Core.Wire/Codec.fs` and `CodecDeclarationFault.fs` — `Codec<'T>`'s `Write` and
        `ReadAll`, `CodecDeclarationFault.under`, `make` / `ofDecoder` / `decoder`, the five
        leaves, `enum`, `list`, `map`, `refine`, `record` / `field` / `optField` / `build`,
@@ -27,7 +31,8 @@
      - A refusal's PROSE. `DecodeError` keeps its `Code` and its `Path`; `Expected` and `Message`
        are dropped, as `WireColumn.fst` drops its refusals' prose. Every theorem here is about a
        code and a path, and `tagDispatchWith` — which rewrites only `Message` — is therefore
-       `tag_dispatch` in the model. The differential compares refusals by code and path.
+       `tag_dispatch` in the model. The differential compares refusals by code and path. The
+       carrier view's `KindName` goes with it: it is read only by `wrongKind`, for its detail.
      - The codec's `Schema` (and a field's `Properties` / `Required`), which is descriptive: "the
        decoder, not the schema, is the authority on acceptance" (Codec.fs).
      - The integers a decoder reads. `intRange lo hi` reads `lo <= i <= hi` over the opaque `num`
@@ -157,8 +162,7 @@ let within (p: list seg) (e: derr) : derr = { e with path = app p e.path }
 
 (* F#: the `List.tryFind (fun (k, _) -> k = name) |> Option.map snd` every member read is — the
    FIRST member of the key, where a foreign document repeats one. *)
-let rec memb (#num #flt: eqtype) (k: string) (fs: list (string & W.jval num flt))
-  : Tot (option (W.jval num flt)) =
+let rec memb (#a: Type0) (k: string) (fs: list (string & a)) : Tot (option a) =
   match fs with
   | [] -> None
   | (n, v) :: t -> if n = k then Some v else memb k t
@@ -187,7 +191,7 @@ let rec resolve (#num #flt: eqtype) (p: list seg) (doc: W.jval num flt)
        | None -> None)
 
 (* F#: the `List.exists (fun (n, _) -> n = k)` inside `resolvesIn`. *)
-let rec has_key (#num #flt: eqtype) (k: string) (fs: list (string & W.jval num flt)) : Tot bool =
+let rec has_key (#a: Type0) (k: string) (fs: list (string & a)) : Tot bool =
   match fs with
   | [] -> false
   | (n, _) :: t -> n = k || has_key k t
@@ -211,61 +215,364 @@ let resolves_in (#num #flt: eqtype) (doc: W.jval num flt) (e: derr) : Tot bool =
        | None -> false)
 
 (* ======================================================================================
-   3. The decoders (F#: `Decoder<'T>` and `module Decoder`, Decoder.fs), clause for clause.
+   2b. The carrier view (F#: `DecodeCarrier<'V>`, Decoder.fs, Phase 640) and the path law read
+       through it.
+
+       Production writes the decode algebra ONCE over a carrier view (`DecodeOver`), and
+       instantiates it at `JVal` (`Decoder`) and at the lossless document (`JDocDecoder`). The
+       model does the same (Phase 658): `carrier` is the view, its `KindName` dropped with the
+       prose (the header); `step_over` / `resolve_over` / `resolves_in_over` are
+       `DecodePath.step`'s rule (the FIRST member of a key, a non-negative index of an array)
+       read through the view. A carrier's own path law is its own specification —
+       `resolve` / `resolves_in` here for `jval`, `JsonDocument.fst`'s `dresolve` /
+       `d_resolves_in` for the document — and the one law between the two is FAITHFULNESS: the
+       view's members and items are the carrier's own object and array. It is proved per carrier
+       (`ok_at_is_over` here), never assumed, so no theorem of the algebra is conditional on it.
    ====================================================================================== *)
 
+(* F#: `DecodeCarrier<'V>` — an object's members in authored order, an array's items, a
+   string's text, each `None` for any other kind. *)
+noeq type carrier (v: Type0) = {
+  members_of: v -> option (list (string & v));
+  items_of: v -> option (list v);
+  text_of: v -> option string
+}
+
+(* `DecodePath.step`'s rule, through the view. *)
+let step_over (#v: Type0) (c: carrier v) (s: seg) (x: v) : Tot (option v) =
+  match s with
+  | Key k -> (match c.members_of x with Some fs -> memb k fs | None -> None)
+  | Index i -> (match c.items_of x with Some xs -> if i >= 0 then try_item i xs else None | None -> None)
+
+(* `DecodePath.resolve`, through the view. *)
+let rec resolve_over (#v: Type0) (c: carrier v) (p: list seg) (doc: v) : Tot (option v) (decreases p) =
+  match p with
+  | [] -> Some doc
+  | s :: rest ->
+      (match step_over c s doc with
+       | Some x -> resolve_over c rest x
+       | None -> None)
+
+(* `DecodeError.resolvesIn`, through the view. *)
+let resolves_in_over (#v: Type0) (c: carrier v) (doc: v) (e: derr) : Tot bool =
+  match e.code with
+  | InvalidJson -> (match e.path with [] -> true | _ -> false)
+  | MissingField ->
+      (match W.rev e.path with
+       | Key k :: parent_rev ->
+           (match resolve_over c (W.rev parent_rev) doc with
+            | Some o -> (match c.members_of o with Some fields -> not (has_key k fields) | None -> false)
+            | None -> false)
+       | _ -> false)
+  | _ ->
+      (match resolve_over c e.path doc with
+       | Some _ -> true
+       | None -> false)
+
+(* ======================================================================================
+   3. The decoders. 3a is the algebra over a carrier (F#: `module internal DecodeOver`,
+      Decoder.fs), clause for clause; 3b is `Decoder<'T>` and `module Decoder`, its instance at
+      `jval`, with the readers that are `jval`'s own (`json`, `int`, `float`, `bool`) and the
+      compositions `Decoder` spells itself (`fieldOr`, `list`, `kindDispatch`, `intRange`,
+      `closed`). The document instance is `JsonDocument.fst`'s.
+   ====================================================================================== *)
+
+(* F#: `'V -> Result<'T, DecodeError>`, the decoder over a carrier. *)
+let dec_over (v: Type0) (a: Type0) = v -> Tot (result a derr)
+
+(* F#: `DecodeOver.fail` (its two phrases dropped), its code a `RootDecodeCode` since Phase 443. *)
+let fail_over (#v #a: Type0) (c: root_code) : dec_over v a = fun _ -> Error (make (root c))
+
+(* F#: `DecodeOver.map`. *)
+let map_over (#v #a #b: Type0) (g: a -> b) (d: dec_over v a) : dec_over v b =
+  fun el ->
+    match d el with
+    | Ok x -> Ok (g x)
+    | Error e -> Error e
+
+(* F#: `DecodeOver.bind` — the second decoder reads the SAME value. *)
+let bind_over (#v #a #b: Type0) (g: a -> dec_over v b) (d: dec_over v a) : dec_over v b =
+  fun el ->
+    match d el with
+    | Ok x -> g x el
+    | Error e -> Error e
+
+(* F#: `DecodeOver.andThen` (its function's two phrases dropped) — since Phase 453 `g` refuses
+   with a `RootDecodeCode`, and the refusal is raised AT the value, as `fail` raises its own. *)
+let and_then_over (#v #a #b: Type0) (g: a -> result b root_code) (d: dec_over v a) : dec_over v b =
+  fun el ->
+    match d el with
+    | Ok x -> (match g x with Ok u -> Ok u | Error c -> Error (make (root c)))
+    | Error e -> Error e
+
+(* F#: `DecodeOver.wrongKind` — its `found` names a kind in prose only. *)
+let wrong_kind_over (#v: Type0) (c: carrier v) (found: v) : derr = make WrongKind
+
+(* F#: `DecodeOver.missing` — the path NAMES the absent member. *)
+let missing (name: string) : derr = { code = MissingField; path = [Key name] }
+
+(* F#: `DecodeOver.tryMember`. *)
+let try_member_over (#v: Type0) (c: carrier v) (name: string) (el: v) : Tot (option v) =
+  match c.members_of el with
+  | Some fields -> memb name fields
+  | None -> None
+
+(* F#: `DecodeOver.text`. *)
+let text_over (#v: Type0) (c: carrier v) : dec_over v string =
+  fun el ->
+    match c.text_of el with
+    | Some s -> Ok s
+    | None -> Error (wrong_kind_over c el)
+
+(* F#: `DecodeOver.items`. *)
+let items_over (#v: Type0) (c: carrier v) : dec_over v (list v) =
+  fun el ->
+    match c.items_of el with
+    | Some xs -> Ok xs
+    | None -> Error (wrong_kind_over c el)
+
+(* F#: `DecodeOver.members` — the object reader (`Decoder.obj`). *)
+let members_over (#v: Type0) (c: carrier v) : dec_over v (list (string & v)) =
+  fun el ->
+    match c.members_of el with
+    | Some fields -> Ok fields
+    | None -> Error (wrong_kind_over c el)
+
+(* F#: `DecodeOver.field`. *)
+let field_over (#v #a: Type0) (c: carrier v) (name: string) (d: dec_over v a) : dec_over v a =
+  fun el ->
+    match c.members_of el with
+    | Some _ ->
+        (match try_member_over c name el with
+         | Some x -> map_err (under (Key name)) (d x)
+         | None -> Error (missing name))
+    | None -> Error (wrong_kind_over c el)
+
+(* F#: `DecodeOver.optField` — absent is `Ok None`, present-and-refused the refusal. *)
+let opt_field_over (#v #a: Type0) (c: carrier v) (name: string) (d: dec_over v a) : dec_over v (option a) =
+  fun el ->
+    match c.members_of el with
+    | Some _ ->
+        (match try_member_over c name el with
+         | Some x ->
+             (match d x with
+              | Ok y -> Ok (Some y)
+              | Error e -> Error (under (Key name) e))
+         | None -> Ok None)
+    | None -> Error (wrong_kind_over c el)
+
+(* F#: `DecodeOver.at`'s `go`. *)
+let rec at_go_over (#v #a: Type0) (c: carrier v) (d: dec_over v a) (done_rev rest: list seg) (x: v)
+  : Tot (result a derr) (decreases rest) =
+  let here = W.rev done_rev in
+  match rest with
+  | [] -> map_err (within here) (d x)
+  | Key k :: tail ->
+      (match c.members_of x with
+       | Some _ ->
+           (match try_member_over c k x with
+            | Some y -> at_go_over c d (Key k :: done_rev) tail y
+            | None -> Error (within here (missing k)))
+       | None -> Error (within here (wrong_kind_over c x)))
+  | Index i :: tail ->
+      (match c.items_of x with
+       | Some xs ->
+           (match (if i >= 0 then try_item i xs else None) with
+            | Some y -> at_go_over c d (Index i :: done_rev) tail y
+            | None -> Error (within here (make OutOfRange)))
+       | None -> Error (within here (wrong_kind_over c x)))
+
+(* F#: `DecodeOver.at`. *)
+let at_over (#v #a: Type0) (c: carrier v) (path: list seg) (d: dec_over v a) : dec_over v a =
+  fun el -> at_go_over c d [] path el
+
+(* F#: `DecodeOver.mapListIndexed`'s `go`. *)
+let rec mli_go (#v #a: Type0) (g: int -> dec_over v a) (i: int) (acc: list a) (xs: list v)
+  : Tot (result (list a) derr) (decreases xs) =
+  match xs with
+  | [] -> Ok (W.rev acc)
+  | x :: rest ->
+      (match g i x with
+       | Ok y -> mli_go g (i + 1) (y :: acc) rest
+       | Error e -> Error (under (Index i) e))
+
+(* F#: `DecodeOver.mapListIndexed`. *)
+let map_list_indexed_over (#v #a: Type0) (c: carrier v) (g: int -> dec_over v a) : dec_over v (list a) =
+  fun el ->
+    match c.items_of el with
+    | Some xs -> mli_go g 0 [] xs
+    | None -> Error (wrong_kind_over c el)
+
+(* F#: `DecodeOver.boundedList` — the bound checked before any item is read. *)
+let bounded_list_over (#v #a: Type0) (c: carrier v) (max_items: int) (d: dec_over v a) : dec_over v (list a) =
+  fun el ->
+    match c.items_of el with
+    | Some xs ->
+        if len xs > max_items then Error (make LimitExceeded)
+        else map_list_indexed_over c (fun _ -> d) el
+    | None -> map_list_indexed_over c (fun _ -> d) el
+
+(* F#: `errorsAndOks`'s `List.choose` of the refusals. *)
+let rec errors_of (#a: Type0) (rs: list (result a derr)) : Tot (list derr) =
+  match rs with
+  | [] -> []
+  | Error e :: t -> e :: errors_of t
+  | Ok _ :: t -> errors_of t
+
+(* F#: `errorsAndOks`'s `List.choose` of the answers. *)
+let rec oks_of (#a #e: Type0) (rs: list (result a e)) : Tot (list a) =
+  match rs with
+  | [] -> []
+  | Ok v :: t -> v :: oks_of t
+  | Error _ :: t -> oks_of t
+
+(* F#: `listAll`'s `List.mapi`. *)
+let rec mapi_d (#v #a: Type0) (d: dec_over v a) (i: int) (xs: list v)
+  : Tot (list (result a derr)) (decreases xs) =
+  match xs with
+  | [] -> []
+  | x :: t -> map_err (under (Index i)) (d x) :: mapi_d d (i + 1) t
+
+(* F#: `DecodeOver.listAll` — every refusal, at its item's index. *)
+let list_all_over (#v #a: Type0) (c: carrier v) (d: dec_over v a) (el: v)
+  : Tot (result (list a) (list derr)) =
+  match c.items_of el with
+  | Some xs ->
+      let rs = mapi_d d 0 xs in
+      (match errors_of rs with
+       | [] -> Ok (oks_of rs)
+       | errs -> Error errs)
+  | None -> Error [wrong_kind_over c el]
+
+(* F#: `DecodeOver.sequence`'s `go`. *)
+let rec seq_go (#v #a: Type0) (el: v) (acc: list a) (ds: list (dec_over v a))
+  : Tot (result (list a) derr) (decreases ds) =
+  match ds with
+  | [] -> Ok (W.rev acc)
+  | d :: rest ->
+      (match d el with
+       | Ok x -> seq_go el (x :: acc) rest
+       | Error e -> Error e)
+
+(* F#: `DecodeOver.sequence`. *)
+let sequence_over (#v #a: Type0) (ds: list (dec_over v a)) : dec_over v (list a) =
+  fun el -> seq_go el [] ds
+
+(* F#: `DecodeOver.all`'s `List.map (fun d -> d el)`. *)
+let rec run_all (#v #a: Type0) (ds: list (dec_over v a)) (el: v) : Tot (list (result a derr)) =
+  match ds with
+  | [] -> []
+  | d :: t -> d el :: run_all t el
+
+(* F#: `DecodeOver.all`. *)
+let all_over (#v #a: Type0) (ds: list (dec_over v a)) (el: v) : Tot (result (list a) (list derr)) =
+  let rs = run_all ds el in
+  match errors_of rs with
+  | [] -> Ok (oks_of rs)
+  | errs -> Error errs
+
+(* F#: the `List.tryFind (fun (k, _) -> k = s)` over a case table. *)
+let rec find_case (#a: Type0) (s: string) (cases: list (string & a)) : Tot (option a) =
+  match cases with
+  | [] -> None
+  | (k, v) :: t -> if k = s then Some v else find_case s t
+
+(* F#: `DecodeOver.oneOf`. *)
+let one_of_over (#v #a: Type0) (c: carrier v) (cases: list (string & a)) : dec_over v a =
+  fun el ->
+    match c.text_of el with
+    | Some s ->
+        (match find_case s cases with
+         | Some x -> Ok x
+         | None -> Error (make UnknownTag))
+    | None -> Error (wrong_kind_over c el)
+
+(* F#: `DecodeOver.tagDispatch` — the case reads the SAME object. *)
+let tag_dispatch_over (#v #a: Type0) (c: carrier v) (key: string) (cases: list (string & dec_over v a))
+  : dec_over v a =
+  fun el ->
+    match field_over c key (text_over c) el with
+    | Error e -> Error e
+    | Ok t ->
+        (match find_case t cases with
+         | Some d -> d el
+         | None -> Error (under (Key key) (make UnknownTag)))
+
+(* F#: `DecodeOver.undeclared`'s filter-then-map, fused. *)
+let rec undeclared_go (#v: Type0) (known: list string) (fields: list (string & v)) : Tot (list derr) =
+  match fields with
+  | [] -> []
+  | (k, _) :: t ->
+      if mem k known then undeclared_go known t
+      else under (Key k) (make UndeclaredMember) :: undeclared_go known t
+
+(* F#: `DecodeOver.undeclared`. *)
+let undeclared_over (#v: Type0) (c: carrier v) (known: list string) (el: v) : Tot (list derr) =
+  match c.members_of el with
+  | Some fields -> undeclared_go known fields
+  | None -> []
+
+(* F#: `DecodeOver.membersOnly` — the strict policy (`Decoder.members`). *)
+let members_only_over (#v: Type0) (c: carrier v) (known: list string) : dec_over v unit =
+  fun el ->
+    match undeclared_over c known el with
+    | [] -> Ok ()
+    | e :: _ -> Error e
+
+(* ---- 3b. `Decoder`, the instance at `jval` ---- *)
+
 (* F#: `Decoder<'T> = JVal -> Result<'T, DecodeError>`. *)
-let dec (num flt: eqtype) (a: Type0) = W.jval num flt -> Tot (result a derr)
+let dec (num flt: eqtype) (a: Type0) = dec_over (W.jval num flt) a
+
+(* F#: `Decoder.carrier` (Phase 640), its three views. *)
+let jmembers (#num #flt: eqtype) (x: W.jval num flt) : Tot (option (list (string & W.jval num flt))) =
+  match x with
+  | W.JObj fields -> Some fields
+  | _ -> None
+
+let jitems (#num #flt: eqtype) (x: W.jval num flt) : Tot (option (list (W.jval num flt))) =
+  match x with
+  | W.JArr xs -> Some xs
+  | _ -> None
+
+let jtext (#num #flt: eqtype) (x: W.jval num flt) : Tot (option string) =
+  match x with
+  | W.JStr s -> Some s
+  | _ -> None
+
+let jcarrier (#num #flt: eqtype) : carrier (W.jval num flt) =
+  { members_of = jmembers; items_of = jitems; text_of = jtext }
 
 (* F#: `Decoder.succeed`. *)
 let succeed (#num #flt: eqtype) (#a: Type0) (v: a) : dec num flt a = fun _ -> Ok v
 
-(* F#: `Decoder.fail` (its two phrases dropped), its code a `RootDecodeCode` since Phase 443. *)
-let fail (#num #flt: eqtype) (#a: Type0) (c: root_code) : dec num flt a = fun _ -> Error (make (root c))
+(* F#: `Decoder.fail`. *)
+let fail (#num #flt: eqtype) (#a: Type0) (c: root_code) : dec num flt a = fun el -> fail_over c el
 
 (* F#: `Decoder.map`. *)
 let map (#num #flt: eqtype) (#a #b: Type0) (g: a -> b) (d: dec num flt a) : dec num flt b =
-  fun el ->
-    match d el with
-    | Ok v -> Ok (g v)
-    | Error e -> Error e
+  fun el -> map_over g d el
 
-(* F#: `Decoder.bind` — the second decoder reads the SAME value. *)
+(* F#: `Decoder.bind`. *)
 let bind (#num #flt: eqtype) (#a #b: Type0) (g: a -> dec num flt b) (d: dec num flt a) : dec num flt b =
-  fun el ->
-    match d el with
-    | Ok v -> g v el
-    | Error e -> Error e
+  fun el -> bind_over g d el
 
-(* F#: `Decoder.andThen` (its function's two phrases dropped) — since Phase 453 `g` refuses with
-   a `RootDecodeCode`, and the refusal is raised AT the value, as `fail` raises its own. *)
+(* F#: `Decoder.andThen`. *)
 let and_then (#num #flt: eqtype) (#a #b: Type0) (g: a -> result b root_code) (d: dec num flt a) : dec num flt b =
-  fun el ->
-    match d el with
-    | Ok v -> (match g v with Ok u -> Ok u | Error c -> Error (make (root c)))
-    | Error e -> Error e
+  fun el -> and_then_over g d el
 
 (* F#: `Decoder.wrongKind`. *)
-let wrong_kind (#num #flt: eqtype) (found: W.jval num flt) : derr = make WrongKind
-
-(* F#: `Decoder.missing` — the path NAMES the absent member. *)
-let missing (name: string) : derr = { code = MissingField; path = [Key name] }
+let wrong_kind (#num #flt: eqtype) (found: W.jval num flt) : derr = wrong_kind_over jcarrier found
 
 (* F#: `Decoder.tryMember`. *)
 let try_member (#num #flt: eqtype) (name: string) (el: W.jval num flt) : Tot (option (W.jval num flt)) =
-  match el with
-  | W.JObj fields -> memb name fields
-  | _ -> None
+  try_member_over jcarrier name el
 
 (* F#: `Decoder.json`. *)
 let json (#num #flt: eqtype) : dec num flt (W.jval num flt) = fun el -> Ok el
 
 (* F#: `Decoder.str`. *)
-let str (#num #flt: eqtype) : dec num flt string =
-  fun el ->
-    match el with
-    | W.JStr s -> Ok s
-    | other -> Error (wrong_kind other)
+let str (#num #flt: eqtype) : dec num flt string = fun el -> text_over jcarrier el
 
 (* F#: `Decoder.int`. *)
 let int_d (#num #flt: eqtype) : dec num flt num =
@@ -290,187 +597,61 @@ let bool_d (#num #flt: eqtype) : dec num flt bool =
     | other -> Error (wrong_kind other)
 
 (* F#: `Decoder.items`. *)
-let items (#num #flt: eqtype) : dec num flt (list (W.jval num flt)) =
-  fun el ->
-    match el with
-    | W.JArr xs -> Ok xs
-    | other -> Error (wrong_kind other)
+let items (#num #flt: eqtype) : dec num flt (list (W.jval num flt)) = fun el -> items_over jcarrier el
 
 (* F#: `Decoder.obj`. *)
-let obj (#num #flt: eqtype) : dec num flt (list (string & W.jval num flt)) =
-  fun el ->
-    match el with
-    | W.JObj fields -> Ok fields
-    | other -> Error (wrong_kind other)
+let obj (#num #flt: eqtype) : dec num flt (list (string & W.jval num flt)) = fun el -> members_over jcarrier el
 
 (* F#: `Decoder.field`. *)
 let field (#num #flt: eqtype) (#a: Type0) (name: string) (d: dec num flt a) : dec num flt a =
-  fun el ->
-    match el with
-    | W.JObj _ ->
-        (match try_member name el with
-         | Some v -> map_err (under (Key name)) (d v)
-         | None -> Error (missing name))
-    | other -> Error (wrong_kind other)
+  fun el -> field_over jcarrier name d el
 
-(* F#: `Decoder.optField` — absent is `Ok None`, present-and-refused the refusal. *)
+(* F#: `Decoder.optField`. *)
 let opt_field (#num #flt: eqtype) (#a: Type0) (name: string) (d: dec num flt a) : dec num flt (option a) =
-  fun el ->
-    match el with
-    | W.JObj _ ->
-        (match try_member name el with
-         | Some v ->
-             (match d v with
-              | Ok x -> Ok (Some x)
-              | Error e -> Error (under (Key name) e))
-         | None -> Ok None)
-    | other -> Error (wrong_kind other)
+  fun el -> opt_field_over jcarrier name d el
 
 (* F#: `Decoder.fieldOr`. *)
 let field_or (#num #flt: eqtype) (#a: Type0) (name: string) (fallback: a) (d: dec num flt a) : dec num flt a =
   map (fun (o: option a) -> match o with Some x -> x | None -> fallback) (opt_field name d)
 
-(* F#: `Decoder.at`'s `go`. *)
-let rec at_go (#num #flt: eqtype) (#a: Type0) (d: dec num flt a) (done_rev rest: list seg) (v: W.jval num flt)
-  : Tot (result a derr) (decreases rest) =
-  let here = W.rev done_rev in
-  match rest with
-  | [] -> map_err (within here) (d v)
-  | Key k :: tail ->
-      (match v with
-       | W.JObj _ ->
-           (match try_member k v with
-            | Some x -> at_go d (Key k :: done_rev) tail x
-            | None -> Error (within here (missing k)))
-       | other -> Error (within here (wrong_kind other)))
-  | Index i :: tail ->
-      (match v with
-       | W.JArr xs ->
-           (match (if i >= 0 then try_item i xs else None) with
-            | Some x -> at_go d (Index i :: done_rev) tail x
-            | None -> Error (within here (make OutOfRange)))
-       | other -> Error (within here (wrong_kind other)))
-
 (* F#: `Decoder.at`. *)
 let at (#num #flt: eqtype) (#a: Type0) (path: list seg) (d: dec num flt a) : dec num flt a =
-  fun el -> at_go d [] path el
-
-(* F#: `Decoder.mapListIndexed`'s `go`. *)
-let rec mli_go (#num #flt: eqtype) (#a: Type0) (g: int -> dec num flt a) (i: int) (acc: list a)
-  (xs: list (W.jval num flt))
-  : Tot (result (list a) derr) (decreases xs) =
-  match xs with
-  | [] -> Ok (W.rev acc)
-  | x :: rest ->
-      (match g i x with
-       | Ok v -> mli_go g (i + 1) (v :: acc) rest
-       | Error e -> Error (under (Index i) e))
+  fun el -> at_over jcarrier path d el
 
 (* F#: `Decoder.mapListIndexed`. *)
 let map_list_indexed (#num #flt: eqtype) (#a: Type0) (g: int -> dec num flt a) : dec num flt (list a) =
-  fun el ->
-    match el with
-    | W.JArr xs -> mli_go g 0 [] xs
-    | other -> Error (wrong_kind other)
+  fun el -> map_list_indexed_over jcarrier g el
 
 (* F#: `Decoder.list`. *)
 let list_d (#num #flt: eqtype) (#a: Type0) (d: dec num flt a) : dec num flt (list a) =
   map_list_indexed (fun _ -> d)
 
-(* F#: `Decoder.boundedList` — the bound checked before any item is read. *)
+(* F#: `Decoder.boundedList`. *)
 let bounded_list (#num #flt: eqtype) (#a: Type0) (max_items: int) (d: dec num flt a) : dec num flt (list a) =
-  fun el ->
-    match el with
-    | W.JArr xs -> if len xs > max_items then Error (make LimitExceeded) else list_d d el
-    | _ -> list_d d el
+  fun el -> bounded_list_over jcarrier max_items d el
 
-(* F#: the `List.choose` of the refusals. *)
-let rec errors_of (#a: Type0) (rs: list (result a derr)) : Tot (list derr) =
-  match rs with
-  | [] -> []
-  | Error e :: t -> e :: errors_of t
-  | Ok _ :: t -> errors_of t
-
-(* F#: the `List.choose` of the answers. *)
-let rec oks_of (#a #e: Type0) (rs: list (result a e)) : Tot (list a) =
-  match rs with
-  | [] -> []
-  | Ok v :: t -> v :: oks_of t
-  | Error _ :: t -> oks_of t
-
-(* F#: `listAll`'s `List.mapi`. *)
-let rec mapi_d (#num #flt: eqtype) (#a: Type0) (d: dec num flt a) (i: int) (xs: list (W.jval num flt))
-  : Tot (list (result a derr)) (decreases xs) =
-  match xs with
-  | [] -> []
-  | x :: t -> map_err (under (Index i)) (d x) :: mapi_d d (i + 1) t
-
-(* F#: `Decoder.listAll` — every refusal, at its item's index. *)
+(* F#: `Decoder.listAll`. *)
 let list_all (#num #flt: eqtype) (#a: Type0) (d: dec num flt a) (el: W.jval num flt)
   : Tot (result (list a) (list derr)) =
-  match el with
-  | W.JArr xs ->
-      let rs = mapi_d d 0 xs in
-      (match errors_of rs with
-       | [] -> Ok (oks_of rs)
-       | errs -> Error errs)
-  | other -> Error [wrong_kind other]
-
-(* F#: `Decoder.sequence`'s `go`. *)
-let rec seq_go (#num #flt: eqtype) (#a: Type0) (el: W.jval num flt) (acc: list a) (ds: list (dec num flt a))
-  : Tot (result (list a) derr) (decreases ds) =
-  match ds with
-  | [] -> Ok (W.rev acc)
-  | d :: rest ->
-      (match d el with
-       | Ok v -> seq_go el (v :: acc) rest
-       | Error e -> Error e)
+  list_all_over jcarrier d el
 
 (* F#: `Decoder.sequence`. *)
 let sequence (#num #flt: eqtype) (#a: Type0) (ds: list (dec num flt a)) : dec num flt (list a) =
-  fun el -> seq_go el [] ds
-
-(* F#: `all`'s `List.map (fun d -> d el)`. *)
-let rec run_all (#num #flt: eqtype) (#a: Type0) (ds: list (dec num flt a)) (el: W.jval num flt)
-  : Tot (list (result a derr)) =
-  match ds with
-  | [] -> []
-  | d :: t -> d el :: run_all t el
+  fun el -> sequence_over ds el
 
 (* F#: `Decoder.all`. *)
 let all_d (#num #flt: eqtype) (#a: Type0) (ds: list (dec num flt a)) (el: W.jval num flt)
   : Tot (result (list a) (list derr)) =
-  let rs = run_all ds el in
-  match errors_of rs with
-  | [] -> Ok (oks_of rs)
-  | errs -> Error errs
-
-(* F#: the `List.tryFind (fun (k, _) -> k = s)` over a case table. *)
-let rec find_case (#a: Type0) (s: string) (cases: list (string & a)) : Tot (option a) =
-  match cases with
-  | [] -> None
-  | (k, v) :: t -> if k = s then Some v else find_case s t
+  all_over ds el
 
 (* F#: `Decoder.oneOf`. *)
 let one_of (#num #flt: eqtype) (#a: Type0) (cases: list (string & a)) : dec num flt a =
-  fun el ->
-    match el with
-    | W.JStr s ->
-        (match find_case s cases with
-         | Some v -> Ok v
-         | None -> Error (make UnknownTag))
-    | other -> Error (wrong_kind other)
+  fun el -> one_of_over jcarrier cases el
 
-(* F#: `Decoder.tagDispatch` — the case reads the SAME object. *)
+(* F#: `Decoder.tagDispatch`. *)
 let tag_dispatch (#num #flt: eqtype) (#a: Type0) (key: string) (cases: list (string & dec num flt a))
   : dec num flt a =
-  fun el ->
-    match field key str el with
-    | Error e -> Error e
-    | Ok t ->
-        (match find_case t cases with
-         | Some d -> d el
-         | None -> Error (under (Key key) (make UnknownTag)))
+  fun el -> tag_dispatch_over jcarrier key cases el
 
 (* F#: `Decoder.tagDispatchWith` — production rewrites the unknown tag's MESSAGE and nothing
    else, so with the prose dropped it is `tagDispatch` (the differential holds it to that). *)
@@ -489,27 +670,13 @@ let int_range (#num #flt: eqtype) (in_range: num -> bool) : dec num flt num =
     | Ok i -> if in_range i then Ok i else Error (make OutOfRange)
     | Error e -> Error e
 
-(* F#: `Decoder.undeclared`'s filter-then-map, fused. *)
-let rec undeclared_go (#num #flt: eqtype) (known: list string) (fields: list (string & W.jval num flt))
-  : Tot (list derr) =
-  match fields with
-  | [] -> []
-  | (k, _) :: t ->
-      if mem k known then undeclared_go known t
-      else under (Key k) (make UndeclaredMember) :: undeclared_go known t
-
 (* F#: `Decoder.undeclared`. *)
 let undeclared (#num #flt: eqtype) (known: list string) (el: W.jval num flt) : Tot (list derr) =
-  match el with
-  | W.JObj fields -> undeclared_go known fields
-  | _ -> []
+  undeclared_over jcarrier known el
 
 (* F#: `Decoder.members`. *)
 let members (#num #flt: eqtype) (known: list string) : dec num flt unit =
-  fun el ->
-    match undeclared known el with
-    | [] -> Ok ()
-    | e :: _ -> Error e
+  fun el -> members_only_over jcarrier known el
 
 (* F#: `Decoder.closed`. *)
 let closed (#num #flt: eqtype) (#a: Type0) (known: list string) (d: dec num flt a) : dec num flt a =
@@ -855,6 +1022,10 @@ let c_union (#num #flt: eqtype) (#t: Type0) (key: string) (cases: list (ccase nu
       `sound` when every refusal it answers over every value is `ok_at` that value; a collecting
       reader is `sound_all` when every refusal list it answers is NON-EMPTY and every member of
       it is `ok_at` the value (the non-emptiness is theorem 2's half, section 7). PROOF-ONLY.
+
+      5a states the same over a carrier (`ok_at_over`, `sound_over`, ...), with the transport
+      lemma proved once there; 5b is the faithfulness of `jcarrier` (`ok_at_is_over`), which
+      makes every statement over `jval` below the generic one at `jcarrier`.
    ====================================================================================== *)
 
 [@@ noextract_to "FSharp"]
@@ -939,18 +1110,65 @@ let rec rev_snoc (#a: Type0) (l: list a) (x: a) : Lemma (ensures W.rev (app l [x
 (* ---- member lookup facts ---- *)
 
 [@@ noextract_to "FSharp"]
-let rec memb_none_has_key (#num #flt: eqtype) (k: string) (fs: list (string & W.jval num flt))
+let rec memb_none_has_key (#a: Type0) (k: string) (fs: list (string & a))
   : Lemma (ensures (None? (memb k fs) <==> not (has_key k fs))) =
   match fs with
   | [] -> ()
   | _ :: t -> memb_none_has_key k t
 
+(* ---- 5a. the same, over a carrier ---- *)
+
+[@@ noextract_to "FSharp"]
+let ok_at_over (#v: Type0) (c: carrier v) (x: v) (e: derr) : bool =
+  e.code <> InvalidJson && resolves_in_over c x e
+
+[@@ noextract_to "FSharp"]
+let good_over (#v #a: Type0) (c: carrier v) (x: v) (r: result a derr) : bool =
+  match r with
+  | Ok _ -> true
+  | Error e -> ok_at_over c x e
+
+[@@ noextract_to "FSharp"]
+let sound_over (#v #a: Type0) (c: carrier v) (d: dec_over v a) : prop =
+  forall (x: v). good_over c x (d x)
+
+[@@ noextract_to "FSharp"]
+let rec all_ok_over (#v: Type0) (c: carrier v) (x: v) (es: list derr) : Tot bool =
+  match es with
+  | [] -> true
+  | e :: t -> ok_at_over c x e && all_ok_over c x t
+
+[@@ noextract_to "FSharp"]
+let good_all_over (#v #a: Type0) (c: carrier v) (x: v) (r: result a (list derr)) : bool =
+  match r with
+  | Ok _ -> true
+  | Error es -> (match es with [] -> false | _ -> all_ok_over c x es)
+
+[@@ noextract_to "FSharp"]
+let sound_all_over (#v #a: Type0) (c: carrier v) (rd: v -> result a (list derr)) : prop =
+  forall (x: v). good_all_over c x (rd x)
+
+[@@ noextract_to "FSharp"]
+let sound_over_intro (#v #a: Type0) (c: carrier v) (d: dec_over v a) (pf: (x: v) -> Lemma (good_over c x (d x)))
+  : Lemma (sound_over c d) =
+  FStar.Classical.forall_intro pf
+
+[@@ noextract_to "FSharp"]
+let sound_all_over_intro (#v #a: Type0) (c: carrier v) (rd: v -> result a (list derr))
+  (pf: (x: v) -> Lemma (good_all_over c x (rd x)))
+  : Lemma (sound_all_over c rd) =
+  FStar.Classical.forall_intro pf
+
+[@@ noextract_to "FSharp"]
+let sound_over_elim (#v #a: Type0) (c: carrier v) (d: dec_over v a) (x: v)
+  : Lemma (requires sound_over c d) (ensures good_over c x (d x)) = ()
+
 (* THE TRANSPORT LEMMA. A refusal owed to the value one step reaches is owed, under that step, to
    the value the step started from. The `MissingField` arm is the content: its path's LAST step
    names the absent member, so the parent the law resolves is the prefix, and a step prepended to
    the path is prepended to the prefix (`rev_cons`, `rev_snoc`). *)
-let ok_at_under (#num #flt: eqtype) (s: seg) (doc v: W.jval num flt) (e: derr)
-  : Lemma (requires step s doc == Some v /\ ok_at v e) (ensures ok_at doc (under s e)) =
+let ok_at_under_over (#v: Type0) (c: carrier v) (s: seg) (doc x: v) (e: derr)
+  : Lemma (requires step_over c s doc == Some x /\ ok_at_over c x e) (ensures ok_at_over c doc (under s e)) =
   match e.code with
   | MissingField ->
       rev_cons s e.path;
@@ -959,25 +1177,108 @@ let ok_at_under (#num #flt: eqtype) (s: seg) (doc v: W.jval num flt) (e: derr)
        | _ -> ())
   | _ -> ()
 
-(* The same, under a whole prefix — `Decoder.at`'s `within`. *)
-let rec ok_at_within (#num #flt: eqtype) (p: list seg) (doc v: W.jval num flt) (e: derr)
-  : Lemma (requires resolve p doc == Some v /\ ok_at v e) (ensures ok_at doc (within p e)) (decreases p) =
+(* The same, under a whole prefix — `at`'s `within`. *)
+let rec ok_at_within_over (#v: Type0) (c: carrier v) (p: list seg) (doc x: v) (e: derr)
+  : Lemma (requires resolve_over c p doc == Some x /\ ok_at_over c x e) (ensures ok_at_over c doc (within p e))
+          (decreases p) =
   match p with
   | [] -> assert (within [] e == e)
   | s :: q ->
-      (match step s doc with
-       | Some v1 ->
-           ok_at_within q v1 v e;
+      (match step_over c s doc with
+       | Some x1 ->
+           ok_at_within_over c q x1 x e;
            assert (within (s :: q) e == under s (within q e));
-           ok_at_under s doc v1 (within q e)
+           ok_at_under_over c s doc x1 (within q e)
        | None -> ())
 
 [@@ noextract_to "FSharp"]
-let rec all_ok_under (#num #flt: eqtype) (s: seg) (doc v: W.jval num flt) (es: list derr)
-  : Lemma (requires step s doc == Some v /\ all_ok v es) (ensures all_ok doc (map_l (under s) es)) =
+let rec all_ok_under_over (#v: Type0) (c: carrier v) (s: seg) (doc x: v) (es: list derr)
+  : Lemma (requires step_over c s doc == Some x /\ all_ok_over c x es)
+          (ensures all_ok_over c doc (map_l (under s) es)) =
   match es with
   | [] -> ()
-  | e :: t -> ok_at_under s doc v e; all_ok_under s doc v t
+  | e :: t -> ok_at_under_over c s doc x e; all_ok_under_over c s doc x t
+
+(* A refusal at the value itself, of any code but the two whose law is not "the path resolves":
+   `InvalidJson` and `MissingField`. *)
+let ok_make_over (#v: Type0) (c: carrier v) (code_: code) (x: v)
+  : Lemma (requires code_ <> InvalidJson /\ code_ <> MissingField) (ensures ok_at_over c x (make code_)) = ()
+
+(* `missing name`, over a value the view presents as an object that does not carry `name`. *)
+let ok_missing_over (#v: Type0) (c: carrier v) (name: string) (x: v) (fs: list (string & v))
+  : Lemma (requires c.members_of x == Some fs /\ memb name fs == None) (ensures ok_at_over c x (missing name)) =
+  memb_none_has_key name fs
+
+[@@ noextract_to "FSharp"]
+let rec resolve_app_over (#v: Type0) (c: carrier v) (p q: list seg) (doc: v)
+  : Lemma (ensures resolve_over c (app p q) doc ==
+                   (match resolve_over c p doc with Some x -> resolve_over c q x | None -> None)) (decreases p) =
+  match p with
+  | [] -> ()
+  | s :: t -> (match step_over c s doc with Some x -> resolve_app_over c t q x | None -> ())
+
+(* ---- 5b. FAITHFULNESS of the `jval` carrier: its view is `jval`'s own object, array and
+   string, so the path law through it is `DecodePath.resolve` and `ok_at` is `ok_at_over`. ---- *)
+
+let step_is_over (#num #flt: eqtype) (s: seg) (x: W.jval num flt) : Lemma (step s x == step_over jcarrier s x) = ()
+
+let rec resolve_is_over (#num #flt: eqtype) (p: list seg) (x: W.jval num flt)
+  : Lemma (ensures resolve p x == resolve_over jcarrier p x) (decreases p) =
+  match p with
+  | [] -> ()
+  | s :: rest -> (match step s x with Some y -> resolve_is_over rest y | None -> ())
+
+let ok_at_is_over (#num #flt: eqtype) (x: W.jval num flt) (e: derr) : Lemma (ok_at x e == ok_at_over jcarrier x e) =
+  resolve_is_over e.path x;
+  match W.rev e.path with
+  | Key k :: parent_rev -> resolve_is_over (W.rev parent_rev) x
+  | _ -> ()
+
+[@@ noextract_to "FSharp"]
+let rec all_ok_is_over (#num #flt: eqtype) (x: W.jval num flt) (es: list derr)
+  : Lemma (ensures all_ok x es == all_ok_over jcarrier x es) =
+  match es with
+  | [] -> ()
+  | e :: t -> ok_at_is_over x e; all_ok_is_over x t
+
+[@@ noextract_to "FSharp"]
+let good_is_over (#num #flt: eqtype) (#a: Type0) (x: W.jval num flt) (r: result a derr)
+  : Lemma (good_res x r == good_over jcarrier x r) =
+  match r with
+  | Ok _ -> ()
+  | Error e -> ok_at_is_over x e
+
+[@@ noextract_to "FSharp"]
+let good_all_is_over (#num #flt: eqtype) (#a: Type0) (x: W.jval num flt) (r: result a (list derr))
+  : Lemma (good_all x r == good_all_over jcarrier x r) =
+  match r with
+  | Ok _ -> ()
+  | Error es -> all_ok_is_over x es
+
+[@@ noextract_to "FSharp"]
+let sound_is_over (#num #flt: eqtype) (#a: Type0) (d: dec num flt a) : Lemma (sound d <==> sound_over jcarrier d) =
+  let pf (x: W.jval num flt) : Lemma (good_res x (d x) == good_over jcarrier x (d x)) = good_is_over x (d x) in
+  FStar.Classical.forall_intro pf
+
+[@@ noextract_to "FSharp"]
+let sound_all_is_over (#num #flt: eqtype) (#a: Type0) (rd: W.jval num flt -> result a (list derr))
+  : Lemma (sound_all rd <==> sound_all_over jcarrier rd) =
+  let pf (x: W.jval num flt) : Lemma (good_all x (rd x) == good_all_over jcarrier x (rd x)) = good_all_is_over x (rd x) in
+  FStar.Classical.forall_intro pf
+
+(* The transport lemma and its companions over `jval`: the generic ones at `jcarrier`. *)
+let ok_at_under (#num #flt: eqtype) (s: seg) (doc v: W.jval num flt) (e: derr)
+  : Lemma (requires step s doc == Some v /\ ok_at v e) (ensures ok_at doc (under s e)) =
+  ok_at_is_over v e; ok_at_is_over doc (under s e); ok_at_under_over jcarrier s doc v e
+
+let ok_at_within (#num #flt: eqtype) (p: list seg) (doc v: W.jval num flt) (e: derr)
+  : Lemma (requires resolve p doc == Some v /\ ok_at v e) (ensures ok_at doc (within p e)) =
+  resolve_is_over p doc; ok_at_is_over v e; ok_at_is_over doc (within p e); ok_at_within_over jcarrier p doc v e
+
+[@@ noextract_to "FSharp"]
+let all_ok_under (#num #flt: eqtype) (s: seg) (doc v: W.jval num flt) (es: list derr)
+  : Lemma (requires step s doc == Some v /\ all_ok v es) (ensures all_ok doc (map_l (under s) es)) =
+  all_ok_is_over v es; all_ok_is_over doc (map_l (under s) es); all_ok_under_over jcarrier s doc v es
 
 [@@ noextract_to "FSharp"]
 let rec all_ok_app (#num #flt: eqtype) (x: W.jval num flt) (e1 e2: list derr)
@@ -986,51 +1287,40 @@ let rec all_ok_app (#num #flt: eqtype) (x: W.jval num flt) (e1 e2: list derr)
   | [] -> ()
   | _ :: t -> all_ok_app x t e2
 
-(* A refusal at the value itself, of any code but the two whose law is not "the path resolves":
-   `InvalidJson` and `MissingField`. *)
 let ok_make (#num #flt: eqtype) (c: code) (x: W.jval num flt)
   : Lemma (requires c <> InvalidJson /\ c <> MissingField) (ensures ok_at x (make c)) = ()
 
-(* `Decoder.missing name`, over an object that does not carry `name`. *)
 let ok_missing (#num #flt: eqtype) (name: string) (fs: list (string & W.jval num flt))
   : Lemma (requires memb name fs == None) (ensures ok_at (W.JObj fs) (missing name)) =
   memb_none_has_key name fs
 
-[@@ noextract_to "FSharp"]
-let rec resolve_app (#num #flt: eqtype) (p q: list seg) (doc: W.jval num flt)
-  : Lemma (ensures resolve (app p q) doc ==
-                   (match resolve p doc with Some v -> resolve q v | None -> None)) (decreases p) =
-  match p with
-  | [] -> ()
-  | s :: t -> (match step s doc with Some v -> resolve_app t q v | None -> ())
-
 (* ======================================================================================
    6. THEOREM 3 — REFUSAL PATHS RESOLVE, block by block. Each lemma: the block, built from
-      sound parts, is sound.
+      sound parts, is sound. 6a proves each block of the algebra ONCE, over any carrier, with
+      no premise on the carrier; 6b is each lemma at `jval`, the generic one at `jcarrier`
+      through the faithfulness of 5b, its statement unchanged.
    ====================================================================================== *)
 
-let succeed_sound (#num #flt: eqtype) (#a: Type0) (v: a) : Lemma (sound (succeed #num #flt v)) = ()
+(* ---- 6a. the algebra over a carrier ---- *)
 
 (* A root code is never one of the two `ok_make` excludes, which is what `RootDecodeCode` is for. *)
 let root_excludes (c: root_code) : Lemma (root c <> InvalidJson /\ root c <> MissingField) = ()
 
 (* `fail` is sound for EVERY code it accepts (Phase 443): its code is a `root_code`, and no root
    code is one of the two whose refusal at the empty path does not resolve (section 9). *)
-let fail_sound (#num #flt: eqtype) (#a: Type0) (c: root_code)
-  : Lemma (ensures sound (fail #num #flt #a c)) =
-  root_excludes c;
-  sound_intro (fail #num #flt #a c) (fun x -> ok_make (root c) x)
+let fail_sound_over (#v #a: Type0) (cv: carrier v) (c: root_code) : Lemma (sound_over cv (fail_over #v #a c)) =
+  root_excludes c
 
-let map_sound (#num #flt: eqtype) (#a #b: Type0) (g: a -> b) (d: dec num flt a)
-  : Lemma (requires sound d) (ensures sound (map g d)) =
-  sound_intro (map g d) (fun x -> sound_elim d x)
+let map_sound_over (#v #a #b: Type0) (c: carrier v) (g: a -> b) (d: dec_over v a)
+  : Lemma (requires sound_over c d) (ensures sound_over c (map_over g d)) =
+  sound_over_intro c (map_over g d) (fun x -> sound_over_elim c d x)
 
-let bind_sound (#num #flt: eqtype) (#a #b: Type0) (g: a -> dec num flt b) (d: dec num flt a)
-  : Lemma (requires sound d /\ (forall (v: a). sound (g v))) (ensures sound (bind g d)) =
-  sound_intro (bind g d) (fun x ->
-    sound_elim d x;
+let bind_sound_over (#v #a #b: Type0) (c: carrier v) (g: a -> dec_over v b) (d: dec_over v a)
+  : Lemma (requires sound_over c d /\ (forall (y: a). sound_over c (g y))) (ensures sound_over c (bind_over g d)) =
+  sound_over_intro c (bind_over g d) (fun x ->
+    sound_over_elim c d x;
     match d x with
-    | Ok v -> sound_elim (g v) x
+    | Ok y -> sound_over_elim c (g y) x
     | Error _ -> ())
 
 (* `andThen` is sound for EVERY function (Phase 453): its function refuses with a `root_code`,
@@ -1038,104 +1328,87 @@ let bind_sound (#num #flt: eqtype) (#a #b: Type0) (g: a -> dec num flt b) (d: de
    function remains. Until 453 the function answered a whole refusal, path included, and this
    lemma carried "every refusal it answers is a root refusal of a code `ok_make` admits" as a
    hypothesis (section 9 states why it was needed). *)
-let and_then_sound (#num #flt: eqtype) (#a #b: Type0) (g: a -> result b root_code) (d: dec num flt a)
-  : Lemma (requires sound d) (ensures sound (and_then g d)) =
-  sound_intro (and_then g d) (fun x ->
-    sound_elim d x;
+let and_then_sound_over (#v #a #b: Type0) (c: carrier v) (g: a -> result b root_code) (d: dec_over v a)
+  : Lemma (requires sound_over c d) (ensures sound_over c (and_then_over g d)) =
+  sound_over_intro c (and_then_over g d) (fun x ->
+    sound_over_elim c d x;
     match d x with
-    | Ok v -> (match g v with Ok _ -> () | Error c -> root_excludes c; ok_make (root c) x)
+    | Ok y -> (match g y with Ok _ -> () | Error r -> root_excludes r)
     | Error _ -> ())
 
-let json_sound (#num #flt: eqtype) : Lemma (sound (json #num #flt)) = ()
+let text_sound_over (#v: Type0) (c: carrier v) : Lemma (sound_over c (text_over c)) =
+  sound_over_intro c (text_over c) (fun x -> ())
 
-let str_sound (#num #flt: eqtype) : Lemma (sound (str #num #flt)) =
-  sound_intro (str #num #flt) (fun x -> ())
+let items_sound_over (#v: Type0) (c: carrier v) : Lemma (sound_over c (items_over c)) =
+  sound_over_intro c (items_over c) (fun x -> ())
 
-let int_sound (#num #flt: eqtype) : Lemma (sound (int_d #num #flt)) =
-  sound_intro (int_d #num #flt) (fun x -> ())
+let members_sound_over (#v: Type0) (c: carrier v) : Lemma (sound_over c (members_over c)) =
+  sound_over_intro c (members_over c) (fun x -> ())
 
-let float_sound (#num #flt: eqtype) (to_flt: num -> flt) : Lemma (sound (float_d #num #flt to_flt)) =
-  sound_intro (float_d to_flt) (fun x -> ())
-
-let bool_sound (#num #flt: eqtype) : Lemma (sound (bool_d #num #flt)) =
-  sound_intro (bool_d #num #flt) (fun x -> ())
-
-let items_sound (#num #flt: eqtype) : Lemma (sound (items #num #flt)) =
-  sound_intro (items #num #flt) (fun x -> ())
-
-let obj_sound (#num #flt: eqtype) : Lemma (sound (obj #num #flt)) =
-  sound_intro (obj #num #flt) (fun x -> ())
-
-let field_sound (#num #flt: eqtype) (#a: Type0) (name: string) (d: dec num flt a)
-  : Lemma (requires sound d) (ensures sound (field name d)) =
-  sound_intro (field name d) (fun x ->
-    match x with
-    | W.JObj fs ->
+let field_sound_over (#v #a: Type0) (c: carrier v) (name: string) (d: dec_over v a)
+  : Lemma (requires sound_over c d) (ensures sound_over c (field_over c name d)) =
+  sound_over_intro c (field_over c name d) (fun x ->
+    match c.members_of x with
+    | Some fs ->
         (match memb name fs with
-         | Some v ->
-             sound_elim d v;
-             (match d v with
-              | Error e -> ok_at_under (Key name) x v e
+         | Some y ->
+             sound_over_elim c d y;
+             (match d y with
+              | Error e -> ok_at_under_over c (Key name) x y e
               | Ok _ -> ())
-         | None -> ok_missing name fs)
-    | _ -> ())
+         | None -> ok_missing_over c name x fs)
+    | None -> ())
 
-let opt_field_sound (#num #flt: eqtype) (#a: Type0) (name: string) (d: dec num flt a)
-  : Lemma (requires sound d) (ensures sound (opt_field name d)) =
-  sound_intro (opt_field name d) (fun x ->
-    match x with
-    | W.JObj fs ->
+let opt_field_sound_over (#v #a: Type0) (c: carrier v) (name: string) (d: dec_over v a)
+  : Lemma (requires sound_over c d) (ensures sound_over c (opt_field_over c name d)) =
+  sound_over_intro c (opt_field_over c name d) (fun x ->
+    match c.members_of x with
+    | Some fs ->
         (match memb name fs with
-         | Some v ->
-             sound_elim d v;
-             (match d v with
-              | Error e -> ok_at_under (Key name) x v e
+         | Some y ->
+             sound_over_elim c d y;
+             (match d y with
+              | Error e -> ok_at_under_over c (Key name) x y e
               | Ok _ -> ())
          | None -> ())
-    | _ -> ())
-
-let field_or_sound (#num #flt: eqtype) (#a: Type0) (name: string) (fallback: a) (d: dec num flt a)
-  : Lemma (requires sound d) (ensures sound (field_or name fallback d)) =
-  opt_field_sound name d;
-  map_sound (fun (o: option a) -> match o with Some x -> x | None -> fallback) (opt_field name d)
+    | None -> ())
 
 (* `at`: by induction on the path still to walk, with the walked prefix's value in hand. *)
 [@@ noextract_to "FSharp"]
-let rec at_go_sound (#num #flt: eqtype) (#a: Type0) (d: dec num flt a) (doc: W.jval num flt)
-  (done_rev rest: list seg) (v: W.jval num flt)
-  : Lemma (requires sound d /\ resolve (W.rev done_rev) doc == Some v)
-          (ensures good_res doc (at_go d done_rev rest v)) (decreases rest) =
+let rec at_go_sound_over (#v #a: Type0) (c: carrier v) (d: dec_over v a) (doc: v) (done_rev rest: list seg) (x: v)
+  : Lemma (requires sound_over c d /\ resolve_over c (W.rev done_rev) doc == Some x)
+          (ensures good_over c doc (at_go_over c d done_rev rest x)) (decreases rest) =
   let here = W.rev done_rev in
   match rest with
   | [] ->
-      sound_elim d v;
-      (match d v with
-       | Error e -> ok_at_within here doc v e
+      sound_over_elim c d x;
+      (match d x with
+       | Error e -> ok_at_within_over c here doc x e
        | Ok _ -> ())
   | Key k :: tail ->
-      (match v with
-       | W.JObj fs ->
+      (match c.members_of x with
+       | Some fs ->
            (match memb k fs with
-            | Some x ->
+            | Some y ->
                 rev_cons (Key k) done_rev;
-                resolve_app here [Key k] doc;
-                at_go_sound d doc (Key k :: done_rev) tail x
-            | None -> ok_missing k fs; ok_at_within here doc v (missing k))
-       | other -> ok_at_within here doc v (wrong_kind other))
+                resolve_app_over c here [Key k] doc;
+                at_go_sound_over c d doc (Key k :: done_rev) tail y
+            | None -> ok_missing_over c k x fs; ok_at_within_over c here doc x (missing k))
+       | None -> ok_at_within_over c here doc x (wrong_kind_over c x))
   | Index i :: tail ->
-      (match v with
-       | W.JArr xs ->
+      (match c.items_of x with
+       | Some xs ->
            (match (if i >= 0 then try_item i xs else None) with
-            | Some x ->
+            | Some y ->
                 rev_cons (Index i) done_rev;
-                resolve_app here [Index i] doc;
-                at_go_sound d doc (Index i :: done_rev) tail x
-            | None -> ok_at_within here doc v (make OutOfRange))
-       | other -> ok_at_within here doc v (wrong_kind other))
+                resolve_app_over c here [Index i] doc;
+                at_go_sound_over c d doc (Index i :: done_rev) tail y
+            | None -> ok_at_within_over c here doc x (make OutOfRange))
+       | None -> ok_at_within_over c here doc x (wrong_kind_over c x))
 
-let at_sound (#num #flt: eqtype) (#a: Type0) (p: list seg) (d: dec num flt a)
-  : Lemma (requires sound d) (ensures sound (at p d)) =
-  sound_intro (at p d) (fun x -> at_go_sound d x [] p x)
+let at_sound_over (#v #a: Type0) (c: carrier v) (p: list seg) (d: dec_over v a)
+  : Lemma (requires sound_over c d) (ensures sound_over c (at_over c p d)) =
+  sound_over_intro c (at_over c p d) (fun x -> at_go_sound_over c d x [] p x)
 
 (* ---- the list walkers: an item's refusal is owed to the array, under its index ---- *)
 
@@ -1153,33 +1426,269 @@ let rec app_snoc (#a: Type0) (pre: list a) (y: a) (t: list a)
   | [] -> ()
   | _ :: r -> app_snoc r y t
 
-(* The item at `len pre` of the array `app pre (x :: _)` is `x`, so a refusal `ok_at x` is owed to
-   the array under `Index (len pre)`. *)
+(* The item at `len pre` of an array whose items are `app pre (x :: _)` is `x`, so a refusal owed
+   to `x` is owed to the array under `Index (len pre)`. *)
 [@@ noextract_to "FSharp"]
-let ok_at_item (#num #flt: eqtype) (pre: list (W.jval num flt)) (x: W.jval num flt) (t: list (W.jval num flt)) (e: derr)
-  : Lemma (requires ok_at x e) (ensures ok_at (W.JArr (app pre (x :: t))) (under (Index (len pre)) e)) =
+let ok_at_item_over (#v: Type0) (c: carrier v) (arr: v) (pre: list v) (x: v) (t: list v) (e: derr)
+  : Lemma (requires c.items_of arr == Some (app pre (x :: t)) /\ ok_at_over c x e)
+          (ensures ok_at_over c arr (under (Index (len pre)) e)) =
   try_item_app pre x t;
-  ok_at_under (Index (len pre)) (W.JArr (app pre (x :: t))) x e
+  ok_at_under_over c (Index (len pre)) arr x e
 
 [@@ noextract_to "FSharp"]
-let rec mli_go_sound (#num #flt: eqtype) (#a: Type0) (g: int -> dec num flt a) (pre: list (W.jval num flt))
-  (acc: list a) (xs: list (W.jval num flt))
-  : Lemma (requires forall (i: int). sound (g i))
-          (ensures good_res (W.JArr (app pre xs)) (mli_go g (len pre) acc xs)) (decreases xs) =
+let rec mli_go_sound_over (#v #a: Type0) (c: carrier v) (g: int -> dec_over v a) (arr: v) (pre: list v)
+  (acc: list a) (xs: list v)
+  : Lemma (requires (forall (i: int). sound_over c (g i)) /\ c.items_of arr == Some (app pre xs))
+          (ensures good_over c arr (mli_go g (len pre) acc xs)) (decreases xs) =
   match xs with
   | [] -> ()
   | x :: rest ->
-      sound_elim (g (len pre)) x;
+      sound_over_elim c (g (len pre)) x;
       (match g (len pre) x with
-       | Ok v -> app_snoc pre x rest; mli_go_sound g (app pre [x]) (v :: acc) rest
-       | Error e -> ok_at_item pre x rest e)
+       | Ok y -> app_snoc pre x rest; mli_go_sound_over c g arr (app pre [x]) (y :: acc) rest
+       | Error e -> ok_at_item_over c arr pre x rest e)
+
+let map_list_indexed_sound_over (#v #a: Type0) (c: carrier v) (g: int -> dec_over v a)
+  : Lemma (requires forall (i: int). sound_over c (g i)) (ensures sound_over c (map_list_indexed_over c g)) =
+  sound_over_intro c (map_list_indexed_over c g) (fun x ->
+    match c.items_of x with
+    | Some xs -> mli_go_sound_over c g x [] [] xs
+    | None -> ())
+
+let bounded_list_sound_over (#v #a: Type0) (c: carrier v) (max_items: int) (d: dec_over v a)
+  : Lemma (requires sound_over c d) (ensures sound_over c (bounded_list_over c max_items d)) =
+  map_list_indexed_sound_over c (fun (_: int) -> d);
+  sound_over_intro c (bounded_list_over c max_items d) (fun x ->
+    sound_over_elim c (map_list_indexed_over c (fun (_: int) -> d)) x)
+
+[@@ noextract_to "FSharp"]
+let rec mapi_d_sound_over (#v #a: Type0) (c: carrier v) (d: dec_over v a) (arr: v) (pre xs: list v)
+  : Lemma (requires sound_over c d /\ c.items_of arr == Some (app pre xs))
+          (ensures all_ok_over c arr (errors_of (mapi_d d (len pre) xs))) (decreases xs) =
+  match xs with
+  | [] -> ()
+  | x :: rest ->
+      sound_over_elim c d x;
+      app_snoc pre x rest;
+      mapi_d_sound_over c d arr (app pre [x]) rest;
+      (match d x with
+       | Error e -> ok_at_item_over c arr pre x rest e
+       | Ok _ -> ())
+
+let list_all_sound_over (#v #a: Type0) (c: carrier v) (d: dec_over v a)
+  : Lemma (requires sound_over c d) (ensures sound_all_over c (list_all_over c d)) =
+  sound_all_over_intro c (list_all_over c d) (fun x ->
+    match c.items_of x with
+    | Some xs -> mapi_d_sound_over c d x [] xs
+    | None -> ())
+
+(* ---- several decoders over one value ---- *)
+
+[@@ noextract_to "FSharp"]
+let rec all_sound_over (#v #a: Type0) (c: carrier v) (ds: list (dec_over v a)) : prop =
+  match ds with
+  | [] -> True
+  | d :: t -> sound_over c d /\ all_sound_over c t
+
+[@@ noextract_to "FSharp"]
+let rec seq_go_sound_over (#v #a: Type0) (c: carrier v) (el: v) (acc: list a) (ds: list (dec_over v a))
+  : Lemma (requires all_sound_over c ds) (ensures good_over c el (seq_go el acc ds)) (decreases ds) =
+  match ds with
+  | [] -> ()
+  | d :: rest ->
+      sound_over_elim c d el;
+      (match d el with
+       | Ok y -> seq_go_sound_over c el (y :: acc) rest
+       | Error _ -> ())
+
+let sequence_sound_over (#v #a: Type0) (c: carrier v) (ds: list (dec_over v a))
+  : Lemma (requires all_sound_over c ds) (ensures sound_over c (sequence_over ds)) =
+  sound_over_intro c (sequence_over ds) (fun x -> seq_go_sound_over c x [] ds)
+
+[@@ noextract_to "FSharp"]
+let rec run_all_sound_over (#v #a: Type0) (c: carrier v) (ds: list (dec_over v a)) (el: v)
+  : Lemma (requires all_sound_over c ds) (ensures all_ok_over c el (errors_of (run_all ds el))) =
+  match ds with
+  | [] -> ()
+  | d :: t -> sound_over_elim c d el; run_all_sound_over c t el
+
+let all_d_sound_over (#v #a: Type0) (c: carrier v) (ds: list (dec_over v a))
+  : Lemma (requires all_sound_over c ds) (ensures sound_all_over c (all_over ds)) =
+  sound_all_over_intro c (all_over ds) (fun x -> run_all_sound_over c ds x)
+
+(* ---- tags and enumerations ---- *)
+
+let one_of_sound_over (#v #a: Type0) (c: carrier v) (cases: list (string & a))
+  : Lemma (sound_over c (one_of_over c cases)) =
+  sound_over_intro c (one_of_over c cases) (fun x -> ())
+
+[@@ noextract_to "FSharp"]
+let rec table_sound_over (#v #a: Type0) (c: carrier v) (cases: list (string & dec_over v a)) : prop =
+  match cases with
+  | [] -> True
+  | (_, d) :: t -> sound_over c d /\ table_sound_over c t
+
+[@@ noextract_to "FSharp"]
+let rec find_case_sound_over (#v #a: Type0) (c: carrier v) (s: string) (cases: list (string & dec_over v a))
+  : Lemma (requires table_sound_over c cases)
+          (ensures (match find_case s cases with Some d -> sound_over c d | None -> True)) =
+  match cases with
+  | [] -> ()
+  | (k, _) :: t -> if k = s then () else find_case_sound_over c s t
+
+(* An unknown tag is refused UNDER the discriminator, which the dispatch has just read — so the
+   step resolves. *)
+let tag_dispatch_sound_over (#v #a: Type0) (c: carrier v) (key: string) (cases: list (string & dec_over v a))
+  : Lemma (requires table_sound_over c cases) (ensures sound_over c (tag_dispatch_over c key cases)) =
+  text_sound_over c;
+  field_sound_over c key (text_over c);
+  sound_over_intro c (tag_dispatch_over c key cases) (fun x ->
+    sound_over_elim c (field_over c key (text_over c)) x;
+    match field_over c key (text_over c) x with
+    | Error _ -> ()
+    | Ok t ->
+        find_case_sound_over c t cases;
+        (match find_case t cases with
+         | Some d -> sound_over_elim c d x
+         | None ->
+             (match c.members_of x with
+              | Some fs ->
+                  (match memb key fs with
+                   | Some y -> ok_at_under_over c (Key key) x y (make UnknownTag)
+                   | None -> ())
+              | None -> ())))
+
+(* ---- the strict member policy: a refused member is one the object carries ---- *)
+
+[@@ noextract_to "FSharp"]
+let rec keys_in (#a: Type0) (sfx full: list (string & a)) : Tot bool =
+  match sfx with
+  | [] -> true
+  | (k, _) :: t -> has_key k full && keys_in t full
+
+[@@ noextract_to "FSharp"]
+let rec keys_in_cons (#a: Type0) (m: string & a) (sfx full: list (string & a))
+  : Lemma (requires keys_in sfx full) (ensures keys_in sfx (m :: full)) =
+  match sfx with
+  | [] -> ()
+  | _ :: t -> keys_in_cons m t full
+
+[@@ noextract_to "FSharp"]
+let rec keys_in_refl (#a: Type0) (fs: list (string & a)) : Lemma (ensures keys_in fs fs) =
+  match fs with
+  | [] -> ()
+  | m :: t -> keys_in_refl t; keys_in_cons m t t
+
+[@@ noextract_to "FSharp"]
+let rec undeclared_go_sound_over (#v: Type0) (c: carrier v) (known: list string) (obj_: v) (sfx full: list (string & v))
+  : Lemma (requires c.members_of obj_ == Some full /\ keys_in sfx full)
+          (ensures all_ok_over c obj_ (undeclared_go known sfx)) =
+  match sfx with
+  | [] -> ()
+  | (k, _) :: t ->
+      undeclared_go_sound_over c known obj_ t full;
+      memb_none_has_key k full;
+      (match memb k full with
+       | Some y -> ok_at_under_over c (Key k) obj_ y (make UndeclaredMember)
+       | None -> ())
+
+let undeclared_sound_over (#v: Type0) (c: carrier v) (known: list string) (x: v)
+  : Lemma (ensures all_ok_over c x (undeclared_over c known x)) =
+  match c.members_of x with
+  | Some fs -> keys_in_refl fs; undeclared_go_sound_over c known x fs fs
+  | None -> ()
+
+let members_only_sound_over (#v: Type0) (c: carrier v) (known: list string)
+  : Lemma (sound_over c (members_only_over c known)) =
+  sound_over_intro c (members_only_over c known) (fun x -> undeclared_sound_over c known x)
+
+(* THEOREM 3 over a carrier, the statement a caller reads: a sound decoder's every refusal over
+   `x` resolves in `x` through the view, and is not the parser's code. *)
+let refusal_paths_resolve_over (#v #a: Type0) (c: carrier v) (d: dec_over v a) (x: v)
+  : Lemma (requires sound_over c d)
+          (ensures (match d x with Error e -> resolves_in_over c x e /\ e.code <> InvalidJson | Ok _ -> True)) =
+  sound_over_elim c d x
+
+(* ---- 6b. the blocks at `jval`: each statement as Phase 436 stated it, its proof the generic
+   lemma at `jcarrier` (5b). The readers `jval` owns (`json`, `int`, `float`, `bool`) and the
+   compositions `Decoder` spells itself are proved here directly, as before. ---- *)
+
+[@@ noextract_to "FSharp"]
+let sound_to_over (#num #flt: eqtype) (#a: Type0) (d: dec num flt a)
+  : Lemma (requires sound d) (ensures sound_over jcarrier d) =
+  sound_is_over d
+
+[@@ noextract_to "FSharp"]
+let sound_of_over (#num #flt: eqtype) (#a: Type0) (d: dec num flt a)
+  : Lemma (requires sound_over jcarrier d) (ensures sound d) =
+  sound_is_over d
+
+let succeed_sound (#num #flt: eqtype) (#a: Type0) (v: a) : Lemma (sound (succeed #num #flt v)) = ()
+
+let fail_sound (#num #flt: eqtype) (#a: Type0) (c: root_code)
+  : Lemma (ensures sound (fail #num #flt #a c)) =
+  fail_sound_over #(W.jval num flt) #a jcarrier c;
+  sound_of_over (fail #num #flt #a c)
+
+let map_sound (#num #flt: eqtype) (#a #b: Type0) (g: a -> b) (d: dec num flt a)
+  : Lemma (requires sound d) (ensures sound (map g d)) =
+  sound_to_over d; map_sound_over jcarrier g d; sound_of_over (map g d)
+
+let bind_sound (#num #flt: eqtype) (#a #b: Type0) (g: a -> dec num flt b) (d: dec num flt a)
+  : Lemma (requires sound d /\ (forall (v: a). sound (g v))) (ensures sound (bind g d)) =
+  sound_to_over d;
+  let each (v: a) : Lemma (sound_over jcarrier (g v)) = sound_to_over (g v) in
+  FStar.Classical.forall_intro each;
+  bind_sound_over jcarrier g d;
+  sound_of_over (bind g d)
+
+let and_then_sound (#num #flt: eqtype) (#a #b: Type0) (g: a -> result b root_code) (d: dec num flt a)
+  : Lemma (requires sound d) (ensures sound (and_then g d)) =
+  sound_to_over d; and_then_sound_over jcarrier g d; sound_of_over (and_then g d)
+
+let json_sound (#num #flt: eqtype) : Lemma (sound (json #num #flt)) = ()
+
+let str_sound (#num #flt: eqtype) : Lemma (sound (str #num #flt)) =
+  text_sound_over (jcarrier #num #flt); sound_of_over (str #num #flt)
+
+let int_sound (#num #flt: eqtype) : Lemma (sound (int_d #num #flt)) =
+  sound_intro (int_d #num #flt) (fun x -> ())
+
+let float_sound (#num #flt: eqtype) (to_flt: num -> flt) : Lemma (sound (float_d #num #flt to_flt)) =
+  sound_intro (float_d to_flt) (fun x -> ())
+
+let bool_sound (#num #flt: eqtype) : Lemma (sound (bool_d #num #flt)) =
+  sound_intro (bool_d #num #flt) (fun x -> ())
+
+let items_sound (#num #flt: eqtype) : Lemma (sound (items #num #flt)) =
+  items_sound_over (jcarrier #num #flt); sound_of_over (items #num #flt)
+
+let obj_sound (#num #flt: eqtype) : Lemma (sound (obj #num #flt)) =
+  members_sound_over (jcarrier #num #flt); sound_of_over (obj #num #flt)
+
+let field_sound (#num #flt: eqtype) (#a: Type0) (name: string) (d: dec num flt a)
+  : Lemma (requires sound d) (ensures sound (field name d)) =
+  sound_to_over d; field_sound_over jcarrier name d; sound_of_over (field name d)
+
+let opt_field_sound (#num #flt: eqtype) (#a: Type0) (name: string) (d: dec num flt a)
+  : Lemma (requires sound d) (ensures sound (opt_field name d)) =
+  sound_to_over d; opt_field_sound_over jcarrier name d; sound_of_over (opt_field name d)
+
+let field_or_sound (#num #flt: eqtype) (#a: Type0) (name: string) (fallback: a) (d: dec num flt a)
+  : Lemma (requires sound d) (ensures sound (field_or name fallback d)) =
+  opt_field_sound name d;
+  map_sound (fun (o: option a) -> match o with Some x -> x | None -> fallback) (opt_field name d)
+
+let at_sound (#num #flt: eqtype) (#a: Type0) (p: list seg) (d: dec num flt a)
+  : Lemma (requires sound d) (ensures sound (at p d)) =
+  sound_to_over d; at_sound_over jcarrier p d; sound_of_over (at p d)
 
 let map_list_indexed_sound (#num #flt: eqtype) (#a: Type0) (g: int -> dec num flt a)
   : Lemma (requires forall (i: int). sound (g i)) (ensures sound (map_list_indexed g)) =
-  sound_intro (map_list_indexed g) (fun x ->
-    match x with
-    | W.JArr xs -> mli_go_sound g [] [] xs
-    | _ -> ())
+  let each (i: int) : Lemma (sound_over jcarrier (g i)) = sound_to_over (g i) in
+  FStar.Classical.forall_intro each;
+  map_list_indexed_sound_over jcarrier g;
+  sound_of_over (map_list_indexed g)
 
 let list_sound (#num #flt: eqtype) (#a: Type0) (d: dec num flt a)
   : Lemma (requires sound d) (ensures sound (list_d d)) =
@@ -1187,31 +1696,11 @@ let list_sound (#num #flt: eqtype) (#a: Type0) (d: dec num flt a)
 
 let bounded_list_sound (#num #flt: eqtype) (#a: Type0) (max_items: int) (d: dec num flt a)
   : Lemma (requires sound d) (ensures sound (bounded_list max_items d)) =
-  list_sound d;
-  sound_intro (bounded_list max_items d) (fun x -> sound_elim (list_d d) x)
-
-[@@ noextract_to "FSharp"]
-let rec mapi_d_sound (#num #flt: eqtype) (#a: Type0) (d: dec num flt a) (pre xs: list (W.jval num flt))
-  : Lemma (requires sound d)
-          (ensures all_ok (W.JArr (app pre xs)) (errors_of (mapi_d d (len pre) xs))) (decreases xs) =
-  match xs with
-  | [] -> ()
-  | x :: rest ->
-      sound_elim d x;
-      app_snoc pre x rest;
-      mapi_d_sound d (app pre [x]) rest;
-      (match d x with
-       | Error e -> ok_at_item pre x rest e
-       | Ok _ -> ())
+  sound_to_over d; bounded_list_sound_over jcarrier max_items d; sound_of_over (bounded_list max_items d)
 
 let list_all_sound (#num #flt: eqtype) (#a: Type0) (d: dec num flt a)
   : Lemma (requires sound d) (ensures sound_all (list_all d)) =
-  sound_all_intro (list_all d) (fun x ->
-    match x with
-    | W.JArr xs -> mapi_d_sound d [] xs
-    | _ -> ())
-
-(* ---- several decoders over one value ---- *)
+  sound_to_over d; list_all_sound_over jcarrier d; sound_all_is_over (list_all d)
 
 [@@ noextract_to "FSharp"]
 let rec all_sound (#num #flt: eqtype) (#a: Type0) (ds: list (dec num flt a)) : prop =
@@ -1220,36 +1709,23 @@ let rec all_sound (#num #flt: eqtype) (#a: Type0) (ds: list (dec num flt a)) : p
   | d :: t -> sound d /\ all_sound t
 
 [@@ noextract_to "FSharp"]
-let rec seq_go_sound (#num #flt: eqtype) (#a: Type0) (el: W.jval num flt) (acc: list a) (ds: list (dec num flt a))
-  : Lemma (requires all_sound ds) (ensures good_res el (seq_go el acc ds)) (decreases ds) =
+let rec all_sound_to_over (#num #flt: eqtype) (#a: Type0) (ds: list (dec num flt a))
+  : Lemma (requires all_sound ds) (ensures all_sound_over jcarrier ds) =
   match ds with
   | [] -> ()
-  | d :: rest ->
-      sound_elim d el;
-      (match d el with
-       | Ok v -> seq_go_sound el (v :: acc) rest
-       | Error _ -> ())
+  | d :: t -> sound_to_over d; all_sound_to_over t
 
 let sequence_sound (#num #flt: eqtype) (#a: Type0) (ds: list (dec num flt a))
   : Lemma (requires all_sound ds) (ensures sound (sequence ds)) =
-  sound_intro (sequence ds) (fun x -> seq_go_sound x [] ds)
-
-[@@ noextract_to "FSharp"]
-let rec run_all_sound (#num #flt: eqtype) (#a: Type0) (ds: list (dec num flt a)) (el: W.jval num flt)
-  : Lemma (requires all_sound ds) (ensures all_ok el (errors_of (run_all ds el))) =
-  match ds with
-  | [] -> ()
-  | d :: t -> sound_elim d el; run_all_sound t el
+  all_sound_to_over ds; sequence_sound_over jcarrier ds; sound_of_over (sequence ds)
 
 let all_d_sound (#num #flt: eqtype) (#a: Type0) (ds: list (dec num flt a))
   : Lemma (requires all_sound ds) (ensures sound_all (all_d ds)) =
-  sound_all_intro (all_d ds) (fun x -> run_all_sound ds x)
-
-(* ---- tags and enumerations ---- *)
+  all_sound_to_over ds; all_d_sound_over jcarrier ds; sound_all_is_over (all_d ds)
 
 let one_of_sound (#num #flt: eqtype) (#a: Type0) (cases: list (string & a))
   : Lemma (sound (one_of #num #flt cases)) =
-  sound_intro (one_of #num #flt cases) (fun x -> ())
+  one_of_sound_over (jcarrier #num #flt) cases; sound_of_over (one_of #num #flt cases)
 
 [@@ noextract_to "FSharp"]
 let rec table_sound (#num #flt: eqtype) (#a: Type0) (cases: list (string & dec num flt a)) : prop =
@@ -1258,36 +1734,15 @@ let rec table_sound (#num #flt: eqtype) (#a: Type0) (cases: list (string & dec n
   | (_, d) :: t -> sound d /\ table_sound t
 
 [@@ noextract_to "FSharp"]
-let rec find_case_sound (#num #flt: eqtype) (#a: Type0) (s: string) (cases: list (string & dec num flt a))
-  : Lemma (requires table_sound cases)
-          (ensures (match find_case s cases with Some d -> sound d | None -> True)) =
+let rec table_sound_to_over (#num #flt: eqtype) (#a: Type0) (cases: list (string & dec num flt a))
+  : Lemma (requires table_sound cases) (ensures table_sound_over jcarrier cases) =
   match cases with
   | [] -> ()
-  | (k, _) :: t -> if k = s then () else find_case_sound s t
+  | (_, d) :: t -> sound_to_over d; table_sound_to_over t
 
-(* An unknown tag is refused UNDER the discriminator, which the dispatch has just read — so the
-   step resolves. *)
 let tag_dispatch_sound (#num #flt: eqtype) (#a: Type0) (key: string) (cases: list (string & dec num flt a))
   : Lemma (requires table_sound cases) (ensures sound (tag_dispatch key cases)) =
-  str_sound #num #flt;
-  field_sound key (str #num #flt);
-  sound_intro (tag_dispatch key cases) (fun x ->
-    sound_elim (field key str) x;
-    match field key str x with
-    | Error _ -> ()
-    | Ok t ->
-        find_case_sound t cases;
-        (match find_case t cases with
-         | Some d -> sound_elim d x
-         | None ->
-             (match x with
-              | W.JObj fs ->
-                  (match memb key fs with
-                   | Some v ->
-                       ok_make UnknownTag v;
-                       ok_at_under (Key key) x v (make UnknownTag)
-                   | None -> ())
-              | _ -> ())))
+  table_sound_to_over cases; tag_dispatch_sound_over jcarrier key cases; sound_of_over (tag_dispatch key cases)
 
 let tag_dispatch_with_sound (#num #flt: eqtype) (#a: Type0) (what key: string) (cases: list (string & dec num flt a))
   : Lemma (requires table_sound cases) (ensures sound (tag_dispatch_with what key cases)) =
@@ -1301,47 +1756,12 @@ let kind_dispatch_sound (#num #flt: eqtype) (#a: Type0) (cases: list (string & d
 let int_range_sound (#num #flt: eqtype) (in_range: num -> bool) : Lemma (sound (int_range #num #flt in_range)) =
   sound_intro (int_range #num #flt in_range) (fun x -> ())
 
-(* ---- the strict member policy: a refused member is one the object carries ---- *)
-
-[@@ noextract_to "FSharp"]
-let rec keys_in (#num #flt: eqtype) (sfx full: list (string & W.jval num flt)) : Tot bool =
-  match sfx with
-  | [] -> true
-  | (k, _) :: t -> has_key k full && keys_in t full
-
-[@@ noextract_to "FSharp"]
-let rec keys_in_cons (#num #flt: eqtype) (m: string & W.jval num flt) (sfx full: list (string & W.jval num flt))
-  : Lemma (requires keys_in sfx full) (ensures keys_in sfx (m :: full)) =
-  match sfx with
-  | [] -> ()
-  | _ :: t -> keys_in_cons m t full
-
-[@@ noextract_to "FSharp"]
-let rec keys_in_refl (#num #flt: eqtype) (fs: list (string & W.jval num flt)) : Lemma (ensures keys_in fs fs) =
-  match fs with
-  | [] -> ()
-  | m :: t -> keys_in_refl t; keys_in_cons m t t
-
-[@@ noextract_to "FSharp"]
-let rec undeclared_go_sound (#num #flt: eqtype) (known: list string) (sfx full: list (string & W.jval num flt))
-  : Lemma (requires keys_in sfx full) (ensures all_ok (W.JObj full) (undeclared_go known sfx)) =
-  match sfx with
-  | [] -> ()
-  | (k, _) :: t ->
-      undeclared_go_sound known t full;
-      memb_none_has_key k full;
-      (match memb k full with
-       | Some v -> ok_make UndeclaredMember v; ok_at_under (Key k) (W.JObj full) v (make UndeclaredMember)
-       | None -> ())
-
 let undeclared_sound (#num #flt: eqtype) (known: list string) (x: W.jval num flt)
   : Lemma (ensures all_ok x (undeclared known x)) =
-  match x with
-  | W.JObj fs -> keys_in_refl fs; undeclared_go_sound known fs fs
-  | _ -> ()
+  undeclared_sound_over jcarrier known x; all_ok_is_over x (undeclared known x)
 
 let members_sound (#num #flt: eqtype) (known: list string) : Lemma (sound (members #num #flt known)) =
-  sound_intro (members #num #flt known) (fun x -> undeclared_sound known x)
+  members_only_sound_over (jcarrier #num #flt) known; sound_of_over (members #num #flt known)
 
 let closed_sound (#num #flt: eqtype) (#a: Type0) (known: list string) (d: dec num flt a)
   : Lemma (requires sound d) (ensures sound (closed known d)) =
@@ -1558,7 +1978,7 @@ let decoder_sound (#num #flt: eqtype) (#a: Type0) (c: codec num flt a)
    7. THEOREM 2 — DECODER TOTALITY.
 
       Every block above is a `Tot` function of the `jval`: F* accepted each definition at `Tot`,
-      so none raises and none diverges — `at_go` terminates on the path it walks, `mli_go`,
+      so none raises and none diverges — `at_go_over` terminates on the path it walks, `mli_go`,
       `mapi_d`, `mapi_all`, `seq_go` and `traverse_go` on their lists, and nothing in the layer
       has an exception path for a document to reach. What a typing cannot say, and what is
       proved here, is that the COLLECTING reader of a codec built from the blocks never answers
@@ -2154,6 +2574,25 @@ let and_then_needs_root_refusals (#num #flt: eqtype) (k: string) (x: W.jval num 
              fun el -> (match d el with Ok v -> g v | Error e -> Error e) in
            raw (fun _ -> Error (missing k)) json (W.JObj [(k, x)]) == Error (missing k) /\
            ~(resolves_in (W.JObj [(k, x)]) (missing k))) = ()
+
+(* The three, over ANY carrier (Phase 658): the first needs nothing of the carrier, the other two a
+   value its view presents as a one-member object — at the document, a `DObj` (`JsonDocument.fst`). *)
+let root_missing_never_resolves_over (#v: Type0) (c: carrier v) (x: v)
+  : Lemma (~(resolves_in_over c x (make MissingField))) = ()
+
+let root_invalid_json_stops_resolving_over (#v #a: Type0) (c: carrier v) (k: string) (x o: v)
+  : Lemma (requires c.members_of o == Some [(k, x)])
+          (ensures (let raw : dec_over v a = fun _ -> Error (make InvalidJson) in
+                    resolves_in_over c x (make InvalidJson) /\
+                    field_over c k raw o == Error (under (Key k) (make InvalidJson)) /\
+                    ~(resolves_in_over c o (under (Key k) (make InvalidJson))))) = ()
+
+let and_then_needs_root_refusals_over (#v: Type0) (c: carrier v) (k: string) (x o: v)
+  : Lemma (requires c.members_of o == Some [(k, x)])
+          (ensures (let raw (g: v -> result unit derr) (d: dec_over v v) : dec_over v unit =
+                      fun el -> (match d el with Ok y -> g y | Error e -> Error e) in
+                    raw (fun _ -> Error (missing k)) (fun el -> Ok el) o == Error (missing k) /\
+                    ~(resolves_in_over c o (missing k)))) = ()
 
 (* ======================================================================================
    10. TWINS (Phase 309) — the extractor premise, sampled at this model. See `WireDecode.fst`'s

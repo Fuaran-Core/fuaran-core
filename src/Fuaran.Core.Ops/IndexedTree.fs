@@ -1,6 +1,6 @@
 namespace Fuaran.Core
 
-// Phase 659 — an op applied to a tree its caller holds an index of costs the op (DECISIONS.md D257).
+// Phase 659 — an op applied to a tree its caller holds an index of costs the op (DECISIONS.md D258).
 // A caller that applies a script one op at a time (a replay, a build frame by frame) paid the whole
 // tree on every op: `Ops.apply`'s base check walks it, an insert's duplicate check walks it, and
 // every lookup walks to its target. The entries here read an index instead and carry it through the
