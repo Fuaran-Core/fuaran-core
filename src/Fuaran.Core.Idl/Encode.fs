@@ -272,7 +272,7 @@ module Encode =
                     // canonical form omits it whatever it holds ([[WireForm.holdsAuthored]]).
                     | _, _ when
                         f.Presence
-                        |> Option.exists (fun c -> not (WireForm.holdsAuthored fields c authored))
+                        |> Option.exists (fun c -> not (WireForm.holdsAuthored fields f.Name c authored))
                         ->
                         go acc rest
                     | (None | Some VAbsent), (Optional | OmitDefault _) -> go acc rest
