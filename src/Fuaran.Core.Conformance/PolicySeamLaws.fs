@@ -535,6 +535,36 @@ module internal PolicySeamLaws =
                     build CapabilityRegistry.register CapabilityRegistry.empty (ids |> List.map capOf)
                     |> CapabilityRegistry.withGate (PolicyGate.ignoringContext gateName (fun c _ -> decideFor c.Id))
 
+                // Phase 651: the query registry under the same two contexts and the same gate.
+                let qCtxReg =
+                    build QueryRegistry.register QueryRegistry.empty (ids |> List.map queryOf)
+                    |> QueryRegistry.withGate
+                        { Policy = gateName
+                          Decide =
+                            fun (trusted: bool) q _ ->
+                                if trusted || q.Id <> target then
+                                    PolicyDecision.Allow
+                                else
+                                    verdict }
+
+                let qLiftedReg =
+                    build QueryRegistry.register QueryRegistry.empty (ids |> List.map queryOf)
+                    |> QueryRegistry.withGate (PolicyGate.ignoringContext gateName (fun q _ -> decideFor q.Id))
+
+                let qargs = [ "n", Int n ]
+                let qOtherArgs = [ "n", Int((n + 1) % 10) ]
+                let resolved = ResizeArray<int>()
+
+                let resolveQ (_: Query) =
+                    resolved.Add n
+                    Ready emptyResult
+
+                let qDecideAt (trusted: bool) (grant: Grant option) =
+                    QueryRegistry.decide qCtxReg trusted grant target qargs
+
+                let qDispatchAt (trusted: bool) (grant: Grant option) =
+                    QueryRegistry.dispatch qCtxReg trusted grant target qargs resolveQ
+
                 let cargs = [ "n", string n ]
                 let otherArgs = [ "n", string ((n + 1) % 10) ]
                 let otherId = ids |> List.find (fun i -> i <> target)
@@ -572,7 +602,21 @@ module internal PolicySeamLaws =
                         ()
                         None
                         target
-                        cargs,
+                        cargs
+                    // the query registry: one registry, two contexts, two decisions; `under` fixes one
+                    && qDecideAt true None = PolicyDecision.Allow
+                    && qDecideAt false None = verdict
+                    && qDispatchAt true None = Ok(Ready emptyResult)
+                    && ((qDispatchAt false None = Ok(Ready emptyResult)) = (verdict = PolicyDecision.Allow))
+                    && QueryRegistry.decide (QueryRegistry.under false qCtxReg) () None target qargs = verdict
+                    && QueryRegistry.decide (QueryRegistry.under true qCtxReg) () None target qargs = PolicyDecision.Allow
+                    && QueryRegistry.decide qLiftedReg true None target qargs = verdict
+                    && QueryRegistry.decide qLiftedReg false None target qargs = QueryRegistry.decide
+                        qReg
+                        ()
+                        None
+                        target
+                        qargs,
                     fun () -> at (sprintf "the contexts law failed for %s under %A" target verdict)
                 )
 
@@ -586,6 +630,40 @@ module internal PolicySeamLaws =
                 let withOtherArgs = dispatchAt false (Some forOtherArgs)
                 let withOtherCap = dispatchAt false (Some forOtherCap)
                 let ranWithOthers = performed.Count - before - ranWithOwn
+
+                // the same on the query registry: a needs-approval read runs with the grant for exactly
+                // its invocation, a denied one reaches no resolver whatever is presented
+                let qOwn = Query.grant (queryOf target) qargs
+                let qForOtherArgs = Query.grant (queryOf target) qOtherArgs
+                let qForOtherQuery = Query.grant (queryOf otherId) qargs
+                let qBefore = resolved.Count
+                let qWithOwn = qDispatchAt false (Some qOwn)
+                let qRanWithOwn = resolved.Count - qBefore
+                let qWithOtherArgs = qDispatchAt false (Some qForOtherArgs)
+                let qWithOtherQuery = qDispatchAt false (Some qForOtherQuery)
+
+                let qWithKey =
+                    qDispatchAt false (Some(Grant.ofInvocation (Query.invocationKey (queryOf target) qargs)))
+
+                let qRanWithOthers = resolved.Count - qBefore - qRanWithOwn
+
+                let queryGrants =
+                    qDecideAt false (Some qOwn) = PolicyDecision.lifted true verdict
+                    && qDecideAt false (Some qForOtherArgs) = verdict
+                    && qDecideAt false (Some qForOtherQuery) = verdict
+                    && qDecideAt true (Some qOwn) = PolicyDecision.Allow
+                    && (qWithOwn = Ok(Ready emptyResult)) = (rank verdict < 2)
+                    && qRanWithOwn = (if rank verdict < 2 then 1 else 0)
+                    && (qWithOtherArgs = Ok(Ready emptyResult)) = (verdict = PolicyDecision.Allow)
+                    && qWithOtherArgs = qDispatchAt false None
+                    && qWithOtherQuery = qWithOtherArgs
+                    && qWithKey = qWithOtherArgs
+                    && qRanWithOthers = (if verdict = PolicyDecision.Allow then 3 else 0)
+                    && (not needsApproval || qWithOtherArgs = Error(QueryApprovalRequired gateName))
+                    && QueryRegistry.dispatch qCtxReg false (Some qOwn) "missing" qargs resolveQ = Error(
+                        NoSuchQuery("missing", ids)
+                    )
+                    && Query.grant (queryOf target) qargs = qOwn
 
                 grants.Check(
                     // the decision: lifted by its own grant only, and only from NeedsApproval
@@ -609,7 +687,8 @@ module internal PolicySeamLaws =
                     && rank (CapabilityRegistry.decide ctxReg true (Some own) "missing" cargs) = 2
                     // a function of its inputs: the same asking, the same answer
                     && decideAt false (Some own) = decideAt false (Some own)
-                    && Capability.grant (capOf target) cargs = own,
+                    && Capability.grant (capOf target) cargs = own
+                    && queryGrants,
                     fun () -> at (sprintf "the grant law failed for %s under %A" target verdict)
                 )
 
@@ -628,10 +707,15 @@ module internal PolicySeamLaws =
                                     PolicyDecision.Allow }
 
                 let namedQueries =
-                    build QueryRegistry.register QueryRegistry.empty (ids |> List.map queryOf)
+                    qCtxReg
                     |> QueryRegistry.withGate
-                        { Policy = gateName
-                          Decide = fun _ q _ -> decideFor q.Id }
+                        { Policy = "second"
+                          Decide =
+                            fun (trusted: bool) q _ ->
+                                if q.Id = otherId && not trusted then
+                                    PolicyDecision.NeedsApproval
+                                else
+                                    PolicyDecision.Allow }
 
                 let calls =
                     [ target, cargs
@@ -691,35 +775,45 @@ module internal PolicySeamLaws =
                                   yield (agrees && sameDecision && namesItsGate), (trusted, grant, cid, a, named, out) ]
 
                 let qAgrees =
-                    [ for qid, qa in
-                          [ target, [ "n", Int n ]
-                            otherId, [ "n", Int n ]
-                            "missing", [ "n", Int n ]
-                            target, [ "n", Str "x" ] ] do
-                          let named = QueryRegistry.decideNamed namedQueries qid qa
-                          let runs = ref 0
+                    [ for trusted in [ true; false ] do
+                          for grant in [ None; Some qOwn; Some qForOtherArgs ] do
+                              for qid, qa in
+                                  [ target, qargs
+                                    otherId, qargs
+                                    target, qOtherArgs
+                                    "missing", qargs
+                                    target, [ "n", Str "x" ] ] do
+                                  let named = QueryRegistry.decideNamed namedQueries trusted grant qid qa
+                                  let runs = ref 0
 
-                          let out =
-                              QueryRegistry.dispatch namedQueries qid qa (fun _ ->
-                                  runs.Value <- runs.Value + 1
-                                  Ready emptyResult)
+                                  let out =
+                                      QueryRegistry.dispatch namedQueries trusted grant qid qa (fun _ ->
+                                          runs.Value <- runs.Value + 1
+                                          Ready emptyResult)
 
-                          let agrees =
-                              match
-                                  refusalOf
-                                      named
-                                      (fun name g -> QueryPolicyRefused(name, g.Message, g.Alternatives))
-                                      QueryApprovalRequired
-                              with
-                              | Some refusal -> out = refusal && runs.Value = 0
-                              | None -> out = Ok(Ready emptyResult) && runs.Value = 1
+                                  let decided = QueryRegistry.decide namedQueries trusted grant qid qa
 
-                          yield agrees, (qid, named, out) ]
+                                  let agrees =
+                                      match
+                                          refusalOf
+                                              named
+                                              (fun name g -> QueryPolicyRefused(name, g.Message, g.Alternatives))
+                                              QueryApprovalRequired
+                                      with
+                                      | Some refusal -> out = refusal && runs.Value = 0
+                                      | None -> out = Ok(Ready emptyResult) && runs.Value = 1
+
+                                  let sameDecision =
+                                      match named with
+                                      | Ok(_, d) -> d = decided
+                                      | Error _ -> rank decided = 2
+
+                                  yield (agrees && sameDecision), (trusted, grant, qid, qa, named, out) ]
 
                 // the read tells no observer, on either registry, whatever it decides
                 let toldBeforeRead, qToldBeforeRead = told.Count, qTold.Count
                 CapabilityRegistry.decideNamed capReg () None target cargs |> ignore
-                QueryRegistry.decideNamed qReg target [ "n", Int n ] |> ignore
+                QueryRegistry.decideNamed qReg () None target [ "n", Int n ] |> ignore
 
                 namedDecision.Check(
                     (capAgrees |> List.forall fst)
@@ -727,7 +821,8 @@ module internal PolicySeamLaws =
                     && told.Count = toldBeforeRead
                     && qTold.Count = qToldBeforeRead
                     && CapabilityRegistry.decideNamed namedReg false None target cargs
-                       |> Result.map snd = Ok verdict,
+                       |> Result.map snd = Ok verdict
+                    && QueryRegistry.decideNamed namedQueries false None target qargs |> Result.map snd = Ok verdict,
                     fun () ->
                         at (
                             sprintf
@@ -750,7 +845,7 @@ module internal PolicySeamLaws =
                         Ready n)
 
                 let qOut =
-                    QueryRegistry.dispatch qReg id [ "n", Int n ] (fun _ ->
+                    QueryRegistry.dispatch qReg () None id [ "n", Int n ] (fun _ ->
                         ran.Add "query"
                         Ready emptyResult)
 
@@ -953,7 +1048,7 @@ module internal PolicySeamLaws =
                 agrees.Check(
                     (CapabilityRegistry.decide capReg () None id args = PolicyDecision.Allow) = (capOut = Ok(Ready n))
                     && (FunctionRegistry.decide fnReg () None id args = PolicyDecision.Allow) = (fnOut = Ok(Ready n))
-                    && (QueryRegistry.decide qReg id [ "n", Int n ] = PolicyDecision.Allow) = (qOut = Ok(
+                    && (QueryRegistry.decide qReg () None id [ "n", Int n ] = PolicyDecision.Allow) = (qOut = Ok(
                         Ready emptyResult
                     ))
                     && rank (CapabilityRegistry.decide capReg () None "missing" []) = 2,
