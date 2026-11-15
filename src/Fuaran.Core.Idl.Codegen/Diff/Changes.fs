@@ -59,6 +59,94 @@ module internal DiffChanges =
               if not (Map.containsKey name after) then
                   yield removed name ]
 
+    /// Phase 644 (DECISIONS.md D260.16, D260.18) — one method of a contract both revisions carry.
+    /// `name` is `<contract>.<method>`.
+    let private diffMethod (name: string) (b: MethodSnap) (a: MethodSnap) : Change list =
+        let byName (xs: ArgumentSnap list) =
+            xs |> List.map (fun (x: ArgumentSnap) -> x.Name, x) |> Map.ofList
+
+        let before = byName b.Arguments
+        let after = byName a.Arguments
+
+        // The arguments both revisions carry, in one revision's order.
+        let shared (xs: ArgumentSnap list) (other: Map<string, ArgumentSnap>) =
+            xs
+            |> List.map (fun (x: ArgumentSnap) -> x.Name)
+            |> List.filter (fun n -> Map.containsKey n other)
+
+        let hostFact (fact: string) (old: string) (now: string) =
+            [ if old <> now then
+                  ContractHostFactChanged("method " + name, fact, old, now) ]
+
+        [ for x in a.Arguments do
+              match Map.tryFind x.Name before with
+              | None -> ArgumentAdded(name, x)
+              | Some old ->
+                  if old.Wire <> x.Wire then
+                      ArgumentTypeChanged(name, x.Name, old, x)
+
+                  if old.Presence <> x.Presence then
+                      ArgumentOptionalityChanged(name, x.Name, old.Presence, x.Presence)
+
+                  if old.Constraint <> x.Constraint then
+                      ArgumentConstraintChanged(name, x.Name, old.Constraint, x.Constraint)
+
+                  if old.ArgumentDoc <> x.ArgumentDoc then
+                      ContractHostFactChanged(
+                          sprintf "argument %s.%s" name x.Name,
+                          "doc",
+                          old.ArgumentDoc,
+                          x.ArgumentDoc
+                      )
+
+          for x in b.Arguments do
+              if not (Map.containsKey x.Name after) then
+                  ArgumentRemoved(name, x.Name)
+
+          let was = shared b.Arguments after
+          let now = shared a.Arguments before
+
+          if was <> now then
+              ArgumentsReordered(name, was, now)
+
+          if b.Result <> a.Result then
+              MethodResultChanged(
+                  name,
+                  b.ResultLabel,
+                  a.ResultLabel,
+                  b.Result
+                  |> Option.bind DiffRules.erasedInWire
+                  |> Option.orElse (a.Result |> Option.bind DiffRules.erasedInWire)
+              )
+
+          if b.Shape <> a.Shape then
+              MethodShapeChanged(name, b.Shape, a.Shape)
+
+          if b.Effect <> a.Effect then
+              MethodEffectChanged(name, b.Effect, a.Effect)
+
+          if b.Authority <> a.Authority then
+              MethodAuthorityChanged(name, b.Authority, a.Authority)
+
+          if b.Serves <> a.Serves then
+              MethodServesChanged(name, b.Serves, a.Serves)
+
+          if b.Destination <> a.Destination then
+              MethodPromiseChanged(name, MethodPromise.Destination(b.Destination, a.Destination))
+
+          if b.Idempotent <> a.Idempotent then
+              MethodPromiseChanged(name, MethodPromise.Idempotent(b.Idempotent, a.Idempotent))
+
+          if b.ReadPolicy <> a.ReadPolicy then
+              MethodPromiseChanged(name, MethodPromise.ReadPolicy(b.ReadPolicy, a.ReadPolicy))
+
+          if b.RateLimit <> a.RateLimit then
+              MethodPromiseChanged(name, MethodPromise.RateLimit(b.RateLimit, a.RateLimit))
+
+          yield! hostFact "record" b.Record a.Record
+          yield! hostFact "auditKind" b.AuditKind a.AuditKind
+          yield! hostFact "doc" b.MethodDoc a.MethodDoc ]
+
     /// Rename inference — a removed name and an added name whose wire-observable
     /// field signature is IDENTICAL, and which pair uniquely on both sides.
     ///
@@ -251,6 +339,26 @@ module internal DiffChanges =
               for KeyValue((kd, f), v) in before.Defaults do
                   if not (Map.containsKey (kd, f) after.Defaults) then
                       DefaultRemoved(kd, f, v)
+
+              // Phase 644 — the contracts, paired by name, and their methods by id. A contract that
+              // arrived or left is one row: its methods are not reported beside it.
+              yield!
+                  diffNamed
+                      ContractAdded
+                      ContractRemoved
+                      (fun c (b: ContractSnap) (a: ContractSnap) ->
+                          [ if b.ContractDoc <> a.ContractDoc then
+                                ContractHostFactChanged("contract " + c, "doc", b.ContractDoc, a.ContractDoc)
+
+                            yield!
+                                diffNamed
+                                    (fun m -> MethodAdded(c + "." + m))
+                                    (fun m -> MethodRemoved(c + "." + m))
+                                    (fun m bm am -> diffMethod (c + "." + m) bm am)
+                                    b.Methods
+                                    a.Methods ])
+                      before.Contracts
+                      after.Contracts
 
               // Phase 293 — the declared support, paired by key.
               for KeyValue(key, v) in after.Support do

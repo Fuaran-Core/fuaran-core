@@ -75,6 +75,79 @@ type PresenceSnap =
         | OmitDefault(Some d) -> "omitDefault " + Canonical.write Rendering.CrossHost d
         | other -> other.Class
 
+/// Phase 644 (DECISIONS.md D260.16) — a bound on a contract argument, as one revision declares it.
+type ConstraintSnap =
+    {
+        /// The bound's `$type` (`intBetween` / `floatBetween` / `lengthBetween`), `?` when absent.
+        Kind: string
+        /// `(min, max)` when both read as numbers; `None` otherwise, and two such bounds are ordered
+        /// by nothing.
+        Bounds: (float * float) option
+        /// The bound's canonical text: what two revisions are compared on, and what a report shows.
+        Text: string
+    }
+
+/// Phase 644 — one argument of a contract method. Declared before [[FieldSnap]] so that a field
+/// stays what an unannotated `.Name` or `.Wire` resolves to.
+type ArgumentSnap =
+    {
+        /// The argument's name: the address a caller binds, and the key arguments pair on.
+        Name: string
+        /// A readable rendering of the type, for report lines only.
+        Label: string
+        /// The structural wire type, `hostSurface` removed.
+        Wire: WireType
+        /// Whether a caller must supply it, an `omitDefault`'s value included.
+        Presence: PresenceSnap
+        /// The declared bound, or none.
+        Constraint: ConstraintSnap option
+        /// The argument's description, `""` when it declares none.
+        ArgumentDoc: string
+    }
+
+/// Phase 644 — one contract method. Every member the artifact omits at its default is read as that
+/// default, so a revision that wrote it and one that omitted it agree.
+type MethodSnap =
+    {
+        /// The arguments in declared order: the order is part of the declaration.
+        Arguments: ArgumentSnap list
+        /// What the method answers, `None` for one that answers nothing.
+        Result: WireType option
+        /// A readable rendering of the result (`nothing` for none), for report lines only.
+        ResultLabel: string
+        /// `call` / `stream` / `job`.
+        Shape: string
+        /// The effect class's canonical text.
+        Effect: string
+        /// Whether a call hands what it is given to a party beyond the host that runs it.
+        Destination: bool
+        /// The read policy's canonical text (`{"$type":"unstated"}` when omitted).
+        ReadPolicy: string
+        /// Whether calling twice with the same arguments has the effect of calling once.
+        Idempotent: bool
+        /// The authority values a caller needs, sorted: the set is what is declared.
+        Authority: string list
+        /// What a host may keep of a call, as canonical text.
+        Record: string
+        /// The audit kind, `""` when none is declared.
+        AuditKind: string
+        /// `(calls, seconds)`, or none.
+        RateLimit: (int * int) option
+        /// The schema versions the method serves, sorted.
+        Serves: int list
+        /// The method's description, `""` when it declares none.
+        MethodDoc: string
+    }
+
+/// Phase 644 — one named contract.
+type ContractSnap =
+    {
+        /// Methods keyed by id, so a reorder alone never reads as a change.
+        Methods: Map<string, MethodSnap>
+        /// The contract's description, `""` when it declares none.
+        ContractDoc: string
+    }
+
 /// One field of a kind / op / union case / record / the node envelope, as one revision declares it.
 ///
 /// Three typed readings rather than one, because they answer three different questions and
@@ -268,4 +341,7 @@ type Snapshot =
         /// and why that matters, and the WIRE consequence of the only wire-visible
         /// member is already reported per union as `UnionTransparencyChanged`.
         Harden: string
+        /// Phase 644 — the contracts by name; empty when the revision declares none or predates the
+        /// member.
+        Contracts: Map<string, ContractSnap>
     }

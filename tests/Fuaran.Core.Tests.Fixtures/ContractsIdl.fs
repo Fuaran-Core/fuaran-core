@@ -199,3 +199,134 @@ let withMethod (id: string) (change: IdlMethod -> IdlMethod) : Idl =
     withContracts
         [ { orders with
               Methods = orders.Methods |> List.map (fun m -> if m.Id = id then change m else m) } ]
+
+/// `orders` with one argument of one method changed, by name.
+let private withArgument (methodId: string) (name: string) (change: IdlArgument -> IdlArgument) : Idl =
+    withMethod methodId (fun m ->
+        { m with
+            Arguments = m.Arguments |> List.map (fun a -> if a.Name = name then change a else a) })
+
+let private ordersOnly: Idl = withContracts [ orders ]
+
+/// The differ's cases (DECISIONS.md D260.16 and D260.18): a name, the revision before, the revision
+/// after, and the class the pair is. Every revision is a valid vocabulary. The vectors in
+/// `conformance/idl/contracts.json` are these pairs with the classifier's own answer, and the suite
+/// holds each answer to the class written here.
+let diffCases: (string * Idl * Idl * string) list =
+    let withoutExport =
+        withContracts
+            [ { orders with
+                  Methods = orders.Methods |> List.filter (fun m -> m.Id <> "export") } ]
+
+    let extra (opt: Optionality) =
+        withMethod "get" (fun m ->
+            { m with
+                Arguments = m.Arguments @ [ { arg "verbose" TBool with Opt = opt } ] })
+
+    let limit (lo: int) (hi: int) =
+        withArgument "list" "limit" (fun a ->
+            { a with
+                Constraint = Some(ArgumentConstraint.IntBetween(lo, hi)) })
+
+    let rate (calls: int) (seconds: int) =
+        withMethod "place" (fun m ->
+            { m with
+                RateLimit = Some { Calls = calls; Seconds = seconds } })
+
+    [ "unchanged", ordersOnly, ordersOnly, "unchanged"
+      "contract-added", ordersOnly, idl, "additive"
+      "contract-removed", idl, ordersOnly, "breaking"
+      "method-added", withoutExport, ordersOnly, "additive"
+      "method-removed", ordersOnly, withoutExport, "breaking"
+      "argument-added-optional", ordersOnly, extra Optional, "additive"
+      "argument-added-with-default", ordersOnly, extra (OmitDefault(VBool false)), "additive"
+      "argument-added-required", ordersOnly, extra Required, "breaking"
+      "argument-removed",
+      ordersOnly,
+      withMethod "place" (fun m ->
+          { m with
+              Arguments = m.Arguments |> List.filter (fun a -> a.Name <> "note") }),
+      "breaking"
+      "arguments-reordered",
+      ordersOnly,
+      withMethod "list" (fun m ->
+          { m with
+              Arguments = List.rev m.Arguments }),
+      "breaking"
+      "argument-type-changed", ordersOnly, withArgument "get" "id" (fun a -> { a with Type = TInt }), "breaking"
+      "argument-type-across-erased-slot",
+      ordersOnly,
+      withArgument "get" "id" (fun a -> { a with Type = TJson }),
+      "undecided"
+      "argument-loosened", ordersOnly, withArgument "get" "id" (fun a -> { a with Opt = Optional }), "additive"
+      "argument-newly-required",
+      ordersOnly,
+      withArgument "list" "status" (fun a -> { a with Opt = Required }),
+      "breaking"
+      "argument-default-changed",
+      ordersOnly,
+      withArgument "list" "limit" (fun a -> { a with Opt = OmitDefault(VInt 50) }),
+      "breaking"
+      "constraint-widened", ordersOnly, limit 1 200, "additive"
+      "constraint-narrowed", ordersOnly, limit 1 50, "breaking"
+      "constraint-withdrawn",
+      ordersOnly,
+      withArgument "list" "limit" (fun a -> { a with Constraint = None }),
+      "additive"
+      "constraint-declared",
+      ordersOnly,
+      withArgument "get" "id" (fun a ->
+          { a with
+              Constraint = Some(ArgumentConstraint.LengthBetween(1, 64)) }),
+      "breaking"
+      "result-changed", ordersOnly, withMethod "get" (fun m -> { m with Result = Some TStr }), "breaking"
+      "shape-changed", ordersOnly, withMethod "export" (fun m -> { m with Shape = MethodShape.Call }), "breaking"
+      "effect-changed",
+      ordersOnly,
+      withMethod "get" (fun m ->
+          { m with
+              Effect =
+                  { Host = ReadsHost
+                    Determinism = Effect.clock } }),
+      "breaking"
+      "authority-removed", ordersOnly, withMethod "place" (fun m -> { m with Authority = [ "writer" ] }), "additive"
+      "authority-added",
+      ordersOnly,
+      withMethod "get" (fun m ->
+          { m with
+              Authority = [ "reader"; "writer" ] }),
+      "breaking"
+      "served-version-added", ordersOnly, withMethod "get" (fun m -> { m with Serves = [ 1; 2 ] }), "additive"
+      "served-version-withdrawn", ordersOnly, withMethod "place" (fun m -> { m with Serves = [ 2 ] }), "breaking"
+      "destination-gained", ordersOnly, withMethod "get" (fun m -> { m with Destination = true }), "breaking"
+      "destination-lost", ordersOnly, withMethod "place" (fun m -> { m with Destination = false }), "additive"
+      "idempotent-lost", ordersOnly, withMethod "get" (fun m -> { m with Idempotent = false }), "breaking"
+      "idempotent-gained", ordersOnly, withMethod "place" (fun m -> { m with Idempotent = true }), "additive"
+      "read-policy-changed",
+      ordersOnly,
+      withMethod "get" (fun m ->
+          { m with
+              ReadPolicy = MethodReadPolicy.Cached 60 }),
+      "breaking"
+      "rate-limit-declared",
+      ordersOnly,
+      withMethod "get" (fun m ->
+          { m with
+              RateLimit = Some { Calls = 5; Seconds = 60 } }),
+      "breaking"
+      "rate-limit-loosened", ordersOnly, rate 20 60, "additive"
+      "rate-limit-tightened", ordersOnly, rate 5 60, "breaking"
+      "rate-limit-withdrawn", ordersOnly, withMethod "place" (fun m -> { m with RateLimit = None }), "additive"
+      "description-changed",
+      ordersOnly,
+      withMethod "get" (fun m ->
+          { m with
+              Doc = Some "One order, by id." }),
+      "host-surface"
+      "audit-kind-and-record-changed",
+      ordersOnly,
+      withMethod "place" (fun m ->
+          { m with
+              AuditKind = Some "order.created"
+              Record = { Arguments = true; Result = true } }),
+      "host-surface" ]

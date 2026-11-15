@@ -84,7 +84,14 @@ module internal DiffObligations =
         let uiTier = roster |> List.exists (fun h -> h.Id = "fuaran")
         let ch = c.Change
 
-        if not (touchesWire c) then
+        if familyOf ch = DiffRules.ContractFamily then
+            // Phase 644 — a contract generates no codec and has no corpus fixture, so one row
+            // answers for it whatever the roster.
+            [ { Surface = "contract: every host that serves or calls it"
+                Strength = (if touchesWire c then Strength.Required else Strength.Check)
+                Note =
+                  "a contract generates no codec: each host that serves or calls the contract follows the declaration, the capabilities projected from it are registered again, and each method's argument schema is regenerated. No codec host, corpus fixture or spec row is obliged." } ]
+        elif not (touchesWire c) then
             [ { Surface = "reference host (F#) regeneration"
                 Strength = Strength.Required
                 Note =

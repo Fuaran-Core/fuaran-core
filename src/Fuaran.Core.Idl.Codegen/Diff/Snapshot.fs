@@ -162,6 +162,92 @@ module internal DiffSnapshot =
         |> List.choose (fun x -> key x |> Option.map (fun k -> k, project x))
         |> Map.ofList
 
+    // ---- contracts (Phase 644, DECISIONS.md D260.16) ----
+
+    let private text (v: JVal) : string = Canonical.write Rendering.CrossHost v
+
+    let private wireOf (ty: JVal) : WireType =
+        { Tag = str "$type" ty |> Option.defaultValue "?"
+          Shape = canonical (stripHostSurface ty) }
+
+    let private readConstraint (v: JVal) : ConstraintSnap =
+        let num (name: string) =
+            match field name v with
+            | Some(JInt i) -> Some(float i)
+            | Some(JFloat f) -> Some f
+            | _ -> None
+
+        { Kind = str "$type" v |> Option.defaultValue "?"
+          Bounds =
+            match num "min", num "max" with
+            | Some lo, Some hi -> Some(lo, hi)
+            | _ -> None
+          Text = text v }
+
+    let private readArgument (v: JVal) : ArgumentSnap option =
+        match str "name" v, field "type" v, field "optionality" v with
+        | Some name, Some ty, Some opt ->
+            let argument: ArgumentSnap =
+                { Name = name
+                  Label = typeLabel ty
+                  Wire = wireOf ty
+                  Presence = presence opt
+                  Constraint = field "constraint" v |> Option.map readConstraint
+                  ArgumentDoc = str "doc" v |> Option.defaultValue "" }
+
+            Some argument
+        | _ -> None
+
+    /// One method, every member the artifact omits at its default read as that default.
+    let private readMethod (v: JVal) : MethodSnap =
+        let result =
+            field "result" v |> Option.filter (fun r -> str "$type" r <> Some "nothing")
+
+        let flag (key: string) = field key v = Some(JBool true)
+
+        { Arguments = arr "arguments" v |> List.choose readArgument
+          Result = result |> Option.map wireOf
+          ResultLabel = result |> Option.map typeLabel |> Option.defaultValue "nothing"
+          Shape = str "shape" v |> Option.defaultValue "call"
+          Effect = field "effect" v |> Option.map text |> Option.defaultValue ""
+          Destination = flag "destination"
+          ReadPolicy =
+            field "readPolicy" v
+            |> Option.map text
+            |> Option.defaultValue (text (JObj [ "$type", JStr "unstated" ]))
+          Idempotent = flag "idempotent"
+          Authority =
+            arr "authority" v
+            |> List.choose (function
+                | JStr s -> Some s
+                | _ -> None)
+            |> List.distinct
+            |> List.sort
+          Record =
+            field "record" v
+            |> Option.map text
+            |> Option.defaultValue (text (JObj [ "arguments", JBool false; "result", JBool false ]))
+          AuditKind = str "auditKind" v |> Option.defaultValue ""
+          RateLimit =
+            match field "rateLimit" v with
+            | Some r ->
+                match field "calls" r, field "seconds" r with
+                | Some(JInt calls), Some(JInt seconds) -> Some(calls, seconds)
+                | _ -> None
+            | None -> None
+          Serves =
+            arr "serves" v
+            |> List.choose (function
+                | JInt i -> Some i
+                | _ -> None)
+            |> List.distinct
+            |> List.sort
+          MethodDoc = str "doc" v |> Option.defaultValue "" }
+
+    let private readContract (v: JVal) : ContractSnap =
+        { Methods = arr "methods" v |> byName (str "id") readMethod
+          ContractDoc = str "doc" v |> Option.defaultValue "" }
+
     /// The support document's declared entries as one flat map of canonical texts — the
     /// shape the diff walk pairs by key.
     let private supportEntries (doc: SupportDocument) : Map<string, string> =
@@ -358,7 +444,8 @@ module internal DiffSnapshot =
                                (str "union" e |> Option.defaultValue "")
                                + "."
                                + (str "case" e |> Option.defaultValue ""))
-                           |> String.concat ",") }
+                           |> String.concat ",")
+                  Contracts = arr "contracts" artifact |> byName (str "name") readContract }
         | _ -> Error "idl.json: expected a JSON object at the root"
 
     /// Phase 293 — a snapshot with the support document beside the artifact joined in;

@@ -109,6 +109,31 @@ point.
 | an authoring default removed | `breaking-for-emitters` | `full-literal-construction` when the field is required — `mk<Kind>` gains the parameter — else `no-generated-shape-change` | `DefaultRemoved` |
 | an authoring default changed | `breaking-for-emitters` | `no-generated-shape-change` — the parameter list is unchanged, the constructor's body is not | `DefaultChanged` |
 | a declared support entry (`support.json`) added, removed or changed — a doc block, a splice, a case refine, a kind projection, the host prelude | `host-surface-only` — host-language source the generator splices, never on the wire | `full-literal-construction` for a kind projection or the type splice (generated declarations move), else `no-generated-shape-change` | `SupportChanged` |
+| a contract added | `additive` | `no-generated-shape-change` — no F# is generated for a contract | `ContractAdded` |
+| a contract removed | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `ContractRemoved` |
+| a contract method added | `additive` | `no-generated-shape-change` — no F# is generated for a contract | `MethodAdded` |
+| a contract method removed | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `MethodRemoved` |
+| an argument added to a contract method, **optional or declared with a default** | `additive` | `no-generated-shape-change` — no F# is generated for a contract | `ArgumentAdded` |
+| a **required** argument added to a contract method | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `ArgumentAdded` |
+| an argument removed from a contract method (a rename is a removal and an addition) | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `ArgumentRemoved` |
+| a contract method's arguments reordered | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `ArgumentsReordered` |
+| a contract argument's type moved | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `ArgumentTypeChanged` |
+| a contract argument's type, or a method's result, moved across an **erased** slot (`hosted` / `json` / `opaque`), at any depth | `undecided` | `no-generated-shape-change` — no F# is generated for a contract | `ArgumentTypeChanged` |
+| a contract argument loosened from `required` to optional or to a declared default | `additive` | `no-generated-shape-change` — no F# is generated for a contract | `ArgumentOptionalityChanged` |
+| any other move of when a caller may leave a contract argument out (newly required; a changed default) | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `ArgumentOptionalityChanged` |
+| a contract argument's bound withdrawn, or widened within its kind | `additive` | `no-generated-shape-change` — no F# is generated for a contract | `ArgumentConstraintChanged` |
+| a contract argument's bound newly declared, narrowed, or changed in kind | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `ArgumentConstraintChanged` |
+| a contract method's result moved (a result declared or withdrawn included) | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `MethodResultChanged` |
+| a contract method's shape moved (`call` / `stream` / `job`) | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `MethodShapeChanged` |
+| a contract method's effect class moved | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `MethodEffectChanged` |
+| an authority value removed from a contract method | `additive` | `no-generated-shape-change` — no F# is generated for a contract | `MethodAuthorityChanged` |
+| an authority value added to a contract method (a widened requirement) | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `MethodAuthorityChanged` |
+| a schema version added to those a contract method serves | `additive` | `no-generated-shape-change` — no F# is generated for a contract | `MethodServesChanged` |
+| a schema version withdrawn from those a contract method serves | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `MethodServesChanged` |
+| a contract method gains a destination, loses `idempotent`, or has a rate limit declared or tightened | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `MethodPromiseChanged` |
+| a contract method loses its destination, gains `idempotent`, or has its rate limit withdrawn or loosened | `additive` | `no-generated-shape-change` — no F# is generated for a contract | `MethodPromiseChanged` |
+| a contract method's read policy moved, in any direction | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `MethodPromiseChanged` |
+| a contract's, method's or argument's description, a method's audit kind, or what may be recorded of a call | `host-surface-only` | `no-generated-shape-change` — no F# is generated for a contract | `ContractHostFactChanged` |
 <!-- END GENERATED -->
 
 **The table is the classifier's own (Phase 293).** Every row above is rendered from the one

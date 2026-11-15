@@ -477,6 +477,27 @@ Core it does not pin. The copy was reverted by a second corpus pull request, who
 that commit. `capability-laws.json` is byte for byte what it was before this phase, and a port adopts the family
 when it learns the space.
 
+**D260.18 — the promises a method makes beside its types are graded in their own direction, and what only
+the host reads is host surface.** D260.16 names the members a caller is admitted or refused by. Six members it
+does not name are classified by its one rule. `destination` and `idempotent` are promises a caller acts on: a
+method that gains a destination, or loses `idempotent`, is breaking (a caller was told its data stayed, or that
+a retry was safe), and the opposite move is additive. A rate limit declared or tightened is breaking and one
+withdrawn or loosened (no fewer calls in no longer a window) is additive, as a constraint is. Any move of
+`readPolicy` is breaking, because the artifact orders no two policies: a longer cache lifetime serves an older
+answer, a shorter one withdraws a reuse a caller was granted, and an `invalidates` list that changes makes
+other answers stale or leaves them standing. `record`, `auditKind` and every description are the host's: no
+caller is admitted, refused or answered differently by them, so a move is host surface, one row a fact. Three
+alternatives lost:
+
+- Every move of the six is breaking. It is the safe reading and it calls a loosened rate limit and a newly
+  idempotent method a break, which they are not; a classifier that does so is read past.
+- Every move of the six is host surface, on the ground that Core interprets none of them. `destination`,
+  `idempotent`, the read policy and the rate limit are closed vocabularies of the IDL (D260.9) that a caller
+  reads, so a move of one changes what a caller may rely on.
+- The read policy is ordered (a longer lifetime additive, a shorter one breaking, or the reverse). Either
+  order is wrong for one of the two parties that read it, the caller that reuses an answer and the caller that
+  needs a fresh one.
+
 ## 2026-11-14 — D259: a declared default at the wider data universe's types is admitted in its one canonical spelling, a tuple when every item is, and the empty set and keyed map; the F# and TypeScript generators print it in the host type each binds, and the F* model prints what carries no obligation and refuses a string-borne scalar by name
 
 **Status:** Live

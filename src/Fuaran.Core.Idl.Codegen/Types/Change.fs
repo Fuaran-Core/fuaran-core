@@ -6,6 +6,19 @@ open Fuaran.Core
 // `Severity`, its F# consequence, and the `Verdict` over a pair, lifted out of the
 // `Diff` module so the classifier splits one concern per file (`Diff/*.fs`).
 
+/// Phase 644 (DECISIONS.md D260.18) — a promise a contract method makes its callers beside its
+/// types, which moved. One case per promise; each is graded in its own direction.
+[<RequireQualifiedAccess>]
+type MethodPromise =
+    /// Whether a call hands what it is given to a party beyond the host that runs it.
+    | Destination of before: bool * after: bool
+    /// Whether calling twice with the same arguments has the effect of calling once.
+    | Idempotent of before: bool * after: bool
+    /// The read policy, as canonical text.
+    | ReadPolicy of before: string * after: string
+    /// The rate limit, `(calls, seconds)`.
+    | RateLimit of before: (int * int) option * after: (int * int) option
+
 /// One difference between two snapshots. `changes` emits them sorted by a fixed rank
 /// and key, so the same pair always yields the same list; `classify` grades each.
 type Change =
@@ -145,6 +158,51 @@ type Change =
     /// walk — a regeneration-visible change for code walking either. Appended last, so every
     /// earlier case keeps its tag.
     | FieldKeyedChanged of Owner * name: string * before: bool * after: bool
+    /// Phase 644 (DECISIONS.md D260.16) — a contract arrived: additive. In every case below a
+    /// method is named `<contract>.<method>`.
+    | ContractAdded of name: string
+    /// A contract left: every caller of every method of it is refused.
+    | ContractRemoved of name: string
+    /// A method added to a contract both revisions carry: additive.
+    | MethodAdded of method: string
+    /// A method removed: its callers are refused.
+    | MethodRemoved of method: string
+    /// An argument new to a method. Additive when a caller may leave it out (optional, or declared
+    /// with a default); breaking when it is required.
+    | ArgumentAdded of method: string * ArgumentSnap
+    /// An argument gone: a caller that binds it is refused.
+    | ArgumentRemoved of method: string * name: string
+    /// The arguments both revisions carry changed their relative order: the order is part of the
+    /// declaration, and the projected capability's holes follow it.
+    | ArgumentsReordered of method: string * before: string list * after: string list
+    /// An argument's type moved: breaking, undecided across an erased slot.
+    | ArgumentTypeChanged of method: string * name: string * before: ArgumentSnap * after: ArgumentSnap
+    /// Whether a caller must supply the argument moved. Additive only from required.
+    | ArgumentOptionalityChanged of method: string * name: string * before: PresenceSnap * after: PresenceSnap
+    /// An argument's bound moved. Additive when withdrawn or widened; breaking when declared,
+    /// narrowed or changed in kind.
+    | ArgumentConstraintChanged of
+        method: string *
+        name: string *
+        before: ConstraintSnap option *
+        after: ConstraintSnap option
+    /// What the method answers moved (`nothing` for none): breaking, undecided across an erased
+    /// slot, whose tag `erased` then names.
+    | MethodResultChanged of method: string * before: string * after: string * erased: string option
+    /// `call` / `stream` / `job` moved: breaking.
+    | MethodShapeChanged of method: string * before: string * after: string
+    /// The effect class moved: breaking.
+    | MethodEffectChanged of method: string * before: string * after: string
+    /// The authority a caller needs moved. Additive when no value was added; a value added is a
+    /// widened requirement and breaking.
+    | MethodAuthorityChanged of method: string * before: string list * after: string list
+    /// The schema versions served moved. Additive when none was withdrawn.
+    | MethodServesChanged of method: string * before: int list * after: int list
+    /// A promise beside the types moved (D260.18).
+    | MethodPromiseChanged of method: string * MethodPromise
+    /// A fact the host reads and no caller is admitted or refused by moved: a description, the
+    /// audit kind, what may be recorded. `subject` names the contract, method or argument.
+    | ContractHostFactChanged of subject: string * fact: string * before: string * after: string
 
 /// A change's wire verdict — what an OLD document, or an old emitter, meets under the
 /// new vocabulary. Independent of the F# consequence reported beside it.

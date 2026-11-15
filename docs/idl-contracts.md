@@ -133,6 +133,34 @@ at this seam is finite, and a hole that took any text would validate nothing.
 **A string-borne scalar is `anyString`.** The exact type stays in the contract, and the host's decoder checks
 the grammar.
 
+## Changing a contract
+
+`fuaran-core-idl classify` reads `contracts` and grades every change by one rule: a change that can refuse a
+caller the contract admitted, or change what an admitted caller receives, is **breaking**; every other change is
+**additive**. The rows are generated into [`idl-stability-classes.md`](idl-stability-classes.md); in outline:
+
+| Change | Class |
+|---|---|
+| a contract or a method added | additive |
+| a contract or a method removed | breaking |
+| an argument added, optional or declared with a default | additive |
+| an argument added required, removed, or reordered among those both revisions carry | breaking |
+| an argument's type, or the result, changed | breaking; undecided across a `hosted` / `json` / `opaque` slot |
+| an argument loosened from required | additive |
+| any other move of an argument's optionality, a changed default included | breaking |
+| a bound withdrawn, or widened within its kind | additive |
+| a bound declared, narrowed, or changed in kind | breaking |
+| the shape or the effect class changed | breaking |
+| an authority value removed; a served version added | additive |
+| an authority value added; a served version withdrawn | breaking |
+| a destination lost; `idempotent` gained; a rate limit withdrawn or loosened | additive |
+| a destination gained; `idempotent` lost; a rate limit declared or tightened; any move of the read policy | breaking |
+| a description, the audit kind, or what may be recorded | host surface |
+
+A contract that arrives or leaves is one row, not a row for each method. A rename is a removal and an addition.
+No F# is generated for a contract, so no row moves a generated shape, and the one obligation a row raises is on
+the hosts that serve or call the contract.
+
 ## The document space
 
 A structured value at a hole or a result is a **document**: `{"$type":"document"}`, or

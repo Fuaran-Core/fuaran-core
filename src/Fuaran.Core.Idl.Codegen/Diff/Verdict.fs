@@ -254,7 +254,10 @@ module internal DiffVerdict =
             | EnumCaseAnnotationsChanged _
             | TypeAnnotationsChanged _
             | FieldAliasesChanged _
-            | EnumCaseAliasesChanged _ -> true
+            | EnumCaseAliasesChanged _
+            // Phase 644 — an argument a caller may leave out: a consumer that ignores what it does
+            // not know calls as it did.
+            | ArgumentAdded _ -> true
             | KindAdded _
             | OpAdded _
             | UnionCaseAdded _
@@ -283,7 +286,23 @@ module internal DiffVerdict =
             | FieldPresenceChanged _
             | SupportChanged _
             | TypeLayoutChanged _
-            | FieldKeyedChanged _ -> false
+            | FieldKeyedChanged _
+            | ContractAdded _
+            | ContractRemoved _
+            | MethodAdded _
+            | MethodRemoved _
+            | ArgumentRemoved _
+            | ArgumentsReordered _
+            | ArgumentTypeChanged _
+            | ArgumentOptionalityChanged _
+            | ArgumentConstraintChanged _
+            | MethodResultChanged _
+            | MethodShapeChanged _
+            | MethodEffectChanged _
+            | MethodAuthorityChanged _
+            | MethodServesChanged _
+            | MethodPromiseChanged _
+            | ContractHostFactChanged _ -> false
 
     /// Phase 587 — the `Versioning.Evolution` a verdict amounts to for a consumer under `rule`.
     /// `RefusesUnknownMembers` is the verdict's own `Evolution`, unchanged; `IgnoresUnknownMembers` is

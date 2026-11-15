@@ -58,6 +58,8 @@ module internal DiffRules =
         | DiscriminatorFamily
         /// Alters a closed string set.
         | EnumSet
+        /// Phase 644 — alters a contract: reaches the hosts that serve or call it, never a codec.
+        | ContractFamily
         | NoFamily
 
     /// One row of the `docs/` mapping table.
@@ -154,11 +156,11 @@ module internal DiffRules =
         | _ -> None
 
     /// The erased tag a field's wire type crosses, if any — its own, or one nested in it.
-    let private erasedIn (f: FieldSnap) : string option =
-        if erasedTag f.Wire.Tag then
-            Some f.Wire.Tag
-        else
-            erasedWithin f.Wire.Shape
+    let erasedInWire (w: WireType) : string option =
+        if erasedTag w.Tag then Some w.Tag else erasedWithin w.Shape
+
+    /// The erased tag a field's wire type crosses, if any.
+    let private erasedIn (f: FieldSnap) : string option = erasedInWire f.Wire
 
     /// Is `after` `before` with one or more `int` positions widened to `float`, and
     /// nothing else moved (Phase 252)? Read on the wire-type objects, so a list, a
@@ -351,6 +353,26 @@ module internal DiffRules =
             <> (after.Presence = PresenceSnap.Required)
             && not (ctx.HasDefault tag field)
         | _ -> false
+
+    // Phase 644 — the contract rows share a family, a consequence and two citations. No F# is
+    // generated for a contract, so no change to one moves a generated shape.
+    let private contractCite =
+        "DECISIONS.md D260.16 (a change that can refuse a caller the contract admitted, or change what an admitted caller receives, is breaking); docs/idl-contracts.md"
+
+    let private promiseCite = "DECISIONS.md D260.18; docs/idl-contracts.md"
+
+    let private contractShape =
+        "`no-generated-shape-change` — no F# is generated for a contract"
+
+    let private contractRule
+        (case: string)
+        (rank: string)
+        (key: string)
+        (verdict: Severity * string * string)
+        (summary: string)
+        (doc: DocRow list)
+        : Rule =
+        rule case rank ContractFamily key verdict (always noShape) summary doc
 
     /// Phase 524 — THE rule for a change: one total match over `Change`, its arms in rank order.
     /// Totality is the compiler's (an incomplete match is an error on this side), where the table
@@ -1234,6 +1256,424 @@ module internal DiffRules =
                       "`host-surface-only` — host-language source the generator splices, never on the wire"
                       "`full-literal-construction` for a kind projection or the type splice (generated declarations move), else `no-generated-shape-change`" ]
 
+        // ---- contracts (Phase 644, DECISIONS.md D260.16 and D260.18) ----
+
+        | ContractAdded n ->
+            contractRule
+                "ContractAdded"
+                "90"
+                n
+                (Additive,
+                 sprintf "contract `%s` added — no caller of an existing method is refused or answered differently." n,
+                 contractCite)
+                (sprintf "contract added: %s" n)
+                [ row "a contract added" "`additive`" contractShape ]
+
+        | ContractRemoved n ->
+            contractRule
+                "ContractRemoved"
+                "91"
+                n
+                (BreakingWire,
+                 sprintf "contract `%s` REMOVED — every caller of every method of it is refused." n,
+                 contractCite)
+                (sprintf "contract removed: %s" n)
+                [ row "a contract removed" "`breaking-wire`" contractShape ]
+
+        | MethodAdded m ->
+            contractRule
+                "MethodAdded"
+                "92"
+                m
+                (Additive,
+                 sprintf "method `%s` added — a new method refuses no caller of the methods the contract already had." m,
+                 contractCite)
+                (sprintf "method added: %s" m)
+                [ row "a contract method added" "`additive`" contractShape ]
+
+        | MethodRemoved m ->
+            contractRule
+                "MethodRemoved"
+                "93"
+                m
+                (BreakingWire, sprintf "method `%s` REMOVED — every caller of it is refused." m, contractCite)
+                (sprintf "method removed: %s" m)
+                [ row "a contract method removed" "`breaking-wire`" contractShape ]
+
+        | ArgumentAdded(m, x) ->
+            contractRule
+                "ArgumentAdded"
+                "94"
+                (m + "/" + x.Name)
+                (match x.Presence with
+                 | PresenceSnap.Optional
+                 | PresenceSnap.OmitDefault _ ->
+                     Additive,
+                     sprintf
+                         "an %s argument `%s` added to method `%s` — a caller may leave it out, so every call the method admitted is admitted as it was."
+                         x.Presence.Class
+                         x.Name
+                         m,
+                     contractCite + "; D259 (a declared default)"
+                 | _ ->
+                     BreakingWire,
+                     sprintf
+                         "a %s argument `%s` added to method `%s` — every existing caller leaves it out and is refused. Declare it optional, or with a default, if existing callers must survive."
+                         x.Presence.Class
+                         x.Name
+                         m,
+                     contractCite)
+                (sprintf "argument added: %s(%s : %s)" m x.Name x.Label)
+                [ row
+                      "an argument added to a contract method, **optional or declared with a default**"
+                      "`additive`"
+                      contractShape
+                  row "a **required** argument added to a contract method" "`breaking-wire`" contractShape ]
+
+        | ArgumentRemoved(m, n) ->
+            contractRule
+                "ArgumentRemoved"
+                "95"
+                (m + "/" + n)
+                (BreakingWire,
+                 sprintf "argument `%s` REMOVED from method `%s` — a caller that binds it is refused." n m,
+                 contractCite)
+                (sprintf "argument removed: %s(%s)" m n)
+                [ row
+                      "an argument removed from a contract method (a rename is a removal and an addition)"
+                      "`breaking-wire`"
+                      contractShape ]
+
+        | ArgumentsReordered(m, b, a) ->
+            contractRule
+                "ArgumentsReordered"
+                "96"
+                m
+                (BreakingWire,
+                 sprintf
+                     "the arguments of method `%s` changed order (%s → %s) — the order is part of the declaration, and the holes of the capability the method projects to follow it."
+                     m
+                     (String.concat ", " b)
+                     (String.concat ", " a),
+                 contractCite)
+                (sprintf "arguments reordered: %s" m)
+                [ row "a contract method's arguments reordered" "`breaking-wire`" contractShape ]
+
+        | ArgumentTypeChanged(m, n, b, a) ->
+            contractRule
+                "ArgumentTypeChanged"
+                "97"
+                (m + "/" + n)
+                (match erasedInWire b.Wire |> Option.orElse (erasedInWire a.Wire) with
+                 | Some tag ->
+                     Unclassifiable,
+                     sprintf
+                         "argument `%s` of method `%s` changed type across an ERASED slot: %s → %s. The artifact does not state what a `%s` slot admits, so nothing here can say whether a value a caller sent is still admitted. CHECK: does every value the old type accepted still decode? If so this is not a break; if not, it is BREAKING."
+                         n
+                         m
+                         b.Label
+                         a.Label
+                         tag,
+                     "Idl.THosted / TJson / TOpaque (content carried verbatim; not described by the artifact)"
+                 | None ->
+                     BreakingWire,
+                     sprintf
+                         "argument `%s` of method `%s` changed type: %s → %s. A value a caller sent is no longer admitted."
+                         n
+                         m
+                         b.Label
+                         a.Label,
+                     contractCite)
+                (sprintf "argument type changed: %s(%s) : %s -> %s" m n b.Label a.Label)
+                [ row "a contract argument's type moved" "`breaking-wire`" contractShape
+                  row
+                      "a contract argument's type, or a method's result, moved across an **erased** slot (`hosted` / `json` / `opaque`), at any depth"
+                      "`undecided`"
+                      contractShape ]
+
+        | ArgumentOptionalityChanged(m, n, b, a) ->
+            contractRule
+                "ArgumentOptionalityChanged"
+                "98"
+                (m + "/" + n)
+                (match b, a with
+                 | PresenceSnap.Required, (PresenceSnap.Optional | PresenceSnap.OmitDefault _) ->
+                     Additive,
+                     sprintf
+                         "argument `%s` of method `%s` loosened (%s → %s) — every caller supplied it and still may."
+                         n
+                         m
+                         b.Label
+                         a.Label,
+                     contractCite
+                 | _ ->
+                     BreakingWire,
+                     sprintf
+                         "argument `%s` of method `%s` changed when a caller may leave it out (%s → %s) — a caller that left it out is refused, or is answered under another default."
+                         n
+                         m
+                         b.Label
+                         a.Label,
+                     contractCite)
+                (sprintf "argument optionality changed: %s(%s) : %s -> %s" m n b.Label a.Label)
+                [ row
+                      "a contract argument loosened from `required` to optional or to a declared default"
+                      "`additive`"
+                      contractShape
+                  row
+                      "any other move of when a caller may leave a contract argument out (newly required; a changed default)"
+                      "`breaking-wire`"
+                      contractShape ]
+
+        | ArgumentConstraintChanged(m, n, b, a) ->
+            let shown (c: ConstraintSnap option) =
+                match c with
+                | Some c -> c.Text
+                | None -> "none"
+
+            let widened =
+                match b, a with
+                | _, None -> true
+                | Some old, Some now when old.Kind = now.Kind ->
+                    match old.Bounds, now.Bounds with
+                    | Some(oldLo, oldHi), Some(newLo, newHi) -> newLo <= oldLo && newHi >= oldHi
+                    | _ -> false
+                | _ -> false
+
+            contractRule
+                "ArgumentConstraintChanged"
+                "99"
+                (m + "/" + n)
+                (if widened then
+                     Additive,
+                     sprintf
+                         "the bound on argument `%s` of method `%s` was withdrawn or widened (%s → %s) — every value a caller sent is still admitted."
+                         n
+                         m
+                         (shown b)
+                         (shown a),
+                     contractCite
+                 else
+                     BreakingWire,
+                     sprintf
+                         "the bound on argument `%s` of method `%s` was declared, narrowed or changed in kind (%s → %s) — a value a caller sent may be refused."
+                         n
+                         m
+                         (shown b)
+                         (shown a),
+                     contractCite)
+                (sprintf "argument constraint changed: %s(%s) : %s -> %s" m n (shown b) (shown a))
+                [ row "a contract argument's bound withdrawn, or widened within its kind" "`additive`" contractShape
+                  row
+                      "a contract argument's bound newly declared, narrowed, or changed in kind"
+                      "`breaking-wire`"
+                      contractShape ]
+
+        | MethodResultChanged(m, b, a, erased) ->
+            contractRule
+                "MethodResultChanged"
+                "9a"
+                m
+                (match erased with
+                 | Some tag ->
+                     Unclassifiable,
+                     sprintf
+                         "the result of method `%s` changed across an ERASED slot: %s → %s. The artifact does not state what a `%s` slot admits, so nothing here can say whether a caller receives what it did. CHECK the two value sets by hand."
+                         m
+                         b
+                         a
+                         tag,
+                     "Idl.THosted / TJson / TOpaque (content carried verbatim; not described by the artifact)"
+                 | None ->
+                     BreakingWire,
+                     sprintf
+                         "the result of method `%s` changed: %s → %s. An admitted caller receives something else."
+                         m
+                         b
+                         a,
+                     contractCite)
+                (sprintf "method result changed: %s : %s -> %s" m b a)
+                [ row
+                      "a contract method's result moved (a result declared or withdrawn included)"
+                      "`breaking-wire`"
+                      contractShape ]
+
+        | MethodShapeChanged(m, b, a) ->
+            contractRule
+                "MethodShapeChanged"
+                "9b"
+                m
+                (BreakingWire,
+                 sprintf
+                     "method `%s` changed how it is called (%s → %s) — a caller waiting for one answer, a stream or a job's acknowledgement meets another."
+                     m
+                     b
+                     a,
+                 contractCite)
+                (sprintf "method shape changed: %s : %s -> %s" m b a)
+                [ row "a contract method's shape moved (`call` / `stream` / `job`)" "`breaking-wire`" contractShape ]
+
+        | MethodEffectChanged(m, b, a) ->
+            contractRule
+                "MethodEffectChanged"
+                "9c"
+                m
+                (BreakingWire,
+                 sprintf
+                     "method `%s` changed its effect class (%s → %s) — the capability it projects to declares another effect, and a caller that relied on the old one is answered differently."
+                     m
+                     b
+                     a,
+                 contractCite)
+                (sprintf "method effect changed: %s" m)
+                [ row "a contract method's effect class moved" "`breaking-wire`" contractShape ]
+
+        | MethodAuthorityChanged(m, b, a) ->
+            contractRule
+                "MethodAuthorityChanged"
+                "9d"
+                m
+                (match a |> List.filter (fun v -> not (List.contains v b)) with
+                 | [] ->
+                     Additive,
+                     sprintf
+                         "method `%s` needs less authority (%s → %s) — every caller that was admitted still is."
+                         m
+                         (String.concat ", " b)
+                         (String.concat ", " a),
+                     contractCite
+                 | added ->
+                     BreakingWire,
+                     sprintf
+                         "method `%s` needs MORE authority: %s added — a widened requirement, so a caller that was admitted may be refused."
+                         m
+                         (String.concat ", " added),
+                     contractCite)
+                (sprintf "method authority changed: %s" m)
+                [ row "an authority value removed from a contract method" "`additive`" contractShape
+                  row
+                      "an authority value added to a contract method (a widened requirement)"
+                      "`breaking-wire`"
+                      contractShape ]
+
+        | MethodServesChanged(m, b, a) ->
+            let shown (vs: int list) =
+                vs |> List.map string |> String.concat ", "
+
+            contractRule
+                "MethodServesChanged"
+                "9e"
+                m
+                (match b |> List.filter (fun v -> not (List.contains v a)) with
+                 | [] ->
+                     Additive,
+                     sprintf "method `%s` serves more schema versions (%s → %s)." m (shown b) (shown a),
+                     contractCite
+                 | withdrawn ->
+                     BreakingWire,
+                     sprintf
+                         "method `%s` no longer serves schema version(s) %s — a caller at one of them is refused."
+                         m
+                         (shown withdrawn),
+                     contractCite)
+                (sprintf "method served versions changed: %s : %s -> %s" m (shown b) (shown a))
+                [ row "a schema version added to those a contract method serves" "`additive`" contractShape
+                  row "a schema version withdrawn from those a contract method serves" "`breaking-wire`" contractShape ]
+
+        | MethodPromiseChanged(m, p) ->
+            let limit (l: (int * int) option) =
+                match l with
+                | Some(calls, seconds) -> sprintf "%d calls in %d s" calls seconds
+                | None -> "none"
+
+            let name, severity, why =
+                match p with
+                | MethodPromise.Destination(_, true) ->
+                    "destination",
+                    BreakingWire,
+                    sprintf
+                        "method `%s` now hands what it is given to a party beyond the host that runs it — a caller was promised it did not."
+                        m
+                | MethodPromise.Destination(_, false) ->
+                    "destination",
+                    Additive,
+                    sprintf "method `%s` no longer hands what it is given beyond the host that runs it." m
+                | MethodPromise.Idempotent(_, false) ->
+                    "idempotent",
+                    BreakingWire,
+                    sprintf
+                        "method `%s` is no longer declared idempotent — a caller that retried on that promise may now act twice."
+                        m
+                | MethodPromise.Idempotent(_, true) ->
+                    "idempotent",
+                    Additive,
+                    sprintf "method `%s` is now declared idempotent; no caller relied on less." m
+                | MethodPromise.ReadPolicy(b, a) ->
+                    "readPolicy",
+                    BreakingWire,
+                    sprintf
+                        "method `%s` changed its read policy (%s → %s) — the artifact orders no two policies, so a caller that reused answers, or relied on a call making others stale, may be answered differently."
+                        m
+                        b
+                        a
+                | MethodPromise.RateLimit(b, a) ->
+                    let loosened =
+                        match b, a with
+                        | _, None -> true
+                        | Some(oldCalls, oldSeconds), Some(newCalls, newSeconds) ->
+                            newCalls >= oldCalls && newSeconds <= oldSeconds
+                        | None, Some _ -> false
+
+                    if loosened then
+                        "rateLimit",
+                        Additive,
+                        sprintf
+                            "the rate limit of method `%s` was withdrawn or loosened (%s → %s) — every call that was admitted still is."
+                            m
+                            (limit b)
+                            (limit a)
+                    else
+                        "rateLimit",
+                        BreakingWire,
+                        sprintf
+                            "the rate limit of method `%s` was declared or tightened (%s → %s) — a caller within the old bound may be refused."
+                            m
+                            (limit b)
+                            (limit a)
+
+            contractRule
+                "MethodPromiseChanged"
+                "9f"
+                (m + "/" + name)
+                (severity, why, promiseCite)
+                (sprintf "method %s changed: %s" name m)
+                [ row
+                      "a contract method gains a destination, loses `idempotent`, or has a rate limit declared or tightened"
+                      "`breaking-wire`"
+                      contractShape
+                  row
+                      "a contract method loses its destination, gains `idempotent`, or has its rate limit withdrawn or loosened"
+                      "`additive`"
+                      contractShape
+                  row "a contract method's read policy moved, in any direction" "`breaking-wire`" contractShape ]
+
+        | ContractHostFactChanged(subject, fact, _, _) ->
+            contractRule
+                "ContractHostFactChanged"
+                "9g"
+                (subject + "/" + fact)
+                (HostSurfaceOnly,
+                 sprintf
+                     "the `%s` of %s changed — a fact the host reads (a description, the audit kind, what may be recorded). No caller is admitted, refused or answered differently by it."
+                     fact
+                     subject,
+                 promiseCite)
+                (sprintf "%s changed: %s" fact subject)
+                [ row
+                      "a contract's, method's or argument's description, a method's audit kind, or what may be recorded of a call"
+                      "`host-surface-only`"
+                      contractShape ]
+
     /// One change of every case, in rank order — what the `docs/` mapping table enumerates, since
     /// the rows a rule shows do not depend on the change's payload. `IdlDiffTests` holds the list
     /// to the union: every case exactly once.
@@ -1251,6 +1691,14 @@ module internal DiffRules =
 
         let owner = ONodeEnvelope
         let host: HostSurface = { Blocks = [] }
+
+        let argument: ArgumentSnap =
+            { Name = ""
+              Label = ""
+              Wire = { Tag = ""; Shape = JObj [] }
+              Presence = PresenceSnap.Required
+              Constraint = None
+              ArgumentDoc = "" }
 
         [ ArtifactVersionChanged(0, 0)
           WireShapeChanged("", "")
@@ -1294,7 +1742,24 @@ module internal DiffRules =
           DefaultAdded("", "", "")
           DefaultRemoved("", "", "")
           DefaultChanged("", "", "", "")
-          SupportChanged("", None, None) ]
+          SupportChanged("", None, None)
+          ContractAdded ""
+          ContractRemoved ""
+          MethodAdded ""
+          MethodRemoved ""
+          ArgumentAdded("", argument)
+          ArgumentRemoved("", "")
+          ArgumentsReordered("", [], [])
+          ArgumentTypeChanged("", "", argument, argument)
+          ArgumentOptionalityChanged("", "", PresenceSnap.Required, PresenceSnap.Required)
+          ArgumentConstraintChanged("", "", None, None)
+          MethodResultChanged("", "", "", None)
+          MethodShapeChanged("", "", "")
+          MethodEffectChanged("", "", "")
+          MethodAuthorityChanged("", [], [])
+          MethodServesChanged("", [], [])
+          MethodPromiseChanged("", MethodPromise.Destination(false, false))
+          ContractHostFactChanged("", "", "", "") ]
 
     /// Deterministic ordering: the rule's rank, then the change's own key, so identical inputs
     /// produce byte-identical output regardless of map enumeration order.
