@@ -177,7 +177,14 @@ the hosts that serve or call the contract.
   answer.
 
 Nothing else is generated. A client, a server table, a protocol, a route, an envelope and a tool executor are a
-runtime's.
+runtime's. No F# and no TypeScript is generated from a contract, so there is no generated host to answer a
+contract vector: the reference answers them, and a host in another language that reads contracts certifies
+against `conformance/idl/contracts.json`.
+
+A contract moves nothing that is generated from the vocabulary's data. Each generated module is headed by a
+stamp naming the vocabulary, the hash of its `idl.json`, and a contract is a member of `idl.json`: that one line
+tells a vocabulary that declares a contract from the same vocabulary without one, and every other line is the
+same.
 
 ## The document space
 

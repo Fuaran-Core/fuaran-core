@@ -432,7 +432,10 @@ same reference pays for.
 **D260.14 — what Core emits, and what it does not.** JSON Schema for a method's arguments, in the shape a tool
 definition takes, and the F\* model for a contract's types with the round trips the IDL already generates. No
 client proxy, server table, effect or reply type for a runtime, protocol, route, envelope, frame or tool
-executor: those are a runtime's, built on this declaration.
+executor: those are a runtime's, built on this declaration. No F# and no TypeScript is generated from a
+contract either, so no generated host answers a contract vector. The reference answers them, and a host in
+another language that reads contracts certifies against `conformance/idl/contracts.json`, replayed from its
+committed bytes.
 
 **D260.15 — amends D253.3.** D253.3's first two sentences stand: the function package names no IDL type and takes
 no reference to the IDL. Its statement that a structured value is `SlotTree(Some name)` is replaced by D260.2 to
