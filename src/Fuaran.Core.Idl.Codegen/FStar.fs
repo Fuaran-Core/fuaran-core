@@ -151,3 +151,81 @@ module FStarTarget =
     /// transparent union), is REFUSED naming the vector — never dropped; the caller selects.
     let vectorsModule (moduleName: string) (models: VectorModel list) : Result<string, CodegenError> =
         FStarVectors.vectorsModule moduleName models
+
+    /// Phase 644 (DECISIONS.md D260.14) — the vocabulary whose model is the model of a contract's
+    /// TYPES. It is `idl` with one kind more for each method of `contract`: `<Method>Arguments`,
+    /// whose members are the method's arguments as declared (name, type, and whether a caller may
+    /// leave one out), and `<Method>Result`, whose one member `result` is what the method answers,
+    /// for a method that answers. The second component is those kinds' tags in declared order: the
+    /// selection to hand [[vocabularyModuleFrom]] and [[proofsModuleFrom]], so that the round trip
+    /// they generate is a theorem about a call's arguments and about its answer. Every declared
+    /// type and the node envelope are kept, so a type means what it means in `idl`. An argument's
+    /// bound is not modelled: it stays in the contract. A contract the vocabulary does not declare
+    /// is refused, and so is a kind name that is already a declared name.
+    let contractTypes (idl: Idl) (contract: string) : Result<Idl * string list, CodegenError> =
+        let refuse (construct: string) (why: string) (alternative: string) =
+            Error(CodegenError.UnsupportedConstruct(construct, why, alternative))
+
+        match idl.Contracts |> List.tryFind (fun c -> c.Name = contract) with
+        | None ->
+            refuse
+                (sprintf "the contract `%s`" contract)
+                "the vocabulary declares no such contract"
+                "name a declared contract"
+        | Some c ->
+            let capitalised (id: string) =
+                if id = "" then
+                    id
+                else
+                    string (System.Char.ToUpperInvariant id[0]) + id.Substring 1
+
+            let kind (tag: string) (fields: IdlField list) : IdlKind =
+                { Tag = tag
+                  Category = "contract"
+                  Annotations = Annotations.Empty
+                  Fields = fields }
+
+            let field (name: string) (t: IdlType) (opt: Optionality) : IdlField =
+                { Name = name
+                  Type = t
+                  Opt = opt
+                  Aliases = []
+                  Keyed = false
+                  Presence = None
+                  Annotations = Annotations.Empty }
+
+            let kinds =
+                c.Methods
+                |> List.collect (fun m ->
+                    kind
+                        (capitalised m.Id + "Arguments")
+                        (m.Arguments |> List.map (fun a -> field a.Name a.Type a.Opt))
+                    :: (match m.Result with
+                        | Some t -> [ kind (capitalised m.Id + "Result") [ field "result" t Required ] ]
+                        | None -> []))
+
+            let tags = kinds |> List.map _.Tag
+
+            let taken =
+                (idl.Kinds |> List.map _.Tag)
+                @ (idl.Ops |> List.map _.Tag)
+                @ (idl.Unions |> List.map _.Name)
+                @ (idl.Enums |> List.map _.Name)
+                @ (idl.Records |> List.map _.Name)
+
+            match
+                tags
+                |> List.tryFind (fun t -> List.contains t taken || (tags |> List.filter ((=) t) |> List.length) > 1)
+            with
+            | Some clash ->
+                refuse
+                    (sprintf "the kind `%s` of contract `%s`" clash contract)
+                    "the name is already a declared name of the vocabulary, or two methods give it"
+                    "rename the method or the declaration"
+            | None ->
+                Ok(
+                    { idl with
+                        Kinds = idl.Kinds @ kinds
+                        Contracts = [] },
+                    tags
+                )

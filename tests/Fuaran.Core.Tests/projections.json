@@ -77,6 +77,11 @@
       "heldBy": "ExportersTests"
     },
     {
+      "path": "conformance/idl/contracts.json",
+      "render": "idl",
+      "heldBy": "ExportersTests"
+    },
+    {
       "path": "conformance/idl/idl.schema.json",
       "switch": "CORE_APPROVE_DOCS",
       "stem": "idl-schema",

@@ -161,6 +161,24 @@ A contract that arrives or leaves is one row, not a row for each method. A renam
 No F# is generated for a contract, so no row moves a generated shape, and the one obligation a row raises is on
 the hosts that serve or call the contract.
 
+## What is generated from a contract
+
+- **The JSON Schema of a method's arguments** (`Gen.methodArgumentsSchema`, `Gen.contractArgumentSchemas`), in
+  the shape a tool definition takes: one object schema, a property an argument, `required` naming the arguments
+  a caller must supply, `additionalProperties` false (an argument the method does not declare is refused),
+  `title` the method's name and `description` its description. An argument's property is its type's schema with
+  its description, its declared default and its bound beside it. `$defs` holds the declared types the arguments
+  reach, and no other. A float argument is a number. A length bound is stated as the tightest bound that
+  refuses no admitted value: the IDL counts UTF-16 code units and JSON Schema counts characters, so `maxLength`
+  is the declared maximum and `minLength` half the declared minimum, rounded up.
+- **The F\* model of a contract's types** (`FStarTarget.contractTypes`): the vocabulary the proof-model
+  backend already models, holding for each method a kind of its arguments and, when it answers, a kind of its
+  result, so that the round-trip theorems the backend generates are theorems about a call's arguments and its
+  answer.
+
+Nothing else is generated. A client, a server table, a protocol, a route, an envelope and a tool executor are a
+runtime's.
+
 ## The document space
 
 A structured value at a hole or a result is a **document**: `{"$type":"document"}`, or

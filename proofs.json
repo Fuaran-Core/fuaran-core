@@ -3028,6 +3028,36 @@
       }
     },
     {
+      "id": "contract-vocabulary-generated-model",
+      "level": "proved",
+      "statement": "The GENERATED model of a CONTRACT's types — `proofs/ContractVocabulary.fst`: the contract fixture's `orders` contract (`tests/Fuaran.Core.Tests.Fixtures/ContractsIdl.fs`) as `FStarTarget.contractTypes` derives its vocabulary, a kind of each method's arguments (its members the arguments as declared: name, type, and whether a caller may leave one out) and a kind of each result, with the types they reach, its discriminated encoder and its tag-dispatch decoder, emitted by `FStarTarget.vocabularyModuleFrom` over the `jval` model and the combinators modelled with it. Every decoder is `Tot` on an arbitrary `jval` and therefore total on every input, by the same `get_prop` termination argument the `vocabulary-generated-model` row states. Ten of its eleven kinds are modelled: `ListArguments` declares an integer default, which the opaque numeric model cannot spell, and the emitted header names it (D259). Proved with no assume and no admit under --report_assumes error, and held to a fresh generation by the Proofs.Vocabulary family.",
+      "boundary": "A model of the TYPES a call carries, on the default wire shape, as nodes of the derived vocabulary: a kind of arguments is the argument record of a call, and nothing here is a call, a dispatch or a protocol. An argument's bound (`ArgumentConstraint`) is not modelled and stays in the contract, as do a method's shape, effect class, authority and every other member that is no type. The kind whose default the numeric model cannot spell is outside the model, so no theorem here speaks of the arguments of `orders.list`. Generated from the fixture, never from a host's contract. CHECKED but not EXTRACTED, for the reason `check.ps1`'s `$proofOnly` note gives; the claim is within the model.",
+      "phase": "fuaran-core#644",
+      "evidence": {
+        "theorem": "dec_node",
+        "model": "proofs/ContractVocabulary.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.vocabularyModuleFrom"
+        ]
+      }
+    },
+    {
+      "id": "contract-vocabulary-round-trip",
+      "level": "proved",
+      "statement": "The ROUND TRIP over `ContractVocabulary`, GENERATED and COMMITTED: `rt_node` in `proofs/ContractVocabularyProofs.fst` proves `dec_node (enc_node x) == Ok x` for every value of every modelled type, so the arguments of a call to a modelled method, and the answer of one, decode to what was encoded, at every depth and through every list, optional member and declared default the modelled kinds carry. By the same mutual induction and the same lemma shapes as the `vocabulary-round-trip` row (one lemma a constructor, a linear presence split), with no in-file option beyond the leg's own.",
+      "boundary": "Over the ten modelled kinds of the contract fixture's `orders` contract only; `ListArguments` is outside it. A round trip of the types, in the model: it says nothing of an argument's bound, of the capability a method projects to, or of any host's codec. NOT claimed: the `wf` characterisation, for the reason the `doc-vocabulary-round-trip` row gives.",
+      "phase": "fuaran-core#644",
+      "evidence": {
+        "theorem": "rt_node",
+        "model": "proofs/ContractVocabularyProofs.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.proofsModuleFrom"
+        ]
+      }
+    },
+    {
       "id": "evolution-classify-sound",
       "level": "proved",
       "statement": "WIRE_FORMAT section 15.4's classifier is SOUND, and the three theorems beside it stand on that. `proofs/WireVersioning.fst` models `Versioning.classify` / `bump` / `negotiate` clause for clause and proves `classify_sound`: `classify` answers `Additive` ONLY when every tag of the before-vocabulary survives into the after-vocabulary. The function computes a LIST — a difference — where the table talks about a SUBSET, and the two are the same statement only through an induction, which is the module's whole substance; `classify_additive_is_sub` packages the quantified form. `rename_is_breaking` is the row section 15.4 calls out by name, because a rename LOOKS additive from the new vocabulary's side: a tag present before and absent after forces `Breaking` whatever else the change added, and nothing about the addition enters the proof. `breaking_bump_is_foreign` and `additive_bump_is_behind` carry the verdict through to the consequence a reader acts on — a breaking verdict mints a new major and the old consumer is `Foreign` and refuses; an additive verdict keeps the major and that consumer is `Behind` and tolerates. Section 15.4's FIELD rows are proved beside them, at the composition that decides them: `classify_field_add` models `Diff.classifyFieldAdd` clause for clause, `evolution_of` models `Diff.evolution`'s partition of each row's subject by severity, and `optional_field_addition_bumps_the_minor` carries the result through `bump` and `negotiate` — an added optional field introduces a subject, the verdict is a NON-EMPTY `Additive`, the minor moves and an old consumer is `Behind`. `required_field_addition_is_foreign_not_behind` states the required row: a required field added retires its subject, moves the major and leaves an old consumer `Foreign` — a minor would rest on the premise that every old document still decodes, which `field_additive_monotone` refutes — and `host_only_field_addition_moves_no_profile` states the one that genuinely moves nothing, which is what makes the other two a measurement rather than a constant. `tag_delta_is_blind_to_field_additions` keeps the other half: the kind-tag delta alone cannot decide any of them. Proved with no assume and no admit under --report_assumes error.",

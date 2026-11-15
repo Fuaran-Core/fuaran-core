@@ -498,6 +498,12 @@ alternatives lost:
   order is wrong for one of the two parties that read it, the caller that reuses an answer and the caller that
   needs a fresh one.
 
+The JSON Schema of a method's arguments (D260.14) states an argument's length bound as the tightest bound
+JSON Schema can state without refusing an admitted value: the IDL counts UTF-16 code units and `minLength` /
+`maxLength` count characters, so `maxLength` is the declared maximum and `minLength` is half the declared
+minimum, rounded up. The contract's own check stays exact. A float argument is stated as a number, since the
+three non-finite tokens are refused at the registry (D260.7).
+
 ## 2026-11-14 — D259: a declared default at the wider data universe's types is admitted in its one canonical spelling, a tuple when every item is, and the empty set and keyed map; the F# and TypeScript generators print it in the host type each binds, and the F* model prints what carries no obligation and refuses a string-borne scalar by name
 
 **Status:** Live

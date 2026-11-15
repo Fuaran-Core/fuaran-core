@@ -530,6 +530,7 @@
     <Compile Include="DocumentSpaceTests.fs" />
     <Compile Include="IdlContractTests.fs" />
     <Compile Include="IdlContractDiffTests.fs" />
+    <Compile Include="IdlContractEmitTests.fs" />
     <!-- Phase 657 - one Tree.updateNode write allocates the path it rebuilds, pinned on the
          241-node, 24-deep tree. Appended (append-only). -->
     <Compile Include="TreeUpdateNodeAllocationTests.fs" />

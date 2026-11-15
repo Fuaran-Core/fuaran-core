@@ -176,6 +176,7 @@ method Fuaran.Core.Idl.Diff.verdict(Fuaran.Core.Idl.Codegen.Types.Snapshot, Fuar
 method Fuaran.Core.Idl.Diff.verdictBlock(Fuaran.Core.Idl.Codegen.Types.Verdict) : System.String
 method Fuaran.Core.Idl.Diff.verdictClass(Fuaran.Core.Idl.Codegen.Types.Verdict) : Fuaran.Core.Idl.Codegen.Types.VerdictClass
 method Fuaran.Core.Idl.FStarTarget.beyondEnvelope(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+method Fuaran.Core.Idl.FStarTarget.contractTypes(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.Tuple`2<Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>>, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.FStarTarget.partition(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.KindVerdict>
 method Fuaran.Core.Idl.FStarTarget.proofKinds(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 method Fuaran.Core.Idl.FStarTarget.proofsModule(System.String, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
@@ -183,6 +184,7 @@ method Fuaran.Core.Idl.FStarTarget.proofsModuleFrom(Fuaran.Core.Idl.Codegen.Type
 method Fuaran.Core.Idl.FStarTarget.vectorsModule(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.VectorModel>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.FStarTarget.vocabularyModule(System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.FStarTarget.vocabularyModuleFrom(Fuaran.Core.Idl.Codegen.Types.Provenance, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.Gen.contractArgumentSchemas(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.fsharpCodecModule(Fuaran.Core.Idl.Codegen.Types.GenSupport, Fuaran.Core.Idl.Codegen.Types.CodecOnly, System.String, Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.fsharpModule(System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.fsharpModuleDerived(Fuaran.Core.Idl.Codegen.Types.GenSupport, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.Derivation>, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
@@ -190,6 +192,7 @@ method Fuaran.Core.Idl.Gen.fsharpModuleWith(Fuaran.Core.Idl.Codegen.Types.GenSup
 method Fuaran.Core.Idl.Gen.fsharpTypes(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.fsharpValue(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlType, Fuaran.Core.Idl.IdlValue) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.jsonSchema(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.Gen.methodArgumentsSchema(Fuaran.Core.Idl.Idl, System.String) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.provenanceHeader(System.String, System.String, System.String) : System.String
 method Fuaran.Core.Idl.Gen.typescriptDeclarations(Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.typescriptDeclarationsDerived(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.Derivation>, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>

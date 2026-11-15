@@ -485,6 +485,30 @@
       "note": "The generated ROUND TRIP over `ScoreVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type), plus `dec_node_total`. Emitted by the same target from the same walk as the model, ONE LEMMA PER CONSTRUCTOR and one per PRESENCE PATTERN (Phase 168): `rt_<T>` is a case split whose arms cite `rt_<T>__<Ctor>`, one constructor's arm alone, and a constructor with `presenceSplitAt` (2) or more conditional members is split further into `…__p<bits>` lemmas whose `requires` pins every conditional member present or absent — so no query carries more than one constructor's object shapes, which is the structural fix Phase 150 named for the 2^k failure it measured at twenty UI kinds. The family is one mutual induction on the lexicographic measure `%[x; tier]`. The in-file `--z3rlimit 200` precedent is RETIRED with the shape that needed it: every query here discharges at the leg's own rlimit of 40, under `--quake 3`, cold. Sixty-two lemmas — the largest proof script in the leg: nineteen kind arms, and `Measure` and `Score` reach the presence split (omit-at-default members, so the pattern lemmas pin equality with the default the encoder tests, not `Some?`). MEASURED (Phase 168) as for `VocabularyProofs`: 58s (direct), 46s, 108s, 47s — the 108s leg ran the whole leg 37% slower than the other two, so it is load, and it is kept because the rule seeds from the slowest. Slowest 108s, so the budget is RAISED from 90s to 220s by the seeding rule — the price of forty-four more lemmas, each its own query, against Phase 173's 42s slowest for the one-lemma shape (the BEFORE). Floor kept at 6s for the reason `VocabularyProofs` gives. RE-SEEDED BY PHASE 182, downwards and by a lot: the split by PATTERN became a split by MEMBER, so the sixty-two lemmas are now thirteen `lk_…` lookups plus forty-two round-trip lemmas, and the forty-four extra queries Phase 168 paid for are not there to pay for. Three cold quaked runs of one `check.ps1 -Runs 3` leg measured 31s, 32s, 31s — slowest 32s, so the budget is 70s by the seeding rule, down from 220s. That leg was a LOADED one and the numbers still did not move: `Capability` (untouched) ran 75s against a 20s budget on the same run 3 and `JsonParse` (untouched) 76s against 42s on run 1, so the stability of this module's three readings is a fact about the module rather than about the afternoon. The floor STAYS at 6s: every run observed is slower than the 12s `fastestSeconds` recorded, so `floorSeeding` forces nothing. PHASE 204 REGENERATED THIS MODULE (the model binds each conditional member of a wide constructor as a named, opaque suffix; the proof script adds three per-suffix steps and proves each lookup as a chain of them) and deliberately RE-SEEDS NOTHING: its one `check.ps1 -Runs 3` leg was LABELLED contended on all three runs (x1.06, x1.06, x1.07 over fourteen untouched modules, against the x0.80 threshold; no other prover on the machine, eleven sibling dotnet processes), and `contentionSeeding` says a labelled run is never a seed. The control is `DocVocabularyProofs`, whose content did not change and which ran 29-30s against the 16-17s Phase 182 recorded, about 1.9x. Measured here: 71s, 70s, 70s against Phase 182's 31-32s, about 2.3x — the widest growth of the four (Measure's four conditional members add twelve step lemmas), and the only one to touch its budget: one run 1s over, which the leg labelled contended. A quiet leg is what settles whether the 70s budget needs moving; this phase does not guess it. RE-SEEDED BY PHASE 224, which regenerated this module: a conditional member of a suffixed constructor whose read calls nothing in the decoder family is decoded through a named, opaque reader, and the proof script adds one value lemma per reader, cited by the round-trip arm in place of its presence case. Seeded from run 1 of the phase's `check.ps1 -Runs 3` leg, the only run the leg did NOT label contended (x0.74 over fourteen untouched modules). Runs 2 and 3 were labelled (x0.87, x0.90) and are not seeds, by `contentionSeeding`. Measured on run 1: 42s (runs 2 and 3: 62s, 44s). By the seeding rule the budget is 90s; `contentionFactor` records the pass it came from. The floor stands: nothing ran faster than the fastest this entry records, so `floorSeeding` obliges nothing."
     },
     {
+      "module": "ContractVocabulary",
+      "kind": "generated",
+      "opens": [ "WireDecode" ],
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
+      "budgetSeconds": 20,
+      "measuredSeconds": 3,
+      "fastestSeconds": 3,
+      "fastestPhase": "fuaran-core#644",
+      "phase": "fuaran-core#644",
+      "note": "Phase 644 - the GENERATED model of a CONTRACT's types: the contract fixture's `orders` contract (`tests/Fuaran.Core.Tests.Fixtures/ContractsIdl.fs`) as `FStarTarget.contractTypes` derives its vocabulary, a kind of each method's arguments and a kind of each result over the fixture's declared types. Ten of its eleven kinds are modelled; `ListArguments` declares an integer default the opaque numeric model cannot spell and is named in the emitted header (D259). Emitted by `render fstar` and held to a fresh generation by the `Proofs.Vocabulary` family, as the three certification models are."
+    },
+    {
+      "module": "ContractVocabularyProofs",
+      "kind": "generated",
+      "opens": [ "WireDecode", "ContractVocabulary" ],
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
+      "budgetSeconds": 20,
+      "measuredSeconds": 4,
+      "fastestSeconds": 4,
+      "fastestPhase": "fuaran-core#644",
+      "phase": "fuaran-core#644",
+      "note": "Phase 644 - the generated ROUND TRIP over `ContractVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type), plus `dec_node_total`: a theorem about the arguments of a call and about its answer, by the same walk and the same lemma shapes as `VocabularyProofs`. An argument's bound is not modelled; it stays in the contract."
+    },
+    {
       "module": "Relation",
       "kind": "extracted",
       "opens": [ "Twin", "ListAlgebra" ],

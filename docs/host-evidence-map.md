@@ -14,7 +14,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## Summary
 
-419 rows: 246 offered, 1 a host's own proof, 172 uncovered (proved 100, tested 31, assumed 39, policy 2).
+421 rows: 246 offered, 1 a host's own proof, 174 uncovered (proved 102, tested 31, assumed 39, policy 2).
 
 ## Offers, by model
 
@@ -62,6 +62,10 @@ Grouped by model. Each group is a candidate vector family or oracle function.
 - `Arbitrate` (6): `arbitration-accepted-pairwise-independent`, `arbitration-merged-order-free`, `arbitration-accepted-maximal`, `arbitration-deterministic`, `arbitration-id-uniqueness-is-needed`, `arbitration-maximal-is-not-maximum`
 
 - `ColumnRefinement` (6): `column-refinement-to-cells-of-cells`, `column-refinement-of-cells-to-cells`, `column-refinement-validate-agrees`, `column-refinement-encode-agrees`, `column-refinement-ladder-transfers`, `column-refinement-validity-two-cases`
+
+- `ContractVocabulary` (1): `contract-vocabulary-generated-model`
+
+- `ContractVocabularyProofs` (1): `contract-vocabulary-round-trip`
 
 - `DocVocabulary` (1): `doc-vocabulary-generated-model`
 
@@ -158,6 +162,7 @@ Certified against the reference implementation alone, so a host passing one offe
 | `skeletonDiff` | [`conformance/diff/skeleton-diff.json`](../conformance/diff/skeleton-diff.json) | 14 |
 | `encodingProfile` | [`conformance/encoding/encoding-profiles.json`](../conformance/encoding/encoding-profiles.json) | 47 |
 | `identity` | [`conformance/identity/identity.json`](../conformance/identity/identity.json) | 9 |
+| `idlContracts` | [`conformance/idl/contracts.json`](../conformance/idl/contracts.json) | 75 |
 | `idlWiderUniverse` | [`conformance/idl/wider-universe.json`](../conformance/idl/wider-universe.json) | 49 |
 | `canonicalFormLaws` | [`conformance/laws/canonical-form-laws.json`](../conformance/laws/canonical-form-laws.json) | 20 |
 | `premiseFloatDigits` | [`conformance/premises/float-digits.json`](../conformance/premises/float-digits.json) | 163 |

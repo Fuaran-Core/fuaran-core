@@ -37,6 +37,17 @@ let provesLines =
       "not of any domain's vocabulary. A domain proves its own vocabulary in its own"
       "repository with the same generator; the UI vocabulary's model is `fuaran#1754`'s." ]
 
+/// Phase 644 — the contract fixture's `orders` contract as the vocabulary `FStarTarget.contractTypes`
+/// derives: a kind of each method's arguments and a kind of each result, over the fixture's declared
+/// types. The fixture's own two kinds are left out: they exist for the membership law, and no method
+/// of `orders` takes a tree.
+let contractVocabulary: Idl =
+    match FStarTarget.contractTypes ContractsIdl.idl "orders" with
+    | Ok(vocabulary, kinds) ->
+        { vocabulary with
+            Kinds = vocabulary.Kinds |> List.filter (fun k -> List.contains k.Tag kinds) }
+    | Error e -> failwithf "the contract fixture has no F* vocabulary: %s" (CodegenError.describe e)
+
 /// The certification set the F* backend is proved over, in the order the F# and TypeScript
 /// backends meet it in `IdlCertificationTests`: the reference vocabulary carries the part of
 /// the type model neither vendored sample uses, and the two samples carry the declared
@@ -71,7 +82,19 @@ let generated: Generated list =
                 "omit-at-default at scale, on the same declared non-default wire shape"
                 "(fuaran-core Phase 173, applying D14 to `proofs/`)." ]
               @ remedyLines
-            Proves = provesLines } } ]
+            Proves = provesLines } }
+      { Module = "ContractVocabulary"
+        Idl = contractVocabulary
+        Provenance =
+          { Origin =
+              [ "the CONTRACT fixture — `tests/Fuaran.Core.Tests.Fixtures/ContractsIdl.fs`, the `orders`"
+                "contract as `FStarTarget.contractTypes` derives its vocabulary: a kind of each"
+                "method's arguments and a kind of each result (fuaran-core Phase 644)." ]
+              @ remedyLines
+            Proves =
+              [ "F* BACKEND over a CONTRACT's types: the round trip is a theorem about the arguments"
+                "of a call and about its answer. An argument's bound is not modelled; it stays in the"
+                "contract." ] } } ]
 
 let modelPath (g: Generated) =
     Path.Combine(repoRoot, "proofs", g.Module + ".fst")

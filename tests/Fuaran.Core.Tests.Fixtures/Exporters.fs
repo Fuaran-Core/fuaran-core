@@ -200,7 +200,11 @@ let tableWith (measuredCases: unit -> (string * CaseCount) list) : Exporter list
       // Phase 639 (DECISIONS.md D251) — the IDL's wider data universe, beside the IDL's schema.
       { Family = "idl"
         Root = OwnedConformance.root
-        Files = fun dir -> [ WiderUniverseCorpus.path dir, WiderUniverseCorpus.render () ]
+        Files =
+          fun dir ->
+              [ WiderUniverseCorpus.path dir, WiderUniverseCorpus.render ()
+                // Phase 644 (DECISIONS.md D260) — the IDL's contracts.
+                ContractsCorpus.path dir, ContractsCorpus.render () ]
         FilesAt = None
         Write = None
         SharedIndexes = fun _ -> []

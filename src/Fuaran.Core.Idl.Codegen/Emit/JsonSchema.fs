@@ -254,14 +254,10 @@ module internal JsonSchema =
     let recordSchema (idl: Idl) (r: IdlRecord) : JVal =
         JObj(("type", JStr "object") :: objectBody idl r.Fields)
 
-    /// Emit a Draft 2020-12 JSON Schema for the whole IDL's canonical wire.
-    ///
-    /// **Phase 195 — this returns a `Result` where it used to return a bare `string`**, for the
-    /// reason [[fsharpTypes]] does: the leg has one construct it cannot emit — a generic union
-    /// whose recursion GROWS its type argument, and so has no finite `$defs` — and answering
-    /// that by throwing made a plain-string channel the one place the generator's refusal
-    /// was an exception. The change is BREAKING for a caller that consumed the string directly.
-    let jsonSchema (decl: Decl) : Result<string, CodegenError> =
+    /// The schema's two parts: the root member, and every definition in emission order. One
+    /// assembly, read by the whole-vocabulary schema and (Phase 644) by a method's arguments, so
+    /// a type has one definition whichever schema names it.
+    let private assemble (decl: Decl) : Result<(string * JVal) * (string * JVal) list, CodegenError> =
         let idl = decl.Idl
 
         let enumDef (e: IdlEnum) =
@@ -398,8 +394,146 @@ module internal JsonSchema =
                 @ [ nodeKindDef; nodeDef ]
                 @ treeOpDefs
 
-            JObj
-                [ "$schema", JStr "https://json-schema.org/draft/2020-12/schema"
-                  root
-                  "$defs", JObj defs ]
-            |> Json.render)
+            root, defs)
+
+    let private draft = "$schema", JStr "https://json-schema.org/draft/2020-12/schema"
+
+    /// Emit a Draft 2020-12 JSON Schema for the whole IDL's canonical wire.
+    ///
+    /// **Phase 195 — this returns a `Result` where it used to return a bare `string`**, for the
+    /// reason [[fsharpTypes]] does: the leg has one construct it cannot emit — a generic union
+    /// whose recursion GROWS its type argument, and so has no finite `$defs` — and answering
+    /// that by throwing made a plain-string channel the one place the generator's refusal
+    /// was an exception. The change is BREAKING for a caller that consumed the string directly.
+    let jsonSchema (decl: Decl) : Result<string, CodegenError> =
+        assemble decl
+        |> Result.map (fun (root, defs) -> JObj [ draft; root; "$defs", JObj defs ] |> Json.render)
+
+    // -----------------------------------------------------------------------
+    // Phase 644 (DECISIONS.md D260.14, D260.18) — the JSON Schema of one contract method's
+    // arguments, in the shape a tool definition takes: ONE object schema, a property an
+    // argument. Nothing a runtime needs is emitted beside it.
+    // -----------------------------------------------------------------------
+
+    /// Every definition a schema value names (`#/$defs/<name>`), in the order met.
+    let rec private refsIn (v: JVal) : string list =
+        match v with
+        | JObj fs ->
+            fs
+            |> List.collect (fun (k, x) ->
+                match k, x with
+                | "$ref", JStr r when r.StartsWith "#/$defs/" -> [ r.Substring 8 ]
+                | _ -> refsIn x)
+        | JArr xs -> xs |> List.collect refsIn
+        | _ -> []
+
+    /// The definitions `roots` reach, transitively, kept in emission order.
+    let private reachable (defs: (string * JVal) list) (roots: JVal list) : (string * JVal) list =
+        let byName = Map.ofList defs
+
+        let rec close (seen: Set<string>) (frontier: string list) : Set<string> =
+            match frontier |> List.filter (fun n -> not (seen.Contains n)) |> List.distinct with
+            | [] -> seen
+            | fresh ->
+                close
+                    (Set.union seen (Set.ofList fresh))
+                    (fresh
+                     |> List.collect (fun n -> byName |> Map.tryFind n |> Option.map refsIn |> Option.defaultValue []))
+
+        let names = close Set.empty (roots |> List.collect refsIn)
+        defs |> List.filter (fun (n, _) -> names.Contains n)
+
+    /// An argument's type. A float argument is a NUMBER: the three non-finite tokens are refused
+    /// at the registry (D260.7), so the schema does not offer them. Every other type is stated as
+    /// the vocabulary's schema states it.
+    let private argumentType (t: IdlType) : JVal =
+        match t with
+        | TFloat -> JObj [ "type", JStr "number" ]
+        | other -> schemaOf other
+
+    /// A bound, as the keywords JSON Schema has for it. A length bound is the tightest one that
+    /// refuses no admitted value: the IDL counts UTF-16 code units and `minLength` / `maxLength`
+    /// count characters, of which a string has at most as many and at least half as many.
+    let private boundOf (c: ArgumentConstraint) : (string * JVal) list =
+        match c with
+        | ArgumentConstraint.IntBetween(lo, hi) -> [ "minimum", JInt lo; "maximum", JInt hi ]
+        | ArgumentConstraint.FloatBetween(lo, hi) -> [ "minimum", JFloat lo; "maximum", JFloat hi ]
+        | ArgumentConstraint.LengthBetween(lo, hi) -> [ "minLength", JInt((lo + 1) / 2); "maxLength", JInt hi ]
+
+    /// The interpreter's encoding of a declared default at its argument's type (D129: the one call
+    /// across the assembly boundary).
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+    let private defaultAt (idl: Idl) (t: IdlType) (v: IdlValue) : Result<JVal, string> = Encode.valueJson idl t v
+
+    /// The schema of `m`'s arguments: `title` the method's name (`<contract>.<method>`),
+    /// `description` its description, a property an argument (its type's schema, then its
+    /// description, its declared default and its bound), `required` the arguments a caller must
+    /// supply, `additionalProperties` false (a binding the method does not declare is refused),
+    /// and `$defs` the declared types the arguments reach and no other. A declared default that
+    /// does not encode at its argument's type is refused, naming the argument.
+    let methodArguments (decl: Decl) (contract: IdlContract) (m: IdlMethod) : Result<JVal, CodegenError> =
+        let name = contract.Name + "." + m.Id
+
+        let property (a: IdlArgument) : Result<string * JVal, CodegenError> =
+            let stated =
+                match argumentType a.Type with
+                | JObj fs -> fs
+                // "Any JSON" (`true`) states nothing; the keywords beside it are the whole schema.
+                | _ -> []
+
+            let described =
+                match a.Doc with
+                | Some d -> [ "description", JStr d ]
+                | None -> []
+
+            let bound = a.Constraint |> Option.map boundOf |> Option.defaultValue []
+
+            let withDefault (fallback: (string * JVal) list) =
+                a.Name, JObj(stated @ described @ fallback @ bound)
+
+            match a.Opt with
+            | OmitDefault v ->
+                match defaultAt decl.Idl a.Type v with
+                | Ok j -> Ok(withDefault [ "default", j ])
+                | Error why ->
+                    Error(
+                        CodegenError.UnsupportedConstruct(
+                            sprintf "the declared default of argument `%s` of method `%s`" a.Name name,
+                            why,
+                            "declare a default that encodes at the argument's type"
+                        )
+                    )
+            | _ -> Ok(withDefault [])
+
+        let properties =
+            (Ok [], m.Arguments)
+            ||> List.fold (fun acc a ->
+                match acc, property a with
+                | Error e, _
+                | _, Error e -> Error e
+                | Ok ps, Ok p -> Ok(ps @ [ p ]))
+
+        match assemble decl, properties with
+        | Error e, _
+        | _, Error e -> Error e
+        | Ok(_, defs), Ok props ->
+            let reached = reachable defs (props |> List.map snd)
+
+            Ok(
+                JObj(
+                    [ draft; "title", JStr name ]
+                    @ (match m.Doc with
+                       | Some d -> [ "description", JStr d ]
+                       | None -> [])
+                    @ [ "type", JStr "object"
+                        "required",
+                        JArr(
+                            m.Arguments
+                            |> List.filter (fun a -> a.Opt = Required)
+                            |> List.map (fun a -> JStr a.Name)
+                        )
+                        "properties", JObj props
+                        "additionalProperties", JBool false ]
+                    @ (if reached.IsEmpty then [] else [ "$defs", JObj reached ])
+                )
+            )

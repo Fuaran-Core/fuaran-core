@@ -67,6 +67,37 @@ module Gen =
     let jsonSchema (idl: Idl) : Result<string, CodegenError> =
         JsonSchema.jsonSchema (Decl.declared idl)
 
+    /// Phase 644 — the JSON Schema (draft 2020-12) of the arguments of every method of every
+    /// contract, in the shape a tool definition takes: one object schema a method, keyed
+    /// `<contract>.<method>`, contracts and methods in declared order. Empty for a vocabulary that
+    /// declares no contract. Nothing a runtime needs is emitted: no client, server table,
+    /// protocol, route, envelope or tool executor.
+    let contractArgumentSchemas (idl: Idl) : Result<(string * string) list, CodegenError> =
+        let decl = Decl.declared idl
+
+        (Ok [], idl.Contracts |> List.collect (fun c -> c.Methods |> List.map (fun m -> c, m)))
+        ||> List.fold (fun acc (c, m) ->
+            match acc, JsonSchema.methodArguments decl c m with
+            | Error e, _
+            | _, Error e -> Error e
+            | Ok done_, Ok schema -> Ok(done_ @ [ c.Name + "." + m.Id, Fuaran.Core.Json.render schema ]))
+
+    /// Phase 644 — the JSON Schema of one method's arguments, named `<contract>.<method>`; a name
+    /// the vocabulary does not declare is refused.
+    let methodArgumentsSchema (idl: Idl) (method: string) : Result<string, CodegenError> =
+        contractArgumentSchemas idl
+        |> Result.bind (fun all ->
+            match all |> List.tryFind (fun (name, _) -> name = method) with
+            | Some(_, schema) -> Ok schema
+            | None ->
+                Error(
+                    CodegenError.UnsupportedConstruct(
+                        sprintf "the contract method `%s`" method,
+                        "the vocabulary declares no such method",
+                        "name a method as `<contract>.<method>`"
+                    )
+                ))
+
     /// A TypeScript value literal for an IDL value under the given wire shape.
     let internal typescriptValueWith (shape: WireShape) (v: IdlValue) : string =
         TypeScriptCodec.typescriptValueWith shape v

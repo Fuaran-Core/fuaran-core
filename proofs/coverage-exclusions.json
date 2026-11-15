@@ -891,6 +891,16 @@
     },
     {
       "members": [
+        "Idl.FStarTarget.contractTypes",
+        "Idl.Gen.contractArgumentSchemas",
+        "Idl.Gen.methodArgumentsSchema"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "What is generated from a contract: the JSON Schema of a method's arguments, a projection of the declaration whose shape, bounds, defaults and reachable definitions the emit tests pin, with the law that every reference resolves in its own schema; and the derivation of the vocabulary a contract's types are modelled through, a map from declarations to declarations whose output the emit tests pin kind by kind. The generated model of that vocabulary and its round trip are the `contract-vocabulary` rows.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlContractEmitTests.fs"
+    },
+    {
+      "members": [
         "Idl.ContractProjection.capabilities",
         "Idl.ContractProjection.capabilityOf",
         "Idl.ContractProjection.spaceOf",
