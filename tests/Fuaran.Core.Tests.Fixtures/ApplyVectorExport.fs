@@ -80,6 +80,12 @@ module SpineAdoption =
     let private rs564 =
         AdoptionSource.Host("0.41.0", "0aa91dbcdd92834166add12c72d3606f483c6711")
 
+    /// The Rust spine's measurement at Core 0.43.0 (a draft): its legs followed the registry change
+    /// (its D11, landed by Phase 645) and asserted these counts again, unchanged, at this spine commit,
+    /// the head of its `main` (its CHANGELOG 0.0.3-alpha.1; recorded here by Phase 651, D261.10).
+    let private rs651 =
+        AdoptionSource.Host("0.43.0", "55c145f2852088c53760eb53bbae9afaac95d026")
+
     /// The Rust spine (`Fuaran-Core/fuaran-core-rs`). A family whose leg did not change keeps the
     /// measurement that stands.
     let internal rust =
@@ -88,12 +94,13 @@ module SpineAdoption =
             [ "skeletonApply", 25, rs463
               "decodeRejects", 47, rs463
               "skeletonChain", 16, rs463
-              "skeletonDag", 11, rs463
+              "skeletonDag", 12, rs651
               "codecRefusals", 101, rs564
-              "seamRefusals", 138, rs564
-              "skeletonMerge", 12, rs564
+              "seamRefusals", 142, rs651
+              "skeletonMerge", 13, rs651
               "skeletonDiff", 14, rs564
-              "capabilityLaws", 72, rs564
+              "capabilityLaws", 144, rs651
+              "capabilityGateLaws", 41, rs651
               "decimal", 75, rs564
               "fieldLaws", 43, rs564
               "propagationLaws", 73, rs564

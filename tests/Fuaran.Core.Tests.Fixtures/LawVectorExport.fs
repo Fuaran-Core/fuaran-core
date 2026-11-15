@@ -6,8 +6,10 @@ namespace Fuaran.Core.Tests
 //  exact decimal's documents (`laws/decimal-laws.json`, Phase 276), the
 //  schema field's documents (`laws/field-laws.json`, Phase 427) and the
 //  propagation vectors (`laws/propagation-laws.json`, Phase 538, rendered by
-//  `PropagationVectorExport`) and the capability gate family
-//  (`laws/capability-gate-laws.json`, Phase 650).
+//  `PropagationVectorExport`), the capability gate family
+//  (`laws/capability-gate-laws.json`, Phase 650), the document family
+//  (`laws/capability-document-laws.json`, Phase 644) and the query grant
+//  family (`laws/query-grant-laws.json`, Phase 651).
 //
 //  Until Phase 258 this module also exported `Conformance.transformLaws`'
 //  reference answers (`laws/transform-laws.json`, fuaran#1479). Those answers
@@ -910,6 +912,217 @@ module LawVectorExport =
         let render () : string = renderAt (kitVersion ())
 
     // -----------------------------------------------------------------------
+    //  the query seam's identity and grant family (Phase 651)
+    // -----------------------------------------------------------------------
+    //  Phase 651 carried the query registry across to the decision context and the grant (DECISIONS.md
+    //  D261). A grant for a read is bound to the read's identity, `Query.invocationPreimage`, and a port
+    //  that follows the query registry certifies that identity and a grant's coverage against these
+    //  vectors. They are a family of their own (D261.8), for D255.1's reason one step on: the Rust port
+    //  reads `capability-gate-laws.json` and fails on a `case` it does not know, so the gate family gains
+    //  no case. The gate's decision and dispatch are the seam's one function at both registries, which
+    //  the gate family already pins, so this family carries the identity and the grant alone. Every
+    //  `expected` is computed by CALLING the kit: the identity by `Query.invocationPreimage`, coverage by
+    //  `Grant.covers`; and the extracted query model answers every vector (`invocation_identity`,
+    //  `granted`). No seed: nothing is drawn.
+
+    module QueryGrants =
+
+        let fileName = "query-grant-laws.json"
+
+        let familyId = "queryGrantLaws"
+
+        let private param (name: string) (t: ColumnType) (required: bool) : QueryParam =
+            { Name = name
+              Type = t
+              Required = required }
+
+        let private query (id: string) (ps: QueryParam list) (where: ColumnPredicate list) (order: SortKey list) =
+            { Id = id
+              Params = ps
+              ResultSchema = [ Field.create "n" IntType; Field.create "region" StringType ]
+              Effect =
+                { Host = ReadsHost
+                  Determinism = Effect.network }
+              Source = Ref id
+              TimeoutMs = None
+              PageSize = Some 50
+              Where = where
+              OrderBy = order }
+
+        /// The queries the vectors read, in id order: `ledger` and `summary` with one required integer,
+        /// `every` with one optional parameter of each column type, and `shaped`, which declares a filter
+        /// and an order.
+        let queries: Query list =
+            [ query
+                  "every"
+                  [ param "a" IntType false
+                    param "b" FloatType false
+                    param "c" BoolType false
+                    param "d" StringType false
+                    param "e" DateType false
+                    param "f" (TimestampType TimeUnit.Milliseconds) false
+                    param "g" DecimalType false ]
+                  []
+                  []
+              query "ledger" [ param "n" IntType true ] [] []
+              query
+                  "shaped"
+                  [ param "n" IntType true ]
+                  [ ColumnPredicate.Contains("region", "eu")
+                    ColumnPredicate.AtLeast("n", Int 2) ]
+                  [ { Column = "n"
+                      Direction = SortDirection.Descending } ]
+              query "summary" [ param "n" IntType true ] [] [] ]
+
+        let private queryOf (id: string) =
+            queries |> List.find (fun q -> q.Id = id)
+
+        /// A cell as the vectors spell it: its kind and its text, and no text for a null. A float's text
+        /// is its shortest round-trip form; a boolean's is `true` or `false`.
+        let private cellJson (c: Cell) : CorpusCell =
+            match c with
+            | Null -> jobj [ "kind", jstr "null" ]
+            | Int i -> jobj [ "kind", jstr "int"; "text", jstr (string i) ]
+            | Float f -> jobj [ "kind", jstr "float"; "text", jstr (FloatLayout.canonical f) ]
+            | Bool b -> jobj [ "kind", jstr "bool"; "text", jstr (if b then "true" else "false") ]
+            | Str s -> jobj [ "kind", jstr "string"; "text", jstr s ]
+            | Date s -> jobj [ "kind", jstr "date"; "text", jstr s ]
+            | Timestamp s -> jobj [ "kind", jstr "timestamp"; "text", jstr s ]
+            | Decimal s -> jobj [ "kind", jstr "decimal"; "text", jstr s ]
+
+        let private argsJson (args: (string * Cell) list) : CorpusCell =
+            args
+            |> List.map (fun (name, cell) -> jobj [ "name", jstr name; "cell", cellJson cell ])
+            |> jarr
+
+        let private grantMember (grant: Grant option) : (string * CorpusCell) list =
+            match grant with
+            | Some g -> [ "grant", jstr g.Invocation ]
+            | None -> []
+
+        // ---- the identity ----
+
+        let private identity (id: string) (queryId: string) (args: (string * Cell) list) : Vector =
+            let q = queryOf queryId
+
+            { Id = id
+              Case = "invocationIdentity"
+              Model = QueryOracle.queryAnswer [ "identity", jstr (QueryOracle.queryIdentity q args) ]
+              Input = [ "query", jstr queryId; "args", argsJson args ]
+              Expected = [ "identity", jstr (Query.invocationPreimage q args) ] }
+
+        /// One binding of each kind, in parameter order.
+        let everyKind: (string * Cell) list =
+            [ "a", Int -7
+              "b", Float 1.5
+              "c", Bool true
+              "d", Str "eu-west"
+              "e", Date "2026-11-15"
+              "f", Timestamp "2026-11-15T09:30:00.250Z"
+              "g", Decimal "12.50" ]
+
+        let internal identityVectors () : Vector list =
+            [ identity "query-identity-ledger" "ledger" [ "n", Int 5 ]
+              identity "query-identity-other-query" "summary" [ "n", Int 5 ]
+              identity "query-identity-every-kind" "every" everyKind
+              identity "query-identity-out-of-name-order" "every" (List.rev everyKind)
+              identity "query-identity-null" "every" [ "d", Null; "a", Int 1 ]
+              identity "query-identity-no-arguments" "every" []
+              identity "query-identity-an-integer-for-a-float" "every" [ "b", Int 5 ]
+              identity "query-identity-a-float-for-a-float" "every" [ "b", Float 5.0 ]
+              identity "query-identity-shaped" "shaped" [ "n", Int 5 ]
+              identity "query-identity-holds-the-separator" "every" [ "d", Str "a\u0001b" ]
+              identity "query-identity-holds-the-escape" "every" [ "d", Str "a\u0010\u0001" ] ]
+
+        // ---- the grant ----
+
+        let private covers
+            (id: string)
+            (queryId: string)
+            (args: (string * Cell) list)
+            (pageToken: string option)
+            (grant: Grant option)
+            : Vector =
+            let q = queryOf queryId
+
+            { Id = id
+              Case = "grantCovers"
+              Model =
+                QueryOracle.queryAnswer
+                    [ "covers",
+                      CorpusCell.Value(JBool(QueryOracle.queryGranted q args (grant |> Option.map _.Invocation))) ]
+              Input =
+                [ "query", jstr queryId; "args", argsJson args ]
+                @ (match pageToken with
+                   | Some t -> [ "pageToken", jstr t ]
+                   | None -> [])
+                @ grantMember grant
+              Expected =
+                [ "covers",
+                  CorpusCell.Value(JBool(Grant.covers (Query.invocationPreimage q args) (Option.toList grant))) ] }
+
+        let internal grantVectors () : Vector list =
+            let args = [ "n", Int 5 ]
+            let ledger = queryOf "ledger"
+            let own = Query.grant ledger args
+
+            [ covers "query-grant-own" "ledger" args None (Some own)
+              // a later page of the same read: the token is in neither identity (D261.4)
+              covers "query-grant-own-a-later-page" "ledger" args (Some "page-2") (Some own)
+              covers "query-grant-other-arguments" "ledger" args None (Some(Query.grant ledger [ "n", Int 6 ]))
+              covers "query-grant-other-query" "ledger" args None (Some(Query.grant (queryOf "summary") args))
+              covers
+                  "query-grant-the-capture-key"
+                  "ledger"
+                  args
+                  None
+                  (Some(Grant.ofInvocation (Query.invocationKey ledger args)))
+              covers
+                  "query-grant-a-page-key"
+                  "ledger"
+                  args
+                  (Some "page-2")
+                  (Some(Grant.ofInvocation (Query.invocationKeyPage ledger args (Some "page-2"))))
+              covers
+                  "query-grant-the-float-for-an-integer"
+                  "every"
+                  [ "b", Int 5 ]
+                  None
+                  (Some(Query.grant (queryOf "every") [ "b", Float 5.0 ]))
+              covers "query-grant-none" "ledger" args None None ]
+
+        let internal allVectors () : Vector list = identityVectors () @ grantVectors ()
+
+        let private description =
+            "The query registry's grant (Phase 651, DECISIONS.md D261): the identity a grant for a read is bound to, and whether a presented grant covers a read. "
+            + "Authored inputs, each `expected` computed by calling the pinned kit; no seed. `registry` holds the queries the vectors read, each a canonical "
+            + "declaration as a JSON string. A binding is `{name, cell}`, a cell `{kind, text}` with no text for a null (a float's text is its shortest "
+            + "round-trip form, a boolean's `true` or `false`). `invocationIdentity` vectors expect the identity: the fields id; then, when the declaration "
+            + "declares a filter, the three fields \"\", `w` and the canonical text of its `where` member, and when it declares an order, \"\", `o` and the "
+            + "canonical text of its `orderBy` member, filter first; then for each binding, sorted by name (ordinal), its name, its kind's tag (`i` int, "
+            + "`f` float, `b` bool, `s` string, `d` date, `t` timestamp, `m` decimal, `n` null) and its payload (an integer's decimal digits, a float's "
+            + "shortest round-trip text, `1` or `0` for a boolean, a string, date, timestamp or decimal as given, empty for a null); each field written with "
+            + "every U+0010 and U+0001 it holds preceded by U+0010, then terminated by U+0001; no hash is taken. A cell is identified by its kind, so an "
+            + "integer bound to a float parameter and the float of the same value are two reads. `grantCovers` vectors expect whether a presented grant "
+            + "(the `grant` member, an identity; absent when none is presented) is for exactly this read: it is when the two identities are equal as strings. "
+            + "A `pageToken` member names the page the read is dispatched for: it is in neither identity, so a grant for a read covers every page of it, "
+            + "and a page's capture key is no grant. The gate's decision and dispatch are the gate family's (capability-gate-laws.json): one function decides "
+            + "at both registries."
+
+        /// Rendered with an explicit `kitVersion`, as every law file is (Phase 560).
+        let renderAt (stamp: string) : string =
+            CorpusFile.render
+                { Head =
+                    [ "family", jstr familyId
+                      "kitVersion", jstr stamp
+                      "description", jstr description
+                      "registry", jarr (queries |> List.map (QueryCodec.encode >> jstr)) ]
+                  Items = "vectors"
+                  Rows = allVectors () |> List.map renderVector }
+
+        let render () : string = renderAt (kitVersion ())
+
+    // -----------------------------------------------------------------------
     //  the decimal documents (Phase 276)
     // -----------------------------------------------------------------------
     //  The exact decimal (DECISIONS.md D72) is a wire commitment every host mirrors: the canonical
@@ -1542,6 +1755,9 @@ module LawVectorExport =
     let documentPath (corpusDir: string) : string =
         Path.Combine(familyDir corpusDir, Documents.fileName)
 
+    let queryGrantPath (corpusDir: string) : string =
+        Path.Combine(familyDir corpusDir, QueryGrants.fileName)
+
     /// Every law file under `corpusDir`, rendered with `stamp` as its `kitVersion` (Phase 560): opening
     /// a version slot stamps the version it opens, which is not yet the version this kit was built at.
     let emittedAt (stamp: string) (corpusDir: string) : (string * string) list =
@@ -1551,7 +1767,8 @@ module LawVectorExport =
           propagationPath corpusDir, PropagationVectorExport.renderAt stamp
           canonicalFormPath corpusDir, CanonicalFormVectorExport.renderAt stamp
           gatePath corpusDir, Gates.renderAt stamp
-          documentPath corpusDir, Documents.renderAt stamp ]
+          documentPath corpusDir, Documents.renderAt stamp
+          queryGrantPath corpusDir, QueryGrants.renderAt stamp ]
 
     /// Every law file under `corpusDir`, stamped with this kit's own version.
     let emitted (corpusDir: string) : (string * string) list = emittedAt (kitVersion ()) corpusDir
