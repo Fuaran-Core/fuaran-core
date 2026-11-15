@@ -61,117 +61,8 @@ let private qModelColTag (t: ModelQuery.column_type) : string =
     | ModelQuery.TimestampType u -> ColumnType.tag (TimestampType(qUnitOfModel u))
     | ModelQuery.DecimalType -> "decimal"
 
-let private qArgsToModel (args: (string * Cell) list) : ModelQuery.arguments =
-    args |> List.map (fun (n, c) -> n, qCellToModel c)
 
-let private qHostToModel (h: HostEffect) : ModelQuery.host_effect =
-    match h with
-    | Pure -> ModelQuery.Pure
-    | ReadsHost -> ModelQuery.ReadsHost
-    | WritesHost -> ModelQuery.WritesHost
-
-let private qDetToModel (d: DeterminismSource) : ModelQuery.determinism_source =
-    { ModelQuery.determinism_source.has_clock = Set.contains ClockFactor d
-      ModelQuery.determinism_source.has_random = Set.contains RandomFactor d
-      ModelQuery.determinism_source.has_network = Set.contains NetworkFactor d }
-
-
-/// A filter predicate as the model reads it (Phase 398).
-let private qPredToModel (p: ColumnPredicate) : ModelQuery.predicate =
-    match p with
-    | ColumnPredicate.EqualTo(c, v) -> ModelQuery.EqualTo(c, qCellToModel v)
-    | ColumnPredicate.GreaterThan(c, v) -> ModelQuery.GreaterThan(c, qCellToModel v)
-    | ColumnPredicate.AtLeast(c, v) -> ModelQuery.AtLeast(c, qCellToModel v)
-    | ColumnPredicate.LessThan(c, v) -> ModelQuery.LessThan(c, qCellToModel v)
-    | ColumnPredicate.AtMost(c, v) -> ModelQuery.AtMost(c, qCellToModel v)
-    | ColumnPredicate.Contains(c, t) -> ModelQuery.Contains(c, t)
-    | ColumnPredicate.IsNull c -> ModelQuery.IsNull c
-    | ColumnPredicate.IsNotNull c -> ModelQuery.IsNotNull c
-
-/// An order key as the model reads it (Phase 398).
-let private qKeyToModel (k: SortKey) : ModelQuery.sort_key =
-    { ModelQuery.sort_key.k_column = k.Column
-      ModelQuery.sort_key.k_direction =
-        match k.Direction with
-        | SortDirection.Ascending -> ModelQuery.Ascending
-        | SortDirection.Descending -> ModelQuery.Descending }
-
-/// A declaration as the model reads it. `keepRequired = false` is the FORGETFUL bridge the
-/// go-red uses: every param crosses as optional, so the model stops seeing step 2.
-let private queryToModelWith (keepRequired: bool) (q: Query) : ModelQuery.query =
-    { ModelQuery.query.q_id = q.Id
-      ModelQuery.query.q_params =
-        q.Params
-        |> List.map (fun p ->
-            { ModelQuery.query_param.p_name = p.Name
-              ModelQuery.query_param.p_type = qColToModel p.Type
-              ModelQuery.query_param.p_required = keepRequired && p.Required })
-      ModelQuery.query.q_schema = q.ResultSchema |> List.map (fun f -> f.Name, qColToModel f.Type)
-      ModelQuery.query.q_effect =
-        { ModelQuery.effect_class.host = qHostToModel q.Effect.Host
-          ModelQuery.effect_class.determinism = qDetToModel q.Effect.Determinism }
-      ModelQuery.query.q_source = sprintf "%A" q.Source
-      ModelQuery.query.q_timeout_ms = toMOpt (Option.map (fun (n: int) -> bigint n) q.TimeoutMs)
-      ModelQuery.query.q_page_size = toMOpt (Option.map (fun (n: int) -> bigint n) q.PageSize)
-      ModelQuery.query.q_where = q.Where |> List.map qPredToModel
-      ModelQuery.query.q_order_by = q.OrderBy |> List.map qKeyToModel }
-
-let private queryToModel (q: Query) : ModelQuery.query = queryToModelWith true q
-
-// ---- Phase 398: the shape renderers are production's own codec ----
-
-let private qPredOfModel (p: ModelQuery.predicate) : ColumnPredicate =
-    match p with
-    | ModelQuery.EqualTo(c, v) -> ColumnPredicate.EqualTo(c, qCellOfModel v)
-    | ModelQuery.GreaterThan(c, v) -> ColumnPredicate.GreaterThan(c, qCellOfModel v)
-    | ModelQuery.AtLeast(c, v) -> ColumnPredicate.AtLeast(c, qCellOfModel v)
-    | ModelQuery.LessThan(c, v) -> ColumnPredicate.LessThan(c, qCellOfModel v)
-    | ModelQuery.AtMost(c, v) -> ColumnPredicate.AtMost(c, qCellOfModel v)
-    | ModelQuery.Contains(c, t) -> ColumnPredicate.Contains(c, t)
-    | ModelQuery.IsNull c -> ColumnPredicate.IsNull c
-    | ModelQuery.IsNotNull c -> ColumnPredicate.IsNotNull c
-
-let private qKeyOfModel (k: ModelQuery.sort_key) : SortKey =
-    { Column = k.k_column
-      Direction =
-        match k.k_direction with
-        | ModelQuery.Ascending -> SortDirection.Ascending
-        | ModelQuery.Descending -> SortDirection.Descending }
-
-/// The canonical text production's codec writes for one member of a declaration — the member the
-/// capture key's shape fields carry (`QueryShape.keyFields` renders the same array through the same
-/// `Canonical.write Rendering.CrossHost`). Read off the PUBLIC codec, so the renderer is production's own call, not a copy.
-let private memberText (name: string) (q: Query) : string =
-    match Json.parse (QueryCodec.encode q) with
-    | Ok(JObj ms) ->
-        match ms |> List.tryFind (fun (k, _) -> k = name) with
-        | Some(_, v) -> Canonical.write Rendering.CrossHost v
-        | None -> ""
-    | _ -> ""
-
-/// Production's own seven calls. `compare` on two F# strings is ordinal, which is what
-/// `List.sortBy fst` sorts a name by; `field` is the Phase 225 canonicaliser both seams share; the
-/// shape renderers (Phase 398) are the declaration codec's `where` and `orderBy` members.
-let private queryRenderers: ModelQuery.renderers =
-    { ModelQuery.renderers.render_int = fun (n: bigint) -> string (int n)
-      ModelQuery.renderers.render_float =
-        fun (s: string) ->
-            FloatLayout.canonical (System.Double.Parse(s, System.Globalization.CultureInfo.InvariantCulture))
-      ModelQuery.renderers.hash = Hash.fnv1a
-      ModelQuery.renderers.name_le = fun (a: string) (b: string) -> System.String.CompareOrdinal(a, b) <= 0
-      ModelQuery.renderers.field = Hash.canonicalField
-      ModelQuery.renderers.render_where =
-        fun (w: ModelQuery.predicate list) ->
-            memberText
-                "where"
-                { shapeCarrier with
-                    Where = w |> List.map qPredOfModel }
-      ModelQuery.renderers.render_order =
-        fun (o: ModelQuery.sort_key list) ->
-            memberText
-                "orderBy"
-                { shapeCarrier with
-                    OrderBy = o |> List.map qKeyOfModel } }
+// ---- Phase 398: the shape renderers are production's own codec (`QueryOracle.queryRenderers`) ----
 
 /// The ORDER-BLIND comparator the second go-red uses: everything is below everything, so the
 /// model's insertion sort leaves the caller's order standing.
@@ -355,7 +246,8 @@ let private queryTally =
           "RepeatedParamDecls"
           "ShapedRegistered"
           "ShapeRefused"
-          "ShapedKeys" ]
+          "ShapedKeys"
+          "Identities" ]
     |> Tally.sets [ "Classes"; "RegisterClasses" ]
 
 let private queryIdPool = [ "q-a"; "q-b"; "q-c" ]
@@ -823,6 +715,43 @@ let private queryProbe
                 |> Tally.bumpIf (args |> List.exists (fun (_, c) -> c = Cell.Null)) "KeysWithNull"
                 |> Differential.check (pKey = mKey) (fun () ->
                     sprintf "seed %d: invocationKey differs on %s %A\n  prod %s\n  model %s" seedTag id args pKey mKey)
+
+            // Phase 651 — the identity a grant for a read is bound to, byte for byte, and whether a
+            // presented grant covers the read: the model's `granted` beside production's
+            // `Grant.covers`, for the read's own grant, a grant for the same arguments to another
+            // query id, and no grant at all.
+            let pId = Query.invocationPreimage q args
+            let mId = ModelQuery.invocation_identity rn mq margs
+            let own = Query.grant q args
+            let forOther = Query.grant { q with Id = q.Id + "-other" } args
+
+            t <-
+                t
+                |> Tally.bump "Identities"
+                |> Differential.check (pId = mId) (fun () ->
+                    sprintf
+                        "seed %d: invocationPreimage differs on %s %A\n  prod %A\n  model %A"
+                        seedTag
+                        id
+                        args
+                        pId
+                        mId)
+                |> Differential.check (own.Invocation = pId) (fun () ->
+                    sprintf "seed %d: Query.grant is not the grant of invocationPreimage on %s" seedTag id)
+
+            for grant in [ own; forOther ] do
+                let covers = Grant.covers pId [ grant ]
+
+                t <-
+                    t
+                    |> Differential.check
+                        (ModelQuery.granted rn mq margs (FStar_Pervasives_Native.Some grant.Invocation) = covers)
+                        (fun () -> sprintf "seed %d: granted differs from Grant.covers on %s %A" seedTag id args)
+
+            t <-
+                t
+                |> Differential.check (not (ModelQuery.granted rn mq margs FStar_Pervasives_Native.None)) (fun () ->
+                    sprintf "seed %d: no grant covered %s" seedTag id)
 
             // Phase 316 — the PAGE key, byte for byte, over a token alphabet carrying the page tag
             // and the canonical encoding's own symbols; and the first page keys as `invocationKey`.
@@ -1296,6 +1225,13 @@ let tests =
                   100
                   (sprintf "capture keys were compared (keys=%d)" (Tally.count "Keys" t))
 
+              // Phase 651: the read's identity and the grant's coverage, on every argument set a key
+              // is compared on.
+              Expect.equal
+                  (Tally.count "Identities" t)
+                  (Tally.count "Keys" t)
+                  "the identity and the grant were compared wherever the key was"
+
               Expect.isGreaterThan
                   (Tally.count "KeysWithNull" t)
                   20
@@ -1382,8 +1318,10 @@ let tests =
               Expect.isTrue
                   (Tally.disagreements blind
                    |> List.forall (fun d ->
-                       d.Contains "invocationKey differs" || d.Contains "invocationKeyPage differs"))
-                  "and every disagreement is about the capture key — the comparator reaches nothing else"
+                       d.Contains "invocationKey differs"
+                       || d.Contains "invocationKeyPage differs"
+                       || d.Contains "invocationPreimage differs"))
+                  "and every disagreement is about the capture key or the read's identity, its pre-image — the comparator reaches nothing else"
 
           testCase
               "the filter and order renderers are injective on the shipped codec — a drawn Where and OrderBy round-trip QueryCodec, and the model's key reads them"
@@ -1882,6 +1820,35 @@ let tests =
                       (ModelQuery.invocation_key queryRenderers mqa (qArgsToModel args))
                       (Query.invocationKey qa args)
                       (sprintf "the query model's key is production's on %A" args)
+
+                  // Phase 651 — the identity a grant for a read is bound to, over string cells
+                  // carrying the encoding's own symbols, and whether a grant covers the read: the
+                  // model's beside production's. The "other" grant changes one value.
+                  Expect.equal
+                      (ModelQuery.invocation_identity queryRenderers mqa (qArgsToModel args))
+                      (Query.invocationPreimage qa args)
+                      (sprintf "the query model's identity is production's on %A" args)
+
+                  let own = Query.grant qa args
+
+                  let other =
+                      Query.grant
+                          qa
+                          (args
+                           |> List.mapi (fun i (n, c) ->
+                               match c with
+                               | Cell.Str v when i = 0 -> n, Cell.Str(v + "x")
+                               | _ -> n, c))
+
+                  for grant in [ own; other ] do
+                      Expect.equal
+                          (ModelQuery.granted
+                              queryRenderers
+                              mqa
+                              (qArgsToModel args)
+                              (FStar_Pervasives_Native.Some grant.Invocation))
+                          (Grant.covers (Query.invocationPreimage qa args) [ grant ])
+                          (sprintf "the query model's granted is production's covers on %A" args)
 
               Expect.equal qCompared 500 "every drawn argument set was compared"
 

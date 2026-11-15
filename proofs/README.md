@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 421 claims — 307 proved (306 across 40 models, 1 a host's own proof), 68 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
+**The ladder, counted:** 433 claims — 319 proved (318 across 40 models, 1 a host's own proof), 68 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -401,14 +401,14 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Ops` | 63 | 21 | 12 | 14 | 0 | 0 | 0 | 16 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
 | `Fuaran.Core.Propagation` | 27 | 8 | 5 | 0 | 0 | 0 | 0 | 14 |
-| `Fuaran.Core.Query` | 58 | 23 | 20 | 0 | 0 | 0 | 0 | 15 |
+| `Fuaran.Core.Query` | 58 | 28 | 15 | 0 | 0 | 0 | 0 | 15 |
 | `Fuaran.Core.Relation` | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Text` | 30 | 5 | 2 | 1 | 2 | 0 | 0 | 20 |
 | `Fuaran.Core.Tree` | 48 | 12 | 8 | 0 | 0 | 0 | 0 | 28 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 64 | 0 | 25 | 3 | 0 | 0 | 0 | 36 |
 | `Fuaran.Core.Wire` | 193 | 116 | 11 | 3 | 4 | 0 | 0 | 59 |
-| **Total** | 1413 | 385 | 436 | 38 | 15 | 0 | 3 | 536 |
+| **Total** | 1413 | 390 | 431 | 38 | 15 | 0 | 3 | 536 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -3594,7 +3594,7 @@ are a `renderers` record, as Phase 177 made the three scalar readers one; a floa
 crosses as an opaque carrier. And a declaration's `Source` is an opaque carrier too: the seam
 never reads it.
 
-**Proved** (18)
+**Proved** (30)
 
 - <a id="row-query-unregistered-refused"></a>**`query-unregistered-refused`** — `unregistered_refused` · fuaran-core#187
 
@@ -3706,11 +3706,91 @@ never reads it.
 
   _Boundary:_ A column-codec refusal is not carried through with its own code: it is raised `OutOfRange` at the member it was reading. Resolution says where a refusal points, not that its code is production's; within the model.
 
+- <a id="row-query-dispatch-theorems-hold-at-no-grant"></a>**`query-dispatch-theorems-hold-at-no-grant`** — `no_gate_is_dispatch` · fuaran-core#651
+
+  WITH NO GATE AND NO GRANT, UNDER EVERY CONTEXT, the query registry's gated dispatch is its ungated `dispatch` with its refusals wrapped (`no_gate_is_dispatch`), and each of the six dispatch theorems restated over a context and a grant yields its present statement verbatim there (`unregistered_refused_no_grant`, `dispatch_validates_first_no_grant`, `dispatch_never_ok_failed_no_grant`, `no_such_iff_unregistered_no_grant`, `registered_dispatches_no_grant`, `dispatch_page_is_dispatch_no_grant`).
+
+  _With:_ `unregistered_refused_no_grant`, `dispatch_validates_first_no_grant`, `dispatch_never_ok_failed_no_grant`, `no_such_iff_unregistered_no_grant`, `registered_dispatches_no_grant`, `dispatch_page_is_dispatch_no_grant`.
+
+  _Boundary:_ This is what "no theorem is weakened" means for the Phase 651 restatement: the present theorems stand unchanged beside it, and each `*_no_grant` corollary derives the present conclusion from its restatement, for every context, through the wrapper's injectivity. The gate functions are `noextract_to "FSharp"`; the bridge to production is `Conformance.policyLaws`' query arm and `QueryDecisionContextTests`.
+
+- <a id="row-query-unregistered-refused-whatever-presented"></a>**`query-unregistered-refused-whatever-presented`** — `unregistered_refused_in_context` · fuaran-core#651
+
+  UNDER EVERY GATE LIST, CONTEXT, GRANT AND RESOLVER, a query dispatch of an id the registry does not hold is refused `NoSuchQuery` naming the held ids, one value whatever is presented.
+
+  _Boundary:_ The gate functions are `noextract_to "FSharp"`; the bridge to production is `Conformance.policyLaws`' query arm and `QueryDecisionContextTests`. The row `query-unregistered-refused` is the ungated statement, which `query-dispatch-theorems-hold-at-no-grant` derives from this one.
+
+- <a id="row-query-validates-before-any-gate"></a>**`query-validates-before-any-gate`** — `dispatch_validates_first_in_context` · fuaran-core#651
+
+  FOR A HELD ID WHOSE ARGUMENTS VALIDATION REJECTS, the query dispatch answers that rejection, one value for every gate list, context, grant and resolver, so validation precedes every gate and the grant (`dispatch_validates_first_in_context`), the envelope keeps its three outcomes through the gated registry (`dispatch_never_ok_failed_in_context`), and `NoSuchQuery` is answered exactly off the enumeration (`no_such_iff_unregistered_in_context`).
+
+  _With:_ `dispatch_never_ok_failed_in_context`, `no_such_iff_unregistered_in_context`.
+
+  _Boundary:_ The gate functions are `noextract_to "FSharp"`; the bridge to production is `Conformance.policyLaws`' query arm and `QueryDecisionContextTests`. The resolver stays outside the claim, as in `query-unregistered-refused`.
+
+- <a id="row-query-registered-dispatches-in-context"></a>**`query-registered-dispatches-in-context`** — `registered_dispatches_in_context` · fuaran-core#651
+
+  A HELD ID DISPATCHES TO ITS OWN DECLARATION'S `invoke` wherever its arguments do not validate or the decision under the context, with the presented grant read, is `Allow`.
+
+  _Boundary:_ With `query-gate-before-resolver`, `query-approval-dispatches-iff-granted` and `query-deny-reaches-no-resolver` it is the whole case split of a gated query dispatch. The gate functions are `noextract_to "FSharp"`; the bridge to production is `Conformance.policyLaws`' query arm and `QueryDecisionContextTests`.
+
+- <a id="row-query-grant-covers-every-page"></a>**`query-grant-covers-every-page`** — `dispatch_page_is_dispatch_in_context` · fuaran-core#651
+
+  UNDER EVERY GATE LIST, CONTEXT, GRANT AND TOKEN, the paged query dispatch is the gated dispatch under the resolver that reads the token, so no gate and no grant reads the page token and a grant for a read covers every page of it.
+
+  _Boundary:_ DECISIONS.md D261.4. The capture key is still per page (`query-invocation-key-page-injective`). The gate functions are `noextract_to "FSharp"`; the bridge to production is `QueryDecisionContextTests`.
+
+- <a id="row-query-gate-before-resolver"></a>**`query-gate-before-resolver`** — `gate_before_resolver` · fuaran-core#651
+
+  FOR A HELD ID AND ARGUMENTS THAT VALIDATE, a query decision that is not `Allow` once the presented grant is read is refused `QueryApprovalRequired n` or `QueryPolicyRefused n m alts`, the same under every resolver, where `n` names a gate of the list whose own decision under the context is the one reported.
+
+  _With:_ `qdecide_named_names_a_gate`.
+
+  _Boundary:_ The model wraps the seam's own refusals in `gated_query_error` rather than widening the extracted `query_error`; production adds the two policy cases to `QueryError`. The gate functions are `noextract_to "FSharp"`; the bridge to production is `Conformance.policyLaws`' query arm and `QueryDecisionContextTests`.
+
+- <a id="row-query-grant-identity-injective"></a>**`query-grant-identity-injective`** — `invocation_identity_injective` · fuaran-core#651
+
+  TWO READS WITH THE SAME `Query.invocationPreimage` name the same query id, filter and order and carry the same bindings.
+
+  _Boundary:_ Under exactly the premises `query-invocation-key-injective` spends (`key_premises`, the escaper and terminator of `Hash.canonicalField` read as symbols and the renderers' injectivity, and `units_named`) and no premise about any hash. `invocation_identity` is extracted and run beside `Query.invocationPreimage` in the query differential.
+
+- <a id="row-query-approval-dispatches-iff-granted"></a>**`query-approval-dispatches-iff-granted`** — `approval_dispatches_iff_granted` · fuaran-core#651
+
+  FOR A HELD ID, ARGUMENTS THAT VALIDATE AND GATES THAT ANSWER `NeedsApproval` UNDER THE CONTEXT, a query dispatch presenting the grant carrying this read's identity answers what `invoke` answers, and one presenting none or any other grant is `QueryApprovalRequired` naming the gate, the same under every resolver.
+
+  _Boundary:_ `granted` is extracted and run beside `Grant.covers` in the query differential; the rest of the section is `noextract_to "FSharp"`, bridged by `Conformance.policyLaws`' query arm and `QueryDecisionContextTests`. NOT claimed: who may mint a grant, single use or expiry, which are the host's facts in the context.
+
+- <a id="row-query-grant-for-another-read-refused"></a>**`query-grant-for-another-read-refused`** — `grant_for_another_invocation_refused` · fuaran-core#651
+
+  A GRANT MINTED FOR A READ OF ANOTHER QUERY ID, FILTER OR ORDER, OR WITH OTHER SORTED BINDINGS, does not cover this read.
+
+  _Boundary:_ Under `key_premises` and `units_named`, through `invocation_identity_injective`; with `query-approval-dispatches-iff-granted` it is what "any other" means there. NOT claimed for two argument lists that sort alike: they are one read by design. A cell is identified by its kind, so an integer bound to a float parameter and the float of the same value are two reads (DECISIONS.md D261.3).
+
+- <a id="row-query-deny-reaches-no-resolver"></a>**`query-deny-reaches-no-resolver`** — `deny_reaches_no_resolver` · fuaran-core#651
+
+  FOR A HELD ID AND ARGUMENTS THAT VALIDATE, gates that answer `Deny` under the context refuse the read `QueryPolicyRefused` naming the gate and its guidance, one value for every grant and every resolver.
+
+  _Boundary:_ The gate functions are `noextract_to "FSharp"`; the bridge to production is `Conformance.policyLaws`' query arm and `QueryDecisionContextTests`.
+
+- <a id="row-query-grant-changes-only-its-own-decision"></a>**`query-grant-changes-only-its-own-decision`** — `grant_changes_only_its_own_decision` · fuaran-core#651
+
+  THE QUERY REGISTRY'S DECISION WITH A GRANT PRESENTED is the gates' own decision except where they answer `NeedsApproval` and the grant carries this read's identity, where it is `Allow`, so an `Allow` is unchanged by any grant and a `Deny` by every grant.
+
+  _With:_ `allow_unchanged_by_any_grant`.
+
+  _Boundary:_ With `allow_unchanged_by_any_grant`, the same at the dispatch. The gate functions are `noextract_to "FSharp"`; the bridge to production is `Conformance.policyLaws`' query arm and `QueryDecisionContextTests`.
+
+- <a id="row-query-one-registry-two-contexts"></a>**`query-one-registry-two-contexts`** — `one_registry_two_contexts` · fuaran-core#651
+
+  ONE QUERY GATE LIST READING A ONE-FACT CONTEXT answers `Allow` under one value of it and `NeedsApproval`, naming its gate, under the other, for every query and every arguments.
+
+  _Boundary:_ A witness at a concrete context type (`bool`), not an existential: both decisions are computed. The gate functions are `noextract_to "FSharp"`; the bridge to production is `Conformance.policyLaws`' query arm and `QueryDecisionContextTests`, which also hold `QueryRegistry.under`.
+
 **Tested** (2)
 
 - <a id="row-query-differential"></a>**`query-differential`** — `Proofs.Oracle`, 6 cases · fuaran-core#187
 
-  The extracted seam model agrees with the shipped `QueryRegistry.register`, `enumerate`, `tryFind` and `dispatch` and with `Query.validateParams`, `invocationKey` and `determinismTag` over generated registries, declarations and argument sets — the generator `queryLaws` uses, widened: a three-id pool so duplicates arise, up to three params over all six column types with names drawn with replacement so the registration refusal of a repeated name is compared (500 registries drawn, to keep the sample's floors), argument sets that bind, skip, null, mistype, repeat and reverse, and declarations carrying a drawn filter and order over a drawn schema — undeclared columns, `contains` on a column that is not a string, a `Null` literal, a literal of another type and an order naming a column twice among them, every literal one the column layer carries — so the admission's refusals are compared. Compared: the verdict, an accepted `Deferred` ENVELOPE rendered case for case (the draw reaches a settling, a pending and a failing resolver, and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the capture key byte for byte for every argument set accepted or not, with the shape fields of a filtered or ordered declaration in its pre-image, and the PAGE key `invocationKeyPage` byte for byte under six tokens carrying the page tag and the encoding's own symbols, with the first page's key held equal to `invocationKey`, the shipped key held still under a reordering of distinct names, and, per dispatch, an instrumented resolver on each side that must have run on both or on neither and never past a refusal that is not its own. Two go-reds, one per half of the model: a bridge that forgets `Required` must lose on the required-params step, and an order-blind comparator must lose on the capture key and on nothing else.
+  The extracted seam model agrees with the shipped `QueryRegistry.register`, `enumerate`, `tryFind` and `dispatch` and with `Query.validateParams`, `invocationKey` and `determinismTag` over generated registries, declarations and argument sets — the generator `queryLaws` uses, widened: a three-id pool so duplicates arise, up to three params over all six column types with names drawn with replacement so the registration refusal of a repeated name is compared (500 registries drawn, to keep the sample's floors), argument sets that bind, skip, null, mistype, repeat and reverse, and declarations carrying a drawn filter and order over a drawn schema — undeclared columns, `contains` on a column that is not a string, a `Null` literal, a literal of another type and an order naming a column twice among them, every literal one the column layer carries — so the admission's refusals are compared. Compared: the verdict, an accepted `Deferred` ENVELOPE rendered case for case (the draw reaches a settling, a pending and a failing resolver, and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the capture key byte for byte for every argument set accepted or not, with the shape fields of a filtered or ordered declaration in its pre-image, and the PAGE key `invocationKeyPage` byte for byte under six tokens carrying the page tag and the encoding's own symbols, with the first page's key held equal to `invocationKey`, the shipped key held still under a reordering of distinct names, and, per dispatch, an instrumented resolver on each side that must have run on both or on neither and never past a refusal that is not its own. Since Phase 651 the read's identity is compared byte for byte with `Query.invocationPreimage`, and `granted` with `Grant.covers` for the read's own grant, another query's and none, on every argument set a key is compared on and over the adversarial string alphabet. Two go-reds, one per half of the model: a bridge that forgets `Required` must lose on the required-params step, and an order-blind comparator must lose on the capture key and the identity, its pre-image, and on nothing else.
 
   _Boundary:_ Agreement is over the pools drawn, never over all inputs. The generator draws no character of the key encoding, so it cannot tell an escaping `field` from a bare one (measured: a `field` that only appends the terminator leaves it green); the escaper case compares the capture key over string cells drawn from an adversarial alphabet, and it goes red on exactly that. Seeded and replayable: the same seed reproduces the same tally, asserted, and the count of resolvers that ran is asserted equal to settled plus pending plus `ExecutionFailed`.
 

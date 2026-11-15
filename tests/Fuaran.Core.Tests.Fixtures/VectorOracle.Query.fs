@@ -89,6 +89,143 @@ let qColOfModel (t: ModelQuery.column_type) : ColumnType =
     | ModelQuery.TimestampType u -> TimestampType(qUnitOfModel u)
     | ModelQuery.DecimalType -> DecimalType
 
+// ---- the declaration, its arguments and the renderers as the model reads them (moved here from the
+// query differential in Phase 651, so the exporters and the differential share one bridge) ----
+
+let qArgsToModel (args: (string * Cell) list) : ModelQuery.arguments =
+    args |> List.map (fun (n, c) -> n, qCellToModel c)
+
+let qHostToModel (h: HostEffect) : ModelQuery.host_effect =
+    match h with
+    | Pure -> ModelQuery.Pure
+    | ReadsHost -> ModelQuery.ReadsHost
+    | WritesHost -> ModelQuery.WritesHost
+
+let qDetToModel (d: DeterminismSource) : ModelQuery.determinism_source =
+    { ModelQuery.determinism_source.has_clock = Set.contains ClockFactor d
+      ModelQuery.determinism_source.has_random = Set.contains RandomFactor d
+      ModelQuery.determinism_source.has_network = Set.contains NetworkFactor d }
+
+/// A filter predicate as the model reads it (Phase 398).
+let qPredToModel (p: ColumnPredicate) : ModelQuery.predicate =
+    match p with
+    | ColumnPredicate.EqualTo(c, v) -> ModelQuery.EqualTo(c, qCellToModel v)
+    | ColumnPredicate.GreaterThan(c, v) -> ModelQuery.GreaterThan(c, qCellToModel v)
+    | ColumnPredicate.AtLeast(c, v) -> ModelQuery.AtLeast(c, qCellToModel v)
+    | ColumnPredicate.LessThan(c, v) -> ModelQuery.LessThan(c, qCellToModel v)
+    | ColumnPredicate.AtMost(c, v) -> ModelQuery.AtMost(c, qCellToModel v)
+    | ColumnPredicate.Contains(c, t) -> ModelQuery.Contains(c, t)
+    | ColumnPredicate.IsNull c -> ModelQuery.IsNull c
+    | ColumnPredicate.IsNotNull c -> ModelQuery.IsNotNull c
+
+/// An order key as the model reads it (Phase 398).
+let qKeyToModel (k: SortKey) : ModelQuery.sort_key =
+    { ModelQuery.sort_key.k_column = k.Column
+      ModelQuery.sort_key.k_direction =
+        match k.Direction with
+        | SortDirection.Ascending -> ModelQuery.Ascending
+        | SortDirection.Descending -> ModelQuery.Descending }
+
+/// A declaration as the model reads it. `keepRequired = false` is the FORGETFUL bridge the
+/// go-red uses: every param crosses as optional, so the model stops seeing step 2.
+let queryToModelWith (keepRequired: bool) (q: Query) : ModelQuery.query =
+    { ModelQuery.query.q_id = q.Id
+      ModelQuery.query.q_params =
+        q.Params
+        |> List.map (fun p ->
+            { ModelQuery.query_param.p_name = p.Name
+              ModelQuery.query_param.p_type = qColToModel p.Type
+              ModelQuery.query_param.p_required = keepRequired && p.Required })
+      ModelQuery.query.q_schema = q.ResultSchema |> List.map (fun f -> f.Name, qColToModel f.Type)
+      ModelQuery.query.q_effect =
+        { ModelQuery.effect_class.host = qHostToModel q.Effect.Host
+          ModelQuery.effect_class.determinism = qDetToModel q.Effect.Determinism }
+      ModelQuery.query.q_source = sprintf "%A" q.Source
+      ModelQuery.query.q_timeout_ms = toMOpt (Option.map (fun (n: int) -> bigint n) q.TimeoutMs)
+      ModelQuery.query.q_page_size = toMOpt (Option.map (fun (n: int) -> bigint n) q.PageSize)
+      ModelQuery.query.q_where = q.Where |> List.map qPredToModel
+      ModelQuery.query.q_order_by = q.OrderBy |> List.map qKeyToModel }
+
+let queryToModel (q: Query) : ModelQuery.query = queryToModelWith true q
+
+let qPredOfModel (p: ModelQuery.predicate) : ColumnPredicate =
+    match p with
+    | ModelQuery.EqualTo(c, v) -> ColumnPredicate.EqualTo(c, qCellOfModel v)
+    | ModelQuery.GreaterThan(c, v) -> ColumnPredicate.GreaterThan(c, qCellOfModel v)
+    | ModelQuery.AtLeast(c, v) -> ColumnPredicate.AtLeast(c, qCellOfModel v)
+    | ModelQuery.LessThan(c, v) -> ColumnPredicate.LessThan(c, qCellOfModel v)
+    | ModelQuery.AtMost(c, v) -> ColumnPredicate.AtMost(c, qCellOfModel v)
+    | ModelQuery.Contains(c, t) -> ColumnPredicate.Contains(c, t)
+    | ModelQuery.IsNull c -> ColumnPredicate.IsNull c
+    | ModelQuery.IsNotNull c -> ColumnPredicate.IsNotNull c
+
+let qKeyOfModel (k: ModelQuery.sort_key) : SortKey =
+    { Column = k.k_column
+      Direction =
+        match k.k_direction with
+        | ModelQuery.Ascending -> SortDirection.Ascending
+        | ModelQuery.Descending -> SortDirection.Descending }
+
+/// The canonical text production's codec writes for one member of a declaration — the member the
+/// capture key's shape fields carry (`QueryShape.keyFields` renders the same array through the same
+/// `Canonical.write Rendering.CrossHost`). Read off the PUBLIC codec, so the renderer is production's own call, not a copy.
+let memberText (name: string) (q: Query) : string =
+    match Json.parse (QueryCodec.encode q) with
+    | Ok(JObj ms) ->
+        match ms |> List.tryFind (fun (k, _) -> k = name) with
+        | Some(_, v) -> Canonical.write Rendering.CrossHost v
+        | None -> ""
+    | _ -> ""
+
+/// Production's own seven calls. `compare` on two F# strings is ordinal, which is what
+/// `List.sortBy fst` sorts a name by; `field` is the Phase 225 canonicaliser both seams share; the
+/// shape renderers (Phase 398) are the declaration codec's `where` and `orderBy` members.
+let queryRenderers: ModelQuery.renderers =
+    { ModelQuery.renderers.render_int = fun (n: bigint) -> string (int n)
+      ModelQuery.renderers.render_float =
+        fun (s: string) ->
+            FloatLayout.canonical (System.Double.Parse(s, System.Globalization.CultureInfo.InvariantCulture))
+      ModelQuery.renderers.hash = Hash.fnv1a
+      ModelQuery.renderers.name_le = fun (a: string) (b: string) -> System.String.CompareOrdinal(a, b) <= 0
+      ModelQuery.renderers.field = Hash.canonicalField
+      ModelQuery.renderers.render_where =
+        fun (w: ModelQuery.predicate list) ->
+            memberText
+                "where"
+                { shapeCarrier with
+                    Where = w |> List.map qPredOfModel }
+      ModelQuery.renderers.render_order =
+        fun (o: ModelQuery.sort_key list) ->
+            memberText
+                "orderBy"
+                { shapeCarrier with
+                    OrderBy = o |> List.map qKeyOfModel } }
+
+// ---- Phase 651: the identity a grant for a read is bound to, as the exporters ask it ----
+
+/// The query model, as the `answeredBy` stamp names it.
+[<Literal>]
+let QueryModel = "Query"
+
+/// The ladder row whose differential holds the query model's identity and grant to production.
+[<Literal>]
+let QueryLadderRow = "query-differential"
+
+/// `invocation_identity`, over production's renderers: the identity a grant for a read is for.
+let queryIdentity (q: Query) (args: (string * Cell) list) : string =
+    ModelQuery.invocation_identity queryRenderers (queryToModel q) (qArgsToModel args)
+
+/// `granted`: whether a presented grant, modelled as the identity it carries, is for exactly this read.
+let queryGranted (q: Query) (args: (string * Cell) list) (grant: string option) : bool =
+    ModelQuery.granted queryRenderers (queryToModel q) (qArgsToModel args) (toMOpt grant)
+
+/// The query model's answer to one vector, for the exporter's stamp.
+let queryAnswer (expected: (string * CorpusCell) list) : Answer option =
+    Some
+        { Model = QueryModel
+          LadderRow = QueryLadderRow
+          Cell = CorpusCell.Row expected }
+
 /// A predicate literal's value as `QueryCodec` writes it — read off the PUBLIC encoder, over a
 /// declaration whose only filter compares with that literal, so the writer is production's own call.
 let literalValueJson (v: Cell) : JVal =

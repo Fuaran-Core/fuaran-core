@@ -1896,6 +1896,18 @@ let union : registry  ->  registry  ->  outcome<registry, query_error> = (fun ( 
      end))
 
 
+let invocation_identity : renderers  ->  query  ->  arguments  ->  Prims.string = (fun ( rn  :  renderers ) ( q  :  query ) ( a  :  arguments ) -> (fields rn ((q.q_id)::(key_fields rn q (sort_args rn a)))))
+
+
+let granted : renderers  ->  query  ->  arguments  ->  FStar_Pervasives_Native.option<Prims.string>  ->  Prims.bool = (fun ( rn  :  renderers ) ( q  :  query ) ( a  :  arguments ) ( g  :  FStar_Pervasives_Native.option<Prims.string> ) -> (match (g) with
+| FStar_Pervasives_Native.None -> begin
+     false
+     end
+| FStar_Pervasives_Native.Some (i) -> begin
+     (Prims.op_Equals i (invocation_identity rn q a))
+     end))
+
+
 let twin_query : query = {q_id = "q"; q_params = ({p_name = "region"; p_type = StringType; p_required = true})::[]; q_schema = ((("n"), (StringType)))::[]; q_effect = {host = Pure; determinism = {has_clock = false; has_random = false; has_network = false}}; q_source = "src"; q_timeout_ms = FStar_Pervasives_Native.None; q_page_size = FStar_Pervasives_Native.None; q_where = []; q_order_by = []}
 
 

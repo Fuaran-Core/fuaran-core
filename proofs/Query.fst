@@ -1696,6 +1696,464 @@ let union_members (a b:registry) (id:string)
     app_ids a.queries b.queries id
 
 (* ======================================================================================
+   11. PHASE 651 — THE GATE, THE DECISION CONTEXT AND THE GRANT (F#: `QueryRegistry<'Ctx>`,
+       `QueryRegistry.withGate` / `decide` / `decideNamed` / `dispatch` / `dispatchPage`,
+       `Query.invocationPreimage`, `Query.grant`, `Grant.covers`, `PolicyDecision.lifted`).
+
+   Since Phase 651 the query registry's gates decide under a DECISION CONTEXT, and a dispatch may
+   present a GRANT, as the capability registry's have since Phase 638 (DECISIONS.md D261). The
+   dispatch theorems of sections 5 to 7 and 10 are about `dispatch`, the registry with no gate; they
+   are KEPT as they stand, and each is RESTATED here over `dispatch_gated`, a registry carrying a
+   gate list read under a context `x`, with a grant `g` presented. None is weakened: with no gate
+   and no grant the gated dispatch IS `dispatch`, wrapped, under every context
+   (`no_gate_is_dispatch`), and each `*_no_grant` corollary derives the present statement, verbatim,
+   from its restatement at no gate and no grant, for every context.
+
+   The decision type, its rank, the join and the grant's lift are `Capability.fst`'s (read by name
+   through `C`), so the lattice and its laws are stated once. The gate is restated here at the
+   query seam's declaration and arguments, because `C.gate` is typed at the capability's.
+
+     `unregistered_refused_in_context`, `dispatch_validates_first_in_context`,
+     `dispatch_never_ok_failed_in_context`, `no_such_iff_unregistered_in_context`,
+     `registered_dispatches_in_context`, `dispatch_page_is_dispatch_in_context` — the six
+     restatements;
+     `gate_before_resolver` — a decision that is not `Allow` once the grant is read refuses,
+     naming a gate of the list, the same under every resolver;
+     `invocation_identity_injective` — the identity a grant for a read is bound to is injective;
+     `approval_dispatches_iff_granted`, `grant_for_another_invocation_refused` — a needs-approval
+     read runs with the grant for exactly its identity, and with no other;
+     `deny_reaches_no_resolver`, `grant_changes_only_its_own_decision`,
+     `allow_unchanged_by_any_grant` — a grant changes one decision and no other;
+     `one_registry_two_contexts` — one gate list, two contexts, two decisions (a witness).
+
+   THE PARAMETERS, and what is assumed of each. `ctx`: a type variable (`Type0`), nothing assumed;
+   the one theorem about a context instantiates it at `bool`. The gate list, the registry, the
+   resolver and the grant: universally quantified, nothing assumed. `rn`: nothing, except in
+   `invocation_identity_injective` and `grant_for_another_invocation_refused`, which are
+   CONDITIONAL on `key_premises` and `units_named`, exactly what `invocation_key_injective` spends.
+   A grant is modelled as the identity string it carries (`option string`). Everything here but
+   `invocation_identity` and `granted` (which the oracle runs beside `Query.invocationPreimage` and
+   `Grant.covers`) is `noextract_to "FSharp"`; the bridge to production for the rest is
+   `Conformance.policyLaws`' query arm and `QueryDecisionContextTests`.
+   ====================================================================================== *)
+
+(* F#: `PolicyGate<'Ctx, Query, (string * Cell) list>` — a gate reads the context the dispatch was
+   made under, then the declaration and the validated arguments. *)
+[@@ noextract_to "FSharp"]
+noeq type qgate (ctx:Type0) = { qgname: string; qgdecide: ctx -> query -> arguments -> C.decision }
+
+(* F#: `RegistryPolicy.decideNamed` at the query seam — the fold from `("", Allow)`, keeping the
+   first gate of the highest rank, every gate consulted under the one context. *)
+[@@ noextract_to "FSharp"]
+let rec qdecide_from (#ctx:Type0) (gs:list (qgate ctx)) (x:ctx) (q:query) (a:arguments)
+                     (acc:(string & C.decision))
+  : Tot (string & C.decision) (decreases gs) =
+  match gs with
+  | [] -> acc
+  | g :: t ->
+    let d = g.qgdecide x q a in
+    if C.policy_rank d > C.policy_rank (snd acc) then qdecide_from t x q a (g.qgname, d) else qdecide_from t x q a acc
+
+[@@ noextract_to "FSharp"]
+let qdecide_named (#ctx:Type0) (gs:list (qgate ctx)) (x:ctx) (q:query) (a:arguments) : Tot (string & C.decision) =
+  qdecide_from gs x q a ("", C.DAllow)
+
+[@@ noextract_to "FSharp"]
+let rec qgate_named (#ctx:Type0) (n:string) (d:C.decision) (gs:list (qgate ctx)) (x:ctx) (q:query) (a:arguments)
+  : Tot prop =
+  match gs with
+  | [] -> False
+  | g :: t -> (g.qgname == n /\ g.qgdecide x q a == d) \/ qgate_named n d t x q a
+
+let rec qdecide_from_names_a_gate (#ctx:Type0) (gs:list (qgate ctx)) (x:ctx) (q:query) (a:arguments)
+                                  (acc:(string & C.decision))
+  : Lemma (ensures (let (n, d) = qdecide_from gs x q a acc in
+                    (n == fst acc /\ d == snd acc) \/ qgate_named n d gs x q a))
+          (decreases gs)
+  = match gs with
+    | [] -> ()
+    | g :: t ->
+      let d = g.qgdecide x q a in
+      if C.policy_rank d > C.policy_rank (snd acc) then qdecide_from_names_a_gate t x q a (g.qgname, d)
+      else qdecide_from_names_a_gate t x q a acc
+
+(* A decision other than `Allow` was made by a gate of the list, under its name and the context. *)
+let qdecide_named_names_a_gate (#ctx:Type0) (gs:list (qgate ctx)) (x:ctx) (q:query) (a:arguments)
+  : Lemma (ensures (let (n, d) = qdecide_named gs x q a in C.DAllow? d \/ qgate_named n d gs x q a))
+  = qdecide_from_names_a_gate gs x q a ("", C.DAllow)
+
+(* ---- the identity a grant for a read is bound to ---- *)
+
+(* F#: `Query.invocationPreimage` — `Hash.canonicalFields (q.Id :: grammarFields q args)`: the id,
+   then the key fields of the name-sorted arguments, with no hash taken. *)
+let invocation_identity (rn:renderers) (q:query) (a:arguments) : Tot string =
+  fields rn (q.q_id :: key_fields rn q (sort_args rn a))
+
+(* THEOREM (Phase 651) — `invocation_identity_injective`. Two reads with one identity name one query
+   id, one filter, one order and the same bindings. Under `invocation_key_injective`'s premises and
+   nothing else: no hash, no comparator. *)
+let invocation_identity_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
+  (uo:string -> time_unit) (q q':query) (a a':arguments)
+  : Lemma (requires key_premises reveal e t rn /\ units_named uo a /\ units_named uo a' /\
+                    invocation_identity rn q a == invocation_identity rn q' a')
+          (ensures q.q_id == q'.q_id /\ q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by /\
+                   sort_args rn a == sort_args rn a' /\
+                   (forall (x:(string & cell)). mem_arg x a = mem_arg x a')) =
+  sort_units_named uo rn a;
+  sort_units_named uo rn a';
+  fields_injective reveal e t rn (q.q_id :: key_fields rn q (sort_args rn a))
+                                 (q'.q_id :: key_fields rn q' (sort_args rn a'));
+  key_fields_injective rn uo q q' (sort_args rn a) (sort_args rn a');
+  let aux (x:(string & cell)) : Lemma (mem_arg x a = mem_arg x a') =
+    sort_mem rn a x; sort_mem rn a' x
+  in
+  FStar.Classical.forall_intro aux
+
+(* F#: `Grant.covers (Query.invocationPreimage q args) (Option.toList grant)`. *)
+let granted (rn:renderers) (q:query) (a:arguments) (g:option string) : Tot bool =
+  match g with
+  | None -> false
+  | Some i -> i = invocation_identity rn q a
+
+(* F#: `RegistryPolicy.decideGranted` for a held id and arguments that validate. *)
+[@@ noextract_to "FSharp"]
+let decide_granted (#ctx:Type0) (rn:renderers) (gs:list (qgate ctx)) (x:ctx) (q:query) (a:arguments)
+                   (g:option string) : Tot C.decision =
+  C.grant_lifted (granted rn q a g) (snd (qdecide_named gs x q a))
+
+(* The gated outcome: the seam's own refusal wrapped, or the policy's two. Production adds the two
+   policy cases to `QueryError` itself (`QueryPolicyRefused`, `QueryApprovalRequired`). *)
+[@@ noextract_to "FSharp"]
+type gated_query_error =
+  | QGRefused : query_error -> gated_query_error
+  | QGPolicyRefused : policy:string -> msg:string -> alts:list string -> gated_query_error
+  | QGApprovalRequired : policy:string -> gated_query_error
+
+[@@ noextract_to "FSharp"]
+let lift_outcome (#v:Type) (o:outcome (deferred v) query_error) : Tot (outcome (deferred v) gated_query_error) =
+  match o with
+  | Ok y -> Ok y
+  | Error e -> Error (QGRefused e)
+
+(* F#: `QueryRegistry.dispatch r ctx grant id args resolve` — resolve the id, validate, the gates'
+   named join under `x`, then `Query.invoke` under `Allow` or under a `NeedsApproval` the grant is
+   for. Production runs `Query.invoke` after its own validation; `invoke` validates again, which
+   accepts what was accepted. *)
+[@@ noextract_to "FSharp"]
+let dispatch_gated (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (qgate ctx)) (x:ctx)
+                   (g:option string) (id:string) (a:arguments) (resolve:query -> deferred v)
+  : Tot (outcome (deferred v) gated_query_error) =
+  match find_query id r.queries with
+  | None -> Error (QGRefused (NoSuchQuery id (ids r.queries)))
+  | Some q ->
+    match validate_params q a with
+    | Error e -> Error (QGRefused e)
+    | Ok () ->
+      match qdecide_named gs x q a with
+      | (_, C.DAllow) -> lift_outcome (invoke q a resolve)
+      | (n, C.DNeedsApproval) -> if granted rn q a g then lift_outcome (invoke q a resolve) else Error (QGApprovalRequired n)
+      | (n, C.DDeny m alts) -> Error (QGPolicyRefused n m alts)
+
+(* F#: `QueryRegistry.dispatchPage r ctx grant id args tok resolve` — the same path, with
+   `Query.invokePage`. *)
+[@@ noextract_to "FSharp"]
+let dispatch_page_gated (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (qgate ctx)) (x:ctx)
+                        (g:option string) (id:string) (a:arguments) (tok:option string)
+                        (resolve:query -> option string -> deferred v)
+  : Tot (outcome (deferred v) gated_query_error) =
+  match find_query id r.queries with
+  | None -> Error (QGRefused (NoSuchQuery id (ids r.queries)))
+  | Some q ->
+    match validate_params q a with
+    | Error e -> Error (QGRefused e)
+    | Ok () ->
+      match qdecide_named gs x q a with
+      | (_, C.DAllow) -> lift_outcome (invoke_page q a tok resolve)
+      | (n, C.DNeedsApproval) ->
+        if granted rn q a g then lift_outcome (invoke_page q a tok resolve) else Error (QGApprovalRequired n)
+      | (n, C.DDeny m alts) -> Error (QGPolicyRefused n m alts)
+
+(* The wrapper loses nothing: two outcomes with one lift are one outcome. *)
+let lift_outcome_injective (#v:Type) (o o':outcome (deferred v) query_error)
+  : Lemma (requires lift_outcome o == lift_outcome o') (ensures o == o')
+  = ()
+
+(* THEOREM (Phase 651) — `no_gate_is_dispatch`. With no gate the gated dispatch IS the present
+   `dispatch`, wrapped, under every context and whatever grant is presented. *)
+let no_gate_is_dispatch (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ctx) (g:option string)
+                        (id:string) (a:arguments) (resolve:query -> deferred v)
+  : Lemma (ensures dispatch_gated #v #ctx rn r [] x g id a resolve == lift_outcome (dispatch r id a resolve))
+  = match find_query id r.queries with
+    | None -> ()
+    | Some q -> ()
+
+(* ---- the six restatements ---- *)
+
+(* THEOREM (Phase 187; restated over a context and a grant by Phase 651) — an unregistered id is
+   `NoSuchQuery` naming the held ids, for every gate list, context, grant and resolver: one value
+   whatever is presented. *)
+let unregistered_refused_in_context (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (qgate ctx))
+                                    (x:ctx) (g g':option string) (id:string) (a:arguments)
+                                    (resolve resolve':query -> deferred v)
+  : Lemma (requires not (mem id (ids (enumerate r))))
+          (ensures dispatch_gated rn r gs x g id a resolve == Error (QGRefused (NoSuchQuery id (ids r.queries))) /\
+                   dispatch_gated rn r gs x g id a resolve == dispatch_gated rn r gs x g' id a resolve')
+  = find_query_mem id r.queries
+
+(* With no grant and no gate, under every context, it is `unregistered_refused` verbatim. *)
+let unregistered_refused_no_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ctx) (id:string)
+                                  (a:arguments) (resolve resolve':query -> deferred v)
+  : Lemma (requires not (mem id (ids (enumerate r))))
+          (ensures dispatch r id a resolve == Error (NoSuchQuery id (ids r.queries)) /\
+                   dispatch r id a resolve == dispatch r id a resolve')
+  = unregistered_refused_in_context #v #ctx rn r [] x None None id a resolve resolve';
+    no_gate_is_dispatch #v #ctx rn r x None id a resolve;
+    no_gate_is_dispatch #v #ctx rn r x None id a resolve';
+    lift_outcome_injective (dispatch r id a resolve) (Error (NoSuchQuery id (ids r.queries)));
+    lift_outcome_injective (dispatch r id a resolve) (dispatch r id a resolve')
+
+(* THEOREM (Phase 187; restated by Phase 651) — validation precedes every gate and the grant: for a
+   held id whose arguments validation rejects, the answer is that rejection, one value for every
+   gate list, context, grant and resolver. *)
+let dispatch_validates_first_in_context (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry)
+                                        (gs gs':list (qgate ctx)) (x x':ctx) (g g':option string)
+                                        (id:string) (a:arguments) (resolve resolve':query -> deferred v)
+  : Lemma (requires (match find_query id r.queries with
+                     | Some q -> Error? (validate_params q a)
+                     | None -> False))
+          (ensures (match find_query id r.queries with
+                    | Some q ->
+                      (match validate_params q a with
+                       | Error e -> dispatch_gated rn r gs x g id a resolve == Error (QGRefused e)
+                       | Ok () -> True)
+                    | None -> True) /\
+                   dispatch_gated rn r gs x g id a resolve == dispatch_gated rn r gs' x' g' id a resolve')
+  = ()
+
+let dispatch_validates_first_no_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ctx) (id:string)
+                                      (a:arguments) (resolve resolve':query -> deferred v)
+  : Lemma (requires (match find_query id r.queries with
+                     | Some q -> Error? (validate_params q a)
+                     | None -> False))
+          (ensures (match find_query id r.queries with
+                    | Some q ->
+                      (match validate_params q a with
+                       | Error e -> dispatch r id a resolve == Error e
+                       | Ok () -> True)
+                    | None -> True) /\
+                   dispatch r id a resolve == dispatch r id a resolve')
+  = dispatch_validates_first_in_context #v #ctx rn r [] [] x x None None id a resolve resolve';
+    no_gate_is_dispatch #v #ctx rn r x None id a resolve;
+    no_gate_is_dispatch #v #ctx rn r x None id a resolve';
+    (match find_query id r.queries with
+     | Some q ->
+       (match validate_params q a with
+        | Error e -> lift_outcome_injective (dispatch r id a resolve) (Error e)
+        | Ok () -> ())
+     | None -> ());
+    lift_outcome_injective (dispatch r id a resolve) (dispatch r id a resolve')
+
+(* THEOREM (Phase 187; restated by Phase 651) — the envelope has no fourth outcome through the gated
+   registry either: `Ok (Failed _)` is unreachable for every gate list, context, grant and resolver. *)
+let dispatch_never_ok_failed_in_context (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry)
+                                        (gs:list (qgate ctx)) (x:ctx) (g:option string) (id:string)
+                                        (a:arguments) (resolve:query -> deferred v)
+  : Lemma (ensures (match dispatch_gated rn r gs x g id a resolve with
+                    | Ok (Failed _) -> False
+                    | _ -> True))
+  = match find_query id r.queries with
+    | None -> ()
+    | Some q -> invoke_never_ok_failed q a resolve
+
+let dispatch_never_ok_failed_no_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ctx) (id:string)
+                                      (a:arguments) (resolve:query -> deferred v)
+  : Lemma (ensures (match dispatch r id a resolve with
+                    | Ok (Failed _) -> False
+                    | _ -> True))
+  = dispatch_never_ok_failed_in_context #v #ctx rn r [] x None id a resolve;
+    no_gate_is_dispatch #v #ctx rn r x None id a resolve
+
+(* THEOREM (Phase 187; restated by Phase 651) — `NoSuchQuery` is answered exactly off the
+   enumeration, under every gate list, context and grant: no gate, no validation and no resolver
+   produces it. *)
+let no_such_iff_unregistered_in_context (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry)
+                                        (gs:list (qgate ctx)) (x:ctx) (g:option string) (id:string)
+                                        (a:arguments) (resolve:query -> deferred v)
+  : Lemma ((match dispatch_gated rn r gs x g id a resolve with
+            | Error (QGRefused (NoSuchQuery _ _)) -> True
+            | _ -> False) <==> not (mem id (ids (enumerate r))))
+  = find_query_mem id r.queries;
+    (match find_query id r.queries with
+     | None -> ()
+     | Some q -> validate_params_shape q a; invoke_never_registry_refusal q a resolve)
+
+let no_such_iff_unregistered_no_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ctx) (id:string)
+                                      (a:arguments) (resolve:query -> deferred v)
+  : Lemma ((match dispatch r id a resolve with
+            | Error (NoSuchQuery _ _) -> True
+            | _ -> False) <==> not (mem id (ids (enumerate r))))
+  = no_such_iff_unregistered_in_context #v #ctx rn r [] x None id a resolve;
+    no_gate_is_dispatch #v #ctx rn r x None id a resolve
+
+(* THEOREM (Phase 187; restated by Phase 651) — a resolved id dispatches to ITS declaration's
+   `invoke` wherever validation refuses or the decision, with the grant read, is `Allow`. *)
+let registered_dispatches_in_context (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry)
+                                     (gs:list (qgate ctx)) (x:ctx) (g:option string) (id:string)
+                                     (a:arguments) (resolve:query -> deferred v)
+  : Lemma (requires mem id (ids (enumerate r)))
+          (ensures (match try_find_query id r with
+                    | Some q ->
+                      q.q_id == id /\
+                      ((Error? (validate_params q a) \/ C.DAllow? (decide_granted rn gs x q a g)) ==>
+                       dispatch_gated rn r gs x g id a resolve == lift_outcome (invoke q a resolve))
+                    | None -> False))
+  = find_query_mem id r.queries; find_query_id id r.queries
+
+let registered_dispatches_no_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ctx) (id:string)
+                                   (a:arguments) (resolve:query -> deferred v)
+  : Lemma (requires mem id (ids (enumerate r)))
+          (ensures (match try_find_query id r with
+                    | Some q -> q.q_id == id /\ dispatch r id a resolve == invoke q a resolve
+                    | None -> False))
+  = registered_dispatches_in_context #v #ctx rn r [] x None id a resolve;
+    no_gate_is_dispatch #v #ctx rn r x None id a resolve;
+    match try_find_query id r with
+    | Some q -> lift_outcome_injective (dispatch r id a resolve) (invoke q a resolve)
+    | None -> ()
+
+(* THEOREM (Phase 316; restated by Phase 651) — the paged gated dispatch IS the gated dispatch under
+   the resolver that reads the token, for every gate list, context, grant and token. No gate and no
+   grant reads the token, so the grant for a read covers every page of it (DECISIONS.md D261.4). *)
+let dispatch_page_is_dispatch_in_context (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry)
+                                         (gs:list (qgate ctx)) (x:ctx) (g:option string) (id:string)
+                                         (a:arguments) (tok:option string)
+                                         (resolve:query -> option string -> deferred v)
+  : Lemma (dispatch_page_gated rn r gs x g id a tok resolve ==
+           dispatch_gated rn r gs x g id a (fun q -> resolve q tok))
+  = ()
+
+let dispatch_page_is_dispatch_no_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ctx) (id:string)
+                                       (a:arguments) (tok:option string)
+                                       (resolve:query -> option string -> deferred v)
+  : Lemma (dispatch_page r id a tok resolve == dispatch r id a (fun q -> resolve q tok))
+  = dispatch_page_is_dispatch_in_context #v #ctx rn r [] x None id a tok resolve;
+    no_gate_is_dispatch #v #ctx rn r x None id a (fun q -> resolve q tok);
+    (match find_query id r.queries with
+     | None -> ()
+     | Some q -> ());
+    lift_outcome_injective (dispatch_page r id a tok resolve) (dispatch r id a (fun q -> resolve q tok))
+
+(* ---- the gate and the grant at the query seam ---- *)
+
+(* THEOREM (Phase 651) — `gate_before_resolver`. For a held id and arguments that validate, a decision
+   that is not `Allow` once the grant is read refuses `QGApprovalRequired n` or
+   `QGPolicyRefused n m alts`, identically under every resolver, and `n` names a gate of the list
+   whose own decision under this context is the one reported. *)
+let gate_before_resolver (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (qgate ctx)) (x:ctx)
+                         (g:option string) (id:string) (a:arguments) (resolve resolve':query -> deferred v)
+  : Lemma (requires (match find_query id r.queries with
+                     | Some q -> validate_params q a == Ok () /\ ~(C.DAllow? (decide_granted rn gs x q a g))
+                     | None -> False))
+          (ensures (match find_query id r.queries with
+                    | Some q ->
+                      (let (n, d) = qdecide_named gs x q a in
+                       qgate_named n d gs x q a /\
+                       (match d with
+                        | C.DNeedsApproval -> dispatch_gated rn r gs x g id a resolve == Error (QGApprovalRequired n)
+                        | C.DDeny m alts -> dispatch_gated rn r gs x g id a resolve == Error (QGPolicyRefused n m alts)
+                        | C.DAllow -> False))
+                    | None -> True) /\
+                   dispatch_gated rn r gs x g id a resolve == dispatch_gated rn r gs x g id a resolve')
+  = match find_query id r.queries with
+    | Some q -> qdecide_named_names_a_gate gs x q a
+    | None -> ()
+
+(* THEOREM (Phase 651) — `approval_dispatches_iff_granted`. For a held id, arguments that validate
+   and gates that answer `NeedsApproval` under the context: with a grant carrying this read's
+   identity the answer is the resolver's, through `invoke`; with none, or any other, it is
+   `QGApprovalRequired` naming the gate, identically under every resolver. *)
+let approval_dispatches_iff_granted (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (qgate ctx))
+                                    (x:ctx) (g:option string) (id:string) (a:arguments)
+                                    (resolve resolve':query -> deferred v)
+  : Lemma (requires (match find_query id r.queries with
+                     | Some q -> validate_params q a == Ok () /\ C.DNeedsApproval? (snd (qdecide_named gs x q a))
+                     | None -> False))
+          (ensures (match find_query id r.queries with
+                    | Some q ->
+                      (g == Some (invocation_identity rn q a) ==>
+                         dispatch_gated rn r gs x g id a resolve == lift_outcome (invoke q a resolve)) /\
+                      (~(g == Some (invocation_identity rn q a)) ==>
+                         dispatch_gated rn r gs x g id a resolve ==
+                           Error (QGApprovalRequired (fst (qdecide_named gs x q a))) /\
+                         dispatch_gated rn r gs x g id a resolve == dispatch_gated rn r gs x g id a resolve')
+                    | None -> True))
+  = ()
+
+(* THEOREM (Phase 651) — `grant_for_another_invocation_refused`. A grant minted for a read of another
+   query id, filter or order, or with other bindings, does not cover this read. *)
+let grant_for_another_invocation_refused (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
+                                         (uo:string -> time_unit) (q q':query) (a a':arguments)
+  : Lemma (requires key_premises reveal e t rn /\ units_named uo a /\ units_named uo a' /\
+                    (~(q.q_id == q'.q_id) \/ ~(q.q_where == q'.q_where) \/ ~(q.q_order_by == q'.q_order_by) \/
+                     ~(sort_args rn a == sort_args rn a')))
+          (ensures granted rn q a (Some (invocation_identity rn q' a')) == false)
+  = if invocation_identity rn q' a' = invocation_identity rn q a
+    then invocation_identity_injective reveal e t rn uo q q' a a'
+    else ()
+
+(* THEOREM (Phase 651) — `deny_reaches_no_resolver`. For a held id and arguments that validate, gates
+   that answer `Deny` under the context refuse `QGPolicyRefused` naming the gate, one value for every
+   grant and every resolver. *)
+let deny_reaches_no_resolver (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (qgate ctx)) (x:ctx)
+                             (g g':option string) (id:string) (a:arguments) (resolve resolve':query -> deferred v)
+  : Lemma (requires (match find_query id r.queries with
+                     | Some q -> validate_params q a == Ok () /\ C.DDeny? (snd (qdecide_named gs x q a))
+                     | None -> False))
+          (ensures (match find_query id r.queries with
+                    | Some q ->
+                      (match qdecide_named gs x q a with
+                       | (n, C.DDeny m alts) -> dispatch_gated rn r gs x g id a resolve == Error (QGPolicyRefused n m alts)
+                       | _ -> False)
+                    | None -> True) /\
+                   dispatch_gated rn r gs x g id a resolve == dispatch_gated rn r gs x g' id a resolve')
+  = ()
+
+(* THEOREM (Phase 651) — `grant_changes_only_its_own_decision`. The decision with a grant presented is
+   the gates' own, except where they answer `NeedsApproval` and the grant carries this read's
+   identity, where it is `Allow`; an `Allow` is unchanged by any grant, a `Deny` by every grant. *)
+let grant_changes_only_its_own_decision (#ctx:Type0) (rn:renderers) (gs:list (qgate ctx)) (x:ctx) (q:query)
+                                        (a:arguments) (g:option string)
+  : Lemma (ensures (let d = snd (qdecide_named gs x q a) in
+                    (decide_granted rn gs x q a g == d \/
+                     (C.DNeedsApproval? d /\ g == Some (invocation_identity rn q a) /\
+                      decide_granted rn gs x q a g == C.DAllow)) /\
+                    (C.DAllow? d ==> decide_granted rn gs x q a g == d) /\
+                    (C.DDeny? d ==> decide_granted rn gs x q a g == d) /\
+                    decide_granted rn gs x q a None == d))
+  = ()
+
+(* THEOREM (Phase 651) — `allow_unchanged_by_any_grant`, at the dispatch. *)
+let allow_unchanged_by_any_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (qgate ctx))
+                                 (x:ctx) (g:option string) (id:string) (a:arguments) (resolve:query -> deferred v)
+  : Lemma (requires (match find_query id r.queries with
+                     | Some q -> validate_params q a == Ok () /\ C.DAllow? (snd (qdecide_named gs x q a))
+                     | None -> False))
+          (ensures dispatch_gated rn r gs x g id a resolve == dispatch_gated rn r gs x None id a resolve)
+  = ()
+
+(* The context the one context-specific theorem is about: one fact, as `bool`. *)
+[@@ noextract_to "FSharp"]
+let context_qgate : qgate bool =
+  { qgname = "context"; qgdecide = (fun (trusted:bool) _ _ -> if trusted then C.DAllow else C.DNeedsApproval) }
+
+(* THEOREM (Phase 651) — `one_registry_two_contexts`. ONE gate list decides differently under two
+   contexts, for every query and every arguments. A witness, at a concrete context type. *)
+let one_registry_two_contexts (q:query) (a:arguments)
+  : Lemma (ensures qdecide_named [context_qgate] true q a == ("", C.DAllow) /\
+                   qdecide_named [context_qgate] false q a == ("context", C.DNeedsApproval))
+  = ()
+
+(* ======================================================================================
    TWINS (Phase 309) — the extractor premise, sampled at this model. What a twin is, why it
    is here and how the list is evaluated are `Twin`'s (Phase 504), which every model opens.
    ====================================================================================== *)
