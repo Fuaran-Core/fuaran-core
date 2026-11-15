@@ -1320,8 +1320,9 @@ let tests =
                    |> List.forall (fun d ->
                        d.Contains "invocationKey differs"
                        || d.Contains "invocationKeyPage differs"
-                       || d.Contains "invocationPreimage differs"))
-                  "and every disagreement is about the capture key or the read's identity, its pre-image — the comparator reaches nothing else"
+                       || d.Contains "invocationPreimage differs"
+                       || d.Contains "granted differs"))
+                  "and every disagreement is about the capture key or the read's identity, its pre-image, and so the grant's coverage, which reads it — the comparator reaches nothing else"
 
           testCase
               "the filter and order renderers are injective on the shipped codec — a drawn Where and OrderBy round-trip QueryCodec, and the model's key reads them"
