@@ -20,7 +20,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 | Model | Rows | Families (cases) | Oracle functions |
 |---|---|---|---|
-| `Capability` | 51 | `capabilityGateLaws` (14), `capabilityLaws` (107), `seamRefusals` (59) | — |
+| `Capability` | 51 | `capabilityDocumentLaws` (11), `capabilityGateLaws` (14), `capabilityLaws` (96), `seamRefusals` (59) | — |
 | `Chain` | 27 | `skeletonChain` (16), `skeletonDag` (4) | `chain.verify` |
 | `DagClosure` | 26 | `skeletonMerge` (12) | — |
 | `DagFold` | 4 | — | `dag.fold` |

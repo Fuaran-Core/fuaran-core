@@ -695,6 +695,26 @@ let tests =
                   ((LawVectorExport.Capabilities.render ()).Contains "\"unexpected\"")
                   "a vector carried a refusal outside the two the law distinguishes"
 
+          testCase "every rendered document vector reads back through the public codecs and is true of this kit"
+          <| fun _ ->
+              // Phase 644: the document family is replayed by the capability family's own checker, case
+              // for case, which is what lets a port adopt it with the reader it already has.
+              match capabilityVectorsOf (LawVectorExport.Documents.render ()) with
+              | Error m -> failtest m
+              | Ok vectors ->
+                  Expect.equal (List.length vectors) 18 "eighteen document vectors"
+
+                  Expect.isEmpty
+                      (vectors |> List.choose checkCapabilityVector)
+                      "every document vector is true of this kit"
+
+                  Expect.equal
+                      (File.ReadAllText(
+                          Path.Combine(OwnedConformance.root (), "laws", LawVectorExport.Documents.fileName)
+                      ))
+                      (LawVectorExport.Documents.render ())
+                      "the committed file is the render"
+
           testCase "every rendered capability vector reads back through the public codecs and is true of this kit"
           <| fun _ ->
               match capabilityVectorsOf (LawVectorExport.Capabilities.render ()) with
@@ -702,14 +722,8 @@ let tests =
               | Ok vectors ->
                   Expect.equal
                       (List.length vectors)
-                      (12 * LawVectorExport.Capabilities.iterations
-                       + List.length (LawVectorExport.Capabilities.documentVectors ()))
-                      "twelve vectors per declared iteration (Phase 642 added the two refusals, each beside its acceptance), then the fixed document vectors (Phase 644)"
-
-                  Expect.equal
-                      (List.length (LawVectorExport.Capabilities.documentVectors ()))
-                      18
-                      "eighteen document vectors"
+                      (12 * LawVectorExport.Capabilities.iterations)
+                      "twelve vectors per declared iteration (Phase 642 added the two refusals, each beside its acceptance)"
 
                   let failures = vectors |> List.choose checkCapabilityVector
                   Expect.isEmpty failures (sprintf "%A" failures)

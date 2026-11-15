@@ -3,8 +3,8 @@
 Phase 644 (DECISIONS.md D260) added a top-level member to the IDL: a named **contract** with **methods**. A
 method is declared once and carries everything that is true of it wherever it is called from. This page is the
 specification every host implements. `Contract` and `ContractProjection` are the reference's code. The document
-space, which the projection rests on, is held by the `document-*` law vectors that end
-[`conformance/laws/capability-laws.json`](../conformance/laws/capability-laws.json).
+space, which the projection rests on, is held by the law vectors in
+[`conformance/laws/capability-document-laws.json`](../conformance/laws/capability-document-laws.json).
 
 The IDL states what a method IS. A client, a server table, a protocol, a route, an envelope and a tool executor
 are a runtime's, built on this declaration and never part of it.
