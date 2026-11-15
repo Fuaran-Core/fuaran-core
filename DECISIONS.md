@@ -449,16 +449,18 @@ method, a removed, renamed, reordered or newly required argument, a changed argu
 or newly declared constraint, an authority value added (a widened requirement), a schema version removed, and a
 changed shape or effect class are breaking. A changed description moves no caller and is the host surface's.
 
-**D260.17 — the document vectors are a family of their own.** `conformance/laws/capability-document-laws.json`
-(id `capabilityDocumentLaws`) holds eighteen vectors over one capability with a document hole and a document
-result, through the cases a host already replays for `capability-laws.json` (`validateArgs`, `invocationKey`,
-`declarationRoundTrip`, `pipelineTypeCheck`), indexed in this repository's own `laws/manifest.json` with every
-host's adoption `proposed`. This is D255.1 applied, and its first alternative was measured rather than assumed:
-the vectors were first appended to `capability-laws.json` and that copy was put to the shared corpus as a pull
-request. The corpus's consumer conformance ran five hosts on it. The Go and TypeScript hosts, which pass on the
-corpus's `main`, each failed exactly the eighteen new vectors, refusing the declaration ("unknown value-space
-kind: document"); neither skips a copy stamped for a Core it does not pin. So `capability-laws.json` is byte for
-byte what it was, its corpus copy and the pin do not move, and a port adopts the family when it learns the space.
+**D260.17 — the document vectors are a section of `capability-laws.json`, and two hosts do not read them yet.**
+Eighteen `document-*` vectors over one capability with a document hole and a document result end
+`conformance/laws/capability-laws.json`, through the cases a host already replays (`validateArgs`,
+`invocationKey`, `declarationRoundTrip`, `pipelineTypeCheck`); the file's vector count moves from 144 to 162 and
+its stamp stays at 0.43.0. The corpus copy moved with them and the pin names it. D255.1 rejected a section of this
+file for the gate family, because a host that reads the file fails on what it does not know, and the same is
+true here and was measured: on the corpus pull request that carried the copy, the Go and TypeScript hosts, which
+pass on the corpus's `main` before it, each failed exactly the eighteen new vectors, refusing the declaration
+("unknown value-space kind: document"); neither skips a copy stamped for a Core it does not pin, and the
+corpus's consumer run reports a host's drift without failing. The copy was merged on that footing. A family of
+its own, with every host's adoption `proposed`, was built first and withdrawn when the copy merged, so that the
+vectors have one home; it remains the alternative if the two hosts are to stay green until they learn the space.
 
 ## 2026-11-14 — D259: a declared default at the wider data universe's types is admitted in its one canonical spelling, a tuple when every item is, and the empty set and keyed map; the F# and TypeScript generators print it in the host type each binds, and the F* model prints what carries no obligation and refuses a string-borne scalar by name
 

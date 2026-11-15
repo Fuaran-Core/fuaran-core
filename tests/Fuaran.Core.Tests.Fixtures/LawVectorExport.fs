@@ -399,9 +399,6 @@ module LawVectorExport =
         /// The document vectors (Phase 644), through the cases a host already replays: membership by
         /// shape (`validateArgs`), one key for two spellings of one document (`invocationKey`), the
         /// declaration's bytes (`declarationRoundTrip`) and the family's relation (`pipelineTypeCheck`).
-        /// They are built here, beside the helpers they share with the drawn vectors, and published as
-        /// a family of their own (`Documents`): a host that reads `capability-laws.json` today refuses
-        /// a value space it does not know, so a section of that file would turn it red (D255.1).
         let internal documentVectors () : Vector list =
             let cap = documentCap
             let declaration = CapabilityCodec.encode cap
@@ -460,7 +457,8 @@ module LawVectorExport =
               pipelineCheck "document-pipeline-output-tree" cap call (SlotTree None) ]
 
         let internal allVectors () : Vector list =
-            draws () |> List.collect (fun d -> vectorsFor d @ resultVectorsFor d)
+            (draws () |> List.collect (fun d -> vectorsFor d @ resultVectorsFor d))
+            @ documentVectors ()
 
         let private description =
             "The (input, expected) pairs Fuaran.Core.Conformance.capabilityLaws draws from `seed` over "
@@ -480,7 +478,14 @@ module LawVectorExport =
             + "space is empty is OutOfRange at [result]. `pipelineTypeCheck` vectors register the capability alone and "
             + "type-check the given one-node pipeline: accept, or reject `pipelineOutputContradicts` naming the node "
             + "and the capability when the node's declared output does not admit the capability's result (or the "
-            + "capability answers nothing)."
+            + "capability answers nothing). Since Phase 644 the file ends with the `document-*` vectors, which are fixed "
+            + "and not drawn: one capability `cap-document` over a single required hole `d0` in the document space of "
+            + "type `Order`, answering a document of type `Receipt`. A document argument is a member exactly when it is "
+            + "well-formed JSON with a canonical rendering (no `null`, no repeated member); the type name is carried and "
+            + "never read. The two `document-key-*` vectors present one document in two spellings and expect ONE key: "
+            + "an argument in a document space is keyed by its cross-host canonical text. They carry no `capturedValue`. "
+            + "The `document-pipeline-output-*` vectors pin the relation: a document result is admitted by an output of "
+            + "the same type or of no type, and by no other document type, no scalar space and no tree space."
 
         /// Rendered with an explicit `kitVersion` so the byte-identity pin can render the file at the
         /// version a published copy was stamped with; `render ()` stamps this kit's own version.
@@ -491,48 +496,6 @@ module LawVectorExport =
                       "kitVersion", jstr stamp
                       "seed", jint seed
                       "iterations", jint iterations
-                      "description", jstr description ]
-                  Items = "vectors"
-                  Rows = allVectors () |> List.map renderVector }
-
-        let render () : string = renderAt (kitVersion ())
-
-    // -----------------------------------------------------------------------
-    //  the capability document family (Phase 644)
-    // -----------------------------------------------------------------------
-    //  The document value space (DECISIONS.md D260) as vectors a port replays with the cases it
-    //  already has for `capability-laws.json`. A file of its own, in this repository's corpus, for
-    //  D255.1's reason: the hosts that read `capability-laws.json` decode every declaration in it and
-    //  refuse a value space they do not know, and each pins that file's vector count.
-
-    module Documents =
-
-        let fileName = "capability-document-laws.json"
-
-        let familyId = "capabilityDocumentLaws"
-
-        let internal allVectors () : Vector list = Capabilities.documentVectors ()
-
-        let private description =
-            "The document value space (Phase 644, DECISIONS.md D260), through the cases of capability-laws.json: `validateArgs`, `invocationKey`, "
-            + "`declarationRoundTrip` and `pipelineTypeCheck`, each read exactly as that file describes it. Authored inputs, each `expected` computed by calling "
-            + "the pinned kit; no seed. Every vector is stated over one capability, `cap-document`: a single required hole `d0` in the document space of type "
-            + "`Order`, answering a document of type `Receipt`. `capability` and `declaration` members carry a canonical capability declaration as a JSON STRING, "
-            + "in which a document space is `{\"$type\":\"document\"}` with an optional `documentType`. A document argument is a member exactly when it is "
-            + "well-formed JSON with a canonical rendering of its own: it parses with no `null`, and holds no repeated member, no ill-formed string and no number a "
-            + "finite float cannot spell. The type name is carried and never read. An argument that is no document is `argOutOfSpace` at its address. The two "
-            + "`document-key-*` vectors present ONE document in two spellings (members out of order, white space, a float with a trailing zero, a control character "
-            + "by its short escape) and expect one key: an argument in a document space is keyed by its cross-host canonical text (members sorted, no white space, "
-            + "the canonical float layout, every control character as `\\u00xx`). They carry no `capturedValue`. The `document-pipeline-output-*` vectors pin the "
-            + "space relation: a document result is admitted by a declared output of the same type or of no type, and by no other document type, no scalar space and "
-            + "no tree space."
-
-        /// Rendered with an explicit `kitVersion`, as every law file is (Phase 560).
-        let renderAt (stamp: string) : string =
-            CorpusFile.render
-                { Head =
-                    [ "family", jstr familyId
-                      "kitVersion", jstr stamp
                       "description", jstr description ]
                   Items = "vectors"
                   Rows = allVectors () |> List.map renderVector }
@@ -1539,9 +1502,6 @@ module LawVectorExport =
     let gatePath (corpusDir: string) : string =
         Path.Combine(familyDir corpusDir, Gates.fileName)
 
-    let documentPath (corpusDir: string) : string =
-        Path.Combine(familyDir corpusDir, Documents.fileName)
-
     /// Every law file under `corpusDir`, rendered with `stamp` as its `kitVersion` (Phase 560): opening
     /// a version slot stamps the version it opens, which is not yet the version this kit was built at.
     let emittedAt (stamp: string) (corpusDir: string) : (string * string) list =
@@ -1550,8 +1510,7 @@ module LawVectorExport =
           fieldPath corpusDir, Fields.renderAt stamp
           propagationPath corpusDir, PropagationVectorExport.renderAt stamp
           canonicalFormPath corpusDir, CanonicalFormVectorExport.renderAt stamp
-          gatePath corpusDir, Gates.renderAt stamp
-          documentPath corpusDir, Documents.renderAt stamp ]
+          gatePath corpusDir, Gates.renderAt stamp ]
 
     /// Every law file under `corpusDir`, stamped with this kit's own version.
     let emitted (corpusDir: string) : (string * string) list = emittedAt (kitVersion ()) corpusDir
