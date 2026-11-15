@@ -155,7 +155,15 @@ caller the contract admitted, or change what an admitted caller receives, is **b
 | an authority value added; a served version withdrawn | breaking |
 | a destination lost; `idempotent` gained; a rate limit withdrawn or loosened | additive |
 | a destination gained; `idempotent` lost; a rate limit declared or tightened; any move of the read policy | breaking |
-| a description, the audit kind, or what may be recorded | host surface |
+| a permission to record withdrawn, of the arguments or of the result, and none gained | additive |
+| a permission to record gained on either half, whatever the other half does | breaking |
+| a description, or the audit kind | host surface |
+
+`record` is a permission, never a demand: it says what a host MAY keep of a call. A method that begins to
+permit recording of its arguments or of its result withdraws what a caller was told, that what it sent or what
+it was answered is not kept, so a permission gained is breaking. A host that records less than it may is
+conformant, so a permission withdrawn is additive. A move that gains one half and withdraws the other is
+breaking.
 
 A contract that arrives or leaves is one row, not a row for each method. A rename is a removal and an addition.
 No F# is generated for a contract, so no row moves a generated shape, and the one obligation a row raises is on

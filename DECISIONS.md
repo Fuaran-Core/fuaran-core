@@ -488,9 +488,13 @@ a retry was safe), and the opposite move is additive. A rate limit declared or t
 withdrawn or loosened (no fewer calls in no longer a window) is additive, as a constraint is. Any move of
 `readPolicy` is breaking, because the artifact orders no two policies: a longer cache lifetime serves an older
 answer, a shorter one withdraws a reuse a caller was granted, and an `invalidates` list that changes makes
-other answers stale or leaves them standing. `record`, `auditKind` and every description are the host's: no
-caller is admitted, refused or answered differently by them, so a move is host surface, one row a fact. Three
-alternatives lost:
+other answers stale or leaves them standing. `record` is a promise too, and a permission, never a demand
+(D260.10 lists what may be recorded among the closed vocabularies): a method that begins to permit recording of
+its arguments or of its result withdraws what a caller was told, that what it sent or what it was answered is
+not kept. So a permission gained on either half is breaking; a permission withdrawn is additive, since a host
+that records less than it may is conformant; and a move that gains one half and withdraws the other is
+breaking. `auditKind` and every description are the host's: no caller is admitted, refused or answered
+differently by them, so a move is host surface, one row a fact. Four alternatives lost:
 
 - Every move of the six is breaking. It is the safe reading and it calls a loosened rate limit and a newly
   idempotent method a break, which they are not; a classifier that does so is read past.
@@ -500,6 +504,11 @@ alternatives lost:
 - The read policy is ordered (a longer lifetime additive, a shorter one breaking, or the reverse). Either
   order is wrong for one of the two parties that read it, the caller that reuses an answer and the caller that
   needs a fresh one.
+- `record` is host surface, beside the audit kind. It was built first and withdrawn on review. The ground was
+  that only the host reads it, and that is true of who ACTS on it and false of who relies on it: `record`
+  bounds what a host may keep of a caller's data, so a caller reads it exactly as it reads `destination`. A
+  classifier that files a new permission to keep a caller's arguments as a fact nobody need review lets the
+  one move a caller would object to through at exit 0.
 
 The JSON Schema of a method's arguments (D260.14) states an argument's length bound as the tightest bound
 JSON Schema can state without refusing an admitted value: the IDL counts UTF-16 code units and `minLength` /
