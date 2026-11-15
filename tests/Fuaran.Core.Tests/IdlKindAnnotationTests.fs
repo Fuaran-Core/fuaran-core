@@ -98,7 +98,8 @@ let private plainIdl: Idl =
             Fields = [ f "target" TStr Required ]
             Annotations = Annotations.Empty } ]
       Wire = WireShape.Default
-      Harden = HardenPolicy.Undeclared }
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }
 
 /// The same vocabulary with the `Legacy` kind marked. Nothing about the SHAPE
 /// differs, which is what makes the "the bytes did not move" assertions a real

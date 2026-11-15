@@ -497,7 +497,8 @@ module EmittedEncStr =
               NodeFields = []
               Ops = []
               Wire = WireShape.Default
-              Harden = HardenPolicy.Undeclared }
+              Harden = HardenPolicy.Undeclared
+              Contracts = [] }
 
         match Gen.typescriptModule idl [ "Note" ] with
         | Ok src -> src

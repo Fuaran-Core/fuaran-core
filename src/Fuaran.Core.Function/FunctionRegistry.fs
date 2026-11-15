@@ -35,13 +35,15 @@ type FunctionEntry =
         Capability: Capability
     }
 
-    /// The node kind the function produces, derived from its capability's result: `Some kind` when
-    /// the result is a tree of that kind (`Returns.Value(SlotTree(Some kind))`), `None` for any other
-    /// result. The `ByResult` index key, compared exactly; an entry whose result is no named tree
-    /// is found only by a query naming no result type.
+    /// The NAME of what the function produces, derived from its capability's result: `Some kind`
+    /// when the result is a tree of that kind (`Returns.Value(SlotTree(Some kind))`), `Some name`
+    /// when it is a document of that type (`Returns.Value(Document(Some name))`, Phase 644), `None`
+    /// for any other result. The `ByResult` index key, compared exactly; an entry whose result
+    /// carries no name is found only by a query naming no result type.
     member e.ResultType: string option =
         match e.Capability.Result with
-        | Returns.Value(SlotTree(Some kind)) -> Some kind
+        | Returns.Value(SlotTree(Some name))
+        | Returns.Value(Document(Some name)) -> Some name
         | Returns.Value _
         | Returns.Nothing -> None
 

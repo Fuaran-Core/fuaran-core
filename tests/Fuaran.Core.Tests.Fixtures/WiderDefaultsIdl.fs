@@ -72,7 +72,8 @@ module WiderDefaultsIdl =
           NodeFields = []
           Ops = []
           Wire = WireShape.Default
-          Harden = HardenPolicy.Undeclared }
+          Harden = HardenPolicy.Undeclared
+          Contracts = [] }
 
     /// The one-member vocabulary: the kind `Holder` with a required `name` and the member `x` of type
     /// `t`, omitted at the default `d`.

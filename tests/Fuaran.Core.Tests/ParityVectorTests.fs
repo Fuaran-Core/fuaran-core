@@ -567,7 +567,8 @@ let tests =
                     NodeFields = []
                     Ops = []
                     Wire = Fuaran.Core.Idl.WireShape.Default
-                    Harden = Fuaran.Core.Idl.HardenPolicy.Undeclared }
+                    Harden = Fuaran.Core.Idl.HardenPolicy.Undeclared
+                    Contracts = [] }
 
               let predicted (seed: int) (count: int) =
                   let mutable r = ConfRng.ofSeed seed

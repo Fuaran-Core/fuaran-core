@@ -54,7 +54,8 @@ let idl: Idl =
         { Discriminator = "kind"
           NodeEnvelope = NodeEnvelopeShape.FlatKind
           KeyOrder = KeyOrder.Sorted }
-      Harden = HardenPolicy.Undeclared }
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }
 
 /// A valid document, every member present: each corner is this document with one member rewritten.
 let valid =

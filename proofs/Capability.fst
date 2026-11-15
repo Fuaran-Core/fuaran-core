@@ -297,13 +297,14 @@ type value_space =
   | Enum       : list string -> value_space
   | AnyString  : value_space
   | SlotTree   : option string -> value_space
+  | Document   : option string -> value_space
 
 (* F#: `SpaceFault` (Phase 307) — why a space is not well-formed. *)
 type space_fault =
   | SEmpty
   | SNonFinite
 
-(* The readers premise: the five host functions `Space.validate` and `Space.wellFormed` reach for.
+(* The readers premise: the six host functions `Space.validate` and `Space.wellFormed` reach for.
    `int_of`      — F#: `Space.readInt` — since Phase 295 an optional `-` and decimal digits read
                    under the INVARIANT culture (`Json.readInt32`), no `+`, no white space, no
                    culture's own minus sign. A function of the string ALONE: the same answer under
@@ -313,6 +314,9 @@ type space_fault =
    `str_len`     — F#: `String.Length`.
    `kind_of`     — F#: `Space.slotKindOf` (Phase 229): the `"kind"` tag of a wire document whose top
                    level is a kind-tagged object, `None` for anything else.
+   `doc_ok`      — F#: `Space.documentOf` (Phase 644) answering `Some`: the string is a well-formed
+                   JSON document with a canonical rendering of its own. A function of the string
+                   ALONE: it reads no type, which is why a document space needs no resolver.
    `float_fault` — F#: `Space.wellFormed` over `FloatRange(lo, hi)` (Phase 307): `SNonFinite` when
                    either carrier is NaN or infinite, else `SEmpty` when `lo > hi`, else nothing. *)
 noeq type readers = {
@@ -320,6 +324,7 @@ noeq type readers = {
   float_in:    string -> string -> string -> bool;
   str_len:     string -> nat;
   kind_of:     string -> option string;
+  doc_ok:      string -> bool;
   float_fault: string -> string -> option space_fault
 }
 
@@ -340,6 +345,7 @@ let validate (rd:readers) (space:value_space) (s:string) : Tot bool =
      | Some k -> (match c with
                   | None -> true
                   | Some kc -> k = kc))
+  | Document _ -> rd.doc_ok s
 
 (* F#: `Space.maxRepeatCount` (Phase 307) — the declared cap a count space sits under. *)
 let max_repeat_count : int = 1000000
@@ -2858,10 +2864,42 @@ let subsumes (fr:feed_readers) (rd:readers) (required available:value_space) : T
   | StringLen rl rh, StringLen al ah -> rl <= al && ah <= rh
   | StringLen rl rh, Enum xs -> all_len_in rd rl rh xs
   | Enum rs, Enum xs -> subset xs rs
-  | AnyString, a -> not (SlotTree? a)
+  | AnyString, a -> not (SlotTree? a || Document? a)
   | SlotTree None, SlotTree _ -> true
   | SlotTree (Some rk), SlotTree (Some ak) -> rk = ak
+  | Document None, Document _ -> true
+  | Document (Some rt), Document (Some at) -> rt = at
   | _ -> false
+
+(* THE DOCUMENT SPACES ARE A FAMILY OF THEIR OWN (Phase 644), `document_family_closed`.
+   F#: `Space.subsumes`. A document space is admitted only by a document space and admits only a
+   document space: no scalar space and no tree space is on either side of a document. *)
+let document_family_closed (fr:feed_readers) (rd:readers) (required available:value_space)
+  : Lemma (requires subsumes fr rd required available)
+          (ensures Document? required == Document? available)
+  = ()
+
+(* WITHIN THE FAMILY THE RELATION IS THE TREES' RULE, `document_relation_exact`: an unconstrained
+   document space admits every document space, a constrained one exactly the same constraint. *)
+let document_relation_exact (fr:feed_readers) (rd:readers) (r a:option string)
+  : Lemma (subsumes fr rd (Document r) (Document a) == (None? r || r = a))
+  = ()
+
+(* A DOCUMENT IS A MEMBER BY ITS SHAPE ALONE, `document_membership_is_shape`.
+   F#: `Space.validate (Document c)`. The carried type name is never read: every document space
+   has the same members, the strings `Space.documentOf` reads. *)
+let document_membership_is_shape (rd:readers) (c c':option string) (v:string)
+  : Lemma (validate rd (Document c) v == rd.doc_ok v /\
+           validate rd (Document c) v == validate rd (Document c') v)
+  = ()
+
+(* THE RELATION IS SOUND ON THE DOCUMENT FAMILY, `document_subsumes_sound`: where a document space
+   is required and the relation holds, every value of the available space is a value of the
+   required one. No reader premise is used. *)
+let document_subsumes_sound (fr:feed_readers) (rd:readers) (required available:value_space) (v:string)
+  : Lemma (requires Document? required /\ subsumes fr rd required available /\ validate rd available v)
+          (ensures validate rd required v)
+  = ()
 
 (* F#: `CapabilityPipeline.spaceTag` — the space FAMILY an `EdgeTypeMismatch` names. *)
 let space_tag (s:value_space) : Tot string =
@@ -2872,6 +2910,7 @@ let space_tag (s:value_space) : Tot string =
   | Enum _ -> "enum"
   | AnyString -> "anyString"
   | SlotTree _ -> "slotTree"
+  | Document _ -> "document"
 
 (* F#: `CapabilityPipeline.nodeId`. *)
 let node_id (n:pipeline_node) : Tot string =
@@ -3534,10 +3573,12 @@ let output_contradiction_refused (fr:feed_readers) (rd:readers) (lk:capability_l
    own beside a capability that declared none; now what it produces is its capability's. *)
 type function_entry = { fe_capability: capability }
 
-(* F#: `FunctionEntry.ResultType` — the kind of the tree the capability answers, derived. *)
+(* F#: `FunctionEntry.ResultType` — the NAME of what the capability answers, derived: the kind of a
+   tree, or (Phase 644) the type name of a document. *)
 let result_kind (res:answer) : Tot (option string) =
   match res with
   | RValue (SlotTree (Some k)) -> Some k
+  | RValue (Document (Some k)) -> Some k
   | _ -> None
 
 let entry_result_type (e:function_entry) : Tot (option string) = result_kind e.fe_capability.c_result
@@ -3588,9 +3629,11 @@ let rec produced_by (k id:string) (es:list function_entry) : Tot bool =
 
 (* The derived kind is exactly the capability's declared result. *)
 let result_kind_exact (k:string) (res:answer)
-  : Lemma (result_kind res = Some k <==> res == RValue (SlotTree (Some k)))
+  : Lemma (result_kind res = Some k <==>
+           (res == RValue (SlotTree (Some k)) \/ res == RValue (Document (Some k))))
   = match res with
     | RValue (SlotTree (Some _)) -> ()
+    | RValue (Document (Some _)) -> ()
     | _ -> ()
 
 let rec index_of_entries_exact (k id:string) (es:list function_entry)
@@ -3605,12 +3648,15 @@ let rec index_of_entries_exact (k id:string) (es:list function_entry)
 
 (* THE ENTRY'S RESULT IS ITS CAPABILITY'S (Phase 642), `registry_result_is_capability_result`.
    F#: `FunctionEntry.ResultType`, `findBySignature`'s result match and the `ByResult` index. An entry
-   carries no result of its own, so the theorem is about what reads one: a query naming kind `k`
-   matches an entry exactly when its capability declares a tree of kind `k`, and the index the query
-   narrows through files an id under `k` exactly when an entry registered under that id has a
-   capability declaring a tree of kind `k`. *)
+   carries no result of its own, so the theorem is about what reads one: a query naming `k` matches
+   an entry exactly when its capability declares a tree of kind `k` or (Phase 644) a document of
+   type `k`, and the index the query narrows through files an id under `k` exactly when an entry
+   registered under that id has a capability declaring one of the two. Both directions are still
+   stated: the document case is a second NAMED result, not a looser match. *)
 let registry_result_is_capability_result (k id:string) (e:function_entry) (es:list function_entry)
-  : Lemma ((result_matches (Some k) e <==> e.fe_capability.c_result == RValue (SlotTree (Some k))) /\
+  : Lemma ((result_matches (Some k) e <==>
+              (e.fe_capability.c_result == RValue (SlotTree (Some k)) \/
+               e.fe_capability.c_result == RValue (Document (Some k)))) /\
            (mem id (idx_get k (index_of_entries es)) == produced_by k id es))
   = result_kind_exact k e.fe_capability.c_result;
     index_of_entries_exact k id es
@@ -4031,6 +4077,11 @@ let space_json (s:value_space) : Tot jval =
           (match c with
            | Some k -> [("slotKind", JStr k)]
            | None -> []))
+  | Document c ->
+    JObj (("$type", JStr "document") ::
+          (match c with
+           | Some t -> [("documentType", JStr t)]
+           | None -> []))
 
 (* F#: `SpaceCodec.decoder` — `Decoder.tagDispatch` under `"$type"`: the discriminator read as a
    string, then the case's decoder over the SAME object; an absent `"$type"` is `MissingField` and an
@@ -4071,6 +4122,10 @@ let space_of_j (cr:codec_readers) (el:jval) : Tot (outcome value_space decode_er
       (match opt_field "slotKind" d_str el with
        | Error e -> Error e
        | Ok c -> Ok (SlotTree c))
+    else if t = "document" then
+      (match opt_field "documentType" d_str el with
+       | Error e -> Error e
+       | Ok c -> Ok (Document c))
     else Error (under (Key "$type") (refuse UnknownTag))
 
 (* ---- the effect class: `EffectCodec` ---- *)
@@ -4676,7 +4731,7 @@ let twins : list twin = [
   { tname = "a-second-address-is-the-duplicate";
     tholds = (fun () ->
       validate_entries ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
-                          kind_of = (fun _ -> None); float_fault = (fun _ _ -> None) }) []
+                          kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None) }) []
         [ { s_addr = "a"; s_name = "a"; s_kind = ValueHole (IntRange 0 1); s_required = true };
           { s_addr = "a"; s_name = "b"; s_kind = ValueHole (IntRange 5 1); s_required = true } ]
         = Some (DuplicateHoleAddr "a")) };
@@ -4704,14 +4759,14 @@ let twins : list twin = [
     tholds = (fun () ->
       edge_fault ({ float_within = (fun _ _ _ _ -> false); int_within = (fun _ _ _ _ -> false) })
         ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
-           kind_of = (fun _ -> None); float_fault = (fun _ _ -> None) })
+           kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None) })
         [ Invoke "a" "c" AnyString [("x", FromNode "b")]; Invoke "b" "c" AnyString [("x", FromNode "a")] ]
         ["a"; "b"] "a" "x" "b" AnyString = Some (PipelineCycle "a" ["a"; "b"])) };
   { tname = "a-later-upstream-that-closes-no-cycle-is-a-forward-edge";
     tholds = (fun () ->
       edge_fault ({ float_within = (fun _ _ _ _ -> false); int_within = (fun _ _ _ _ -> false) })
         ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
-           kind_of = (fun _ -> None); float_fault = (fun _ _ -> None) })
+           kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None) })
         [ Invoke "a" "c" AnyString [("x", FromNode "b")]; Source "b" "ref" AnyString ]
         ["a"; "b"] "a" "x" "b" AnyString = Some (PipelineForwardEdge "a" "x" "b")) };
   { tname = "the-dirty-set-is-the-change-and-everything-downstream";
@@ -4752,7 +4807,7 @@ let twins : list twin = [
   { tname = "a-node-with-an-empty-output-space-is-refused-at-outputType";
     tholds = (fun () ->
       node_of_j ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
-                   kind_of = (fun _ -> None); float_fault = (fun _ _ -> None) })
+                   kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None) })
         ({ float_of_int = (fun _ -> "0") })
         (node_json (Source "s" "ref" (IntRange 5 1)))
         = Error ({ d_code = OutOfRange; d_path = [Key "outputType"] })) } ]
@@ -5547,6 +5602,7 @@ let space_good (cr:codec_readers) (x:jval) : Lemma (good_res x (space_of_j cr x)
   field_good "min" (d_float cr) x; field_good "max" (d_float cr) x;
   field_good "values" (d_list d_str) x;
   opt_field_good "slotKind" d_str x;
+  opt_field_good "documentType" d_str x;
   match x with
   | JObj fs ->
     (match assoc "$type" fs with

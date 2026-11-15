@@ -70,7 +70,8 @@ let private small: Idl =
       NodeFields = []
       Ops = []
       Wire = WireShape.Default
-      Harden = HardenPolicy.Undeclared }
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }
 
 /// An unpaired surrogate. Built from its code unit because an F# string literal cannot carry
 /// one: the compiler reads `"\uD800"` as U+FFFD (measured), which is why `SourceLit.fsString`

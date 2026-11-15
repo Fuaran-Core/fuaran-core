@@ -48,7 +48,8 @@ let private recordIdl (fields: IdlField list) : Idl =
       NodeFields = []
       Ops = []
       Wire = WireShape.Default
-      Harden = HardenPolicy.Undeclared }
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }
 
 let private everyType: (string * IdlType) list =
     [ "int64", TInt64

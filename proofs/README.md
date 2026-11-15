@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 415 claims — 301 proved (300 across 38 models, 1 a host's own proof), 68 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
+**The ladder, counted:** 419 claims — 305 proved (304 across 38 models, 1 a host's own proof), 68 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -391,8 +391,8 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Column` | 127 | 50 | 51 | 3 | 0 | 0 | 0 | 23 |
 | `Fuaran.Core.Conformance` | 165 | 2 | 107 | 2 | 6 | 0 | 0 | 48 |
 | `Fuaran.Core.ContentAddress` | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `Fuaran.Core.Function` | 199 | 52 | 91 | 5 | 0 | 0 | 0 | 51 |
-| `Fuaran.Core.Idl` | 79 | 0 | 6 | 1 | 1 | 0 | 0 | 71 |
+| `Fuaran.Core.Function` | 200 | 53 | 91 | 5 | 0 | 0 | 0 | 51 |
+| `Fuaran.Core.Idl` | 89 | 0 | 6 | 1 | 1 | 0 | 0 | 81 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 51 | 8 | 0 | 0 | 0 | 0 | 0 | 43 |
 | `Fuaran.Core.Observer` | 12 | 0 | 7 | 1 | 0 | 0 | 0 | 4 |
@@ -408,7 +408,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 64 | 0 | 25 | 3 | 0 | 0 | 0 | 36 |
 | `Fuaran.Core.Wire` | 193 | 116 | 11 | 3 | 4 | 0 | 0 | 59 |
-| **Total** | 1399 | 384 | 436 | 38 | 15 | 0 | 3 | 523 |
+| **Total** | 1410 | 385 | 436 | 38 | 15 | 0 | 3 | 533 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -3207,7 +3207,7 @@ one float read the codecs make (`codec_readers`). The pipeline's host body and t
 spells (`node_body`, `spell`) are parameters as `invoke`'s body is; a handler is an abstract
 type.
 
-**Proved** (44)
+**Proved** (48)
 
 - <a id="row-capability-unregistered-refused"></a>**`capability-unregistered-refused`** — `unregistered_refused` · fuaran-core#177
 
@@ -3405,9 +3405,33 @@ type.
 
 - <a id="row-function-registry-result-is-capability-result"></a>**`function-registry-result-is-capability-result`** — `registry_result_is_capability_result` · fuaran-core#642
 
-  `registry_result_is_capability_result`: a function registry entry states no result of its own. A query naming result kind `k` matches an entry exactly when its capability declares a tree of kind `k` (`Returns.Value(SlotTree(Some k))`), and the result index a query narrows through files an id under `k` exactly when an entry registered under that id has a capability declaring one, whatever order the entries were filed in.
+  `registry_result_is_capability_result`: a function registry entry states no result of its own. A query naming result `k` matches an entry exactly when its capability declares a tree of kind `k` (`Returns.Value(SlotTree(Some k))`) or a document of type `k` (`Returns.Value(Document(Some k))`), and the result index a query narrows through files an id under `k` exactly when an entry registered under that id has a capability declaring one of the two, whatever order the entries were filed in. Both directions are stated, so the document case is a second named result and not a looser match.
 
   _Boundary:_ The index is modelled as an association list built by the production's `indexed` step folded over the entries; production's `Map` and `Set` are its premise. Within the model; the correspondence to production rests on the extractor (premise `extractor-and-compiler-trusted`) and the registry tests.
+
+- <a id="row-document-family-closed"></a>**`document-family-closed`** — `document_family_closed` · fuaran-core#644
+
+  `document_family_closed`: the document spaces are a family of their own in the space relation. Wherever `Space.subsumes required available` holds, `required` is a document space exactly when `available` is: no scalar space and no tree space admits a document, and no document space admits either.
+
+  _Boundary:_ Within the model; the correspondence to production rests on the differential and the extractor (premise `extractor-and-compiler-trusted`).
+
+- <a id="row-document-relation-exact"></a>**`document-relation-exact`** — `document_relation_exact` · fuaran-core#644
+
+  `document_relation_exact`: inside the document family the relation is the trees' rule and nothing else. `Document r` admits `Document a` exactly when `r` names no type or names the type `a` names; the names are compared and never read.
+
+  _Boundary:_ Within the model; the correspondence to production rests on the differential and the extractor (premise `extractor-and-compiler-trusted`).
+
+- <a id="row-document-membership-is-shape"></a>**`document-membership-is-shape`** — `document_membership_is_shape` · fuaran-core#644
+
+  `document_membership_is_shape`: a document is a member by its shape alone. `Space.validate (Document c) v` is the `doc_ok` reader's answer on `v` whatever `c` is, so every document space has the same members and the carried type name is never read.
+
+  _Boundary:_ The reader itself (`Space.documentOf`: the JSON parser and the cross-host canonical renderer) is the readers premise `capability-scalar-readers-abstract`; this theorem is about which reader is asked and that the type name is not. Within the model; the correspondence to production rests on the differential and the extractor (premise `extractor-and-compiler-trusted`).
+
+- <a id="row-document-subsumes-sound"></a>**`document-subsumes-sound`** — `document_subsumes_sound` · fuaran-core#644
+
+  `document_subsumes_sound`: the relation is sound on the document family. Where a document space is required and `Space.subsumes required available` holds, every value of the available space is a value of the required one, with no premise about the readers.
+
+  _Boundary:_ Soundness of the relation over the scalar families is certified by the conformance laws over drawn spaces, not by this theorem. Within the model; the correspondence to production rests on the differential and the extractor (premise `extractor-and-compiler-trusted`).
 
 - <a id="row-capability-register-well-formed-result"></a>**`capability-register-well-formed-result`** — `register_refuses_ill_formed_result` · fuaran-core#642
 
@@ -3497,7 +3521,7 @@ type.
 
   _Boundary:_ Agreement is over the pools drawn, never over all inputs.
 
-**Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`lawful-abstract-witness`](#row-lawful-abstract-witness) (assumed), [`capability-key-renderers-abstract`](#row-capability-key-renderers-abstract) (assumed), [`capability-sections-parameters-abstract`](#row-capability-sections-parameters-abstract) (assumed), [`capability-pipeline-body-total`](#row-capability-pipeline-body-total) (assumed).
+**Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`lawful-abstract-witness`](#row-lawful-abstract-witness) (assumed), [`capability-scalar-readers-abstract`](#row-capability-scalar-readers-abstract) (assumed), [`capability-key-renderers-abstract`](#row-capability-key-renderers-abstract) (assumed), [`capability-sections-parameters-abstract`](#row-capability-sections-parameters-abstract) (assumed), [`capability-pipeline-body-total`](#row-capability-pipeline-body-total) (assumed).
 
 **Inherited through the models it opens:** [`propagation-change-set-and-prior`](#row-propagation-change-set-and-prior) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed).
 
@@ -3662,7 +3686,7 @@ never reads it.
 
 **Rests on, or is bounded by:** [`extractor-and-compiler-trusted`](#row-extractor-and-compiler-trusted) (assumed), [`query-renderers-abstract`](#row-query-renderers-abstract) (assumed), [`query-codec-column-premises`](#row-query-codec-column-premises) (assumed).
 
-**Inherited through the models it opens:** [`lawful-abstract-witness`](#row-lawful-abstract-witness) (assumed), [`capability-key-renderers-abstract`](#row-capability-key-renderers-abstract) (assumed), [`propagation-change-set-and-prior`](#row-propagation-change-set-and-prior) (assumed), [`capability-sections-parameters-abstract`](#row-capability-sections-parameters-abstract) (assumed), [`capability-pipeline-body-total`](#row-capability-pipeline-body-total) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed).
+**Inherited through the models it opens:** [`lawful-abstract-witness`](#row-lawful-abstract-witness) (assumed), [`capability-scalar-readers-abstract`](#row-capability-scalar-readers-abstract) (assumed), [`capability-key-renderers-abstract`](#row-capability-key-renderers-abstract) (assumed), [`propagation-change-set-and-prior`](#row-propagation-change-set-and-prior) (assumed), [`capability-sections-parameters-abstract`](#row-capability-sections-parameters-abstract) (assumed), [`capability-pipeline-body-total`](#row-capability-pipeline-body-total) (assumed), [`propagation-evaluator-total`](#row-propagation-evaluator-total) (assumed).
 
 ### `Arbitrate`
 
@@ -4568,7 +4592,7 @@ The rows no model section carries. An `assumed` row is classed in the contract t
 
 - <a id="row-capability-scalar-readers-abstract"></a>**`capability-scalar-readers-abstract`** — `model-bridge` · closes: `permanent` · fuaran-core#177
 
-  THE READERS PREMISE. `Space.validate` and `Space.wellFormed` reach for five host functions — `Space.readInt` (an optional `-` and decimal digits under the INVARIANT culture, `Json.readInt32`, no `+`, no white space, no culture's own minus sign), `Space.readFloat` against a float range, `String.Length`, `Space.slotKindOf`, and `Space.wellFormed`'s float case (`float_fault`: a NaN or infinite carrier, else an empty range) — and the model takes them as a `readers` record: the space vocabulary, the clause structure of `validate`, `space_wf` and `is_count` are modelled, the lexical parsers are not, and a float range's two bounds cross as opaque carriers (the round-trip `R` format). The premise the theorems spend is that each reader is a function of the STRING alone, which production honours; the differential holds it by running under he-IL. The differential instantiates the readers at production's own calls (`int_of` through `Space.canonical`), so the envelope is compared and the parsers are exercised, not modelled; `ParityVectors` pins the reader's answer on `-5`, U+2212 `5`, ` 5`, `+5` and `1e999` on both pipelines.
+  THE READERS PREMISE. `Space.validate` and `Space.wellFormed` reach for six host functions — `Space.readInt` (an optional `-` and decimal digits under the INVARIANT culture, `Json.readInt32`, no `+`, no white space, no culture's own minus sign), `Space.readFloat` against a float range, `String.Length`, `Space.slotKindOf`, `Space.documentOf` (`doc_ok`: whether the string is well-formed JSON with a canonical rendering of its own) and `Space.wellFormed`'s float case (`float_fault`: a NaN or infinite carrier, else an empty range) — and the model takes them as a `readers` record: the space vocabulary, the clause structure of `validate`, `space_wf` and `is_count` are modelled, the lexical parsers are not, and a float range's two bounds cross as opaque carriers (the round-trip `R` format). The premise the theorems spend is that each reader is a function of the STRING alone, which production honours; the differential holds it by running under he-IL. The differential instantiates the readers at production's own calls (`int_of` through `Space.canonical`), so the envelope is compared and the parsers are exercised, not modelled; `ParityVectors` pins the reader's answer on `-5`, U+2212 `5`, ` 5`, `+5` and `1e999` on both pipelines.
 
   _Assumes:_ the five readers behind Space.validate and Space.wellFormed are host functions of the string alone the model takes as parameters; a float range's bounds are opaque carriers.
 

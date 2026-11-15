@@ -51,6 +51,7 @@ let spaceToModel (s: ValueSpace) : ModelCap.value_space =
     | Enum xs -> ModelCap.Enum xs
     | AnyString -> ModelCap.AnyString
     | SlotTree c -> ModelCap.SlotTree(toMOpt c)
+    | Document c -> ModelCap.Document(toMOpt c)
 
 /// The model's value space back.
 let spaceOfModel (s: ModelCap.value_space) : ValueSpace =
@@ -61,6 +62,7 @@ let spaceOfModel (s: ModelCap.value_space) : ValueSpace =
     | ModelCap.Enum xs -> Enum xs
     | ModelCap.AnyString -> AnyString
     | ModelCap.SlotTree c -> SlotTree(ofMOpt c)
+    | ModelCap.Document c -> Document(ofMOpt c)
 
 let holeKindToModel (k: HoleKind) : ModelCap.hole_kind =
     match k with
@@ -109,9 +111,9 @@ let capToModel (c: Capability) : ModelCap.capability =
       ModelCap.capability.c_determinism = detToModel c.Determinism
       ModelCap.capability.c_placement = placementToModel c.Placement }
 
-/// The readers premise made concrete: the five host functions `Space.validate` and
+/// The readers premise made concrete: the six host functions `Space.validate` and
 /// `Space.wellFormed` reach for, exactly as production calls them (Phase 229 added `kind_of`,
-/// production's `Space.slotKindOf`; Phase 307 `float_fault`, and restated `int_of` as production's
+/// production's `Space.slotKindOf`; Phase 644 `doc_ok`, production's `Space.documentOf`; Phase 307 `float_fault`, and restated `int_of` as production's
 /// own invariant reader — `Space.canonical` over the whole `int` range — where it was
 /// `Int32.TryParse` under the CURRENT culture, a reader production stopped using at Phase 295).
 let readers: ModelCap.readers =
@@ -124,6 +126,7 @@ let readers: ModelCap.readers =
         fun lo hi s -> Space.validate (FloatRange(System.Double.Parse(lo, inv), System.Double.Parse(hi, inv))) s
       ModelCap.readers.str_len = fun s -> bigint s.Length
       ModelCap.readers.kind_of = fun s -> toMOpt (Space.slotKindOf s)
+      ModelCap.readers.doc_ok = fun s -> (Space.documentOf s).IsSome
       ModelCap.readers.float_fault =
         fun lo hi ->
             match Space.wellFormed (FloatRange(System.Double.Parse(lo, inv), System.Double.Parse(hi, inv))) with

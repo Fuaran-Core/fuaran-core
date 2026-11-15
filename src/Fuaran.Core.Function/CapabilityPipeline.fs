@@ -24,6 +24,7 @@ module CapabilityPipeline =
         | Enum _ -> "enum"
         | AnyString -> "anyString"
         | SlotTree _ -> "slotTree"
+        | Document _ -> "document"
 
     /// Does a producer output value-space feed a consumer arg value-space — every value the producer
     /// can emit is acceptable to the consumer? THE space relation, `Space.subsumes` (Phase 295), which

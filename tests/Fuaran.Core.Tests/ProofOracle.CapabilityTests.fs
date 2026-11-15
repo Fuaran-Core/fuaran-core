@@ -26,6 +26,7 @@ let private modelSpaceRender (s: ModelCap.value_space) : string =
     | ModelCap.Enum xs -> sprintf "enum{%s}" (String.concat "," xs)
     | ModelCap.AnyString -> "any"
     | ModelCap.SlotTree c -> sprintf "tree{%s}" (defaultArg (ofMOpt c) "*")
+    | ModelCap.Document c -> sprintf "document{%s}" (defaultArg (ofMOpt c) "*")
 
 /// The go-red: an int reader that reads nothing, so every int-ranged value is out of space to
 /// the model and in space to production.
@@ -218,6 +219,23 @@ let genValueFor (s: ValueSpace) (r: ConfRng.T) : string * ConfRng.T =
          elif roll < 8 then sprintf """{"kind":"%s-x"}""" kind
          elif roll < 9 then "s"
          else """{"n":1}"""),
+        r2
+    // Phase 644 — a document space: a canonical document, a second spelling of one (members out of
+    // order, white space), a list, and three strings that are no document (cut short, a repeated
+    // member, a bare word).
+    | Document _ ->
+        (if roll < 4 then
+             sprintf """{"a":%d,"b":[true,"x"]}""" k
+         elif roll < 6 then
+             sprintf """{ "b" : [ true, "x" ], "a" : %d }""" k
+         elif roll < 7 then
+             sprintf "[%d,2.50]" k
+         elif roll < 8 then
+             """{"a":1"""
+         elif roll < 9 then
+             """{"a":1,"a":2}"""
+         else
+             "s"),
         r2
 
 /// An argument set for an artifact's holes: three draws in four bind a hole (with a value for

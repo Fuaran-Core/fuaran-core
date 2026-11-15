@@ -68,7 +68,8 @@ module OmitWhenEmptyIdl =
           NodeFields = []
           Ops = []
           Wire = WireShape.Default
-          Harden = HardenPolicy.Undeclared }
+          Harden = HardenPolicy.Undeclared
+          Contracts = [] }
 
     /// The same vocabulary declaring nothing: every member an ordinary `Optional` list.
     let plain: Idl =

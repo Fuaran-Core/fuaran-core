@@ -604,19 +604,6 @@ module Declare =
                                   k.Tag
                                   f.Name) ]
 
-    /// Whether `s` is a name every backend can spell bare as an identifier: an ASCII letter
-    /// or `_`, then ASCII letters, digits and `_`. Every declared NAME the generators emit
-    /// as an identifier (a kind or op tag, a type name, a case, a field, a type parameter)
-    /// is held to it — an identifier cannot be escaped, so a name that is not one is a
-    /// splice of source text into the generated module.
-    let private isIdentifier (s: string) : bool =
-        let letter (c: char) =
-            (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c = '_'
-
-        s.Length > 0
-        && letter s[0]
-        && s |> Seq.forall (fun c -> letter c || (c >= '0' && c <= '9'))
-
     /// Whether `s` holds an unpaired surrogate — text with no UTF-8 encoding, so no canonical
     /// bytes, and no spelling in an F# or F* literal.
     let private illFormed (s: string) : bool = not (SourceLit.isWellFormed s)
@@ -863,7 +850,7 @@ module Declare =
         /// Each name at its own path; a name declared more than once, at every repeat after the first.
         let nameErrors (what: string) (names: (PathSegment list * string) list) : VocabularyFault list =
             [ for path, n in names do
-                  if not (isIdentifier n) then
+                  if not (Contract.isIdentifier n) then
                       fault
                           path
                           (sprintf
@@ -899,7 +886,7 @@ module Declare =
                   if not (List.isEmpty tail) then
                       let path = fieldAt j @ tail
 
-                      if not (isIdentifier n) then
+                      if not (Contract.isIdentifier n) then
                           fault
                               path
                               (sprintf
@@ -1216,7 +1203,7 @@ module Declare =
               // A case NAME is the host identifier; its WIRE string is data, escaped where
               // it is spliced, and held only to well-formedness.
               for c, name in List.indexed e.Cases do
-                  if not (isIdentifier name) then
+                  if not (Contract.isIdentifier name) then
                       fault
                           (at @ [ key (hostCasesOf e); item c ])
                           (sprintf "%s: case '%s' is not an identifier" owner name)
@@ -1319,4 +1306,26 @@ module Declare =
               if List.length earlier = 1 then
                   fault
                       [ key "harden"; key "transparentUnions"; item k ]
-                      (sprintf "harden policy: union '%s' declares more than one transparent case" name) ]
+                      (sprintf "harden policy: union '%s' declares more than one transparent case" name)
+
+          // Phase 644 — contracts. The names a method's types use are held to the vocabulary as a
+          // field's are; the contract's own rules are `Contract.faults`, each a named refusal.
+          for i, c in List.indexed idl.Contracts do
+              for j, m in List.indexed c.Methods do
+                  let at = sprintf "method '%s'" (Contract.methodName c.Name m.Id)
+                  let mAt = [ key "contracts"; item i; key "methods"; item j ]
+
+                  for k, a in List.indexed m.Arguments do
+                      yield!
+                          typeErrors
+                              (mAt @ [ key "arguments"; item k; key "type" ])
+                              (sprintf "%s: argument '%s'" at a.Name)
+                              []
+                              a.Type
+
+                  match m.Result with
+                  | Some t -> yield! typeErrors (mAt @ [ key "result" ]) (at + ": its result") [] t
+                  | None -> ()
+
+          for path, f in Contract.faults idl do
+              fault path (ContractFault.describe f) ]

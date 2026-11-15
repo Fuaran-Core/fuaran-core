@@ -24,12 +24,12 @@ module internal RegistrySeamLaws =
         FunctionRegistry.entry { c with Result = treeOf kind }
 
     /// A small value space, drawn so that related and unrelated pairs both occur: tight bounds, a
-    /// shared enum alphabet, both tree constraints.
+    /// shared enum alphabet, both tree constraints, both document constraints.
     let internal drawSpace (rng: LawKit.Draws) : ValueSpace =
         let lo = rng.IntBelow 6
         let hi = lo + rng.IntBelow 6
 
-        match rng.IntBelow 7 with
+        match rng.IntBelow 9 with
         | 0 -> IntRange(lo, hi)
         | 1 -> FloatRange(float lo, float hi + 0.5)
         | 2 -> StringLen(lo, hi)
@@ -40,7 +40,9 @@ module internal RegistrySeamLaws =
             )
         | 4 -> AnyString
         | 5 -> SlotTree None
-        | _ -> SlotTree(Some(rng.Choose [ "para"; "table" ]))
+        | 6 -> SlotTree(Some(rng.Choose [ "para"; "table" ]))
+        | 7 -> Document None
+        | _ -> Document(Some(rng.Choose [ "order"; "receipt" ]))
 
     /// Candidate values for a space: some inside it, some at and past its edges, so the soundness
     /// check meets both answers.
@@ -55,6 +57,7 @@ module internal RegistrySeamLaws =
         | Enum xs -> xs @ [ "a"; "zz" ]
         | AnyString -> [ ""; "5"; "a" ]
         | SlotTree _ -> [ "{\"kind\":\"para\"}"; "{\"kind\":\"table\"}"; "5" ]
+        | Document _ -> [ "{\"a\":1}"; "[1,2]"; "{\"a\":1"; "{\"a\":1,\"a\":2}"; "5" ]
 
 
     /// The signature-typed registry laws (Phase 50) — the teeth on `FunctionEntry` / `FunctionRegistry`

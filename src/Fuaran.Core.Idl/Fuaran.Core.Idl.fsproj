@@ -35,10 +35,12 @@
     <Compile Include="Encode.fs" />
     <Compile Include="FloatToken.fs" />
     <Compile Include="Decode.fs" />
+    <Compile Include="Contract.fs" />
     <Compile Include="Declare.fs" />
     <Compile Include="Sanitize.fs" />
     <Compile Include="Sample.fs" />
     <Compile Include="Artifact.fs" />
+    <Compile Include="ContractProjection.fs" />
     <!-- Phase 702 — the vocabulary-change PROPOSAL document: its reader, its
          admissibility checks, and `applyDelta`, which returns a new `Idl` value and
          never writes one. The model half deliberately: a proposal is data about a
@@ -49,6 +51,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Fuaran.Core.Wire\Fuaran.Core.Wire.fsproj" />
+    <ProjectReference Include="..\Fuaran.Core.Function\Fuaran.Core.Function.fsproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- Phase 388: the declaration lookups (`IdlLookup`) are the code generator's too — one body,

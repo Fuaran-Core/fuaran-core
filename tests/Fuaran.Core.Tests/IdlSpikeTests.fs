@@ -925,7 +925,8 @@ module private SecondVocabulary =
           NodeFields = []
           Ops = []
           Wire = WireShape.Default
-          Harden = HardenPolicy.Undeclared }
+          Harden = HardenPolicy.Undeclared
+          Contracts = [] }
 
     let tags = [ "Trip"; "Bag"; "Item" ]
 

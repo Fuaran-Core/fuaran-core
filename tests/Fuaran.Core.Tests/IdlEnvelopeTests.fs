@@ -129,7 +129,8 @@ let private envelopeIdl: Idl =
           hostOnly "extraAttributes" (TFn attributesSlot) ]
       Ops = []
       Wire = WireShape.Default
-      Harden = HardenPolicy.Undeclared }
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }
 
 /// The same envelope with a REQUIRED member carrying a declared `IdlDefault` — the
 /// Phase 195 shape, addressed by the empty `IdlDefault.Kind`.

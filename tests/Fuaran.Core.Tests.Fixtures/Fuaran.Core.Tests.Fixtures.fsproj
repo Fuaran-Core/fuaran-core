@@ -37,6 +37,7 @@
     <Compile Include="WiderDefaultsIdl.fs" />
     <Compile Include="IdlClassifyFixtures.fs" />
     <Compile Include="IdentityIdl.fs" />
+    <Compile Include="ContractsIdl.fs" />
     <Compile Include="CertificationVectors.fs" />
     <Compile Include="FStarModels.fs" />
     <Compile Include="GeneratedModules.fs" />

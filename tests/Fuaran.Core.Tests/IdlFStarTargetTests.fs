@@ -64,7 +64,8 @@ let private tinyIdl (fieldType: IdlType) (opt: Optionality) : Idl =
       // an override that existed only to drop the default's one entry. With the
       // default retired the override has nothing to say, and the vocabulary declares
       // outright what it always meant — no gated kind, no transparent case.
-      Harden = HardenPolicy.Undeclared }
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }
 
 let private refusalOf (t: IdlType) =
     match FStarTarget.vocabularyModule "M" (tinyIdl t Required) [ "Only" ] with
@@ -280,7 +281,8 @@ let private uiScaleIdl: Idl =
       // an override that existed only to drop the default's one entry. With the
       // default retired the override has nothing to say, and the vocabulary declares
       // outright what it always meant — no gated kind, no transparent case.
-      Harden = HardenPolicy.Undeclared }
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }
 
 /// Phase 204 — the synthetic vocabulary Phase 182's probe measured the MODEL at: one kind, `Grid`,
 /// carrying `k` optional string members and one always-emitted member that sorts after them.

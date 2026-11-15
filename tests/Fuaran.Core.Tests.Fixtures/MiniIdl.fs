@@ -22,7 +22,8 @@ open Fuaran.Core.Idl
 
 /// The mini UI IDL — the canonical source the codec is driven from.
 let miniIdl: Idl =
-    { Enums =
+    { Contracts = []
+      Enums =
         [ Declare.enumOf "HeadingVariant" [ "Standard"; "Subtle"; "Display" ]
           Declare.enumOf "BadgeVariant" [ "Info"; "Success"; "Warning"; "Critical"; "Neutral" ]
           Declare.enumOf "ButtonVariant" [ "Primary"; "Secondary"; "Ghost"; "Danger" ]

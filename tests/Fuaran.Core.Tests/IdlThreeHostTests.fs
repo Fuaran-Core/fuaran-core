@@ -1349,7 +1349,8 @@ module private Seam550 =
           NodeFields = []
           Ops = []
           Wire = WireShape.Default
-          Harden = HardenPolicy.Undeclared }
+          Harden = HardenPolicy.Undeclared
+          Contracts = [] }
 
     /// The host declarations the codec-only module is generated against: one with qualified access,
     /// one without, a generic, a record, and the two host codecs.

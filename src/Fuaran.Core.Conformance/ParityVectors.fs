@@ -377,7 +377,8 @@ let private sVocab (kinds: Fuaran.Core.Idl.IdlKind list) (enums: Fuaran.Core.Idl
        NodeFields = []
        Ops = []
        Wire = Fuaran.Core.Idl.WireShape.Default
-       Harden = Fuaran.Core.Idl.HardenPolicy.Undeclared }
+       Harden = Fuaran.Core.Idl.HardenPolicy.Undeclared
+       Contracts = [] }
     : Fuaran.Core.Idl.Idl)
 
 /// The DRAW vocabulary: one kind whose one field is a seven-case enum, and no envelope. A sampled

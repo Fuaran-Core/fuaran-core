@@ -155,7 +155,8 @@ let deriveIdl: Idl =
       NodeFields = [ opt "annotation" TNode ]
       Ops = [ kind "Move" "op" [ req "target" TStr; req "index" TInt ] ]
       Wire = WireShape.Default
-      Harden = HardenPolicy.Undeclared }
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }
 
 /// The module name the committed generated file declares.
 [<Literal>]

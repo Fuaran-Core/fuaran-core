@@ -878,6 +878,30 @@
     },
     {
       "members": [
+        "Idl.Contract.faults",
+        "Idl.Contract.methodAt",
+        "Idl.Contract.methodName",
+        "Idl.Contract.writes",
+        "Idl.ContractFault.describe",
+        "Idl.ContractFault.name"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Contract well-formedness: every rule a declared contract must satisfy, each a named refusal reported through `Declare.errors` and refused at parse, and a method read at a schema version; the contract tests hold one case per named refusal.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlContractTests.fs"
+    },
+    {
+      "members": [
+        "Idl.ContractProjection.capabilities",
+        "Idl.ContractProjection.capabilityOf",
+        "Idl.ContractProjection.spaceOf",
+        "Idl.ContractProjection.typeText"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "The projection of a contract method onto a capability: a total map over a well-formed vocabulary, whose laws (distinct ids, the holes in argument order, the method's result and effect class, one capability per method, a canonical value of every type a member of its declared space) the contract tests state over a fixture reaching every type. What a projected capability then does at the registry is `proofs/Capability.fst`'s.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlContractTests.fs"
+    },
+    {
+      "members": [
         "Idl.Declare.errors"
       ],
       "class": "measured-elsewhere",

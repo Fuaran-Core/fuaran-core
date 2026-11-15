@@ -972,7 +972,13 @@ let genSpace (r: ConfRng.T) : ValueSpace * ConfRng.T =
     | 1 -> FloatRange(float lo / 2.0, float (lo + span) / 2.0 + 0.5), r3
     | 2 -> StringLen(lo, lo + span), r3
     | 3 -> Enum [ "a"; "b" ], r3
-    | 4 -> AnyString, r3
+    // Phase 644 — two draws in five of this arm are a document space, unconstrained and constrained.
+    | 4 ->
+        (match span with
+         | 3 -> Document None
+         | 4 -> Document(Some "order")
+         | _ -> AnyString),
+        r3
     // Phase 307 — the declarations the admission gate refuses or ranks: a negative range, an
     // empty one, a NaN or infinite bound, bounds past 2^53, an empty enum, a count past the cap.
     | 5 -> IntRange(-(lo + 1), span), r3

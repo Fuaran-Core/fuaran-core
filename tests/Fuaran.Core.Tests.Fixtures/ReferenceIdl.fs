@@ -94,7 +94,8 @@ let private series: IdlType =
 // ---------------------------------------------------------------------------
 
 let refIdl: Idl =
-    { Kinds =
+    { Contracts = []
+      Kinds =
         [ kind
               "Embed"
               "meta"

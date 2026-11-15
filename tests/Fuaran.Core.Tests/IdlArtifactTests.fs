@@ -431,6 +431,17 @@ let private offDefaults: Idl =
             Doc = Some "noted" }
 
     { refIdl with
+        // Phase 644 — one method away from every default a method's members are omitted at.
+        Contracts =
+            [ { Name = "notes"
+                Doc = None
+                Methods =
+                  [ { ContractsIdl.method "find" [ ContractsIdl.arg "text" TStr ] (Some TStr) [ "reader" ] with
+                        Shape = MethodShape.Job
+                        Destination = true
+                        ReadPolicy = MethodReadPolicy.Cached 5
+                        Idempotent = true
+                        Record = { Arguments = true; Result = true } } ] } ]
         Kinds =
             [ { Tag = "Note"
                 Category = "content"
@@ -542,6 +553,7 @@ let private offDefaults: Idl =
 /// The same vocabulary AT every default the omit table names.
 let private atDefaults: Idl =
     { offDefaults with
+        Contracts = []
         Kinds =
             offDefaults.Kinds
             |> List.map (fun k ->

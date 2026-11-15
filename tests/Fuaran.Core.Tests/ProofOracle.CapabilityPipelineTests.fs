@@ -161,6 +161,7 @@ let private validValueFor (s: ValueSpace) : string =
     | Enum [] -> "zz"
     | AnyString -> "v"
     | SlotTree c -> sprintf """{"kind":"%s"}""" (defaultArg c "k0")
+    | Document _ -> """{"a":1}"""
 
 /// A registry on both sides holding up to the three pool ids, each tried up to three times so
 /// most registries hold all of them (the admission gate refuses a good share of the draws).

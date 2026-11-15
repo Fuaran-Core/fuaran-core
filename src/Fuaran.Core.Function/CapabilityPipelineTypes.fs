@@ -72,7 +72,7 @@ type PipelineError =
     /// and following each `FromNode` edge to its upstream; a self-edge is `[node]`.
     | PipelineCycle of node: string * cycle: string list
     /// The upstream's output space does not fit argument `arg` of `node`. `producer` and `consumer`
-    /// name only the space FAMILIES (`int`, `float`, `string`, `enum`, `anyString`, `slotTree`), so a
+    /// name only the space FAMILIES (`int`, `float`, `string`, `enum`, `anyString`, `slotTree`, `document`), so a
     /// bounds mismatch inside one family reads as e.g. `int` against `int`.
     | EdgeTypeMismatch of node: string * arg: string * producer: string * consumer: string
     /// An acyclic edge that points FORWARD in declaration order (Phase 295) — the pipeline is not in

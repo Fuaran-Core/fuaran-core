@@ -116,4 +116,5 @@ let docIdl: Idl =
         { Discriminator = "kind"
           NodeEnvelope = NodeEnvelopeShape.FlatKind
           KeyOrder = KeyOrder.Declared }
-      Harden = HardenPolicy.Undeclared }
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }

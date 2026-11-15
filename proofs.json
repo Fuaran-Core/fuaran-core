@@ -3517,7 +3517,7 @@
     {
       "id": "capability-scalar-readers-abstract",
       "level": "assumed",
-      "statement": "THE READERS PREMISE. `Space.validate` and `Space.wellFormed` reach for five host functions — `Space.readInt` (an optional `-` and decimal digits under the INVARIANT culture, `Json.readInt32`, no `+`, no white space, no culture's own minus sign), `Space.readFloat` against a float range, `String.Length`, `Space.slotKindOf`, and `Space.wellFormed`'s float case (`float_fault`: a NaN or infinite carrier, else an empty range) — and the model takes them as a `readers` record: the space vocabulary, the clause structure of `validate`, `space_wf` and `is_count` are modelled, the lexical parsers are not, and a float range's two bounds cross as opaque carriers (the round-trip `R` format). The premise the theorems spend is that each reader is a function of the STRING alone, which production honours; the differential holds it by running under he-IL. The differential instantiates the readers at production's own calls (`int_of` through `Space.canonical`), so the envelope is compared and the parsers are exercised, not modelled; `ParityVectors` pins the reader's answer on `-5`, U+2212 `5`, ` 5`, `+5` and `1e999` on both pipelines.",
+      "statement": "THE READERS PREMISE. `Space.validate` and `Space.wellFormed` reach for six host functions — `Space.readInt` (an optional `-` and decimal digits under the INVARIANT culture, `Json.readInt32`, no `+`, no white space, no culture's own minus sign), `Space.readFloat` against a float range, `String.Length`, `Space.slotKindOf`, `Space.documentOf` (`doc_ok`: whether the string is well-formed JSON with a canonical rendering of its own) and `Space.wellFormed`'s float case (`float_fault`: a NaN or infinite carrier, else an empty range) — and the model takes them as a `readers` record: the space vocabulary, the clause structure of `validate`, `space_wf` and `is_count` are modelled, the lexical parsers are not, and a float range's two bounds cross as opaque carriers (the round-trip `R` format). The premise the theorems spend is that each reader is a function of the STRING alone, which production honours; the differential holds it by running under he-IL. The differential instantiates the readers at production's own calls (`int_of` through `Space.canonical`), so the envelope is compared and the parsers are exercised, not modelled; `ParityVectors` pins the reader's answer on `-5`, U+2212 `5`, ` 5`, `+5` and `1e999` on both pipelines.",
       "boundary": "Every theorem about validation is about the ENVELOPE — which entry a value is checked against, which refusal names it, that the body waits on the answer — and nothing about whether \"12\" is in `[0, 10]`. Permanent: modelling the two numeral grammars is a lexical model, which is `JsonParse.fst`'s cost and not `Capability.fst`'s. The witness (`Holes` / `Effect` / `Bind` / `KindTag` / `Children` / `preorder` / the node id) is the model's other parameter and is the standing `lawful-abstract-witness` obligation, not a second row here.",
       "phase": "fuaran-core#177",
       "class": "model-bridge",
@@ -5380,7 +5380,7 @@
     {
       "id": "function-registry-result-is-capability-result",
       "level": "proved",
-      "statement": "`registry_result_is_capability_result`: a function registry entry states no result of its own. A query naming result kind `k` matches an entry exactly when its capability declares a tree of kind `k` (`Returns.Value(SlotTree(Some k))`), and the result index a query narrows through files an id under `k` exactly when an entry registered under that id has a capability declaring one, whatever order the entries were filed in.",
+      "statement": "`registry_result_is_capability_result`: a function registry entry states no result of its own. A query naming result `k` matches an entry exactly when its capability declares a tree of kind `k` (`Returns.Value(SlotTree(Some k))`) or a document of type `k` (`Returns.Value(Document(Some k))`), and the result index a query narrows through files an id under `k` exactly when an entry registered under that id has a capability declaring one of the two, whatever order the entries were filed in. Both directions are stated, so the document case is a second named result and not a looser match.",
       "boundary": "The index is modelled as an association list built by the production's `indexed` step folded over the entries; production's `Map` and `Set` are its premise. Within the model; the correspondence to production rests on the extractor (premise `extractor-and-compiler-trusted`) and the registry tests.",
       "phase": "fuaran-core#642",
       "evidence": {
@@ -5390,6 +5390,66 @@
         "operations": [
           "FunctionRegistry.findBySignature",
           "FunctionRegistry.register"
+        ]
+      }
+    },
+    {
+      "id": "document-family-closed",
+      "level": "proved",
+      "statement": "`document_family_closed`: the document spaces are a family of their own in the space relation. Wherever `Space.subsumes required available` holds, `required` is a document space exactly when `available` is: no scalar space and no tree space admits a document, and no document space admits either.",
+      "boundary": "Within the model; the correspondence to production rests on the differential and the extractor (premise `extractor-and-compiler-trusted`).",
+      "phase": "fuaran-core#644",
+      "evidence": {
+        "theorem": "document_family_closed",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Space.subsumes"
+        ]
+      }
+    },
+    {
+      "id": "document-relation-exact",
+      "level": "proved",
+      "statement": "`document_relation_exact`: inside the document family the relation is the trees' rule and nothing else. `Document r` admits `Document a` exactly when `r` names no type or names the type `a` names; the names are compared and never read.",
+      "boundary": "Within the model; the correspondence to production rests on the differential and the extractor (premise `extractor-and-compiler-trusted`).",
+      "phase": "fuaran-core#644",
+      "evidence": {
+        "theorem": "document_relation_exact",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Space.subsumes"
+        ]
+      }
+    },
+    {
+      "id": "document-membership-is-shape",
+      "level": "proved",
+      "statement": "`document_membership_is_shape`: a document is a member by its shape alone. `Space.validate (Document c) v` is the `doc_ok` reader's answer on `v` whatever `c` is, so every document space has the same members and the carried type name is never read.",
+      "boundary": "The reader itself (`Space.documentOf`: the JSON parser and the cross-host canonical renderer) is the readers premise `capability-scalar-readers-abstract`; this theorem is about which reader is asked and that the type name is not. Within the model; the correspondence to production rests on the differential and the extractor (premise `extractor-and-compiler-trusted`).",
+      "phase": "fuaran-core#644",
+      "evidence": {
+        "theorem": "document_membership_is_shape",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Space.documentOf"
+        ]
+      }
+    },
+    {
+      "id": "document-subsumes-sound",
+      "level": "proved",
+      "statement": "`document_subsumes_sound`: the relation is sound on the document family. Where a document space is required and `Space.subsumes required available` holds, every value of the available space is a value of the required one, with no premise about the readers.",
+      "boundary": "Soundness of the relation over the scalar families is certified by the conformance laws over drawn spaces, not by this theorem. Within the model; the correspondence to production rests on the differential and the extractor (premise `extractor-and-compiler-trusted`).",
+      "phase": "fuaran-core#644",
+      "evidence": {
+        "theorem": "document_subsumes_sound",
+        "model": "proofs/Capability.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Space.subsumes"
         ]
       }
     },

@@ -251,7 +251,8 @@ let build (vectors: DecodeVector list) : Idl * (int * DecodeVector) list * (Deco
             { Discriminator = "kind"
               NodeEnvelope = NodeEnvelopeShape.FlatKind
               KeyOrder = KeyOrder.Sorted }
-          Harden = HardenPolicy.Undeclared }
+          Harden = HardenPolicy.Undeclared
+          Contracts = [] }
 
     idl, covered, excluded
 

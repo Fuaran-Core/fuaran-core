@@ -1000,6 +1000,12 @@ module Function =
             @ (match c with
                | Some k -> [ "description", JStr("slot of kind: " + k) ]
                | None -> [])
+        // A document is any JSON value, so it projects NO `type` keyword: a schema that said
+        // `object` would refuse a list, and the type's own schema is its owner's to emit.
+        | Document c ->
+            match c with
+            | Some t -> [ "description", JStr("document of type: " + t) ]
+            | None -> []
 
     /// The JSON-Schema property for one signature entry. A slot hole projects an `object`
     /// carrying its kind-constraint in `description` (a tree-typed argument has no scalar JSON

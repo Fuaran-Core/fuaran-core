@@ -211,7 +211,8 @@ module InvokeError =
 /// accepted instead of parsing the string again. `IntRange` arguments arrive as `IntValue`,
 /// `FloatRange` as `FloatValue`, `StringLen` / `Enum` / `AnyString` as `TextValue`, and a
 /// `SlotTree` argument as `TreeValue`, the parsed wire document (decoding it into the domain's node
-/// stays the host's, per the witness pattern).
+/// stays the host's, per the witness pattern), and a `Document` argument as `DocumentValue`, the
+/// parsed JSON document (decoding it into its type stays the type's owner's).
 type ArgValue =
     /// An `IntRange` argument, within its bounds.
     | IntValue of int
@@ -221,6 +222,8 @@ type ArgValue =
     | TextValue of string
     /// A `SlotTree` argument, parsed but not decoded into any domain node.
     | TreeValue of JVal
+    /// A `Document` argument (Phase 644), parsed but not decoded into any type.
+    | DocumentValue of JVal
 
 /// The invocable-capability surface: the typed registry (populate + enumerate + dispatch), the
 /// arg-validation contract, the Phase 27 capture keying, and the wire codec. Additive over the
@@ -356,6 +359,8 @@ module Capability =
     /// argument is a wire document (a `"kind"`-tagged object) whose kind satisfies the constraint —
     /// a tree of the wrong kind is `ArgOutOfSpace` naming the addr and the `SlotTree` constraint,
     /// and an argument that is no tree at all (a scalar, a malformed document) is `UninvocableArg`.
+    /// A hole in a `Document` space (Phase 644) has no such second refusal: a string that is no document is
+    /// `ArgOutOfSpace` carrying the space, whose description says what would be accepted.
     /// A spaceless entry (an action hole) stays `UninvocableArg` for every argument. The host validates this
     /// before running any body (default-deny by shape, FGP 3). `Required` is checked as the hole's
     /// PRESENCE among the args, which here is presence of a value: an arg is a string checked
@@ -486,6 +491,10 @@ module Capability =
         | Some(SlotTree _) ->
             match Json.parse value with
             | Ok el -> Some(TreeValue el)
+            | Error _ -> None
+        | Some(Document _) ->
+            match Json.parse value with
+            | Ok el -> Some(DocumentValue el)
             | Error _ -> None
         | None -> None
 

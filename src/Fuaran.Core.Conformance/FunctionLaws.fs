@@ -280,6 +280,15 @@ module internal FunctionLaws =
                     Json.render (Json.kindObj kind [ "n", JInt k ]), r'),
                 None
             )
+        // A document space (Phase 644) samples JSON documents in their canonical text; the type name
+        // is carried and never read, so the sample does not depend on it. Unbounded, so no finite size.
+        | Document _ ->
+            SampledDom(
+                (fun r ->
+                    let k, r' = ConfRng.intBelow 1000 r
+                    Canonical.write Rendering.CrossHost (JObj [ "n", JInt k ]), r'),
+                None
+            )
 
     /// Property-verify an artifact-function by deriving the param space from its holes' value-spaces
     /// (Phase 48) — the symbolic / bounded mode. Value / repeat holes are enumerated **exhaustively**

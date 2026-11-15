@@ -1179,7 +1179,8 @@ module internal Projected =
           NodeFields = []
           Ops = []
           Wire = WireShape.Default
-          Harden = HardenPolicy.Undeclared }
+          Harden = HardenPolicy.Undeclared
+          Contracts = [] }
 
     let idl = idlWith gateWire
 
@@ -1922,7 +1923,8 @@ module private NullChecked =
           NodeFields = [ field "hidden" (binding TBool) Optional ]
           Ops = []
           Wire = WireShape.Default
-          Harden = HardenPolicy.Undeclared }
+          Harden = HardenPolicy.Undeclared
+          Contracts = [] }
 
     let emitted () =
         Projected.emitted (
@@ -2435,7 +2437,8 @@ module private OptionalNode =
           NodeFields = []
           Ops = []
           Wire = WireShape.Default
-          Harden = HardenPolicy.Undeclared }
+          Harden = HardenPolicy.Undeclared
+          Contracts = [] }
 
     let emitted (ds: Derivation list) =
         Projected.emitted (Gen.fsharpModuleDerived GenSupport.Empty ds "OptionalNode" idl [ "Box"; "Tip"; "Leaf" ])

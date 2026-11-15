@@ -4,11 +4,19 @@
 # and stage the baselines you meant to move BY NAME — the switch rewrites them all.
 # One ordinal-sorted line per externally-visible type, member, record field and union case.
 # See STABILITY.md "Public-surface baselines" for what each move class means.
+attribute Fuaran.Core.Idl.ArgumentConstraint RequireQualifiedAccess
+attribute Fuaran.Core.Idl.Contract RequireQualifiedAccess
+attribute Fuaran.Core.Idl.ContractFault RequireQualifiedAccess
+attribute Fuaran.Core.Idl.ContractFaultModule RequireQualifiedAccess
+attribute Fuaran.Core.Idl.ContractProjection RequireQualifiedAccess
 attribute Fuaran.Core.Idl.Declare RequireQualifiedAccess
 attribute Fuaran.Core.Idl.HostedFormat RequireQualifiedAccess
 attribute Fuaran.Core.Idl.HostedFormatModule RequireQualifiedAccess
 attribute Fuaran.Core.Idl.HostedRefusal RequireQualifiedAccess
 attribute Fuaran.Core.Idl.KeyOrder RequireQualifiedAccess
+attribute Fuaran.Core.Idl.MethodReadPolicy RequireQualifiedAccess
+attribute Fuaran.Core.Idl.MethodRefusal RequireQualifiedAccess
+attribute Fuaran.Core.Idl.MethodShape RequireQualifiedAccess
 attribute Fuaran.Core.Idl.NodeEnvelopeShape RequireQualifiedAccess
 attribute Fuaran.Core.Idl.ProposalModule RequireQualifiedAccess
 attribute Fuaran.Core.Idl.ScalarText RequireQualifiedAccess
@@ -23,15 +31,20 @@ ctor Fuaran.Core.Idl.ClosureSig..ctor(System.String, System.String, System.Strin
 ctor Fuaran.Core.Idl.Deprecation..ctor(Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.HardenPolicy..ctor(System.String, System.String, System.String, System.String, System.String, System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>)
 ctor Fuaran.Core.Idl.HostedCodec..ctor(System.String, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.IdlType>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.HostedFormat>, Fuaran.Core.Idl.HostedRefusal)
-ctor Fuaran.Core.Idl.Idl..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlKind>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlUnion>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlEnum>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlRecord>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlDefault>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlKind>, Fuaran.Core.Idl.WireShape, Fuaran.Core.Idl.HardenPolicy)
+ctor Fuaran.Core.Idl.Idl..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlKind>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlUnion>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlEnum>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlRecord>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlDefault>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlKind>, Fuaran.Core.Idl.WireShape, Fuaran.Core.Idl.HardenPolicy, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlContract>)
+ctor Fuaran.Core.Idl.IdlArgument..ctor(System.String, Fuaran.Core.Idl.IdlType, Fuaran.Core.Idl.Optionality, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.ArgumentConstraint>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
+ctor Fuaran.Core.Idl.IdlContract..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlMethod>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.IdlDefault..ctor(System.String, System.String, Fuaran.Core.Idl.IdlValue)
 ctor Fuaran.Core.Idl.IdlEnum..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Idl.Annotations>>, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>>, Fuaran.Core.Idl.Annotations)
 ctor Fuaran.Core.Idl.IdlField..ctor(System.String, Fuaran.Core.Idl.IdlType, Fuaran.Core.Idl.Optionality, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.PresenceCondition>, Fuaran.Core.Idl.Annotations, System.Boolean)
 ctor Fuaran.Core.Idl.IdlKind..ctor(System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Fuaran.Core.Idl.Annotations)
+ctor Fuaran.Core.Idl.IdlMethod..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlArgument>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.IdlType>, Fuaran.Core.Idl.MethodShape, Fuaran.Core.EffectClass, System.Boolean, Fuaran.Core.Idl.MethodReadPolicy, System.Boolean, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Fuaran.Core.Idl.MethodRecord, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.MethodRateLimit>, Microsoft.FSharp.Collections.FSharpList`1<System.Int32>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
 ctor Fuaran.Core.Idl.IdlRecord..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Fuaran.Core.Idl.Annotations, System.Boolean)
 ctor Fuaran.Core.Idl.IdlUnion..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlUnionCase>, Fuaran.Core.Idl.Annotations, Fuaran.Core.Idl.UnionTagRule, Fuaran.Core.Idl.UnionDiscrimination)
 ctor Fuaran.Core.Idl.IdlUnionCase..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Fuaran.Core.Idl.Annotations, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.HostedCodec>)
 ctor Fuaran.Core.Idl.KeyedCase..ctor(System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Idl.IdlValue>>)
+ctor Fuaran.Core.Idl.MethodRateLimit..ctor(System.Int32, System.Int32)
+ctor Fuaran.Core.Idl.MethodRecord..ctor(System.Boolean, System.Boolean)
 ctor Fuaran.Core.Idl.Proposal..ctor(System.String, System.String, System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ProposalDelta>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ProposalFixture>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ProposalEvidence>, System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ProposalAlternative>, System.String, System.String)
 ctor Fuaran.Core.Idl.ProposalAlternative..ctor(System.String, System.String, System.String)
 ctor Fuaran.Core.Idl.ProposalEvidence..ctor(System.String, System.String, System.String, System.Int32, System.String)
@@ -39,7 +52,35 @@ ctor Fuaran.Core.Idl.ProposalFixture..ctor(System.String, System.String)
 ctor Fuaran.Core.Idl.Sample+SampleFault..ctor(System.String, System.String)
 ctor Fuaran.Core.Idl.VocabularyFault..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PathSegment>, System.String)
 ctor Fuaran.Core.Idl.WireShape..ctor(System.String, Fuaran.Core.Idl.NodeEnvelopeShape, Fuaran.Core.Idl.KeyOrder)
+field Fuaran.Core.Idl.ArgumentConstraint+Tags.FloatBetween : System.Int32 (literal)
+field Fuaran.Core.Idl.ArgumentConstraint+Tags.IntBetween : System.Int32 (literal)
+field Fuaran.Core.Idl.ArgumentConstraint+Tags.LengthBetween : System.Int32 (literal)
 field Fuaran.Core.Idl.Artifact.version : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.ArgumentNameNotIdentifier : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.CacheLifetimeNotPositive : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.ConstraintMismatch : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.ContractNameNotIdentifier : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.DefaultOutOfType : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.DuplicateArgument : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.DuplicateContract : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.DuplicateMethod : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.EmptyConstraint : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.EmptyEnumeration : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.HostOnlyArgument : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.IllFormedDescription : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.InvalidatesUnknownMethod : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.MalformedAuditKind : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.MalformedAuthority : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.MalformedInvalidation : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.MalformedVersion : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.MethodIdNotIdentifier : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.NoAuthority : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.RateLimitNotPositive : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.ServesNoVersion : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.StreamWithReadPolicy : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.StreamWithoutResult : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.TypeWithoutWireForm : System.Int32 (literal)
+field Fuaran.Core.Idl.ContractFault+Tags.WriteWithCacheLifetime : System.Int32 (literal)
 field Fuaran.Core.Idl.HostedFormat+Tags.Date : System.Int32 (literal)
 field Fuaran.Core.Idl.HostedFormat+Tags.DateTime : System.Int32 (literal)
 field Fuaran.Core.Idl.HostedFormat+Tags.Uuid : System.Int32 (literal)
@@ -88,6 +129,15 @@ field Fuaran.Core.Idl.IdlValue+Tags.VStr : System.Int32 (literal)
 field Fuaran.Core.Idl.IdlValue+Tags.VUnion : System.Int32 (literal)
 field Fuaran.Core.Idl.KeyOrder+Tags.Declared : System.Int32 (literal)
 field Fuaran.Core.Idl.KeyOrder+Tags.Sorted : System.Int32 (literal)
+field Fuaran.Core.Idl.MethodReadPolicy+Tags.Cached : System.Int32 (literal)
+field Fuaran.Core.Idl.MethodReadPolicy+Tags.Invalidates : System.Int32 (literal)
+field Fuaran.Core.Idl.MethodReadPolicy+Tags.Unstated : System.Int32 (literal)
+field Fuaran.Core.Idl.MethodRefusal+Tags.UnknownContract : System.Int32 (literal)
+field Fuaran.Core.Idl.MethodRefusal+Tags.UnknownMethod : System.Int32 (literal)
+field Fuaran.Core.Idl.MethodRefusal+Tags.VersionNotServed : System.Int32 (literal)
+field Fuaran.Core.Idl.MethodShape+Tags.Call : System.Int32 (literal)
+field Fuaran.Core.Idl.MethodShape+Tags.Job : System.Int32 (literal)
+field Fuaran.Core.Idl.MethodShape+Tags.Stream : System.Int32 (literal)
 field Fuaran.Core.Idl.NodeEnvelopeShape+Tags.FlatKind : System.Int32 (literal)
 field Fuaran.Core.Idl.NodeEnvelopeShape+Tags.NestedKind : System.Int32 (literal)
 field Fuaran.Core.Idl.Optionality+Tags.HostOnly : System.Int32 (literal)
@@ -125,6 +175,16 @@ method Fuaran.Core.Idl.Artifact.parseDetailed(System.String) : Microsoft.FSharp.
 method Fuaran.Core.Idl.Artifact.render(Fuaran.Core.Idl.Idl) : System.String
 method Fuaran.Core.Idl.Artifact.renderJson(Fuaran.Core.JVal) : System.String
 method Fuaran.Core.Idl.Artifact.renderWith(Fuaran.Core.Idl.Artifact+Identity, Fuaran.Core.Idl.Idl) : System.String
+method Fuaran.Core.Idl.Contract.faults(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PathSegment>, Fuaran.Core.Idl.ContractFault>>
+method Fuaran.Core.Idl.Contract.methodAt(Fuaran.Core.Idl.Idl, System.String, System.String, System.Int32) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlMethod, Fuaran.Core.Idl.MethodRefusal>
+method Fuaran.Core.Idl.Contract.methodName(System.String, System.String) : System.String
+method Fuaran.Core.Idl.Contract.writes(Fuaran.Core.Idl.IdlMethod) : System.Boolean
+method Fuaran.Core.Idl.ContractFaultModule.describe(Fuaran.Core.Idl.ContractFault) : System.String
+method Fuaran.Core.Idl.ContractFaultModule.name(Fuaran.Core.Idl.ContractFault) : System.String
+method Fuaran.Core.Idl.ContractProjection.capabilities(Fuaran.Core.Placement, Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Capability>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.VocabularyFault>>
+method Fuaran.Core.Idl.ContractProjection.capabilityOf(Fuaran.Core.Idl.Idl, Fuaran.Core.Placement, Fuaran.Core.Idl.IdlContract, Fuaran.Core.Idl.IdlMethod) : Fuaran.Core.Capability
+method Fuaran.Core.Idl.ContractProjection.spaceOf(Fuaran.Core.Idl.Idl, Fuaran.Core.Idl.IdlType, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.ArgumentConstraint>) : Fuaran.Core.ValueSpace
+method Fuaran.Core.Idl.ContractProjection.typeText(Fuaran.Core.Idl.IdlType) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Idl.Declare.enumAnnotate(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Idl.Annotations>>, Fuaran.Core.Idl.IdlEnum) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Idl.IdlEnum, Microsoft.FSharp.Collections.FSharpList`1<System.String>>
 method Fuaran.Core.Idl.Declare.enumOf(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Fuaran.Core.Idl.IdlEnum
 method Fuaran.Core.Idl.Declare.enumWireErrors(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.VocabularyFault>
@@ -230,6 +290,7 @@ record-field Fuaran.Core.Idl.HostedCodec.FSharp #0 : System.String
 record-field Fuaran.Core.Idl.HostedCodec.Format #4 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.HostedFormat>
 record-field Fuaran.Core.Idl.HostedCodec.Refusal #5 : Fuaran.Core.Idl.HostedRefusal
 record-field Fuaran.Core.Idl.HostedCodec.Wire #3 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.IdlType>
+record-field Fuaran.Core.Idl.Idl.Contracts #9 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlContract>
 record-field Fuaran.Core.Idl.Idl.Defaults #4 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlDefault>
 record-field Fuaran.Core.Idl.Idl.Enums #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlEnum>
 record-field Fuaran.Core.Idl.Idl.Harden #8 : Fuaran.Core.Idl.HardenPolicy
@@ -239,6 +300,14 @@ record-field Fuaran.Core.Idl.Idl.Ops #6 : Microsoft.FSharp.Collections.FSharpLis
 record-field Fuaran.Core.Idl.Idl.Records #3 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlRecord>
 record-field Fuaran.Core.Idl.Idl.Unions #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlUnion>
 record-field Fuaran.Core.Idl.Idl.Wire #7 : Fuaran.Core.Idl.WireShape
+record-field Fuaran.Core.Idl.IdlArgument.Constraint #3 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.ArgumentConstraint>
+record-field Fuaran.Core.Idl.IdlArgument.Doc #4 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+record-field Fuaran.Core.Idl.IdlArgument.Name #0 : System.String
+record-field Fuaran.Core.Idl.IdlArgument.Opt #2 : Fuaran.Core.Idl.Optionality
+record-field Fuaran.Core.Idl.IdlArgument.Type #1 : Fuaran.Core.Idl.IdlType
+record-field Fuaran.Core.Idl.IdlContract.Doc #2 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+record-field Fuaran.Core.Idl.IdlContract.Methods #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlMethod>
+record-field Fuaran.Core.Idl.IdlContract.Name #0 : System.String
 record-field Fuaran.Core.Idl.IdlDefault.Field #1 : System.String
 record-field Fuaran.Core.Idl.IdlDefault.Kind #0 : System.String
 record-field Fuaran.Core.Idl.IdlDefault.Value #2 : Fuaran.Core.Idl.IdlValue
@@ -259,6 +328,20 @@ record-field Fuaran.Core.Idl.IdlKind.Annotations #3 : Fuaran.Core.Idl.Annotation
 record-field Fuaran.Core.Idl.IdlKind.Category #1 : System.String
 record-field Fuaran.Core.Idl.IdlKind.Fields #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>
 record-field Fuaran.Core.Idl.IdlKind.Tag #0 : System.String
+record-field Fuaran.Core.Idl.IdlMethod.Arguments #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlArgument>
+record-field Fuaran.Core.Idl.IdlMethod.AuditKind #10 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+record-field Fuaran.Core.Idl.IdlMethod.Authority #8 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
+record-field Fuaran.Core.Idl.IdlMethod.Destination #5 : System.Boolean
+record-field Fuaran.Core.Idl.IdlMethod.Doc #13 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
+record-field Fuaran.Core.Idl.IdlMethod.Effect #4 : Fuaran.Core.EffectClass
+record-field Fuaran.Core.Idl.IdlMethod.Id #0 : System.String
+record-field Fuaran.Core.Idl.IdlMethod.Idempotent #7 : System.Boolean
+record-field Fuaran.Core.Idl.IdlMethod.RateLimit #11 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.MethodRateLimit>
+record-field Fuaran.Core.Idl.IdlMethod.ReadPolicy #6 : Fuaran.Core.Idl.MethodReadPolicy
+record-field Fuaran.Core.Idl.IdlMethod.Record #9 : Fuaran.Core.Idl.MethodRecord
+record-field Fuaran.Core.Idl.IdlMethod.Result #2 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.IdlType>
+record-field Fuaran.Core.Idl.IdlMethod.Serves #12 : Microsoft.FSharp.Collections.FSharpList`1<System.Int32>
+record-field Fuaran.Core.Idl.IdlMethod.Shape #3 : Fuaran.Core.Idl.MethodShape
 record-field Fuaran.Core.Idl.IdlRecord.Annotations #2 : Fuaran.Core.Idl.Annotations
 record-field Fuaran.Core.Idl.IdlRecord.Fields #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>
 record-field Fuaran.Core.Idl.IdlRecord.Inline #3 : System.Boolean
@@ -276,6 +359,10 @@ record-field Fuaran.Core.Idl.IdlUnionCase.Tag #0 : System.String
 record-field Fuaran.Core.Idl.KeyedCase.Case #0 : System.String
 record-field Fuaran.Core.Idl.KeyedCase.Key #1 : System.String
 record-field Fuaran.Core.Idl.KeyedCase.Synthesised #2 : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Idl.IdlValue>>
+record-field Fuaran.Core.Idl.MethodRateLimit.Calls #0 : System.Int32
+record-field Fuaran.Core.Idl.MethodRateLimit.Seconds #1 : System.Int32
+record-field Fuaran.Core.Idl.MethodRecord.Arguments #0 : System.Boolean
+record-field Fuaran.Core.Idl.MethodRecord.Result #1 : System.Boolean
 record-field Fuaran.Core.Idl.Proposal.Alternatives #8 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.ProposalAlternative>
 record-field Fuaran.Core.Idl.Proposal.Cluster #1 : System.String
 record-field Fuaran.Core.Idl.Proposal.ConfusionPlan #10 : System.String
@@ -305,9 +392,44 @@ record-field Fuaran.Core.Idl.WireShape.Discriminator #0 : System.String
 record-field Fuaran.Core.Idl.WireShape.KeyOrder #2 : Fuaran.Core.Idl.KeyOrder
 record-field Fuaran.Core.Idl.WireShape.NodeEnvelope #1 : Fuaran.Core.Idl.NodeEnvelopeShape
 type Fuaran.Core.Idl.Annotations (record)
+type Fuaran.Core.Idl.ArgumentConstraint (union)
+type Fuaran.Core.Idl.ArgumentConstraint+FloatBetween (type)
+type Fuaran.Core.Idl.ArgumentConstraint+IntBetween (type)
+type Fuaran.Core.Idl.ArgumentConstraint+LengthBetween (type)
+type Fuaran.Core.Idl.ArgumentConstraint+Tags (type)
 type Fuaran.Core.Idl.Artifact (module)
 type Fuaran.Core.Idl.Artifact+Identity (record)
 type Fuaran.Core.Idl.ClosureSig (record)
+type Fuaran.Core.Idl.Contract (module)
+type Fuaran.Core.Idl.ContractFault (union)
+type Fuaran.Core.Idl.ContractFault+ArgumentNameNotIdentifier (type)
+type Fuaran.Core.Idl.ContractFault+CacheLifetimeNotPositive (type)
+type Fuaran.Core.Idl.ContractFault+ConstraintMismatch (type)
+type Fuaran.Core.Idl.ContractFault+ContractNameNotIdentifier (type)
+type Fuaran.Core.Idl.ContractFault+DefaultOutOfType (type)
+type Fuaran.Core.Idl.ContractFault+DuplicateArgument (type)
+type Fuaran.Core.Idl.ContractFault+DuplicateContract (type)
+type Fuaran.Core.Idl.ContractFault+DuplicateMethod (type)
+type Fuaran.Core.Idl.ContractFault+EmptyConstraint (type)
+type Fuaran.Core.Idl.ContractFault+EmptyEnumeration (type)
+type Fuaran.Core.Idl.ContractFault+HostOnlyArgument (type)
+type Fuaran.Core.Idl.ContractFault+IllFormedDescription (type)
+type Fuaran.Core.Idl.ContractFault+InvalidatesUnknownMethod (type)
+type Fuaran.Core.Idl.ContractFault+MalformedAuditKind (type)
+type Fuaran.Core.Idl.ContractFault+MalformedAuthority (type)
+type Fuaran.Core.Idl.ContractFault+MalformedInvalidation (type)
+type Fuaran.Core.Idl.ContractFault+MalformedVersion (type)
+type Fuaran.Core.Idl.ContractFault+MethodIdNotIdentifier (type)
+type Fuaran.Core.Idl.ContractFault+NoAuthority (type)
+type Fuaran.Core.Idl.ContractFault+RateLimitNotPositive (type)
+type Fuaran.Core.Idl.ContractFault+ServesNoVersion (type)
+type Fuaran.Core.Idl.ContractFault+StreamWithReadPolicy (type)
+type Fuaran.Core.Idl.ContractFault+StreamWithoutResult (type)
+type Fuaran.Core.Idl.ContractFault+Tags (type)
+type Fuaran.Core.Idl.ContractFault+TypeWithoutWireForm (type)
+type Fuaran.Core.Idl.ContractFault+WriteWithCacheLifetime (type)
+type Fuaran.Core.Idl.ContractFaultModule (module)
+type Fuaran.Core.Idl.ContractProjection (module)
 type Fuaran.Core.Idl.Declare (module)
 type Fuaran.Core.Idl.Decode (module)
 type Fuaran.Core.Idl.Deprecation (record)
@@ -320,10 +442,13 @@ type Fuaran.Core.Idl.HostedFormatModule (module)
 type Fuaran.Core.Idl.HostedRefusal (union)
 type Fuaran.Core.Idl.HostedRefusal+Tags (type)
 type Fuaran.Core.Idl.Idl (record)
+type Fuaran.Core.Idl.IdlArgument (record)
+type Fuaran.Core.Idl.IdlContract (record)
 type Fuaran.Core.Idl.IdlDefault (record)
 type Fuaran.Core.Idl.IdlEnum (record)
 type Fuaran.Core.Idl.IdlField (record)
 type Fuaran.Core.Idl.IdlKind (record)
+type Fuaran.Core.Idl.IdlMethod (record)
 type Fuaran.Core.Idl.IdlRecord (record)
 type Fuaran.Core.Idl.IdlType (union)
 type Fuaran.Core.Idl.IdlType+TEnum (type)
@@ -357,6 +482,19 @@ type Fuaran.Core.Idl.IdlValue+VUnion (type)
 type Fuaran.Core.Idl.KeyOrder (union)
 type Fuaran.Core.Idl.KeyOrder+Tags (type)
 type Fuaran.Core.Idl.KeyedCase (record)
+type Fuaran.Core.Idl.MethodRateLimit (record)
+type Fuaran.Core.Idl.MethodReadPolicy (union)
+type Fuaran.Core.Idl.MethodReadPolicy+Cached (type)
+type Fuaran.Core.Idl.MethodReadPolicy+Invalidates (type)
+type Fuaran.Core.Idl.MethodReadPolicy+Tags (type)
+type Fuaran.Core.Idl.MethodRecord (record)
+type Fuaran.Core.Idl.MethodRefusal (union)
+type Fuaran.Core.Idl.MethodRefusal+Tags (type)
+type Fuaran.Core.Idl.MethodRefusal+UnknownContract (type)
+type Fuaran.Core.Idl.MethodRefusal+UnknownMethod (type)
+type Fuaran.Core.Idl.MethodRefusal+VersionNotServed (type)
+type Fuaran.Core.Idl.MethodShape (union)
+type Fuaran.Core.Idl.MethodShape+Tags (type)
 type Fuaran.Core.Idl.NodeEnvelopeShape (union)
 type Fuaran.Core.Idl.NodeEnvelopeShape+Tags (type)
 type Fuaran.Core.Idl.Optionality (union)
@@ -399,6 +537,34 @@ type Fuaran.Core.Idl.UnionTagRule+Tags (type)
 type Fuaran.Core.Idl.VocabularyFault (record)
 type Fuaran.Core.Idl.VocabularyFaultModule (module)
 type Fuaran.Core.Idl.WireShape (record)
+union-case Fuaran.Core.Idl.ArgumentConstraint.NewFloatBetween #1(min: System.Double, max: System.Double)
+union-case Fuaran.Core.Idl.ArgumentConstraint.NewIntBetween #0(min: System.Int32, max: System.Int32)
+union-case Fuaran.Core.Idl.ArgumentConstraint.NewLengthBetween #2(min: System.Int32, max: System.Int32)
+union-case Fuaran.Core.Idl.ContractFault.NewArgumentNameNotIdentifier #17(contract: System.String, methodId: System.String, argument: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewCacheLifetimeNotPositive #11(contract: System.String, methodId: System.String, seconds: System.Int32)
+union-case Fuaran.Core.Idl.ContractFault.NewConstraintMismatch #22(contract: System.String, methodId: System.String, argument: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewContractNameNotIdentifier #0(contract: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewDefaultOutOfType #24(contract: System.String, methodId: System.String, argument: System.String, detail: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewDuplicateArgument #18(contract: System.String, methodId: System.String, argument: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewDuplicateContract #1(contract: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewDuplicateMethod #3(contract: System.String, methodId: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewEmptyConstraint #23(contract: System.String, methodId: System.String, argument: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewEmptyEnumeration #21(contract: System.String, methodId: System.String, slot: System.String, enum: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewHostOnlyArgument #19(contract: System.String, methodId: System.String, argument: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewIllFormedDescription #16(contract: System.String, owner: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewInvalidatesUnknownMethod #13(contract: System.String, methodId: System.String, target: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewMalformedAuditKind #15(contract: System.String, methodId: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewMalformedAuthority #5(contract: System.String, methodId: System.String, value: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewMalformedInvalidation #12(contract: System.String, methodId: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewMalformedVersion #7(contract: System.String, methodId: System.String, version: System.Int32)
+union-case Fuaran.Core.Idl.ContractFault.NewMethodIdNotIdentifier #2(contract: System.String, methodId: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewNoAuthority #4(contract: System.String, methodId: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewRateLimitNotPositive #14(contract: System.String, methodId: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewServesNoVersion #6(contract: System.String, methodId: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewStreamWithReadPolicy #8(contract: System.String, methodId: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewStreamWithoutResult #9(contract: System.String, methodId: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewTypeWithoutWireForm #20(contract: System.String, methodId: System.String, slot: System.String)
+union-case Fuaran.Core.Idl.ContractFault.NewWriteWithCacheLifetime #10(contract: System.String, methodId: System.String)
 union-case Fuaran.Core.Idl.HostedFormat.Date #0()
 union-case Fuaran.Core.Idl.HostedFormat.DateTime #1()
 union-case Fuaran.Core.Idl.HostedFormat.Uuid #2()
@@ -447,6 +613,15 @@ union-case Fuaran.Core.Idl.IdlValue.VClosure #10()
 union-case Fuaran.Core.Idl.IdlValue.VOpaque #11()
 union-case Fuaran.Core.Idl.KeyOrder.Declared #1()
 union-case Fuaran.Core.Idl.KeyOrder.Sorted #0()
+union-case Fuaran.Core.Idl.MethodReadPolicy.NewCached #1(seconds: System.Int32)
+union-case Fuaran.Core.Idl.MethodReadPolicy.NewInvalidates #2(methods: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
+union-case Fuaran.Core.Idl.MethodReadPolicy.Unstated #0()
+union-case Fuaran.Core.Idl.MethodRefusal.NewUnknownContract #0(contract: System.String)
+union-case Fuaran.Core.Idl.MethodRefusal.NewUnknownMethod #1(contract: System.String, methodId: System.String)
+union-case Fuaran.Core.Idl.MethodRefusal.NewVersionNotServed #2(contract: System.String, methodId: System.String, version: System.Int32, served: Microsoft.FSharp.Collections.FSharpList`1<System.Int32>)
+union-case Fuaran.Core.Idl.MethodShape.Call #0()
+union-case Fuaran.Core.Idl.MethodShape.Job #2()
+union-case Fuaran.Core.Idl.MethodShape.Stream #1()
 union-case Fuaran.Core.Idl.NodeEnvelopeShape.FlatKind #1()
 union-case Fuaran.Core.Idl.NodeEnvelopeShape.NestedKind #0()
 union-case Fuaran.Core.Idl.Optionality.HostOnly #3()

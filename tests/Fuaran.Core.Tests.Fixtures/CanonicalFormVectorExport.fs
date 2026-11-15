@@ -75,7 +75,8 @@ module CanonicalFormVectorExport =
           NodeFields = []
           Ops = []
           Wire = WireShape.Default
-          Harden = HardenPolicy.Undeclared }
+          Harden = HardenPolicy.Undeclared
+          Contracts = [] }
 
     /// The fixture's artifact identity, so the file does not carry the UI vocabulary's description.
     let private identity: Artifact.Identity =

@@ -271,7 +271,8 @@ let private probeIdl: Idl =
       NodeFields = []
       Ops = []
       Wire = WireShape.Default
-      Harden = HardenPolicy.Undeclared }
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }
 
 let private badMapField = field "bag" (TMap TStr) (OmitDefault unrenderable)
 

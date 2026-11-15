@@ -46,7 +46,8 @@ let idl: Idl =
                 f "value" TStr Required
                 f "unit" TStr (OmitDefault(VStr DefaultUnit)) ] } ]
       Wire = WireShape.Default
-      Harden = HardenPolicy.Undeclared }
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }
 
 /// The declared values of one record. `Value` is a decimal number's text, and the vocabulary admits one
 /// text per number (`DecimalText.tryCanonical`); `Unit` is `None` when the author left it out.

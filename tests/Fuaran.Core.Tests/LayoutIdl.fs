@@ -85,7 +85,8 @@ let private base' (kinds: IdlKind list) (unions: IdlUnion list) (records: IdlRec
       NodeFields = []
       Ops = []
       Wire = WireShape.Default
-      Harden = HardenPolicy.Undeclared }
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }
 
 /// The vocabulary declaring the three shapes.
 let layout: Idl =

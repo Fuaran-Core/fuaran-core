@@ -947,8 +947,136 @@ type IdlDefault =
         Value: IdlValue
     }
 
-/// The whole IDL — kinds, value-unions, enums, non-discriminated records, and
-/// field defaults. The canonical root.
+/// How a contract method is called (Phase 644). A closed vocabulary of the IDL: every host reads
+/// the same three shapes, and what a runtime does with each is the runtime's.
+[<RequireQualifiedAccess>]
+type MethodShape =
+    /// One request, one answer.
+    | Call
+    /// One request, then the declared result any number of times, in order.
+    | Stream
+    /// One request, an acknowledgement at once, and the declared result when the work ends.
+    | Job
+
+/// A bound on one argument's values (Phase 644), beside its type. A closed vocabulary: each case
+/// fits one scalar type and is stated in that type's own terms, so every host checks it alike and
+/// a contract's differ can say which of two bounds is the narrower.
+[<RequireQualifiedAccess>]
+type ArgumentConstraint =
+    /// An integer argument ([[TInt]]) lies between `min` and `max`, both inclusive.
+    | IntBetween of min: int * max: int
+    /// A float argument ([[TFloat]]) lies between `min` and `max`, both inclusive and both finite.
+    | FloatBetween of min: float * max: float
+    /// A string argument ([[TStr]]) has between `min` and `max` UTF-16 code units, both inclusive.
+    | LengthBetween of min: int * max: int
+
+/// One argument of a contract method (Phase 644).
+type IdlArgument =
+    {
+        /// The argument's name: an identifier, unique within its method. It is the address a caller
+        /// binds the value at.
+        Name: string
+        /// The argument's type. A type with no wire form (a closure, a function, an opaque host
+        /// value, a type variable) is refused: an argument crosses a boundary.
+        Type: IdlType
+        /// Whether a caller must supply it. [[Optionality.Required]]: always. [[Optionality.Optional]]:
+        /// it may be left out, and its absence is information. [[Optionality.OmitDefault]]: it may
+        /// be left out, and the declared default is the value then. [[Optionality.HostOnly]] is
+        /// refused: an argument that never crosses is not an argument.
+        Opt: Optionality
+        /// A bound on the values the type admits, or none.
+        Constraint: ArgumentConstraint option
+        /// What the argument is, for a person and for a model.
+        Doc: string option
+    }
+
+/// Whether and how a method's answers may be reused (Phase 644). A closed vocabulary of the IDL.
+[<RequireQualifiedAccess>]
+type MethodReadPolicy =
+    /// Nothing is declared: an answer is not to be reused, and a call invalidates nothing.
+    | Unstated
+    /// An answer may be reused for `seconds` (positive). A method that writes may not declare it,
+    /// and neither may a stream.
+    | Cached of seconds: int
+    /// A call makes stale the cached answers of the named methods of the same contract.
+    | Invalidates of methods: string list
+
+/// What a host may keep of one call (Phase 644): each half is permission, never a demand, and a
+/// host that records less is conformant.
+type MethodRecord =
+    {
+        /// The call's arguments may be recorded.
+        Arguments: bool
+        /// The call's result may be recorded.
+        Result: bool
+    }
+
+/// A bound on how often a method may be called (Phase 644): at most `Calls` calls in any window
+/// of `Seconds`. Whose calls are counted together (a caller, a session, everyone) is the host's.
+type MethodRateLimit =
+    {
+        /// The number of calls the window admits; positive.
+        Calls: int
+        /// The window's length in seconds; positive.
+        Seconds: int
+    }
+
+/// One method of a contract (Phase 644): declared once, and carrying everything that is true of
+/// it wherever it is called from.
+type IdlMethod =
+    {
+        /// The method's id: an identifier, unique within its contract.
+        Id: string
+        /// The arguments, in declared order. The order is part of the declaration.
+        Arguments: IdlArgument list
+        /// What the method answers, or `None` for a method that answers nothing. For a
+        /// [[MethodShape.Stream]] it is the type of ONE item, for a [[MethodShape.Job]] of the
+        /// final answer.
+        Result: IdlType option
+        /// How it is called.
+        Shape: MethodShape
+        /// Its effect class: how far it reaches into the host that runs it, and every
+        /// non-deterministic source it reads. Core's own two axes, as a capability declares them.
+        Effect: EffectClass
+        /// Whether a call hands what it is given to a party beyond the host that runs it. Which
+        /// party is the host's to say.
+        Destination: bool
+        /// Whether and how its answers may be reused.
+        ReadPolicy: MethodReadPolicy
+        /// Whether calling it twice with the same arguments has the effect of calling it once.
+        Idempotent: bool
+        /// The authority a caller needs, as values of the HOST's vocabulary: the IDL carries them
+        /// and reads none. A caller needs every one of them. The list is never empty: a method
+        /// open to every caller says so with a value its host defines.
+        Authority: string list
+        /// What a host may keep of a call.
+        Record: MethodRecord
+        /// The kind an audit trail files a call under, in the host's vocabulary, or none.
+        AuditKind: string option
+        /// A bound on how often it may be called, or none.
+        RateLimit: MethodRateLimit option
+        /// The schema versions it serves: positive, distinct, and never empty.
+        Serves: int list
+        /// What the method does, for a person and for a model.
+        Doc: string option
+    }
+
+/// A named contract (Phase 644): a set of methods a caller may invoke with typed arguments. The
+/// IDL states what a method IS; a client, a server, a protocol and a route are a runtime's, built
+/// on this declaration and never part of it.
+type IdlContract =
+    {
+        /// The contract's name: an identifier, unique within the vocabulary. With a method's id it
+        /// names the method everywhere (`<contract>.<method>`).
+        Name: string
+        /// The methods; ids are unique within the contract.
+        Methods: IdlMethod list
+        /// What the contract is for, for a person and for a model.
+        Doc: string option
+    }
+
+/// The whole IDL — kinds, value-unions, enums, non-discriminated records,
+/// field defaults, and contracts. The canonical root.
 type Idl =
     {
         /// The node kinds a [[TNode]] / [[TKind]] tag resolves against; tags are unique.
@@ -1005,4 +1133,7 @@ type Idl =
         /// [[Wire]] are: what a vocabulary CALLS the node it refuses to resolve live
         /// is a property of the domain, not of the engine.
         Harden: HardenPolicy
+        /// The contracts (Phase 644): named sets of methods, each declared once. Empty (the
+        /// default) means the vocabulary declares data only, exactly as before; names are unique.
+        Contracts: IdlContract list
     }

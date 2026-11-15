@@ -77,7 +77,8 @@ let private vocabulary unions enums records discriminator : Idl =
       Wire =
         { WireShape.Default with
             Discriminator = discriminator }
-      Harden = HardenPolicy.Undeclared }
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }
 
 /// One generated module: its vocabulary, the request, the module name and the committed file.
 type SeamModule =

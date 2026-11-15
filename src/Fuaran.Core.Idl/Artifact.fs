@@ -220,7 +220,28 @@ module Artifact =
             { idl.Harden with
                 // Addressed by union name, so the authored order carries nothing —
                 // sorted here for the same reason every other named collection is.
-                TransparentUnions = idl.Harden.TransparentUnions |> List.sortWith (fun (a, _) (b, _) -> ordinal a b) } }
+                TransparentUnions = idl.Harden.TransparentUnions |> List.sortWith (fun (a, _) (b, _) -> ordinal a b) }
+          // Phase 644 — contracts by name and their methods by id, as every named collection is. A
+          // method's ARGUMENTS keep their order, which is part of the declaration; its authority,
+          // versions and invalidated methods are sets, written in one order.
+          Contracts =
+            idl.Contracts
+            |> List.map (fun c ->
+                { c with
+                    Methods =
+                        c.Methods
+                        |> List.map (fun m ->
+                            { m with
+                                Arguments = m.Arguments |> List.map (fun a -> { a with Opt = canonOpt a.Opt })
+                                Authority = m.Authority |> List.sortWith ordinal
+                                Serves = List.sort m.Serves
+                                ReadPolicy =
+                                    match m.ReadPolicy with
+                                    | MethodReadPolicy.Invalidates ms ->
+                                        MethodReadPolicy.Invalidates(ms |> List.sortWith ordinal)
+                                    | other -> other })
+                        |> sortedBy _.Id })
+            |> sortedBy _.Name }
 
     /// Who a vocabulary IS (Phase 252) — the artifact's `name` and `description` members.
     ///
@@ -293,6 +314,48 @@ module Artifact =
               Key = "wire"
               Default = WireShape.Default
               Omits = (=) WireShape.Default }
+
+        /// Phase 644 — a vocabulary that declares no contract writes no `contracts`.
+        let contracts: Omission<IdlContract list> =
+            { Owner = "the artifact"
+              Key = "contracts"
+              Default = []
+              Omits = List.isEmpty }
+
+        /// Phase 644 — a method called once and answered once writes no `shape`.
+        let methodShape: Omission<MethodShape> =
+            { Owner = "a contract method"
+              Key = "shape"
+              Default = MethodShape.Call
+              Omits = (=) MethodShape.Call }
+
+        /// Phase 644 — a method with no destination writes no `destination`.
+        let methodDestination: Omission<bool> =
+            { Owner = "a contract method"
+              Key = "destination"
+              Default = false
+              Omits = not }
+
+        /// Phase 644 — a method that states no read policy writes no `readPolicy`.
+        let methodReadPolicy: Omission<MethodReadPolicy> =
+            { Owner = "a contract method"
+              Key = "readPolicy"
+              Default = MethodReadPolicy.Unstated
+              Omits = (=) MethodReadPolicy.Unstated }
+
+        /// Phase 644 — a method not declared idempotent writes no `idempotent`.
+        let methodIdempotent: Omission<bool> =
+            { Owner = "a contract method"
+              Key = "idempotent"
+              Default = false
+              Omits = not }
+
+        /// Phase 644 — a method of which nothing may be recorded writes no `record`.
+        let methodRecord: Omission<MethodRecord> =
+            { Owner = "a contract method"
+              Key = "record"
+              Default = { Arguments = false; Result = false }
+              Omits = (=) { Arguments = false; Result = false } }
 
         /// Phases 113/119/542 — a declaration that says nothing writes no `annotations`.
         let annotations: Omission<Annotations> =
@@ -397,7 +460,13 @@ module Artifact =
           Omit.hostedRefusal.Owner, Omit.hostedRefusal.Key
           Omit.discrimination.Owner, Omit.discrimination.Key
           Omit.synthesised.Owner, Omit.synthesised.Key
-          Omit.recordInline.Owner, Omit.recordInline.Key ]
+          Omit.recordInline.Owner, Omit.recordInline.Key
+          Omit.contracts.Owner, Omit.contracts.Key
+          Omit.methodShape.Owner, Omit.methodShape.Key
+          Omit.methodDestination.Owner, Omit.methodDestination.Key
+          Omit.methodReadPolicy.Owner, Omit.methodReadPolicy.Key
+          Omit.methodIdempotent.Owner, Omit.methodIdempotent.Key
+          Omit.methodRecord.Owner, Omit.methodRecord.Key ]
 
     /// The member `o` declares, written away from its default and read as it when absent.
     let private omitting
@@ -1235,6 +1304,193 @@ module Artifact =
         |> Codec.build
         |> declared "harden"
 
+    // ---- contracts (Phase 644) ----
+
+    /// A bound on an argument's values.
+    let private argumentConstraint: Codec<ArgumentConstraint> =
+        let between (tag: string) (c: Codec<'N>) (project: ArgumentConstraint -> ('N * 'N) option) inject =
+            Codec.case
+                tag
+                project
+                inject
+                (Codec.record (fun lo hi -> lo, hi)
+                 |> Codec.field "min" fst c
+                 |> Codec.field "max" snd c)
+
+        Codec.union
+            "$type"
+            [ between
+                  "intBetween"
+                  Codec.int
+                  (function
+                  | ArgumentConstraint.IntBetween(lo, hi) -> Some(lo, hi)
+                  | _ -> None)
+                  ArgumentConstraint.IntBetween
+              between
+                  "floatBetween"
+                  Codec.float
+                  (function
+                  | ArgumentConstraint.FloatBetween(lo, hi) -> Some(lo, hi)
+                  | _ -> None)
+                  ArgumentConstraint.FloatBetween
+              between
+                  "lengthBetween"
+                  Codec.int
+                  (function
+                  | ArgumentConstraint.LengthBetween(lo, hi) -> Some(lo, hi)
+                  | _ -> None)
+                  ArgumentConstraint.LengthBetween ]
+        |> declared "argument constraint"
+
+    let private argument: Codec<IdlArgument> =
+        (Codec.record (fun name t opt bound doc ->
+            ({ Name = name
+               Type = t
+               Opt = opt
+               Constraint = bound
+               Doc = doc }
+            : IdlArgument))
+        : CodecFields<IdlArgument, _>)
+        |> Codec.field "name" _.Name Codec.string
+        |> Codec.field "type" _.Type idlType
+        |> Codec.field "optionality" _.Opt optionality
+        |> Codec.optField "constraint" _.Constraint argumentConstraint
+        |> Codec.optField "doc" _.Doc Codec.string
+        |> Codec.build
+        |> declared "contract argument"
+
+    let private methodShape: Codec<MethodShape> =
+        Codec.enum
+            [ "call", MethodShape.Call
+              "stream", MethodShape.Stream
+              "job", MethodShape.Job ]
+        |> declared "method shape"
+
+    /// A method's effect class, in the spelling a capability declaration writes it (`host`,
+    /// `determinism`): one effect class has one wire form in this repository.
+    let private effectClass: Codec<EffectClass> =
+        Codec.ofDecoder
+            EffectCodec.toJson
+            EffectCodec.decoder
+            (JObj
+                [ "type", JStr "object"
+                  "required", JArr [ JStr "determinism"; JStr "host" ]
+                  "properties",
+                  JObj
+                      [ "determinism", JObj [ "type", JStr "string" ]
+                        "host", JObj [ "enum", JArr [ JStr "pure"; JStr "readsHost"; JStr "writesHost" ] ] ] ])
+
+    let private readPolicy: Codec<MethodReadPolicy> =
+        Codec.union
+            "$type"
+            [ bare "unstated" MethodReadPolicy.Unstated
+              single
+                  "cached"
+                  "seconds"
+                  (function
+                  | MethodReadPolicy.Cached s -> Some s
+                  | _ -> None)
+                  MethodReadPolicy.Cached
+                  Codec.int
+              single
+                  "invalidates"
+                  "methods"
+                  (function
+                  | MethodReadPolicy.Invalidates ms -> Some ms
+                  | _ -> None)
+                  MethodReadPolicy.Invalidates
+                  (Codec.list Codec.string) ]
+        |> declared "read policy"
+
+    let private methodRecord: Codec<MethodRecord> =
+        (Codec.record (fun args result -> ({ Arguments = args; Result = result }: MethodRecord))
+        : CodecFields<MethodRecord, _>)
+        |> Codec.field "arguments" _.Arguments Codec.bool
+        |> Codec.field "result" _.Result Codec.bool
+        |> Codec.build
+        |> declared "method record"
+
+    let private rateLimit: Codec<MethodRateLimit> =
+        (Codec.record (fun calls seconds -> ({ Calls = calls; Seconds = seconds }: MethodRateLimit))
+        : CodecFields<MethodRateLimit, _>)
+        |> Codec.field "calls" _.Calls Codec.int
+        |> Codec.field "seconds" _.Seconds Codec.int
+        |> Codec.build
+        |> declared "rate limit"
+
+    /// A method's result: a type, or the ONE document that says it answers nothing,
+    /// `{"$type":"nothing"}`, the spelling a capability declaration writes. The member is never
+    /// absent: a method that declares no result has declared nothing, and is refused.
+    let private methodResult: Codec<IdlType option> =
+        let nothing = Canonical.typed "nothing" []
+
+        Codec.make
+            (function
+            | Some t ->
+                match idlType.Write t with
+                | Ok j -> j
+                | Error f ->
+                    invalidOp (
+                        "Artifact: the codec refused to write a method's result: "
+                        + CodecDeclarationFault.describe f
+                    )
+            | None -> nothing)
+            (fun j ->
+                if j = nothing then
+                    Ok None
+                else
+                    idlType.ReadAll j |> Result.map Some)
+            (JObj [ "oneOf", JArr [ idlType.Schema; JObj [ "const", nothing ] ] ])
+
+    let private contractMethod: Codec<IdlMethod> =
+        (Codec.record
+            (fun id args result shape effect destination policy idempotent authority record audit rate serves doc ->
+                ({ Id = id
+                   Arguments = args
+                   Result = result
+                   Shape = shape
+                   Effect = effect
+                   Destination = destination
+                   ReadPolicy = policy
+                   Idempotent = idempotent
+                   Authority = authority
+                   Record = record
+                   AuditKind = audit
+                   RateLimit = rate
+                   Serves = serves
+                   Doc = doc }
+                : IdlMethod))
+        : CodecFields<IdlMethod, _>)
+        |> Codec.field "id" _.Id Codec.string
+        |> Codec.field "arguments" _.Arguments (Codec.list argument)
+        |> Codec.field "result" _.Result methodResult
+        |> omitting Omit.methodShape _.Shape methodShape
+        |> Codec.field "effect" _.Effect effectClass
+        |> omitting Omit.methodDestination _.Destination Codec.bool
+        |> omitting Omit.methodReadPolicy _.ReadPolicy readPolicy
+        |> omitting Omit.methodIdempotent _.Idempotent Codec.bool
+        |> Codec.field "authority" _.Authority (Codec.list Codec.string)
+        |> omitting Omit.methodRecord _.Record methodRecord
+        |> Codec.optField "auditKind" _.AuditKind Codec.string
+        |> Codec.optField "rateLimit" _.RateLimit rateLimit
+        |> Codec.field "serves" _.Serves (Codec.list Codec.int)
+        |> Codec.optField "doc" _.Doc Codec.string
+        |> Codec.build
+        |> declared "contract method"
+
+    let private contract: Codec<IdlContract> =
+        (Codec.record (fun name methods doc ->
+            ({ Name = name
+               Methods = methods
+               Doc = doc }
+            : IdlContract))
+        : CodecFields<IdlContract, _>)
+        |> Codec.field "name" _.Name Codec.string
+        |> Codec.field "methods" _.Methods (Codec.list contractMethod)
+        |> Codec.optField "doc" _.Doc Codec.string
+        |> Codec.build
+        |> declared "contract"
+
     /// The encoding version: written as [[version]], and refused by name when it is not this
     /// engine's.
     let private encodingVersion: Codec<unit> =
@@ -1252,19 +1508,21 @@ module Artifact =
     /// [[canonicalise]] FIRST, which owns every ordering decision; nothing in the codec sorts.
     let private document: Codec<Identity * Idl> =
         let c =
-            Codec.record (fun () name description kinds unions enums records defaults nodeFields ops wire harden ->
-                ({ Name = name
-                   Description = description }
-                : Identity),
-                { Kinds = kinds
-                  Unions = unions |> List.map fst
-                  Enums = enums
-                  Records = records
-                  Defaults = defaults
-                  NodeFields = nodeFields
-                  Ops = ops
-                  Wire = wire
-                  Harden = harden })
+            Codec.record
+                (fun () name description kinds unions enums records defaults nodeFields ops wire harden contracts ->
+                    ({ Name = name
+                       Description = description }
+                    : Identity),
+                    { Kinds = kinds
+                      Unions = unions |> List.map fst
+                      Enums = enums
+                      Records = records
+                      Defaults = defaults
+                      NodeFields = nodeFields
+                      Ops = ops
+                      Wire = wire
+                      Harden = harden
+                      Contracts = contracts })
             |> Codec.field "version" ignore encodingVersion
             // The vocabulary's identity (Phase 252), each member written only when declared.
             |> Codec.optField "name" (fun (i: Identity, _) -> i.Name) Codec.string
@@ -1287,6 +1545,8 @@ module Artifact =
             // before the reader could stop inferring one. `IdlArtifactTests`' reader-flip family
             // is the guard; read D40 before changing it.
             |> lenient "harden" HardenPolicy.Undeclared (fun (_, idl: Idl) -> idl.Harden) harden
+            // The contracts (Phase 644), written only when one is declared.
+            |> omitting Omit.contracts (fun (_, idl: Idl) -> idl.Contracts) (Codec.list contract)
             |> Codec.build
             |> declared "idl.json"
 

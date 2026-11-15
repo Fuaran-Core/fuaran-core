@@ -355,6 +355,7 @@ module CapabilityCodec =
             | Some "stringLen" -> [ "min"; "max" ]
             | Some "enum" -> [ "values" ]
             | Some "slotTree" -> [ "slotKind" ]
+            | Some "document" -> [ "documentType" ]
             | _ -> []
 
         Decoder.members ("$type" :: extra) el

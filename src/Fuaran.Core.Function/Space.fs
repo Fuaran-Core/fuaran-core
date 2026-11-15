@@ -10,6 +10,13 @@ namespace Fuaran.Core
 /// type, so the space is stated over the WIRE and checked by shape; decoding the document into the
 /// domain's node is the host's, per the witness pattern. `Function.signature` enters every
 /// `SlotHole` with this space, which is what makes a capability over a slotted artifact invocable.
+///
+/// `Document` (Phase 644) is the value space of a STRUCTURED value at the seam: a well-formed JSON
+/// document, carried as the argument string, with the type it is a value of carried as a string
+/// this package does not interpret, as `SlotTree` carries a kind. Membership is by shape alone (the
+/// string reads as JSON and has a canonical rendering), so there is no resolver and the type's own
+/// decoder stays its owner's. One document has one spelling: `Space.canonical` hands on its
+/// `Rendering.CrossHost` text, so two spellings of one document are one argument.
 type ValueSpace =
     /// An integer between `lo` and `hi`, both inclusive, written with no `+`, white space or fraction.
     | IntRange of lo: int * hi: int
@@ -25,6 +32,9 @@ type ValueSpace =
     /// A `"kind"`-tagged wire document, of the constrained kind when one is given; unbounded, and
     /// admitted by no scalar space.
     | SlotTree of kindConstraint: string option
+    /// A well-formed JSON document, of the named type when one is given (the name is carried, never
+    /// interpreted); unbounded, admitted by no scalar space and by no tree space.
+    | Document of typeConstraint: string option
 
 /// Why a value space is not well-formed (Phase 307) — the two ways a declared space can fail to
 /// mean anything an argument could satisfy or a codec could write back.
@@ -53,6 +63,20 @@ module Space =
             | Ok k -> Some k
             | Error _ -> None
         | _ -> None
+
+    /// The ONE spelling of a document argument (Phase 644): `Some text` when the string is a
+    /// well-formed JSON document that has a canonical rendering of its own, `text` being that
+    /// rendering under `Rendering.CrossHost` (members sorted, no white space, the pinned float layout
+    /// and string escape); `None` otherwise: text that is not JSON, a `null`, or a document holding a
+    /// repeated member, an ill-formed string or a number no finite float spells. The one reader
+    /// `Document` reaches for; it decodes nothing, and reads no type.
+    let documentOf (s: string) : string option =
+        match Json.parse s with
+        | Ok el ->
+            match Canonical.tryWrite Rendering.CrossHost el with
+            | Ok text -> Some text
+            | Error _ -> None
+        | Error _ -> None
 
     /// An integer argument as the seam reads it (Phase 295): an optional `-` and decimal digits,
     /// read under the INVARIANT culture (`Json.readInt32`) — no white space, no `+`, no culture's own
@@ -118,7 +142,8 @@ module Space =
     /// The ONE spelling a value in the space is handed on as (Phase 295), or `None` where the
     /// string is not in the space. An integer is written in its shortest decimal form (`05` and `5`
     /// are both `5`), a number in the canonical float layout (`FloatLayout.canonical`: `1.50` is
-    /// `1.5`); every other space's value is its own spelling. So one value has one spelling, and
+    /// `1.5`), a document in its cross-host canonical text (`documentOf`: `{"b":1, "a":2}` is
+    /// `{"a":2,"b":1}`); every other space's value is its own spelling. So one value has one spelling, and
     /// `Capability.invocationKey` — which keys an argument by this spelling where it lies in its
     /// hole's space — gives one value one capture key.
     let canonical (space: ValueSpace) (s: string) : string option =
@@ -139,6 +164,7 @@ module Space =
             | None, _ -> None
             | Some _, None -> Some s
             | Some k, Some c -> if k = c then Some s else None
+        | Document _ -> documentOf s
 
     /// Is a candidate value within the space? Exactly when it has a `canonical` spelling there.
     let validate (space: ValueSpace) (s: string) : bool = (canonical space s).IsSome
@@ -159,7 +185,11 @@ module Space =
     ///     space, since every argument at the seam is a string;
     ///   * the tree spaces are their own family: an unconstrained `SlotTree` admits every
     ///     `SlotTree`, a constrained one only a `SlotTree` of the same kind; no scalar space admits a
-    ///     tree and no tree space a scalar.
+    ///     tree and no tree space a scalar;
+    ///   * the document spaces are a third family, by the trees' rule (Phase 644): an unconstrained
+    ///     `Document` admits every `Document`, a constrained one only a `Document` of the same type
+    ///     name; no scalar space and no tree space admits a document, and no document space admits
+    ///     either.
     let subsumes (required: ValueSpace) (available: ValueSpace) : bool =
         match required, available with
         | IntRange(rl, rh), IntRange(al, ah) -> rl <= al && ah <= rh
@@ -171,6 +201,8 @@ module Space =
         | AnyString, (IntRange _ | FloatRange _ | StringLen _ | Enum _ | AnyString) -> true
         | SlotTree None, SlotTree _ -> true
         | SlotTree(Some rk), SlotTree(Some ak) -> rk = ak
+        | Document None, Document _ -> true
+        | Document(Some rt), Document(Some at) -> rt = at
         | _ -> false
 
     /// The largest count a repeat hole may range over (Phase 307): the declared cap a count space
@@ -183,7 +215,7 @@ module Space =
 
     /// Is the space a COUNT space (Phase 307) — the totality criterion for repeats: an `IntRange`
     /// with `0 <= lo <= hi <= maxRepeatCount`. Every other space is refused as a repeat's count:
-    /// `AnyString` and `SlotTree` are unbounded, an empty range counts nothing, and a `FloatRange`,
+    /// `AnyString`, `SlotTree` and `Document` are unbounded, an empty range counts nothing, and a `FloatRange`,
     /// `StringLen` or `Enum` is no count at all. Until Phase 307 the criterion was "neither
     /// `AnyString` nor `SlotTree`", under which `RepeatHole(FloatRange(0, infinity))` was total.
     let isCount (space: ValueSpace) : bool =
@@ -195,7 +227,7 @@ module Space =
     /// write it back? `Error SpaceFault.NonFinite` for a `FloatRange` with a NaN or infinite bound
     /// (looked for first, since NaN compares false against everything); `Error SpaceFault.Empty`
     /// for a range whose `lo` exceeds its `hi`, a `StringLen` whose `hi` is negative, or `Enum []`.
-    /// `AnyString` and every `SlotTree` are well-formed. The one space check `Signature.validate`,
+    /// `AnyString`, every `SlotTree` and every `Document` are well-formed. The one space check `Signature.validate`,
     /// the registries and the decoders run, so a declaration a seam admits has a space a value can
     /// lie in and a bound JSON can spell.
     let wellFormed (space: ValueSpace) : Result<unit, SpaceFault> =
@@ -224,12 +256,15 @@ module Space =
         | AnyString -> "any string"
         | SlotTree None -> "a tree: a JSON object with a \"kind\""
         | SlotTree(Some k) -> "a tree of kind '" + k + "': a JSON object whose \"kind\" is '" + k + "'"
+        | Document None -> "a document: well-formed JSON"
+        | Document(Some t) -> "a document of type '" + t + "': well-formed JSON"
 
 /// THE wire codec for a value space (Phase 295): one writer, `toJson`, and one reader, `decoder`,
 /// which `CapabilityCodec`, `CapabilityPipeline` and the typed refusals all go through. A space is
 /// a wire DOCUMENT in Phase 251's convention — discriminated by `"$type"` (`intRange`,
-/// `floatRange`, `stringLen`, `enum`, `anyString`, `slotTree`), its bounds as `min` / `max` for
-/// every range, an enum's members as `values`, a constrained slot's kind as `slotKind`.
+/// `floatRange`, `stringLen`, `enum`, `anyString`, `slotTree`, `document`), its bounds as `min` / `max` for
+/// every range, an enum's members as `values`, a constrained slot's kind as `slotKind`, a
+/// constrained document's type name as `documentType`.
 ///
 /// `toSchema` is a DESCRIPTOR in the substrate's `"kind"` convention and writes the descriptor
 /// spelling — `"kind"`, and a string length's bounds as `minLength` / `maxLength` — through
@@ -256,6 +291,12 @@ module SpaceCodec =
                 (match c with
                  | Some k -> [ "slotKind", JStr k ]
                  | None -> [])
+        | Document c ->
+            Canonical.typed
+                "document"
+                (match c with
+                 | Some t -> [ "documentType", JStr t ]
+                 | None -> [])
 
     /// The frozen descriptor spelling `toSchema` writes (`"kind"`; a string length's bounds as
     /// `minLength` / `maxLength`). Never a document, and never read: `decoder` refuses it.
@@ -272,6 +313,12 @@ module SpaceCodec =
                 (match c with
                  | Some k -> [ "slotKind", JStr k ]
                  | None -> [])
+        | Document c ->
+            Json.kindObj
+                "document"
+                (match c with
+                 | Some t -> [ "documentType", JStr t ]
+                 | None -> [])
 
     /// The readers by `"$type"` tag, in the order an unknown tag's refusal names them — shared with
     /// the declared result's reader (`CapabilityCodec`, Phase 642), which adds `nothing` to them.
@@ -287,7 +334,8 @@ module SpaceCodec =
           "stringLen", pair (int "min") (int "max") (fun lo hi -> StringLen(lo, hi))
           "enum", Decoder.field "values" (Decoder.list Decoder.str) |> Decoder.map Enum
           "anyString", Decoder.succeed AnyString
-          "slotTree", Decoder.optField "slotKind" Decoder.str |> Decoder.map SlotTree ]
+          "slotTree", Decoder.optField "slotKind" Decoder.str |> Decoder.map SlotTree
+          "document", Decoder.optField "documentType" Decoder.str |> Decoder.map Document ]
 
     /// Read a value space as `toJson` writes it, dispatched on `"$type"` — the ONE reader spelling
     /// (Phase 405). A document with no `"$type"`, the descriptor spelling `toSchema` writes among

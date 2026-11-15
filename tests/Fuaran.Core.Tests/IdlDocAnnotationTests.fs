@@ -110,7 +110,8 @@ let docIdl: Idl =
       NodeFields = []
       Ops = []
       Wire = WireShape.Default
-      Harden = HardenPolicy.Undeclared }
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }
 
 /// The same vocabulary with every doc removed and every other annotation kept —
 /// the BEFORE side of claim 2.

@@ -196,12 +196,17 @@ module LawVectorExport =
             | CapabilityOracle.Verdict.Unexpected -> [ "verdict", jstr "reject"; "error", jstr "unexpected" ]
 
         /// One `validateArgs` vector: the reference's verdict, and the model's on the same input.
-        let private validates (id: string) (d: Draw) (declaration: string) (args: (string * string) list) : Vector =
+        let private validates
+            (id: string)
+            (cap: Capability)
+            (declaration: string)
+            (args: (string * string) list)
+            : Vector =
             { Id = id
               Case = "validateArgs"
-              Model = CapabilityOracle.answer (verdictCells (CapabilityOracle.validateArgs d.Cap args))
+              Model = CapabilityOracle.answer (verdictCells (CapabilityOracle.validateArgs cap args))
               Input = [ "capability", jstr declaration; "args", argsJson args ]
-              Expected = verdictCells (CapabilityOracle.verdictOf (Capability.validateArgs d.Cap args)) }
+              Expected = verdictCells (CapabilityOracle.verdictOf (Capability.validateArgs cap args)) }
 
         /// Every vector for one drawn iteration — the four properties `capabilityLaws` certifies,
         /// each as an independently runnable case.
@@ -220,14 +225,18 @@ module LawVectorExport =
                 | Ok r -> CapabilityRegistry.enumerate r |> List.map _.Id
                 | Error _ -> []
 
-            [ validates (sprintf "capability-%d-accept" d.Iteration) d declaration acceptArgs
-              validates (sprintf "capability-%d-out-of-space" d.Iteration) d declaration [ "h0", outOfSpace ]
+            [ validates (sprintf "capability-%d-accept" d.Iteration) d.Cap declaration acceptArgs
+              validates (sprintf "capability-%d-out-of-space" d.Iteration) d.Cap declaration [ "h0", outOfSpace ]
               // Phase 568 — each bound of the range is pinned by a pair, one at it and one past it (the
               // D226 shape): `accept` sits at the lower bound and `out-of-space` past the upper, and these
               // two are the other halves, so a host one unit off either bound, early or late, fails one.
-              validates (sprintf "capability-%d-at-upper-bound" d.Iteration) d declaration [ "h0", string d.Hi ]
-              validates (sprintf "capability-%d-past-lower-bound" d.Iteration) d declaration [ "h0", string (d.Lo - 1) ]
-              validates (sprintf "capability-%d-unknown-arg" d.Iteration) d declaration [ "nope", inSpace ]
+              validates (sprintf "capability-%d-at-upper-bound" d.Iteration) d.Cap declaration [ "h0", string d.Hi ]
+              validates
+                  (sprintf "capability-%d-past-lower-bound" d.Iteration)
+                  d.Cap
+                  declaration
+                  [ "h0", string (d.Lo - 1) ]
+              validates (sprintf "capability-%d-unknown-arg" d.Iteration) d.Cap declaration [ "nope", inSpace ]
 
               // The captured value is the draw itself: neither side computes it, and both carry it.
               { Id = sprintf "capability-%d-invocation-key" d.Iteration
@@ -314,12 +323,16 @@ module LawVectorExport =
         /// with its declared output, type-checked against a registry holding the capability alone. No
         /// model is stamped here: the model's check runs beside production in the pipeline
         /// differential (`capability-sections-differential`), which carries its float readers.
-        let private pipelineCheck (id: string) (d: Draw) (declared: ValueSpace) : Vector =
-            let pipeline =
-                { Nodes = [ Invoke("call", d.Cap.Id, declared, [ "h0", Literal(string d.Lo) ]) ] }
+        let private pipelineCheck
+            (id: string)
+            (cap: Capability)
+            (args: (string * ArgSource) list)
+            (declared: ValueSpace)
+            : Vector =
+            let pipeline = { Nodes = [ Invoke("call", cap.Id, declared, args) ] }
 
             let lookup =
-                match CapabilityRegistry.register d.Cap CapabilityRegistry.empty with
+                match CapabilityRegistry.register cap CapabilityRegistry.empty with
                 | Ok r -> CapabilityLookup.ofRegistry r
                 | Error e -> failwithf "the drawn capability was refused: %A" e
 
@@ -337,20 +350,114 @@ module LawVectorExport =
               Case = "pipelineTypeCheck"
               Model = None
               Input =
-                [ "capability", jstr (CapabilityCodec.encode d.Cap)
+                [ "capability", jstr (CapabilityCodec.encode cap)
                   "pipeline", jstr (CapabilityPipeline.encode pipeline) ]
               Expected = expected }
 
         /// The Phase 642 vectors for one draw: the two new refusals, each beside its acceptance.
         let internal resultVectorsFor (d: Draw) : Vector list =
             let declaration = CapabilityCodec.encode d.Cap
+            let h0 (d: Draw) = [ "h0", Literal(string d.Lo) ]
 
             [ refusedDeclaration (sprintf "capability-%d-without-result" d.Iteration) (reResulted declaration None)
               refusedDeclaration
                   (sprintf "capability-%d-empty-result" d.Iteration)
                   (reResulted declaration (Some(SpaceCodec.toJson (Enum []))))
-              pipelineCheck (sprintf "capability-%d-pipeline-output-admits" d.Iteration) d AnyString
-              pipelineCheck (sprintf "capability-%d-pipeline-output-narrower" d.Iteration) d (IntRange(d.Lo, d.Hi)) ]
+              pipelineCheck (sprintf "capability-%d-pipeline-output-admits" d.Iteration) d.Cap (h0 d) AnyString
+              pipelineCheck
+                  (sprintf "capability-%d-pipeline-output-narrower" d.Iteration)
+                  d.Cap
+                  (h0 d)
+                  (IntRange(d.Lo, d.Hi)) ]
+
+        /// The capability the document vectors are stated over (Phase 644): one required hole in the
+        /// document space of a named type, answering a document of another. It is fixed, not drawn: a
+        /// document space has no bound to draw, and what the vectors pin is the membership rule, the
+        /// one spelling a document is keyed by, and the family's place in the relation.
+        let documentCap: Capability =
+            Capability.create
+                "cap-document"
+                { Name = "capDocument"
+                  Holes =
+                    [ { Addr = "d0"
+                        Name = "order"
+                        Kind = ValueHole(Document(Some "Order"))
+                        Required = true } ]
+                  Effect =
+                    { Host = ReadsHost
+                      Determinism = Effect.clock } }
+                Server
+                (Returns.Value(Document(Some "Receipt")))
+
+        /// One document in its canonical text, and the same document spelled a second way: members
+        /// out of order, white space, a float with a trailing zero, a control character by its short
+        /// escape.
+        let documentCanonical = "{\"a\":1,\"b\":[true,\"x\\u000ay\",2.5]}"
+
+        let documentRespelled = "{ \"b\" : [ true, \"x\\ny\", 2.50 ],\n  \"a\" : 1 }"
+
+        /// The document vectors (Phase 644), through the cases a host already replays: membership by
+        /// shape (`validateArgs`), one key for two spellings of one document (`invocationKey`), the
+        /// declaration's bytes (`declarationRoundTrip`) and the family's relation (`pipelineTypeCheck`).
+        /// They are built here, beside the helpers they share with the drawn vectors, and published as
+        /// a family of their own (`Documents`): a host that reads `capability-laws.json` today refuses
+        /// a value space it does not know, so a section of that file would turn it red (D255.1).
+        let internal documentVectors () : Vector list =
+            let cap = documentCap
+            let declaration = CapabilityCodec.encode cap
+            let d0 (value: string) = [ "d0", value ]
+
+            let key (id: string) (args: (string * string) list) : Vector =
+                { Id = id
+                  Case = "invocationKey"
+                  Model =
+                    CapabilityOracle.answer
+                        [ "key", jstr (CapabilityOracle.invocationKey cap args)
+                          "determinismTag", jstr (CapabilityOracle.determinismTag cap) ]
+                  Input = [ "capability", jstr declaration; "args", argsJson args ]
+                  Expected =
+                    [ "key", jstr (Capability.invocationKey cap args)
+                      "determinismTag", jstr (Capability.determinismTag cap) ] }
+
+            let unconstrained =
+                CapabilityCodec.encode
+                    { cap with
+                        Id = "cap-document-any"
+                        Result = Returns.Value(Document None) }
+
+            let roundTrip (id: string) (text: string) : Vector =
+                { Id = id
+                  Case = "declarationRoundTrip"
+                  Model = None
+                  Input = [ "declaration", jstr text ]
+                  Expected =
+                    [ "declaration",
+                      jstr (
+                          match CapabilityCodec.decode text with
+                          | Ok c -> CapabilityCodec.encode c
+                          | Error m -> "DECODE FAILED: " + m
+                      ) ] }
+
+            let call = [ "d0", Literal documentCanonical ]
+
+            [ validates "document-accept-canonical" cap declaration (d0 documentCanonical)
+              validates "document-accept-respelled" cap declaration (d0 documentRespelled)
+              validates "document-accept-list" cap declaration (d0 "[1,2,3]")
+              validates "document-accept-scalar" cap declaration (d0 "\"text\"")
+              validates "document-reject-cut-short" cap declaration (d0 "{\"a\":1")
+              validates "document-reject-repeated-member" cap declaration (d0 "{\"a\":1,\"a\":2}")
+              validates "document-reject-null" cap declaration (d0 "null")
+              validates "document-reject-bare-word" cap declaration (d0 "order")
+              validates "document-unknown-arg" cap declaration [ "nope", documentCanonical ]
+              key "document-key-canonical" (d0 documentCanonical)
+              key "document-key-respelled" (d0 documentRespelled)
+              roundTrip "document-declaration-round-trip" declaration
+              roundTrip "document-declaration-round-trip-unconstrained" unconstrained
+              pipelineCheck "document-pipeline-output-same-type" cap call (Document(Some "Receipt"))
+              pipelineCheck "document-pipeline-output-unconstrained" cap call (Document None)
+              pipelineCheck "document-pipeline-output-other-type" cap call (Document(Some "Order"))
+              pipelineCheck "document-pipeline-output-scalar" cap call AnyString
+              pipelineCheck "document-pipeline-output-tree" cap call (SlotTree None) ]
 
         let internal allVectors () : Vector list =
             draws () |> List.collect (fun d -> vectorsFor d @ resultVectorsFor d)
@@ -384,6 +491,48 @@ module LawVectorExport =
                       "kitVersion", jstr stamp
                       "seed", jint seed
                       "iterations", jint iterations
+                      "description", jstr description ]
+                  Items = "vectors"
+                  Rows = allVectors () |> List.map renderVector }
+
+        let render () : string = renderAt (kitVersion ())
+
+    // -----------------------------------------------------------------------
+    //  the capability document family (Phase 644)
+    // -----------------------------------------------------------------------
+    //  The document value space (DECISIONS.md D260) as vectors a port replays with the cases it
+    //  already has for `capability-laws.json`. A file of its own, in this repository's corpus, for
+    //  D255.1's reason: the hosts that read `capability-laws.json` decode every declaration in it and
+    //  refuse a value space they do not know, and each pins that file's vector count.
+
+    module Documents =
+
+        let fileName = "capability-document-laws.json"
+
+        let familyId = "capabilityDocumentLaws"
+
+        let internal allVectors () : Vector list = Capabilities.documentVectors ()
+
+        let private description =
+            "The document value space (Phase 644, DECISIONS.md D260), through the cases of capability-laws.json: `validateArgs`, `invocationKey`, "
+            + "`declarationRoundTrip` and `pipelineTypeCheck`, each read exactly as that file describes it. Authored inputs, each `expected` computed by calling "
+            + "the pinned kit; no seed. Every vector is stated over one capability, `cap-document`: a single required hole `d0` in the document space of type "
+            + "`Order`, answering a document of type `Receipt`. `capability` and `declaration` members carry a canonical capability declaration as a JSON STRING, "
+            + "in which a document space is `{\"$type\":\"document\"}` with an optional `documentType`. A document argument is a member exactly when it is "
+            + "well-formed JSON with a canonical rendering of its own: it parses with no `null`, and holds no repeated member, no ill-formed string and no number a "
+            + "finite float cannot spell. The type name is carried and never read. An argument that is no document is `argOutOfSpace` at its address. The two "
+            + "`document-key-*` vectors present ONE document in two spellings (members out of order, white space, a float with a trailing zero, a control character "
+            + "by its short escape) and expect one key: an argument in a document space is keyed by its cross-host canonical text (members sorted, no white space, "
+            + "the canonical float layout, every control character as `\\u00xx`). They carry no `capturedValue`. The `document-pipeline-output-*` vectors pin the "
+            + "space relation: a document result is admitted by a declared output of the same type or of no type, and by no other document type, no scalar space and "
+            + "no tree space."
+
+        /// Rendered with an explicit `kitVersion`, as every law file is (Phase 560).
+        let renderAt (stamp: string) : string =
+            CorpusFile.render
+                { Head =
+                    [ "family", jstr familyId
+                      "kitVersion", jstr stamp
                       "description", jstr description ]
                   Items = "vectors"
                   Rows = allVectors () |> List.map renderVector }
@@ -1390,6 +1539,9 @@ module LawVectorExport =
     let gatePath (corpusDir: string) : string =
         Path.Combine(familyDir corpusDir, Gates.fileName)
 
+    let documentPath (corpusDir: string) : string =
+        Path.Combine(familyDir corpusDir, Documents.fileName)
+
     /// Every law file under `corpusDir`, rendered with `stamp` as its `kitVersion` (Phase 560): opening
     /// a version slot stamps the version it opens, which is not yet the version this kit was built at.
     let emittedAt (stamp: string) (corpusDir: string) : (string * string) list =
@@ -1398,7 +1550,8 @@ module LawVectorExport =
           fieldPath corpusDir, Fields.renderAt stamp
           propagationPath corpusDir, PropagationVectorExport.renderAt stamp
           canonicalFormPath corpusDir, CanonicalFormVectorExport.renderAt stamp
-          gatePath corpusDir, Gates.renderAt stamp ]
+          gatePath corpusDir, Gates.renderAt stamp
+          documentPath corpusDir, Documents.renderAt stamp ]
 
     /// Every law file under `corpusDir`, stamped with this kit's own version.
     let emitted (corpusDir: string) : (string * string) list = emittedAt (kitVersion ()) corpusDir
