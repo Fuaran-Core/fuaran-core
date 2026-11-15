@@ -1641,6 +1641,32 @@ module internal DiffRules =
                             (limit b)
                             (limit a)
 
+                | MethodPromise.Record((oldArguments, oldResult), (newArguments, newResult)) ->
+                    let kept (arguments: bool, result: bool) =
+                        match arguments, result with
+                        | true, true -> "its arguments and its result"
+                        | true, false -> "its arguments"
+                        | false, true -> "its result"
+                        | false, false -> "nothing"
+
+                    // A permission gained on either half, whatever the other half did.
+                    if (newArguments && not oldArguments) || (newResult && not oldResult) then
+                        "record",
+                        BreakingWire,
+                        sprintf
+                            "method `%s` now permits a host to keep more of a call (%s → %s) — a caller was told that what it sent, or what it was answered, is not kept."
+                            m
+                            (kept (oldArguments, oldResult))
+                            (kept (newArguments, newResult))
+                    else
+                        "record",
+                        Additive,
+                        sprintf
+                            "method `%s` withdrew a permission to keep a call (%s → %s) — a host that records less is conformant, and no caller was told less than it is now."
+                            m
+                            (kept (oldArguments, oldResult))
+                            (kept (newArguments, newResult))
+
             contractRule
                 "MethodPromiseChanged"
                 "9f"
@@ -1648,11 +1674,11 @@ module internal DiffRules =
                 (severity, why, promiseCite)
                 (sprintf "method %s changed: %s" name m)
                 [ row
-                      "a contract method gains a destination, loses `idempotent`, or has a rate limit declared or tightened"
+                      "a contract method gains a destination, loses `idempotent`, has a rate limit declared or tightened, or gains a permission to record its arguments or its result (whatever else it withdraws)"
                       "`breaking-wire`"
                       contractShape
                   row
-                      "a contract method loses its destination, gains `idempotent`, or has its rate limit withdrawn or loosened"
+                      "a contract method loses its destination, gains `idempotent`, has its rate limit withdrawn or loosened, or withdraws a permission to record and gains none"
                       "`additive`"
                       contractShape
                   row "a contract method's read policy moved, in any direction" "`breaking-wire`" contractShape ]
@@ -1664,13 +1690,13 @@ module internal DiffRules =
                 (subject + "/" + fact)
                 (HostSurfaceOnly,
                  sprintf
-                     "the `%s` of %s changed — a fact the host reads (a description, the audit kind, what may be recorded). No caller is admitted, refused or answered differently by it."
+                     "the `%s` of %s changed — a fact the host reads (a description or the audit kind). No caller is admitted, refused or answered differently by it."
                      fact
                      subject,
                  promiseCite)
                 (sprintf "%s changed: %s" fact subject)
                 [ row
-                      "a contract's, method's or argument's description, a method's audit kind, or what may be recorded of a call"
+                      "a contract's, method's or argument's description, or a method's audit kind"
                       "`host-surface-only`"
                       contractShape ]
 

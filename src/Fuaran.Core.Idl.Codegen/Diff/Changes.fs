@@ -143,7 +143,9 @@ module internal DiffChanges =
           if b.RateLimit <> a.RateLimit then
               MethodPromiseChanged(name, MethodPromise.RateLimit(b.RateLimit, a.RateLimit))
 
-          yield! hostFact "record" b.Record a.Record
+          if b.Record <> a.Record then
+              MethodPromiseChanged(name, MethodPromise.Record(b.Record, a.Record))
+
           yield! hostFact "auditKind" b.AuditKind a.AuditKind
           yield! hostFact "doc" b.MethodDoc a.MethodDoc ]
 

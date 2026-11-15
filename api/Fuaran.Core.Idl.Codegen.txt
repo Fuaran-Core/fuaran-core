@@ -26,7 +26,7 @@ ctor Fuaran.Core.Idl.Codegen.Types.Host..ctor(System.String, System.String, Fuar
 ctor Fuaran.Core.Idl.Codegen.Types.HostSurface..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.JVal>>)
 ctor Fuaran.Core.Idl.Codegen.Types.KindProjection..ctor(System.String, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>>)
 ctor Fuaran.Core.Idl.Codegen.Types.KindVerdict..ctor(System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
-ctor Fuaran.Core.Idl.Codegen.Types.MethodSnap..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.ArgumentSnap>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.Codegen.Types.WireType>, System.String, System.String, System.String, System.Boolean, System.String, System.Boolean, Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.Int32, System.Int32>>, Microsoft.FSharp.Collections.FSharpList`1<System.Int32>, System.String)
+ctor Fuaran.Core.Idl.Codegen.Types.MethodSnap..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.ArgumentSnap>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.Codegen.Types.WireType>, System.String, System.String, System.String, System.Boolean, System.String, System.Boolean, Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.Tuple`2<System.Boolean, System.Boolean>, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.Int32, System.Int32>>, Microsoft.FSharp.Collections.FSharpList`1<System.Int32>, System.String)
 ctor Fuaran.Core.Idl.Codegen.Types.Obligation..ctor(System.String, Fuaran.Core.Idl.Codegen.Types.Strength, System.String)
 ctor Fuaran.Core.Idl.Codegen.Types.Provenance..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.Idl.Codegen.Types.Snapshot..ctor(System.Int32, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.UnionSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.EnumSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>>, Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.Tuple`2<System.String, System.String>, System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.FieldSnap>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, System.String, System.String, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.ContractSnap>)
@@ -121,6 +121,7 @@ field Fuaran.Core.Idl.Codegen.Types.MethodPromise+Tags.Destination : System.Int3
 field Fuaran.Core.Idl.Codegen.Types.MethodPromise+Tags.Idempotent : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.MethodPromise+Tags.RateLimit : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.MethodPromise+Tags.ReadPolicy : System.Int32 (literal)
+field Fuaran.Core.Idl.Codegen.Types.MethodPromise+Tags.Record : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.Owner+Tags.OKind : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.Owner+Tags.ONodeEnvelope : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.Owner+Tags.OOp : System.Int32 (literal)
@@ -283,7 +284,7 @@ record-field Fuaran.Core.Idl.Codegen.Types.MethodSnap.Idempotent #7 : System.Boo
 record-field Fuaran.Core.Idl.Codegen.Types.MethodSnap.MethodDoc #13 : System.String
 record-field Fuaran.Core.Idl.Codegen.Types.MethodSnap.RateLimit #11 : Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.Int32, System.Int32>>
 record-field Fuaran.Core.Idl.Codegen.Types.MethodSnap.ReadPolicy #6 : System.String
-record-field Fuaran.Core.Idl.Codegen.Types.MethodSnap.Record #9 : System.String
+record-field Fuaran.Core.Idl.Codegen.Types.MethodSnap.Record #9 : System.Tuple`2<System.Boolean, System.Boolean>
 record-field Fuaran.Core.Idl.Codegen.Types.MethodSnap.Result #1 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.Codegen.Types.WireType>
 record-field Fuaran.Core.Idl.Codegen.Types.MethodSnap.ResultLabel #2 : System.String
 record-field Fuaran.Core.Idl.Codegen.Types.MethodSnap.Serves #12 : Microsoft.FSharp.Collections.FSharpList`1<System.Int32>
@@ -432,6 +433,7 @@ type Fuaran.Core.Idl.Codegen.Types.MethodPromise+Destination (type)
 type Fuaran.Core.Idl.Codegen.Types.MethodPromise+Idempotent (type)
 type Fuaran.Core.Idl.Codegen.Types.MethodPromise+RateLimit (type)
 type Fuaran.Core.Idl.Codegen.Types.MethodPromise+ReadPolicy (type)
+type Fuaran.Core.Idl.Codegen.Types.MethodPromise+Record (type)
 type Fuaran.Core.Idl.Codegen.Types.MethodPromise+Tags (type)
 type Fuaran.Core.Idl.Codegen.Types.MethodSnap (record)
 type Fuaran.Core.Idl.Codegen.Types.Obligation (record)
@@ -562,6 +564,7 @@ union-case Fuaran.Core.Idl.Codegen.Types.MethodPromise.NewDestination #0(before:
 union-case Fuaran.Core.Idl.Codegen.Types.MethodPromise.NewIdempotent #1(before: System.Boolean, after: System.Boolean)
 union-case Fuaran.Core.Idl.Codegen.Types.MethodPromise.NewRateLimit #3(before: Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.Int32, System.Int32>>, after: Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.Int32, System.Int32>>)
 union-case Fuaran.Core.Idl.Codegen.Types.MethodPromise.NewReadPolicy #2(before: System.String, after: System.String)
+union-case Fuaran.Core.Idl.Codegen.Types.MethodPromise.NewRecord #4(before: System.Tuple`2<System.Boolean, System.Boolean>, after: System.Tuple`2<System.Boolean, System.Boolean>)
 union-case Fuaran.Core.Idl.Codegen.Types.Owner.NewOKind #0(tag: System.String)
 union-case Fuaran.Core.Idl.Codegen.Types.Owner.NewOOp #1(tag: System.String)
 union-case Fuaran.Core.Idl.Codegen.Types.Owner.NewORecord #3(name: System.String)

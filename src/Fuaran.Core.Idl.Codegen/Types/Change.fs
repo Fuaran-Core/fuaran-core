@@ -18,6 +18,10 @@ type MethodPromise =
     | ReadPolicy of before: string * after: string
     /// The rate limit, `(calls, seconds)`.
     | RateLimit of before: (int * int) option * after: (int * int) option
+    /// What a host may keep of a call, `(arguments, result)`. A permission, never a demand: a
+    /// permission gained withdraws what a caller was told, that what it sent or was answered is
+    /// not kept.
+    | Record of before: (bool * bool) * after: (bool * bool)
 
 /// One difference between two snapshots. `changes` emits them sorted by a fixed rank
 /// and key, so the same pair always yields the same list; `classify` grades each.
@@ -200,8 +204,8 @@ type Change =
     | MethodServesChanged of method: string * before: int list * after: int list
     /// A promise beside the types moved (D260.18).
     | MethodPromiseChanged of method: string * MethodPromise
-    /// A fact the host reads and no caller is admitted or refused by moved: a description, the
-    /// audit kind, what may be recorded. `subject` names the contract, method or argument.
+    /// A fact the host reads and no caller is admitted or refused by moved: a description or the
+    /// audit kind. `subject` names the contract, method or argument.
     | ContractHostFactChanged of subject: string * fact: string * before: string * after: string
 
 /// A change's wire verdict — what an OLD document, or an old emitter, meets under the

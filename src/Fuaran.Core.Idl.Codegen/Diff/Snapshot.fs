@@ -224,9 +224,9 @@ module internal DiffSnapshot =
             |> List.distinct
             |> List.sort
           Record =
-            field "record" v
-            |> Option.map text
-            |> Option.defaultValue (text (JObj [ "arguments", JBool false; "result", JBool false ]))
+            match field "record" v with
+            | Some r -> field "arguments" r = Some(JBool true), field "result" r = Some(JBool true)
+            | None -> false, false
           AuditKind = str "auditKind" v |> Option.defaultValue ""
           RateLimit =
             match field "rateLimit" v with

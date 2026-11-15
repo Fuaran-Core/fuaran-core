@@ -130,10 +130,10 @@ point.
 | an authority value added to a contract method (a widened requirement) | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `MethodAuthorityChanged` |
 | a schema version added to those a contract method serves | `additive` | `no-generated-shape-change` — no F# is generated for a contract | `MethodServesChanged` |
 | a schema version withdrawn from those a contract method serves | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `MethodServesChanged` |
-| a contract method gains a destination, loses `idempotent`, or has a rate limit declared or tightened | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `MethodPromiseChanged` |
-| a contract method loses its destination, gains `idempotent`, or has its rate limit withdrawn or loosened | `additive` | `no-generated-shape-change` — no F# is generated for a contract | `MethodPromiseChanged` |
+| a contract method gains a destination, loses `idempotent`, has a rate limit declared or tightened, or gains a permission to record its arguments or its result (whatever else it withdraws) | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `MethodPromiseChanged` |
+| a contract method loses its destination, gains `idempotent`, has its rate limit withdrawn or loosened, or withdraws a permission to record and gains none | `additive` | `no-generated-shape-change` — no F# is generated for a contract | `MethodPromiseChanged` |
 | a contract method's read policy moved, in any direction | `breaking-wire` | `no-generated-shape-change` — no F# is generated for a contract | `MethodPromiseChanged` |
-| a contract's, method's or argument's description, a method's audit kind, or what may be recorded of a call | `host-surface-only` | `no-generated-shape-change` — no F# is generated for a contract | `ContractHostFactChanged` |
+| a contract's, method's or argument's description, or a method's audit kind | `host-surface-only` | `no-generated-shape-change` — no F# is generated for a contract | `ContractHostFactChanged` |
 <!-- END GENERATED -->
 
 **The table is the classifier's own (Phase 293).** Every row above is rendered from the one

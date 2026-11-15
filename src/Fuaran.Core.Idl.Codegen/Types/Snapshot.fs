@@ -127,8 +127,8 @@ type MethodSnap =
         Idempotent: bool
         /// The authority values a caller needs, sorted: the set is what is declared.
         Authority: string list
-        /// What a host may keep of a call, as canonical text.
-        Record: string
+        /// What a host may keep of a call, `(arguments, result)`; each is false when omitted.
+        Record: bool * bool
         /// The audit kind, `""` when none is declared.
         AuditKind: string
         /// `(calls, seconds)`, or none.

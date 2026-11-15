@@ -437,10 +437,29 @@ let diffCases: (string * Idl * Idl * string) list =
           { m with
               Doc = Some "One order, by id." }),
       "host-surface"
-      "audit-kind-and-record-changed",
+      // `get` permits no recording and `list` permits its arguments: a permission gained on either
+      // half is breaking whatever the other half does, and one withdrawn alone is additive.
+      "record-gained",
+      ordersOnly,
+      withMethod "get" (fun m ->
+          { m with
+              Record = { Arguments = false; Result = true } }),
+      "breaking"
+      "record-withdrawn",
+      ordersOnly,
+      withMethod "list" (fun m ->
+          { m with
+              Record = { Arguments = false; Result = false } }),
+      "additive"
+      "record-gained-and-withdrawn",
+      ordersOnly,
+      withMethod "list" (fun m ->
+          { m with
+              Record = { Arguments = false; Result = true } }),
+      "breaking"
+      "audit-kind-changed",
       ordersOnly,
       withMethod "place" (fun m ->
           { m with
-              AuditKind = Some "order.created"
-              Record = { Arguments = true; Result = true } }),
+              AuditKind = Some "order.created" }),
       "host-surface" ]

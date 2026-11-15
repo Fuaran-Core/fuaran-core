@@ -166,7 +166,40 @@ let tests =
               Expect.equal (graded "rate-limit-declared") BreakingWire "a limit declared"
               Expect.equal (graded "rate-limit-tightened") BreakingWire "a limit tightened"
               Expect.equal (graded "rate-limit-loosened") Additive "a limit loosened"
-              Expect.equal (graded "rate-limit-withdrawn") Additive "a limit withdrawn")
+              Expect.equal (graded "rate-limit-withdrawn") Additive "a limit withdrawn"
+              Expect.equal (graded "record-gained") BreakingWire "a permission to record gained"
+              Expect.equal (graded "record-withdrawn") Additive "a permission to record withdrawn"
+              Expect.equal (graded "record-gained-and-withdrawn") BreakingWire "one half gained, the other withdrawn")
+
+          testCase "a permission to record is graded by what was gained, half by half" (fun _ ->
+              let move (before: bool * bool) (after: bool * bool) =
+                  let recording (arguments: bool, result: bool) =
+                      ContractsIdl.withMethod "get" (fun m ->
+                          { m with
+                              Record =
+                                  { Arguments = arguments
+                                    Result = result } })
+
+                  match rows (recording before) (recording after) with
+                  | [ row ] ->
+                      match row.Change with
+                      | MethodPromiseChanged("orders.get", MethodPromise.Record(b, a)) ->
+                          Expect.equal (b, a) (before, after) "the row carries both revisions"
+                          row.Severity
+                      | other -> failtestf "unexpected row %A" other
+                  | other -> failtestf "expected one row, got %d" other.Length
+
+              let halves = [ false, false; true, false; false, true; true, true ]
+
+              for before in halves do
+                  for after in halves do
+                      if before <> after then
+                          let gained = (snd after && not (snd before)) || (fst after && not (fst before))
+
+                          Expect.equal
+                              (move before after)
+                              (if gained then BreakingWire else Additive)
+                              (sprintf "%A to %A" before after))
 
           testCase "what only the host reads is host surface, one row a fact" (fun _ ->
               Expect.equal
@@ -175,17 +208,13 @@ let tests =
                   "a description"
 
               let facts =
-                  rowsOf "audit-kind-and-record-changed"
+                  rowsOf "audit-kind-changed"
                   |> List.map (fun r ->
                       match r.Change with
                       | ContractHostFactChanged(subject, fact, _, _) -> subject, fact, r.Severity
                       | other -> failtestf "unexpected row %A" other)
 
-              Expect.equal
-                  facts
-                  [ "method orders.place", "auditKind", HostSurfaceOnly
-                    "method orders.place", "record", HostSurfaceOnly ]
-                  "the audit kind and the record")
+              Expect.equal facts [ "method orders.place", "auditKind", HostSurfaceOnly ] "the audit kind")
 
           testCase "a member the artifact omits at its default reads as that default" (fun _ ->
               // `export` writes `shape`; moving it to `call` omits the member, and the row names both.
