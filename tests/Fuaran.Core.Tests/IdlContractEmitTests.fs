@@ -4,6 +4,7 @@ open System.IO
 open Expecto
 open Fuaran.Core
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 open Fuaran.Core.Tests
 
 // Phase 644 (DECISIONS.md D260.14, D260.18) — what Core emits from a contract, and the contract
@@ -41,6 +42,62 @@ let rec private refs (v: JVal) : string list =
             | _ -> refs x)
     | JArr xs -> xs |> List.collect refs
     | _ -> []
+
+let private tagsOf (idl: Idl) : string list = idl.Kinds |> List.map (fun k -> k.Tag)
+
+let private described (r: Result<string, CodegenError>) : Result<string, string> =
+    r |> Result.mapError CodegenError.describe
+
+/// Every generator entry point that renders from a vocabulary, with the vocabulary it is compared
+/// over. Every one admits the contract fixture whole (`ContractsIdl.idl`, both contracts declared), so
+/// each comparison is of output and none of a refusal. Default records are not requested of the
+/// derived modules: the fixture declares no kind every member of which has a default, and that
+/// request is refused over it with or without a contract.
+///
+/// What the comparison finds is stated by the test and is narrower than "the same bytes": a generated
+/// module is headed by a stamp naming the vocabulary it was generated from, the hash of the canonical
+/// `idl.json`, and a contract is a member of `idl.json`. So a vocabulary that declares a contract and
+/// the same vocabulary without one are two vocabularies, and the stamp says so on that one line. Every
+/// other line is the same, the `emission` hash of the body among them. The JSON Schema, the F# type
+/// declarations and the F* partition carry no stamp and are the same whole.
+let private backends: (string * Idl * (Idl -> Result<string, string>)) list =
+    let full = ContractsIdl.idl
+
+    let codecOnly: CodecOnly =
+        { Roots = [ "Order"; "Paging"; "Filter"; "Status" ]
+          HostTypes =
+            Map.ofList
+                [ "Order", "Host.Order"
+                  "Paging", "Host.Paging"
+                  "Filter", "Host.Filter"
+                  "Status", "Host.Status" ] }
+
+    let derivations =
+        [ Derivation.StructuralAccess
+          Derivation.KeyedPositions
+          Derivation.VocabularyConstants
+          Derivation.SpecDecoders ]
+
+    [ "the JSON Schema", full, (fun v -> Gen.jsonSchema v |> described)
+      "the F# types", full, (fun v -> Gen.fsharpTypes v |> described)
+      "the F# module", full, (fun v -> Gen.fsharpModule "M" v (tagsOf v) |> described)
+      "the F# module with derivations",
+      full,
+      (fun v ->
+          Gen.fsharpModuleDerived GenSupport.Empty derivations "M" v (tagsOf v)
+          |> described)
+      "the TypeScript module with derivations",
+      full,
+      (fun v -> Gen.typescriptModuleDerived derivations v (tagsOf v) |> described)
+      "the TypeScript declarations with derivations",
+      full,
+      (fun v -> Gen.typescriptDeclarationsDerived derivations v (tagsOf v) |> described)
+      "the F# codec-only module", full, (fun v -> Gen.fsharpCodecModule GenSupport.Empty codecOnly "M" v |> described)
+      "the TypeScript module", full, (fun v -> Gen.typescriptModule v (tagsOf v) |> described)
+      "the TypeScript declarations", full, (fun v -> Gen.typescriptDeclarations v (tagsOf v) |> described)
+      "the F* model", full, (fun v -> FStarTarget.vocabularyModule "M" v (tagsOf v) |> described)
+      "the F* theorems", full, (fun v -> FStarTarget.proofsModule "P" "M" v (tagsOf v) |> described)
+      "the F* partition", full, (fun v -> Ok(sprintf "%A" (FStarTarget.partition v))) ]
 
 [<Tests>]
 let emitTests =
@@ -137,12 +194,41 @@ let emitTests =
               Expect.isError (Gen.methodArgumentsSchema ContractsIdl.idl "orders.nope") "an unknown method"
               Expect.equal (Gen.contractArgumentSchemas (ContractsIdl.withContracts []) |> ok) [] "no contract")
 
-          testCase
-              "a vocabulary generates the same schema and the same F# whether or not it declares a contract"
-              (fun _ ->
-                  let bare = ContractsIdl.withContracts []
-                  Expect.equal (Gen.jsonSchema ContractsIdl.idl |> ok) (Gen.jsonSchema bare |> ok) "the JSON Schema"
-                  Expect.equal (Gen.fsharpTypes ContractsIdl.idl |> ok) (Gen.fsharpTypes bare |> ok) "the F# types")
+          testList
+              "a contract moves nothing a backend generates from a vocabulary but the line that names the vocabulary"
+              [ for name, vocabulary, render in backends do
+                    testCase name (fun _ ->
+                        Expect.isNonEmpty vocabulary.Contracts "the vocabulary declares a contract"
+
+                        let lines (r: Result<string, string>) =
+                            match r with
+                            | Ok output -> output.Split('\n') |> List.ofArray
+                            | Error refusal -> failtestf "%s refuses the vocabulary: %s" name refusal
+
+                        let declaring = lines (render vocabulary)
+                        let bare = lines (render { vocabulary with Contracts = [] })
+                        Expect.equal (List.length declaring) (List.length bare) "line for line"
+
+                        let moved = List.zip declaring bare |> List.filter (fun (d, b) -> d <> b)
+
+                        let stamps =
+                            declaring
+                            |> List.filter (fun l -> l.Contains "vocabulary: sha256:")
+                            |> List.length
+
+                        Expect.equal
+                            (List.length moved)
+                            stamps
+                            "one line moves for each line that names the vocabulary, and no other"
+
+                        for d, b in moved do
+                            Expect.stringContains d "vocabulary: sha256:" "the line that moved names the vocabulary"
+                            Expect.stringContains b "vocabulary: sha256:" "and so does its twin"
+
+                        Expect.equal
+                            (declaring |> List.filter (fun l -> l.Contains "emission: sha256:"))
+                            (bare |> List.filter (fun l -> l.Contains "emission: sha256:"))
+                            "the hash of what was emitted is the same") ]
 
           testCase "a contract's types are a vocabulary: a kind of each method's arguments and of each result" (fun _ ->
               let vocabulary, kinds = FStarTarget.contractTypes ContractsIdl.idl "orders" |> ok
