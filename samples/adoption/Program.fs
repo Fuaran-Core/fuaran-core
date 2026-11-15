@@ -314,7 +314,7 @@ let genQuery (rng: ConfRng.T) : (string * (string * Cell) list) * ConfRng.T =
 
 let querySeam: QuerySeamWitness =
     { Queries = queries
-      Dispatch = QueryRegistry.dispatch queries
+      Dispatch = QueryRegistry.dispatch queries () None
       GenQuery = genQuery }
 
 let private outcome (r: Result<Deferred<'v>, string>) : string =
@@ -407,7 +407,7 @@ let main _ =
     let notes section =
         let args = [ "section", Str section ]
 
-        QueryRegistry.dispatch queries "outline.notes" args (notesResolver args)
+        QueryRegistry.dispatch queries () None "outline.notes" args (notesResolver args)
         |> Result.map (
             Deferred.map (fun r ->
                 Table.tryColumn "text" r.Rows

@@ -352,7 +352,8 @@ module Query =
 
     /// The query grammar (Phase 225, D173): the declaration's shape fields (`QueryShape.keyFields`),
     /// then three fields per binding — name, cell tag, cell payload — name-sorted. The one body both
-    /// keys read, so the paged key is the unpaged one behind a page triple.
+    /// keys and the read's identity (`invocationPreimage`) read, so the paged key is the unpaged one
+    /// behind a page triple and the identity is the key's pre-image with the id in front.
     let internal grammarFields (q: Query) (args: (string * Cell) list) : string list =
         QueryShape.keyFields q.Where q.OrderBy
         @ (args
@@ -393,6 +394,22 @@ module Query =
         match pageToken with
         | None -> invocationKey q args
         | Some token -> Hash.keyedBy q.Id ([ ""; "p"; token ] @ grammarFields q args)
+
+    /// The IDENTITY of one read (Phase 638 stated it, Phase 651 names it) — what a `Grant` for a
+    /// read is for: the query id, then the fields `invocationKey` hashes (the declaration's filter
+    /// and order, then each binding's name, cell tag and payload, name-sorted), as one canonical
+    /// pre-image (`Hash.canonicalFields`). No hash is taken, so it is INJECTIVE outright: two reads
+    /// share an identity only when they name one query id, one filter, one order and the same
+    /// bindings (`invocation_identity_injective` in `proofs/Query.fst`). The page token is not in
+    /// it, so a grant for a read covers every page of it (DECISIONS.md D261.4); `invocationKey`
+    /// ends in a 32-bit cache hash, so an approval is never bound to it.
+    let invocationPreimage (q: Query) (args: (string * Cell) list) : string =
+        Hash.canonicalFields (q.Id :: grammarFields q args)
+
+    /// The grant for exactly this read of `q` (Phase 651): `Grant.ofInvocation` of its
+    /// `invocationPreimage`. What a host mints when an approval is given for a previewed read.
+    let grant (q: Query) (args: (string * Cell) list) : Grant =
+        Grant.ofInvocation (invocationPreimage q args)
 
     /// Validate typed `args` (name -> bound `Cell`) against the query's declared params *before* any
     /// fetch: every arg must address a declared param, once (`DuplicateParam`, Phase 307 — so the

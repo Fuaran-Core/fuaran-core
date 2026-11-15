@@ -353,7 +353,7 @@ module internal RegistrySeamLaws =
         let capIds (r: CapabilityRegistry<unit>) =
             CapabilityRegistry.enumerate r |> List.map _.Id
 
-        let qIds (r: QueryRegistry) =
+        let qIds (r: QueryRegistry<unit>) =
             QueryRegistry.enumerate r |> List.map _.Id
 
         // Both associations of a union agree: refused together, or equal under `same`.

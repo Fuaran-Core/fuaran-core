@@ -7,17 +7,21 @@ namespace Fuaran.Core
 /// OPAQUE since `0.37.0` (Phase 386), with `FunctionRegistry`'s shape (Phase 316): the map and the
 /// policy are reachable only through this module's verbs, so `register` — and its admission gate —
 /// is the only way a query gets in. Since Phase 509 it is a `Seam` over `Query`, in this seam's
-/// vocabulary, and every verb below forwards to it.
-type QueryRegistry =
+/// vocabulary, and every verb below forwards to it. Since Phase 651 its gates decide under the
+/// decision context `'Ctx`, as the capability registry's do (DECISIONS.md D261): a registry that
+/// needs no context is a `QueryRegistry<unit>`.
+type QueryRegistry<'Ctx> =
     private
         {
             /// The registered queries keyed by `Query.Id` — each admitted by `register` — and the
             /// gates every dispatch runs after the parameters validate and before the resolver, with
             /// the observers a refusal reaches (Phase 318).
-            Seam: Seam<unit, Query, (string * Cell) list, QueryError>
+            Seam: Seam<'Ctx, Query, (string * Cell) list, QueryError>
         }
 
-/// Building, enumerating and dispatching through a `QueryRegistry`.
+/// Building, enumerating and dispatching through a `QueryRegistry`. `ModuleSuffix`, so the module
+/// and the type share a name, as `CapabilityRegistry` does.
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module QueryRegistry =
 
     /// The registration refusal a declaration earns, or `None` (Phase 316): a declaration naming a
@@ -52,9 +56,8 @@ module QueryRegistry =
 
     /// The query seam's vocabulary (Phase 509): `NoSuchQuery` / `DuplicateQuery`, `admissionFault`
     /// as the registration gate, `Query.validateParams` before the policy, and `QueryPolicyRefused` /
-    /// `QueryApprovalRequired` for its gates. `Invocation` (Phase 638) is the query id, then the
-    /// fields `Query.invocationKey` hashes, as one canonical pre-image with no hash taken. This
-    /// registry decides under the `unit` context and presents no grant, so nothing reads it yet.
+    /// `QueryApprovalRequired` for its gates. `Invocation` is `Query.invocationPreimage` (Phase 638;
+    /// named and public since Phase 651): the identity a presented `Grant` is compared with.
     let private vocabulary: SeamVocabulary<Query, (string * Cell) list, QueryError> =
         { Id = _.Id
           NoSuch = fun id known -> NoSuchQuery(id, known)
@@ -63,136 +66,172 @@ module QueryRegistry =
           Validate = Query.validateParams
           Refused = fun policy g -> QueryPolicyRefused(policy, g.Message, g.Alternatives)
           Approval = QueryApprovalRequired
-          Invocation = fun q args -> Hash.canonicalFields (q.Id :: Query.grammarFields q args)
+          Invocation = Query.invocationPreimage
           Describe = QueryError.describe }
 
     /// The registry with no queries: every dispatch against it is `NoSuchQuery` with an empty
     /// `known` list.
-    let empty: QueryRegistry = { Seam = Seam.create vocabulary }
+    let empty<'Ctx> : QueryRegistry<'Ctx> = { Seam = Seam.create vocabulary }
 
-    let private lift (r: Result<Seam<unit, Query, (string * Cell) list, QueryError>, QueryError>) =
+    let private lift (r: Result<Seam<'Ctx, Query, (string * Cell) list, QueryError>, QueryError>) =
         r |> Result.map (fun s -> { Seam = s })
 
     /// Register a query — additive, no silent overwrite (a duplicate id is a named error), and,
     /// since Phase 316, only a declaration whose parameter names are distinct (`DuplicateParam`
     /// otherwise, naming the repeated name). The id is checked first.
-    let register (q: Query) (r: QueryRegistry) : Result<QueryRegistry, QueryError> = Seam.register q r.Seam |> lift
+    let register (q: Query) (r: QueryRegistry<'Ctx>) : Result<QueryRegistry<'Ctx>, QueryError> =
+        Seam.register q r.Seam |> lift
 
     /// The query registered under `id`, or `None`. A bare lookup: unlike `dispatch` it
     /// validates nothing and names no alternatives.
-    let tryFind (id: string) (r: QueryRegistry) : Query option = Seam.tryFind id r.Seam
+    let tryFind (id: string) (r: QueryRegistry<'Ctx>) : Query option = Seam.tryFind id r.Seam
 
     /// Enumerate the registry in a stable order (by id) — the discovery surface; stability is part of
     /// the contract (`queryLaws` certifies it).
-    let enumerate (r: QueryRegistry) : Query list = Seam.enumerate r.Seam
+    let enumerate (r: QueryRegistry<'Ctx>) : Query list = Seam.enumerate r.Seam
 
     // ---- the policy gate (Phase 318) ----
 
     /// `r` with `gate` added to the gates every dispatch runs (`RegistryPolicy.withGate`): after the
     /// parameters validate, before the resolver. The decision is the join over every gate, so adding
-    /// one can only refuse more.
-    let withGate (gate: PolicyGate<unit, Query, (string * Cell) list>) (r: QueryRegistry) : QueryRegistry =
+    /// one can only refuse more: a read `r` refused under a context, the result refuses under it. A
+    /// gate that reads no context is `PolicyGate.ignoringContext`.
+    let withGate (gate: PolicyGate<'Ctx, Query, (string * Cell) list>) (r: QueryRegistry<'Ctx>) : QueryRegistry<'Ctx> =
         { Seam = Seam.withGate gate r.Seam }
 
-    /// `r` with `observe` told of every invocation its policy refuses, before the refusal returns.
-    let onDenied (observe: PolicyDenial<unit, (string * Cell) list> -> unit) (r: QueryRegistry) : QueryRegistry =
+    /// `r` with `observe` told of every invocation its policy refuses, before the refusal returns,
+    /// with the context it was refused under.
+    let onDenied
+        (observe: PolicyDenial<'Ctx, (string * Cell) list> -> unit)
+        (r: QueryRegistry<'Ctx>)
+        : QueryRegistry<'Ctx> =
         { Seam = Seam.onDenied observe r.Seam }
+
+    /// `r` as the one context `ctx` sees it (Phase 651, as `CapabilityRegistry.under`): the same
+    /// queries, every gate deciding as it does under `ctx`. The result takes the `unit` context and
+    /// decides and dispatches exactly as `r` does under `ctx` — the registry a conformance witness
+    /// is handed, and the view a host gives a caller that must not choose its own context.
+    let under (ctx: 'Ctx) (r: QueryRegistry<'Ctx>) : QueryRegistry<unit> = { Seam = Seam.under ctx r.Seam }
 
     /// What the registry would decide for an invocation without dispatching it: an unknown id is a
     /// `Deny` naming the registered ids as alternatives, parameters that do not validate a `Deny`
-    /// with the refusal's sentence, otherwise the gates' join. No observer is told.
-    let decide (r: QueryRegistry) (id: string) (args: (string * Cell) list) : PolicyDecision =
-        Seam.decide r.Seam () None id args
+    /// with the refusal's sentence, otherwise the gates' join under `ctx`, with a `NeedsApproval`
+    /// lifted to `Allow` when `grant` is for exactly this read (Phase 651: `Query.grant`). A `Deny`
+    /// is lifted by no grant and an `Allow` is changed by none. No observer is told.
+    let decide
+        (r: QueryRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
+        (id: string)
+        (args: (string * Cell) list)
+        : PolicyDecision =
+        Seam.decide r.Seam ctx grant id args
 
-    /// The registry's NAMED decision for an invocation, read without dispatching it (Phase 650), at
-    /// the context this registry has (`unit`, no grant presented): `Ok` of the name of the gate that
-    /// made the decision and the decision `decide` answers — the first gate of the most restrictive
-    /// rank, `""` when every gate allows — or, where no gate decided, the refusal `dispatch` gives:
-    /// `NoSuchQuery` naming the registered ids for an unregistered id, the validation refusal for
-    /// parameters that do not validate. No observer is told.
+    /// The registry's NAMED decision for an invocation, read without dispatching it (Phase 650; under
+    /// a context and with a grant since Phase 651): `Ok` of the name of the gate that made the
+    /// decision and the decision `decide` answers — the first gate of the most restrictive rank,
+    /// `""` when every gate allows, and kept when `grant` lifts a `NeedsApproval` — or, where no gate
+    /// decided, the refusal `dispatch` gives: `NoSuchQuery` naming the registered ids for an
+    /// unregistered id, the validation refusal for parameters that do not validate. No observer is
+    /// told.
     ///
     /// **Advisory.** It is computed by the one function a dispatch judges by, so `dispatch` refuses
     /// `QueryPolicyRefused(name, …)` for `Ok(name, Deny guidance)` and `QueryApprovalRequired name`
     /// for `Ok(name, NeedsApproval)`, and runs the resolver for `Ok(_, Allow)`. But `dispatch`
     /// decides again and is authoritative.
     let decideNamed
-        (r: QueryRegistry)
+        (r: QueryRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * Cell) list)
         : Result<string * PolicyDecision, QueryError> =
-        Seam.decideNamed r.Seam () None id args
+        Seam.decideNamed r.Seam ctx grant id args
 
     /// Dispatch an invocation through the registry: resolve the id (default-deny — an unregistered id
-    /// is `NoSuchQuery`), validate the parameters, run the policy's gates (Phase 318 —
-    /// `QueryPolicyRefused` / `QueryApprovalRequired`, reaching every `onDenied` observer), then the
-    /// resolver; with no gate this is `Query.invoke` exactly. The host resolver is supplied by the
+    /// is `NoSuchQuery`, whatever is presented), validate the parameters, run the policy's gates under
+    /// `ctx` (Phase 318 — a `Deny` is `QueryPolicyRefused`, whatever is presented; a `NeedsApproval`
+    /// is `QueryApprovalRequired` unless `grant` is for exactly this read, Phase 651; a refusal
+    /// reaches every `onDenied` observer), then the resolver; with no gate this is `Query.invoke`
+    /// exactly, under every context and grant. The host resolver is supplied by the
     /// caller per the resolved query's source + placement, and answers in the `Deferred` envelope — so the same
     /// three outcomes `Query.invoke` documents are what a registry dispatch returns.
     let dispatch
-        (r: QueryRegistry)
+        (r: QueryRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * Cell) list)
         (resolve: Query -> Deferred<QueryResult>)
         : Result<Deferred<QueryResult>, QueryError> =
-        Seam.dispatch r.Seam () None id args (fun q -> Query.invoke q args resolve)
+        Seam.dispatch r.Seam ctx grant id args (fun q -> Query.invoke q args resolve)
 
     /// `dispatch`, with the resolver handed the resolved query and the validated argument list
     /// (`Query.invokeWithArgs`, Phase 251). Additive beside `dispatch`; default-deny the same.
     let dispatchWithArgs
-        (r: QueryRegistry)
+        (r: QueryRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * Cell) list)
         (resolve: Query -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
         : Result<Deferred<QueryResult>, QueryError> =
-        Seam.dispatch r.Seam () None id args (fun q -> Query.invokeWithArgs q args resolve)
+        Seam.dispatch r.Seam ctx grant id args (fun q -> Query.invokeWithArgs q args resolve)
 
     /// `dispatch` for ONE PAGE (Phase 316): resolve the id (default-deny), then `Query.invokePage`,
-    /// handing the resolver the page token. `dispatch r id args resolve` is
-    /// `dispatchPage r id args None (fun q _ -> resolve q)`.
+    /// handing the resolver the page token. `dispatch r ctx grant id args resolve` is
+    /// `dispatchPage r ctx grant id args None (fun q _ -> resolve q)`. The token is not in what a
+    /// gate or a grant reads, so the grant for a read covers every page of it (DECISIONS.md D261.4).
     let dispatchPage
-        (r: QueryRegistry)
+        (r: QueryRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * Cell) list)
         (pageToken: string option)
         (resolve: Query -> string option -> Deferred<QueryResult>)
         : Result<Deferred<QueryResult>, QueryError> =
-        Seam.dispatch r.Seam () None id args (fun q -> Query.invokePage q args pageToken resolve)
+        Seam.dispatch r.Seam ctx grant id args (fun q -> Query.invokePage q args pageToken resolve)
 
     /// `dispatchPage` with the typed resolver (Phase 385): resolve the id (default-deny), validate,
     /// admit through the policy, then `Query.invokePageWithArgs` — so a resolver answering a
-    /// `ResolveFault` pages through the registry. `dispatchWithArgs r id args resolve` is
-    /// `dispatchPageWith r id args None (fun q _ typed -> resolve q typed)`.
+    /// `ResolveFault` pages through the registry. `dispatchWithArgs r ctx grant id args resolve` is
+    /// `dispatchPageWith r ctx grant id args None (fun q _ typed -> resolve q typed)`.
     let dispatchPageWith
-        (r: QueryRegistry)
+        (r: QueryRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * Cell) list)
         (pageToken: string option)
         (resolve: Query -> string option -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
         : Result<Deferred<QueryResult>, QueryError> =
-        Seam.dispatch r.Seam () None id args (fun q -> Query.invokePageWithArgs q args pageToken resolve)
+        Seam.dispatch r.Seam ctx grant id args (fun q -> Query.invokePageWithArgs q args pageToken resolve)
 
     // ---- the lifecycle (Phase 316): a registry is a lattice, not an append log ----
 
     /// Remove the query registered under `id` — refused `NoSuchQuery(id, known)` when the registry
     /// does not hold it, naming every id it does hold. Removing a query just registered gives back
     /// the registry it was registered into.
-    let unregister (id: string) (r: QueryRegistry) : Result<QueryRegistry, QueryError> =
+    let unregister (id: string) (r: QueryRegistry<'Ctx>) : Result<QueryRegistry<'Ctx>, QueryError> =
         Seam.unregister id r.Seam |> lift
 
     /// Swap the query registered under `q.Id` for `q` — the hot-reload verb. Refused `NoSuchQuery`
     /// when the id is not registered, and held to the admission `register` runs (`DuplicateParam`);
     /// on a refusal the registry is unchanged.
-    let replace (q: Query) (r: QueryRegistry) : Result<QueryRegistry, QueryError> = Seam.replace q r.Seam |> lift
+    let replace (q: Query) (r: QueryRegistry<'Ctx>) : Result<QueryRegistry<'Ctx>, QueryError> =
+        Seam.replace q r.Seam |> lift
 
     /// The registry narrowed to the ids in `keep` — a session- or actor-scoped default-deny. An id
     /// in `keep` the registry does not hold is ignored, so the result enumerates a subset of what `r`
     /// enumerates.
-    let restrict (keep: Set<string>) (r: QueryRegistry) : QueryRegistry = { Seam = Seam.restrict keep r.Seam }
+    let restrict (keep: Set<string>) (r: QueryRegistry<'Ctx>) : QueryRegistry<'Ctx> =
+        { Seam = Seam.restrict keep r.Seam }
 
     /// The join of two registries whose ids are disjoint — refused `DuplicateQuery` naming the first
     /// id, in id order, that both hold (no silent overwrite, as `register`). Associative. The union
     /// runs both registries' gates (Phase 318, `RegistryPolicy.combine`).
-    let union (a: QueryRegistry) (b: QueryRegistry) : Result<QueryRegistry, QueryError> =
+    let union (a: QueryRegistry<'Ctx>) (b: QueryRegistry<'Ctx>) : Result<QueryRegistry<'Ctx>, QueryError> =
         Seam.union a.Seam b.Seam |> lift
 
     // ---- invocation-keyed capture (Phase 318) ----
@@ -237,7 +276,9 @@ module QueryRegistry =
     let dispatchCaptured
         (hashFn: HashFn)
         (encode: QueryResult -> string)
-        (r: QueryRegistry)
+        (r: QueryRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * Cell) list)
         (resolve: Query -> Deferred<QueryResult>)
@@ -248,8 +289,8 @@ module QueryRegistry =
             encode
             unpaged
             r.Seam
-            ()
-            None
+            ctx
+            grant
             id
             args
             (fun q -> Query.invoke q args resolve)
@@ -260,7 +301,9 @@ module QueryRegistry =
     let dispatchPageCaptured
         (hashFn: HashFn)
         (encode: QueryResult -> string)
-        (r: QueryRegistry)
+        (r: QueryRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * Cell) list)
         (pageToken: string option)
@@ -272,8 +315,8 @@ module QueryRegistry =
             encode
             (paged pageToken)
             r.Seam
-            ()
-            None
+            ctx
+            grant
             id
             args
             (fun q -> Query.invokePage q args pageToken resolve)
@@ -286,7 +329,9 @@ module QueryRegistry =
     let dispatchCapturedWith
         (hashFn: HashFn)
         (encode: QueryResult -> string)
-        (r: QueryRegistry)
+        (r: QueryRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * Cell) list)
         (resolve: Query -> (string * Cell) list -> Result<Deferred<QueryResult>, ResolveFault>)
@@ -297,8 +342,8 @@ module QueryRegistry =
             encode
             unpaged
             r.Seam
-            ()
-            None
+            ctx
+            grant
             id
             args
             (fun q -> Query.invokeWithArgs q args resolve)
@@ -310,7 +355,9 @@ module QueryRegistry =
     let dispatchPageCapturedWith
         (hashFn: HashFn)
         (encode: QueryResult -> string)
-        (r: QueryRegistry)
+        (r: QueryRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * Cell) list)
         (pageToken: string option)
@@ -322,8 +369,8 @@ module QueryRegistry =
             encode
             (paged pageToken)
             r.Seam
-            ()
-            None
+            ctx
+            grant
             id
             args
             (fun q -> Query.invokePageWithArgs q args pageToken resolve)
@@ -342,7 +389,9 @@ module QueryRegistry =
     /// Phase 391 (a nested `Result` before `0.37.0`).
     let dispatchReplayed
         (decode: string -> Result<QueryResult, string>)
-        (r: QueryRegistry)
+        (r: QueryRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * Cell) list)
         (pageToken: string option)
@@ -354,8 +403,8 @@ module QueryRegistry =
             decode
             (paged pageToken)
             r.Seam
-            ()
-            None
+            ctx
+            grant
             id
             args
             (fun q -> Query.invokePage q args pageToken resolve)
@@ -368,7 +417,9 @@ module QueryRegistry =
     /// `Query.invokePageWithArgs`.
     let dispatchReplayedWith
         (decode: string -> Result<QueryResult, string>)
-        (r: QueryRegistry)
+        (r: QueryRegistry<'Ctx>)
+        (ctx: 'Ctx)
+        (grant: Grant option)
         (id: string)
         (args: (string * Cell) list)
         (pageToken: string option)
@@ -380,8 +431,8 @@ module QueryRegistry =
             decode
             (paged pageToken)
             r.Seam
-            ()
-            None
+            ctx
+            grant
             id
             args
             (fun q -> Query.invokePageWithArgs q args pageToken resolve)

@@ -708,7 +708,7 @@ let private queryProbe
             | 1 -> ModelQuery.Pending
             | _ -> ModelQuery.Ready(queryResultOf answer)
 
-        let p = QueryRegistry.dispatch preg id args pResolve
+        let p = QueryRegistry.dispatch preg () None id args pResolve
         let m = ModelQuery.dispatch mreg id margs mResolve
 
         t <-
@@ -1485,7 +1485,7 @@ let tests =
               // `unregistered_refused`
               for resolve in [ settling; failing; pending ] do
                   Expect.equal
-                      (QueryRegistry.dispatch reg "q-u" [ "p0", Cell.Int 1 ] resolve)
+                      (QueryRegistry.dispatch reg () None "q-u" [ "p0", Cell.Int 1 ] resolve)
                       (Error(NoSuchQuery("q-u", [ "q-t" ])))
                       "an unregistered id is NoSuchQuery, naming the id and the registry's ids, under every resolver"
 
@@ -1500,7 +1500,7 @@ let tests =
 
                   for resolve in [ settling; failing; pending ] do
                       Expect.equal
-                          (QueryRegistry.dispatch reg "q-t" args resolve)
+                          (QueryRegistry.dispatch reg () None "q-t" args resolve)
                           (refusal |> Result.map (fun () -> Pending))
                           (sprintf "a rejected set %A IS validation's refusal, under every resolver" args)
 
@@ -1510,17 +1510,17 @@ let tests =
               let accepted = [ "p0", Cell.Int 1 ]
 
               Expect.equal
-                  (QueryRegistry.dispatch reg "q-t" accepted settling)
+                  (QueryRegistry.dispatch reg () None "q-t" accepted settling)
                   (Ok(Ready(queryResultOf 1)))
                   "a settling resolver settles"
 
               Expect.equal
-                  (QueryRegistry.dispatch reg "q-t" accepted pending)
+                  (QueryRegistry.dispatch reg () None "q-t" accepted pending)
                   (Ok Pending)
                   "a pending one stays pending"
 
               Expect.equal
-                  (QueryRegistry.dispatch reg "q-t" accepted failing)
+                  (QueryRegistry.dispatch reg () None "q-t" accepted failing)
                   (Error(ExecutionFailed("boom", [])))
                   "a failing resolver is the typed ExecutionFailed, never Ok(Failed _)"
 

@@ -134,7 +134,7 @@ let private readingsQuery: Query =
       Where = []
       OrderBy = [] }
 
-let queryRegistry: QueryRegistry =
+let queryRegistry: QueryRegistry<unit> =
     QueryRegistry.empty
     |> QueryRegistry.register readingsQuery
     |> Result.defaultWith (fun e -> failwithf "the reference query registry did not build: %A" e)
@@ -171,7 +171,7 @@ let genQueryCall (rng: ConfRng.T) : (string * (string * Cell) list) * ConfRng.T 
 
 let queryWitness: QuerySeamWitness =
     { Queries = queryRegistry
-      Dispatch = QueryRegistry.dispatch queryRegistry
+      Dispatch = QueryRegistry.dispatch queryRegistry () None
       GenQuery = genQueryCall }
 
 let private resolverBeforeRefusal
@@ -182,8 +182,8 @@ let private resolverBeforeRefusal
     match QueryRegistry.tryFind id queryRegistry with
     | Some q ->
         let early = resolve q
-        QueryRegistry.dispatch queryRegistry id args (fun _ -> early)
-    | None -> QueryRegistry.dispatch queryRegistry id args resolve
+        QueryRegistry.dispatch queryRegistry () None id args (fun _ -> early)
+    | None -> QueryRegistry.dispatch queryRegistry () None id args resolve
 
 // ---------------------------------------------------------------------------
 //  the capability pipeline

@@ -76,7 +76,7 @@ type CapabilitySeamWitness<'v> =
 
 /// A domain's query seam, as `Conformance.queryLawsAt` certifies it (Phase 246) — the query
 /// mirror of `CapabilitySeamWitness`: `Queries` is the oracle, `Dispatch` the host path
-/// (`QueryRegistry.dispatch queries` for a host that delegates to Core), and `GenQuery` the calls a
+/// (`QueryRegistry.dispatch queries () None` for a host that delegates to Core), and `GenQuery` the calls a
 /// model could make. The domain's resolver is the family's per-call argument
 /// (`Conformance.queryLawsAt w resolver`), as the capability body is (Phase 391; the field
 /// `Resolver` before `0.37.0`, DECISIONS.md D138).
@@ -84,7 +84,7 @@ type QuerySeamWitness =
     {
         /// The oracle: whether a call should reach the resolver, and which error refuses it
         /// otherwise, is read from this registry alone.
-        Queries: QueryRegistry
+        Queries: QueryRegistry<unit>
         /// The host's query path — id, arguments, resolver. It must refuse with exactly the
         /// registry's error; a throw fails the family.
         Dispatch:

@@ -65,7 +65,7 @@ let private fns (entries: (string * string) list) : FunctionRegistry<unit> =
             |> orFail)
         FunctionRegistry.empty
 
-let private queries (ids: string list) : QueryRegistry =
+let private queries (ids: string list) : QueryRegistry<unit> =
     ids
     |> List.fold (fun r id -> QueryRegistry.register (query id) r |> orFail) QueryRegistry.empty
 
@@ -354,7 +354,7 @@ let pagingTests =
                         TotalRowCount = None
                         NextPageToken = None }
 
-              match QueryRegistry.dispatchPage reg "sales" args (Some "cursor-2") resolve with
+              match QueryRegistry.dispatchPage reg () None "sales" args (Some "cursor-2") resolve with
               | Ok(Ready r) -> Expect.equal r.PageNum 1 "the resolver answered the page it was asked for"
               | other -> failtestf "expected a settled page, got %A" other
 
@@ -380,7 +380,7 @@ let pagingTests =
                   Pending
 
               Expect.equal
-                  (QueryRegistry.dispatchPage (queries [ "sales" ]) "nope" [] (Some "t") resolve)
+                  (QueryRegistry.dispatchPage (queries [ "sales" ]) () None "nope" [] (Some "t") resolve)
                   (Error(NoSuchQuery("nope", [ "sales" ])))
                   "default-deny"
 

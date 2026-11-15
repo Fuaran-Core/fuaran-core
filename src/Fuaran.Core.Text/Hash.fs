@@ -135,8 +135,9 @@ module Hash =
     ///   - `Capability.invocationKey`
     ///   - `Capability.invocationPreimage` (Phase 638: the capability id, then `invocationKey`'s
     ///     fields, with no hash taken — the identity a `Grant` is for)
-    ///   - `QueryRegistry.vocabulary` (Phase 638: the query seam's invocation identity — the query
-    ///     id, then `Query.invocationKey`'s fields, with no hash taken)
+    ///   - `Query.invocationPreimage` (Phase 638 as the query seam's invocation identity, named in
+    ///     Phase 651: the query id, then `Query.invocationKey`'s fields, with no hash taken — the
+    ///     identity a `Grant` for a read is for)
     ///   - `CapabilityPipeline.nodeInvocationKey`
     ///   - `Function.memoKey`
     ///   - `Projection.digestOf`

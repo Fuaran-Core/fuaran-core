@@ -456,15 +456,22 @@ let tests =
                   "a host that ignores the gate the registry decides with fails the agreement law"
 
           testCase
-              "the query seam family reads the gate: a parked or denied query is expected refused as the named decision says"
+              "the query seam family reads the gate: a parked or denied query is expected refused as the named decision says, under each context"
           <| fun () ->
-              let gated =
-                  WitnessTakingFamiliesTests.queryRegistry
+              // Since Phase 651 the query registry decides under a context, as the capability
+              // registry does (DECISIONS.md D261.5): the frozen witness holds a `QueryRegistry<unit>`,
+              // so each context of one context-reading registry is certified through `under`. The
+              // trusted context admits every drawn call; the untrusted one parks and denies.
+              let gated: QueryRegistry<bool> =
+                  QueryRegistry.enumerate WitnessTakingFamiliesTests.queryRegistry
+                  |> List.fold (fun r q -> QueryRegistry.register q r |> Result.defaultValue r) QueryRegistry.empty
                   |> QueryRegistry.withGate
                       { Policy = "stations"
                         Decide =
-                          fun () _ args ->
-                              if
+                          fun trusted _ args ->
+                              if trusted then
+                                  PolicyDecision.Allow
+                              elif
                                   List.contains ("station", Str "ridge") args
                                   && List.contains ("limit", Int 2) args
                               then
@@ -475,6 +482,7 @@ let tests =
                                   PolicyDecision.Allow }
 
               let run
+                  (ctx: bool)
                   (dispatch:
                       string
                           -> (string * Cell) list
@@ -482,17 +490,18 @@ let tests =
                           -> Result<Deferred<QueryResult>, QueryError>)
                   =
                   Conformance.queryLawsAt
-                      { Queries = gated
+                      { Queries = QueryRegistry.under ctx gated
                         Dispatch = dispatch
                         GenQuery = WitnessTakingFamiliesTests.genQueryCall }
                       WitnessTakingFamiliesTests.queryResolver
                       2461
                       300
 
-              for r in run (QueryRegistry.dispatch gated) do
-                  Expect.isTrue r.Passed (sprintf "%s — %A" r.Law r.Counterexample)
+              for ctx in [ true; false ] do
+                  for r in run ctx (QueryRegistry.dispatch gated ctx None) do
+                      Expect.isTrue r.Passed (sprintf "under %b: %s — %A" ctx r.Law r.Counterexample)
 
               Expect.exists
-                  (run (QueryRegistry.dispatch WitnessTakingFamiliesTests.queryRegistry))
+                  (run false (QueryRegistry.dispatch WitnessTakingFamiliesTests.queryRegistry () None))
                   (fun r -> not r.Passed && r.Law.Contains "agrees with its query registry")
                   "a host that ignores the gate fails the agreement law" ]

@@ -71,7 +71,7 @@ let tests =
           <| fun _ ->
               let resolve (_: Query) = Ready Unchecked.defaultof<QueryResult>
 
-              match QueryRegistry.dispatch QueryRegistry.empty "nope" [] resolve with
+              match QueryRegistry.dispatch QueryRegistry.empty () None "nope" [] resolve with
               | Error(NoSuchQuery("nope", _)) -> ()
               | other -> failtestf "expected NoSuchQuery, got %A" other
 
@@ -113,7 +113,7 @@ let tests =
                   |> Result.toOption
                   |> Option.get
               // a type-mismatched param must short-circuit before the resolver runs.
-              match QueryRegistry.dispatch r "sales-by-region" [ "year", Str "x" ] resolve with
+              match QueryRegistry.dispatch r () None "sales-by-region" [ "year", Str "x" ] resolve with
               | Error(ParamTypeMismatch _) -> Expect.isFalse ran "resolver must not run on invalid params"
               | other -> failtestf "expected ParamTypeMismatch, got %A" other
 
@@ -170,21 +170,24 @@ let tests =
           testCase "a settled resolver settles: dispatch returns Ok(Ready result)"
           <| fun _ ->
               match
-                  QueryRegistry.dispatch registered "sales-by-region" [ "year", Int 2026 ] (fun _ -> Ready sampleResult)
+                  QueryRegistry.dispatch registered () None "sales-by-region" [ "year", Int 2026 ] (fun _ ->
+                      Ready sampleResult)
               with
               | Ok(Ready r) -> Expect.equal r sampleResult "the resolver's rows ride the envelope unchanged"
               | other -> failtestf "expected Ok(Ready _), got %A" other
 
           testCase "a pending resolver stays pending: the host expresses 'not yet' in Core's vocabulary"
           <| fun _ ->
-              match QueryRegistry.dispatch registered "sales-by-region" [ "year", Int 2026 ] (fun _ -> Pending) with
+              match
+                  QueryRegistry.dispatch registered () None "sales-by-region" [ "year", Int 2026 ] (fun _ -> Pending)
+              with
               | Ok Pending -> ()
               | other -> failtestf "expected Ok Pending, got %A" other
 
           testCase "a resolver failure is REFUSED typed: ExecutionFailed, never Ok(Failed _)"
           <| fun _ ->
               match
-                  QueryRegistry.dispatch registered "sales-by-region" [ "year", Int 2026 ] (fun _ ->
+                  QueryRegistry.dispatch registered () None "sales-by-region" [ "year", Int 2026 ] (fun _ ->
                       Failed "source unreachable")
               with
               | Error(ExecutionFailed("source unreachable", recoverable)) ->
@@ -532,7 +535,8 @@ let typedDispatchTests =
 
               let live =
                   tokens385
-                  |> List.map (fun t -> QueryRegistry.dispatchPageWith registered "sales-by-region" args t typedPages)
+                  |> List.map (fun t ->
+                      QueryRegistry.dispatchPageWith registered () None "sales-by-region" args t typedPages)
 
               Expect.equal
                   live
@@ -551,6 +555,8 @@ let typedDispatchTests =
                                   OpStream.defaultHash
                                   QueryCodec.encodeResult
                                   registered
+                                  ()
+                                  None
                                   "sales-by-region"
                                   args
                                   t
@@ -570,6 +576,8 @@ let typedDispatchTests =
                               QueryRegistry.dispatchReplayedWith
                                   QueryCodec.decodeResult
                                   registered
+                                  ()
+                                  None
                                   "sales-by-region"
                                   args
                                   t
@@ -593,6 +601,8 @@ let typedDispatchTests =
                       OpStream.defaultHash
                       QueryCodec.encodeResult
                       registered
+                      ()
+                      None
                       "sales-by-region"
                       args
                       (fun q a -> typedPages q (Some "p1") a)
@@ -604,6 +614,8 @@ let typedDispatchTests =
                   QueryRegistry.dispatchReplayedWith
                       QueryCodec.decodeResult
                       registered
+                      ()
+                      None
                       "sales-by-region"
                       args
                       None
@@ -622,6 +634,8 @@ let typedDispatchTests =
                       OpStream.defaultHash
                       QueryCodec.encodeResult
                       registered
+                      ()
+                      None
                       "sales-by-region"
                       args
                       (fun _ -> Failed "down")
@@ -634,6 +648,8 @@ let typedDispatchTests =
                   QueryRegistry.dispatchReplayed
                       QueryCodec.decodeResult
                       registered
+                      ()
+                      None
                       "sales-by-region"
                       args
                       None
@@ -1121,7 +1137,7 @@ let whereOrderByTests =
               let seen = ref None
 
               let served =
-                  QueryRegistry.dispatchWithArgs reg "shaped" shapedArgs (fun q _ ->
+                  QueryRegistry.dispatchWithArgs reg () None "shaped" shapedArgs (fun q _ ->
                       seen.Value <- Some(q.Where, q.OrderBy)
                       Ok(Ready sampleResult))
 
@@ -1134,7 +1150,7 @@ let whereOrderByTests =
                   Error(ResolveFault.PredicateUnsupported contains)
 
               Expect.equal
-                  (QueryRegistry.dispatchWithArgs reg "shaped" shapedArgs noContains)
+                  (QueryRegistry.dispatchWithArgs reg () None "shaped" shapedArgs noContains)
                   (Error(PredicateNotHonoured contains))
                   "an unhonoured predicate is refused naming it"
 
@@ -1150,6 +1166,8 @@ let whereOrderByTests =
                       OpStream.defaultHash
                       QueryCodec.encodeResult
                       reg
+                      ()
+                      None
                       "shaped"
                       shapedArgs
                       noContains
@@ -1162,6 +1180,8 @@ let whereOrderByTests =
                   QueryRegistry.dispatchReplayedWith
                       QueryCodec.decodeResult
                       reg
+                      ()
+                      None
                       "shaped"
                       shapedArgs
                       None
@@ -1552,6 +1572,8 @@ let seamBaselineTests528 =
                       OpStream.defaultHash
                       QueryCodec.encodeResult
                       reg
+                      ()
+                      None
                       "q"
                       [ "year", Int year ]
                       resolve
@@ -1571,6 +1593,8 @@ let seamBaselineTests528 =
                   (QueryRegistry.dispatchReplayed
                       QueryCodec.decodeResult
                       reg
+                      ()
+                      None
                       "q"
                       [ "year", Int year ]
                       None

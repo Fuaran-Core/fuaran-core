@@ -225,7 +225,7 @@ module internal QuerySeamLaws =
                 |> List.map (fun t ->
                     match
                         Query.invokePage q pagedArgs t resolver,
-                        QueryRegistry.dispatchPage reg q.Id pagedArgs t resolver
+                        QueryRegistry.dispatchPage reg () None q.Id pagedArgs t resolver
                     with
                     | Ok(Ready r), Ok(Ready r') when r = r' -> Some r
                     | _ -> None)
@@ -270,7 +270,9 @@ module internal QuerySeamLaws =
                 && fst replayed = served
                 && List.isEmpty (snd replayed)
                 && Query.invokePage q pagedArgs (Some "t") resolver = Error(ExecutionFailed("no such page", []))
-                && QueryRegistry.dispatchPage reg "nope" pagedArgs None resolver = Error(NoSuchQuery("nope", [ q.Id ]))
+                && QueryRegistry.dispatchPage reg () None "nope" pagedArgs None resolver = Error(
+                    NoSuchQuery("nope", [ q.Id ])
+                )
                 && Query.invokePage q [ "p0", Str "x" ] None resolver = Error(
                     ParamTypeMismatch("p0", IntType, StringType)
                 ),
@@ -388,12 +390,12 @@ module internal QuerySeamLaws =
             | Ok reg ->
                 let goodArgs = [ "p0", Int 42 ]
 
-                (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Ready realized) with
+                (match QueryRegistry.dispatch reg () None q.Id goodArgs (fun _ -> Ready realized) with
                  | Ok(Ready r) when r = realized -> asyncAxis.Saw()
                  | other ->
                      asyncAxis.Check(false, fun () -> at (sprintf "a settled resolver did not settle: %A" other)))
 
-                (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Pending) with
+                (match QueryRegistry.dispatch reg () None q.Id goodArgs (fun _ -> Pending) with
                  | Ok Pending -> asyncAxis.Saw()
                  | other ->
                      asyncAxis.Check(false, fun () -> at (sprintf "a pending resolver did not stay pending: %A" other)))
@@ -401,7 +403,7 @@ module internal QuerySeamLaws =
                 let ran = ref false
 
                 (match
-                    QueryRegistry.dispatch reg q.Id [ "p0", Str "nope" ] (fun _ ->
+                    QueryRegistry.dispatch reg () None q.Id [ "p0", Str "nope" ] (fun _ ->
                         ran.Value <- true
                         Ready realized)
                  with
@@ -413,17 +415,17 @@ module internal QuerySeamLaws =
                              at (sprintf "refusal not typed-before-resolve (%A; resolver ran: %b)" other ran.Value)
                      ))
 
-                (match QueryRegistry.dispatch reg "no-such-query" goodArgs (fun _ -> Ready realized) with
+                (match QueryRegistry.dispatch reg () None "no-such-query" goodArgs (fun _ -> Ready realized) with
                  | Error(NoSuchQuery _) -> asyncAxis.Saw()
                  | other ->
                      asyncAxis.Check(false, fun () -> at (sprintf "an unregistered id was not refused: %A" other)))
 
                 // a resolver's typed fault names its refusal (Phase 295).
                 (match
-                    QueryRegistry.dispatchWithArgs reg q.Id goodArgs (fun _ _ ->
+                    QueryRegistry.dispatchWithArgs reg () None q.Id goodArgs (fun _ _ ->
                         Error(ResolveFault.SourceMissing("src-" + string i))),
-                    QueryRegistry.dispatchWithArgs reg q.Id goodArgs (fun _ _ -> Error ResolveFault.TimedOut),
-                    QueryRegistry.dispatchWithArgs reg q.Id goodArgs (fun _ _ ->
+                    QueryRegistry.dispatchWithArgs reg () None q.Id goodArgs (fun _ _ -> Error ResolveFault.TimedOut),
+                    QueryRegistry.dispatchWithArgs reg () None q.Id goodArgs (fun _ _ ->
                         Error(ResolveFault.Failed("busy", [ "p0" ])))
                  with
                  | Error(SourceNotResolved r), Error Timeout, Error(ExecutionFailed("busy", [ "p0" ])) when
@@ -463,7 +465,7 @@ module internal QuerySeamLaws =
 
                 let live =
                     tokens
-                    |> List.map (fun t -> QueryRegistry.dispatchPageWith reg q.Id goodArgs t typedResolver)
+                    |> List.map (fun t -> QueryRegistry.dispatchPageWith reg () None q.Id goodArgs t typedResolver)
 
                 let capturedTyped, typedJournal =
                     tokens
@@ -474,6 +476,8 @@ module internal QuerySeamLaws =
                                     hashFn
                                     encodeV
                                     reg
+                                    ()
+                                    None
                                     q.Id
                                     goodArgs
                                     t
@@ -487,6 +491,8 @@ module internal QuerySeamLaws =
                     QueryRegistry.dispatchReplayedWith
                         decodeV
                         reg
+                        ()
+                        None
                         q.Id
                         goodArgs
                         t
@@ -511,6 +517,8 @@ module internal QuerySeamLaws =
                         hashFn
                         encodeV
                         reg
+                        ()
+                        None
                         q.Id
                         goodArgs
                         (fun q' a -> typedResolver q' None a)
@@ -546,7 +554,7 @@ module internal QuerySeamLaws =
                     | Ok _ -> ())
 
                 // a resolver's untyped failure never rides out of the seam — `Ok(Failed _)` is unreachable.
-                (match QueryRegistry.dispatch reg q.Id goodArgs (fun _ -> Failed("boom-" + string i)) with
+                (match QueryRegistry.dispatch reg () None q.Id goodArgs (fun _ -> Failed("boom-" + string i)) with
                  | Error(ExecutionFailed(m, _)) when m = "boom-" + string i -> typedFailure.Saw()
                  | other ->
                      typedFailure.Check(
@@ -622,21 +630,21 @@ module internal QuerySeamLaws =
                     let seen = ref None
 
                     let served =
-                        QueryRegistry.dispatchWithArgs regS qS.Id goodArgs (fun q' _ ->
+                        QueryRegistry.dispatchWithArgs regS () None qS.Id goodArgs (fun q' _ ->
                             seen.Value <- Some(q'.Where, q'.OrderBy)
                             Ok(Ready realized))
 
                     let unhonoured (_: Query) (_: (string * Cell) list) =
                         Error(ResolveFault.PredicateUnsupported predicate)
 
-                    let refusedP = QueryRegistry.dispatchWithArgs regS qS.Id goodArgs unhonoured
+                    let refusedP = QueryRegistry.dispatchWithArgs regS () None qS.Id goodArgs unhonoured
 
                     let refusedO =
-                        QueryRegistry.dispatchWithArgs regS qS.Id goodArgs (fun _ _ ->
+                        QueryRegistry.dispatchWithArgs regS () None qS.Id goodArgs (fun _ _ ->
                             Error(ResolveFault.OrderUnsupported orderColumn))
 
                     let captureP =
-                        QueryRegistry.dispatchCapturedWith hashFn encodeV regS qS.Id goodArgs unhonoured []
+                        QueryRegistry.dispatchCapturedWith hashFn encodeV regS () None qS.Id goodArgs unhonoured []
 
                     let capturedP = captureP.Outcome
 
@@ -644,6 +652,8 @@ module internal QuerySeamLaws =
                         QueryRegistry.dispatchReplayedWith
                             decodeV
                             regS
+                            ()
+                            None
                             qS.Id
                             goodArgs
                             None
@@ -703,7 +713,9 @@ module internal QuerySeamLaws =
     /// outcomes (`Ok(Failed _)` never escapes, and an `ExecutionFailed` carries the resolver's own
     /// failure), that **a refused dispatch runs no resolver** (and a dispatched one runs it exactly
     /// once), and that the host agrees with the registry: a call reaches the resolver iff the
-    /// registry's NAMED decision for it (`QueryRegistry.decideNamed`, Phase 650) is `Allow`, and a
+    /// registry's NAMED decision for it (`QueryRegistry.decideNamed`, Phase 650) is `Allow` at the
+    /// witness's context — the witness holds a `QueryRegistry<unit>`, so a host whose registry reads a
+    /// context hands it `QueryRegistry.under ctx r` and certifies that context's gate (Phase 651) — and a
     /// refused call carries the registry's own error — `NoSuchQuery`, the validation refusal, or the
     /// policy refusal the named decision is (`QueryPolicyRefused` / `QueryApprovalRequired` naming
     /// the gate). The read tells no observer. `queryLaws` beside it certifies Core's seam at Core's fixtures and
@@ -764,7 +776,7 @@ module internal QuerySeamLaws =
             LawKit.seamLaws
                 { Admitted =
                     fun id args ->
-                        match QueryRegistry.decideNamed w.Queries id args with
+                        match QueryRegistry.decideNamed w.Queries () None id args with
                         | Error e -> Error e
                         | Ok(_, PolicyDecision.Allow) -> Ok()
                         | Ok(name, PolicyDecision.Deny g) -> Error(QueryPolicyRefused(name, g.Message, g.Alternatives))

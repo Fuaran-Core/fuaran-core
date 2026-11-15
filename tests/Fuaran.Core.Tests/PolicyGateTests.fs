@@ -369,13 +369,15 @@ let tests =
               let enc = QueryCodec.encodeResult
 
               let c1 =
-                  QueryRegistry.dispatchPageCaptured hashFn enc reg "feed" [] None (fun _ _ -> Ready(page 1)) []
+                  QueryRegistry.dispatchPageCaptured hashFn enc reg () None "feed" [] None (fun _ _ -> Ready(page 1)) []
 
               let c2 =
                   QueryRegistry.dispatchPageCaptured
                       hashFn
                       enc
                       reg
+                      ()
+                      None
                       "feed"
                       []
                       (Some "2")
@@ -391,17 +393,47 @@ let tests =
               let live _ _ = Ready(page 99)
 
               let second =
-                  QueryRegistry.dispatchReplayed QueryCodec.decodeResult reg "feed" [] (Some "2") live Map.empty j2
+                  QueryRegistry.dispatchReplayed
+                      QueryCodec.decodeResult
+                      reg
+                      ()
+                      None
+                      "feed"
+                      []
+                      (Some "2")
+                      live
+                      Map.empty
+                      j2
 
               Expect.equal second.Outcome (Ok(Ready(page 2))) "page two replays from its own capture"
 
               let first =
-                  QueryRegistry.dispatchReplayed QueryCodec.decodeResult reg "feed" [] None live second.Cursor j2
+                  QueryRegistry.dispatchReplayed
+                      QueryCodec.decodeResult
+                      reg
+                      ()
+                      None
+                      "feed"
+                      []
+                      None
+                      live
+                      second.Cursor
+                      j2
 
               Expect.equal first.Outcome (Ok(Ready(page 1))) "and page one from its own"
 
               let never =
-                  QueryRegistry.dispatchReplayed QueryCodec.decodeResult reg "feed" [] (Some "3") live Map.empty j2
+                  QueryRegistry.dispatchReplayed
+                      QueryCodec.decodeResult
+                      reg
+                      ()
+                      None
+                      "feed"
+                      []
+                      (Some "3")
+                      live
+                      Map.empty
+                      j2
 
               Expect.equal
                   never.Outcome

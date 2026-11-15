@@ -337,7 +337,7 @@ let tests =
                         "ParamTypeMismatch"
 
                     let noQuery =
-                        refusalOf (QueryRegistry.dispatch queries "raw-dump" [] (fun _ -> Ready emptyResult))
+                        refusalOf (QueryRegistry.dispatch queries () None "raw-dump" [] (fun _ -> Ready emptyResult))
 
                     Expect.equal
                         (QueryError.describe noQuery)
@@ -346,7 +346,7 @@ let tests =
 
                     let failed =
                         refusalOf (
-                            QueryRegistry.dispatch queries "readings" [ "station", Str "offline" ] (fun _ ->
+                            QueryRegistry.dispatch queries () None "readings" [ "station", Str "offline" ] (fun _ ->
                                 Failed "archive shard for station offline is unreachable")
                         )
 
@@ -629,13 +629,13 @@ let tests =
                         )
 
                     Expect.equal
-                        (QueryRegistry.dispatchWithArgs queries "readings" args resolve)
+                        (QueryRegistry.dispatchWithArgs queries () None "readings" args resolve)
                         (Ok(Ready { emptyResult with PageNum = 2 }))
                         "settled with the resolved query"
 
                     Expect.equal seen args "the list that was validated"
 
-                    match QueryRegistry.dispatchWithArgs queries "raw-dump" args resolve with
+                    match QueryRegistry.dispatchWithArgs queries () None "raw-dump" args resolve with
                     | Error(NoSuchQuery("raw-dump", [ "readings"; "stations" ])) -> ()
                     | other -> failtestf "expected NoSuchQuery, got %A" other
 
