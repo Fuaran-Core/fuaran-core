@@ -281,6 +281,111 @@ it equal to them. [`CONTRIBUTING.md`](CONTRIBUTING.md) says how an entry is adde
 | D1 | 2026-06-17 | `Severity` is `[<RequireQualifiedAccess>]` | Live |
 <!-- decisions-index:end -->
 
+## 2026-11-15 — D261: the query registry decides under a decision context and a dispatch may present a grant, as the capability registry does; a grant for a read is bound to the read's injective identity and covers every page of it; the frozen query witness stays at the unit context
+
+**Status:** Live
+
+**Recorded by Phase 651.** D249 put a decision context and a grant on the seam the two invocable registries share and
+carried the capability registry across; the query registry stayed at the `unit` context and presented no grant
+(D249.3). So a host could decide an effect for whoever was acting and could not decide a read the same way: a read made
+for a restricted actor still needed a registry built for it by hand. This entry carries the query registry across, in
+the same breaking slot, so the change reaches a consumer once.
+
+**D261.1 — went red first.** The laws were written against the new shape before the registry moved:
+`QueryDecisionContextTests` (one query registry, two contexts, two decisions; a needs-approval read runs with the grant
+for exactly its invocation and is refused with none, with a grant for other arguments, for another query, or with the
+hashed capture key presented as one; a denied read reaches no resolver whatever is presented; the grant for a read
+covers every page; a registry at the unit context decides as before; the named decision is the refusal every dispatch
+verb makes), and the query arm of `Conformance.policyLaws`' context, grant and named-decision laws, whose sentences
+already claimed both registries. On the tree before the registry moved the conformance package did not build:
+`PolicySeamLaws.fs(544,34): error FS0001: This expression was expected to have type 'unit' but here has type 'bool'`
+(a query gate could not read a context), `(636,34): error FS0039: The value, constructor, namespace or type 'grant' is
+not defined` (there was no grant for a read), and `(563,21): error FS0003: This value is not a function and cannot be
+applied` (no dispatch verb took a context or a grant).
+
+**D261.2 — the shape is the capability registry's.** `QueryRegistry<'Ctx>`, with the context a type parameter of the
+registry, its gates (`PolicyGate<'Ctx, Query, (string * Cell) list>`) and its observers. Every verb that decides takes
+the context and a `Grant option` after the registry: `decide`, `decideNamed`, `dispatch`, `dispatchWithArgs`,
+`dispatchPage`, `dispatchPageWith`, the four captured verbs and the two replayed ones
+(`QueryRegistry.dispatch r ctx grant id args resolve`). `QueryRegistry.under ctx r` fixes a context: the result takes
+`unit` and decides and dispatches exactly as `r` does under `ctx`. A registry that needs no context is
+`QueryRegistry<unit>` and passes `() None`, one changed line per dispatch; a gate written before is carried by
+`PolicyGate.ignoringContext`. Two alternatives lost. A second, context-reading registry beside the present one would
+give the query seam two surfaces where the capability seam has one, and a host's policy for reads and for effects
+would be installed two ways. Keeping the type name non-generic through an abbreviation at `unit` would save the type
+annotation and none of the dispatch lines, and would leave the two registries spelled differently for one release.
+
+**D261.3 — what a grant for a read is, and when a host asks for one.** The identity of a read is
+`Query.invocationPreimage q args`: the query id, then the fields `Query.invocationKey` hashes (the declaration's
+filter and order, then each binding's name, cell tag and payload, name-sorted), as one canonical pre-image with no
+hash taken. It is the identity D249.3 stated for the query seam, now named and public beside
+`Capability.invocationPreimage`, and `Query.grant q args` mints the grant for exactly that read. It is injective
+(`invocation_identity_injective` in `proofs/Query.fst`): two reads with one identity name one query id, one filter,
+one order and the same bindings. A grant therefore approves ONE read, what one declaration discloses for exactly
+those arguments. A host asks for one when a gate answers `NeedsApproval` for a read whose disclosure or cost needs a
+person's say: it previews the read with `decideNamed`, shows the approver the declaration and the bindings, mints
+`Query.grant`, and dispatches with it. Who may approve, whether the grant was spent and when it lapses are the
+host's facts in the context (D249.5). A cell is identified by its tag, as the capture key identifies it: an `Int 5`
+bound to a float parameter and a `Float 5.0` are two reads to the grant as they are two captures to the journal, so a
+host mints the grant from the arguments it will dispatch. Three alternatives lost. Binding to `Query.invocationKey`
+lost for D249.3's reason: it ends in a 32-bit cache hash a second pre-image of which is cheap. Binding to the query
+id alone would approve every argument set of a declaration, and what a read discloses depends on its arguments.
+Canonicalising a cell by the parameter's type (an `Int` read as the float it widens to) would make the identity
+differ from the capture key's pre-image, which this phase does not change.
+
+**D261.4 — a grant for one page of a paged read covers the next.** The page token is not in the identity. The seam
+decides on the declaration and the arguments; a token is the resolver's cursor over the one result those fix, and the
+resolver mints it after the approval, so no approver could be shown a page's token in advance. A grant is therefore
+for the read, and every page of it is dispatched with the same grant. A host that limits pages (a cost per page) holds
+that limit itself, in its paging loop or as a context fact. The capture key is still per page (`invocationKeyPage`),
+unchanged. Two alternatives lost. The token in the identity would put it in the arguments the seam reads, which moves
+the seam, and would make a paged read impossible to approve before its first page. A grant for the first page only is
+the same refusal one page later.
+
+**D261.5 — the frozen query witness stays at the unit context.** `QuerySeamWitness.Queries` is a
+`QueryRegistry<unit>`; a host whose registry reads a context hands the witness `QueryRegistry.under ctx r` and its own
+dispatch at that context, as D254.6 kept the capability witnesses. `queryLawsAt` admits a drawn call only when the
+registry's named decision is `Allow` (D255.7), so `under ctx` certifies the context's own gate; a test holds the family
+green under both contexts of one context-reading registry, and red for a host that drops the gate. The alternative, a
+witness generic in the context, lost for D254.6's reasons: it needs the host's contexts as data and a new `Takes`
+case, and its laws would be the unit laws run once per context.
+
+**D261.6 — what a registry built on this one changes; the compute repository's pipeline-query registry is one.** A
+registry that holds a `QueryRegistry` and dispatches through it moves the held registry to `QueryRegistry<unit>` (or
+to its own context type) and passes `() None` (or its context and grant) on each dispatch line; with no gate it decides
+exactly as before. `Fuaran.Compute.PipelineQuery`'s `PipelineQueryRegistry` (read at the compute repository's
+`1a80f11`) is such a registry: it holds a `QueryRegistry` of its declarations, answers it from `declarations`, and
+dispatches through `QueryRegistry.dispatch`. It exposes no gate, so at its raise it changes one type and one dispatch
+line and decides as before. One thing more binds it if it ever takes a grant: it hands the seam only the first binding
+of each list-read parameter and checks the rest itself, so the seam's identity of what it dispatches does not see the
+further bindings, and a grant forwarded to the seam would cover every read differing only there. A registry that
+rewrites the arguments before the seam reads them binds a grant to the whole invocation its body reads, or presents
+none. That registry follows at its own raise; this phase changes nothing there.
+
+**D261.7 — one decision path.** Every query dispatch verb judges through the seam's one function (D255.6), so
+`QueryPolicyRefused` and `QueryApprovalRequired` are built from the decision `decideNamed` answers, under the context
+and with the grant. `Conformance.policyLaws` holds it on the query registry under both contexts and every grant, and
+`QueryDecisionContextTests` holds it for every dispatch verb.
+
+**D261.8 — the query seam's identity vectors are a family of their own.** `conformance/laws/query-grant-laws.json`
+(id `queryGrantLaws`) holds `invocationIdentity` and `grantCovers` vectors for reads, indexed in this repository's
+`laws/manifest.json` with every host's adoption `proposed`, and rendered by the exporter. `capability-gate-laws.json`
+and `capability-laws.json` are byte for byte what they were. The alternative that lost was new cases in
+`capability-gate-laws.json`: the Rust port's reader at its `55c145f` fails on a case it does not know
+(`tests/capability_gate.rs`, the `unknown case` arm), and this phase records that port as having adopted that family
+(D261.10), so a new case there turns an adopted host red. D255.1 and D260.17 are the precedent; nothing is rendered
+into the shared corpus.
+
+**D261.9 — the model.** `proofs/Query.fst` states the query registry's gates, context and grant (section 11),
+restating each dispatch theorem over a context and a grant; none is weakened and none is removed. What is proved and
+under which premises is the section's header and the ladder's rows.
+
+**D261.10 — the Rust port's adoption record.** The spine table records what the port's legs asserted at its `main`
+`55c145f`: `capabilityGateLaws` 41, `capabilityLaws` 144, `seamRefusals` 142, `skeletonDag` 12 and `skeletonMerge`
+13, against Core `0.43.0` (a draft). The corpus's law index carries no adoption, so no corpus file moves.
+
+**D261.11 — Fable.** The laws pass on .NET. Their Fable half is discharged at the `0.43.0` cut (Phase 652).
+
 ## 2026-11-15 — D260: the IDL gains contracts, a named set of methods each declared once and projected onto a capability; a structured value at a hole or a result is a document, a value space of its own family; and a float at the registry is finite
 
 **Status:** Live
@@ -829,7 +934,7 @@ declares the condition.
 
 ## 2026-11-14 — D255: the gate, its context and the grant are emitted as a law family of their own, decided from a declared gate table; the registries gain a named read of their decision, which dispatch is built from, and the seam families admit a call only when that decision allows it
 
-**Status:** Live
+**Status:** Amended-by D261
 
 **Recorded by Phase 650.** Phase 638 gave a gate a decision context and let a dispatch present a grant (D249). Its laws
 hold in the conformance package and in the suite, but nothing of it was in the emitted vectors, so a port that follows
@@ -1383,7 +1488,7 @@ the present leg only; running the custard arms there needs the newer prover fetc
 
 ## 2026-11-12 — D249: a gate decides under a decision context, a type parameter of the gate, the seam and the registries; a dispatch may present a grant, bound to the invocation's injective pre-image and never to its hashed capture key; a grant lifts exactly one needs-approval and is not a gate
 
-**Status:** Live
+**Status:** Amended-by D261
 
 Phase 638. A gate was a function of a declaration and its arguments. It could not be shown who was
 acting, so a restricted actor needed a registry built for it by hand; and it could not be shown an
