@@ -553,6 +553,377 @@ let private unitDrawn (seed: int) : string =
         Unit.render u + "=" + factor)
     |> String.concat "|"
 
+// ---- Phase 677 — the 0.43 runtime families, run under Node ----
+// Until Phase 677 no row reached a value of the families the 0.43 slot added or changed: the
+// receiving gate compiled them under Fable and their laws ran on .NET only. The helpers below print
+// what each family answers — a decision, a grant, an identity, a rendered document, an ordering —
+// as ASCII, from inputs that exercise what the two pipelines carry differently: 64-bit integers past
+// 2^53, float and decimal spellings, non-ASCII order, and map- or set-ordered output.
+
+/// `s` itself when it is printable ASCII, else `sha:` and its SHA-256: a message or a document that
+/// may carry non-ASCII text is compared by digest, never echoed.
+let private asciiOr (s: string) : string =
+    if s |> Seq.forall (fun ch -> ch >= ' ' && ch <= '~') then
+        s
+    else
+        "sha:" + Hash.sha256Hex s
+
+/// A decode refusal as `<code>@<path>`.
+let private refusalOf (e: DecodeError) : string =
+    DecodeError.codeName e.Code + "@" + asciiOr (DecodePath.render e.Path)
+
+/// A policy decision as text: `allow`, `needsApproval`, or `deny:<message>/<alternatives>`.
+let private decisionText (d: PolicyDecision) : string =
+    match d with
+    | PolicyDecision.Allow -> "allow"
+    | PolicyDecision.NeedsApproval -> "needsApproval"
+    | PolicyDecision.Deny g -> "deny:" + asciiOr g.Message + "/" + String.concat "," g.Alternatives
+
+/// A named decision (Phase 650) as `<gate>:<decision>` (`<none>` where every gate allows), or the
+/// refusal's own text.
+let private namedText (refusal: 'e -> string) (r: Result<string * PolicyDecision, 'e>) : string =
+    match r with
+    | Ok(name, d) -> (if name = "" then "<none>" else name) + ":" + decisionText d
+    | Error e -> "refused:" + asciiOr (refusal e)
+
+/// `1` / `0` per answer, in order.
+let private bits (xs: bool list) : string =
+    xs |> List.map (fun b -> if b then "1" else "0") |> String.concat ""
+
+/// A law run as `<passed>/<results>:<SHA-256 of each law's statement, verdict and evidence>`. The
+/// evidence is how many times each law was asserted, which the seeded draw decides, so a pipeline
+/// that draws another sample moves the digest even where every verdict stays green.
+let private lawSummary (results: LawResult list) : string =
+    let passed = results |> List.filter _.Passed |> List.length
+
+    string passed
+    + "/"
+    + string (List.length results)
+    + ":"
+    + Hash.sha256Hex (
+        results
+        |> List.map (fun r -> r.Law + "|" + (if r.Passed then "1" else "0") + "|" + string r.Evidence)
+        |> String.concat "\n"
+    )
+
+// -- Phases 638, 642, 650: the capability registry's identity, grant, decision and dispatch --
+
+let private hole677 (addr: string) (space: ValueSpace) : SigEntry =
+    { Addr = addr
+      Name = addr
+      Kind = ValueHole space
+      Required = true }
+
+let private cap677 (id: string) (holes: SigEntry list) (result: Returns) : Capability =
+    Capability.create
+        id
+        { Name = id
+          Holes = holes
+          Effect = Effect.pureDeterministic }
+        Server
+        result
+
+/// Every integer, every finite float, and any string: the spellings the identity canonicalises.
+let private editCap: Capability =
+    cap677
+        "edit"
+        [ hole677 "n" (IntRange(System.Int32.MinValue, System.Int32.MaxValue))
+          hole677 "x" (FloatRange(-1e308, 1e308))
+          hole677 "s" AnyString ]
+        (Returns.Value(FloatRange(0.1, 1e21)))
+
+/// A document argument and a document result (Phase 644).
+let private noteCap: Capability =
+    cap677 "note" [ hole677 "doc" (Document(Some "Note")) ] (Returns.Value(Document(Some "Note")))
+
+/// A call made for its effect (Phase 642's `Returns.Nothing`).
+let private eraseCap: Capability =
+    cap677 "erase" [ hole677 "n" (IntRange(0, 99)) ] Returns.Nothing
+
+/// The registry under a 64-bit decision context: `budget` reads it and parks an edit below 2^53 + 1,
+/// which a context carried as a double could not tell from 2^53; `lock` ignores it and denies an erase.
+let private registry677: CapabilityRegistry<int64> =
+    [ editCap; noteCap; eraseCap ]
+    |> List.fold (fun r c -> r |> Result.bind (CapabilityRegistry.register c)) (Ok CapabilityRegistry.empty)
+    |> Result.defaultValue CapabilityRegistry.empty
+    |> CapabilityRegistry.withGate
+        { Policy = "budget"
+          Decide =
+            fun (ctx: int64) (c: Capability) _ ->
+                if c.Id = "edit" && ctx < 9007199254740993L then
+                    PolicyDecision.NeedsApproval
+                else
+                    PolicyDecision.Allow }
+    |> CapabilityRegistry.withGate (
+        PolicyGate.ignoringContext "lock" (fun (c: Capability) (_: (string * string) list) ->
+            if c.Id = "erase" then
+                PolicyDecision.denyWith "an erase is locked" [ "edit"; "note" ]
+            else
+                PolicyDecision.Allow)
+    )
+
+let private editArgs = [ "n", "7"; "x", "1.5"; "s", "a" ]
+
+/// The identity a grant binds, as the UTF-8 hex of its pre-image (it carries the field separators).
+let private identityHex (c: Capability) (args: (string * string) list) : string =
+    hexOf (Hash.utf8Bytes (Capability.invocationPreimage c args))
+
+let private capDecide (ctx: int64) (grant: Grant option) (id: string) (args: (string * string) list) =
+    namedText CapabilityCodec.encodeInvokeError (CapabilityRegistry.decideNamed registry677 ctx grant id args)
+
+let private capDispatch (ctx: int64) (grant: Grant option) (id: string) (args: (string * string) list) =
+    match CapabilityRegistry.dispatch registry677 ctx grant id args (fun c () -> Ready("ran:" + c.Id)) with
+    | Ok(Ready s) -> s
+    | Ok Pending -> "pending"
+    | Ok(Failed m) -> "failed:" + asciiOr m
+    | Error e -> "refused:" + asciiOr (CapabilityCodec.encodeInvokeError e)
+
+/// `CapabilityRegistry.register` of a capability whose declared result the admission gate refuses.
+let private registerResult (result: Returns) : string =
+    match CapabilityRegistry.register (cap677 "bad" [] result) (CapabilityRegistry.empty: CapabilityRegistry<unit>) with
+    | Ok _ -> "admitted"
+    | Error e -> "refused:" + asciiOr (CapabilityCodec.encodeInvokeError e)
+
+// -- Phases 650, 651: the query registry's identity, grant and named decision --
+
+let private qParam (name: string) (t: ColumnType) : QueryParam =
+    { Name = name
+      Type = t
+      Required = false }
+
+let private query677 (id: string) (ps: QueryParam list) : Query =
+    { Id = id
+      Params = ps
+      ResultSchema = [ Field.create "n" IntType ]
+      Effect =
+        { Host = ReadsHost
+          Determinism = Effect.network }
+      Source = Ref id
+      TimeoutMs = None
+      PageSize = Some 50
+      Where = []
+      OrderBy = [] }
+
+/// One optional parameter of each column type.
+let private everyQuery: Query =
+    query677
+        "every"
+        [ qParam "a" IntType
+          qParam "b" FloatType
+          qParam "c" BoolType
+          qParam "d" StringType
+          qParam "e" DateType
+          qParam "f" (TimestampType TimeUnit.Milliseconds)
+          qParam "g" DecimalType ]
+
+let private ledgerQuery: Query =
+    query677
+        "ledger"
+        [ { qParam "n" IntType with
+              Required = true } ]
+
+/// `disclosure` parks a guest's read of `every` and denies a guest the ledger.
+let private queries677: QueryRegistry<string> =
+    [ everyQuery; ledgerQuery ]
+    |> List.fold (fun r q -> r |> Result.bind (QueryRegistry.register q)) (Ok QueryRegistry.empty)
+    |> Result.defaultValue QueryRegistry.empty
+    |> QueryRegistry.withGate
+        { Policy = "disclosure"
+          Decide =
+            fun (ctx: string) (q: Query) _ ->
+                match ctx, q.Id with
+                | "guest", "every" -> PolicyDecision.NeedsApproval
+                | "guest", "ledger" -> PolicyDecision.deny "the ledger is not open to a guest"
+                | _ -> PolicyDecision.Allow }
+
+let private queryIdentityHex (args: (string * Cell) list) : string =
+    hexOf (Hash.utf8Bytes (Query.invocationPreimage everyQuery args))
+
+let private queryDecide (ctx: string) (grant: Grant option) (id: string) (args: (string * Cell) list) =
+    namedText QueryCodec.encodeQueryError (QueryRegistry.decideNamed queries677 ctx grant id args)
+
+let private everyKind677: (string * Cell) list =
+    [ "a", Int System.Int32.MinValue
+      "b", Float 0.1
+      "c", Bool false
+      "d", Str "eu-west"
+      "e", Date "2026-11-16"
+      "f", Timestamp "2026-11-16T09:30:00.250Z"
+      "g", Decimal "12.50" ]
+
+// -- Phase 639: the IDL's wider data universe --
+
+/// One kind holding each of the eight wider types.
+let private wideVocab: Fuaran.Core.Idl.Idl =
+    let req = Fuaran.Core.Idl.Required
+
+    sVocab
+        [ sKind
+              "W"
+              [ sField "i" Fuaran.Core.Idl.TInt64 req
+                sField "m" Fuaran.Core.Idl.TDecimal req
+                sField "b" Fuaran.Core.Idl.TBytes req
+                sField "t" (Fuaran.Core.Idl.TTuple [ Fuaran.Core.Idl.TInt64; Fuaran.Core.Idl.TStr ]) req
+                sField "k" (Fuaran.Core.Idl.TKeyedMap(Fuaran.Core.Idl.TInt64, Fuaran.Core.Idl.TStr)) req
+                sField "s" (Fuaran.Core.Idl.TSet Fuaran.Core.Idl.TStr) req
+                sField "h" Fuaran.Core.Idl.TTimeOfDay req
+                sField "d" Fuaran.Core.Idl.TDuration req ] ]
+        []
+
+/// A `W` node: a 64-bit integer past 2^53, a decimal no host decimal holds, a tuple at the int64
+/// minimum, a keyed map whose keys' canonical order is not their numeric order, and a set authored
+/// out of order.
+let private wideNode (set: string list) (tupleText: string) : Fuaran.Core.Idl.IdlValue =
+    let s (x: string) = Fuaran.Core.Idl.VStr x
+
+    Fuaran.Core.Idl.VNode(
+        "n",
+        "W",
+        [ "i", s "9007199254740993"
+          "m", s "79228162514264337593543950336.5"
+          "b", s "SGVsbG8gd29ybGQ="
+          "t", Fuaran.Core.Idl.VList [ s "-9223372036854775808"; s tupleText ]
+          "k",
+          Fuaran.Core.Idl.VList
+              [ for k, v in [ "9", "nine"; "10", "ten"; "-1", "minus"; "9007199254740993", "big" ] ->
+                    Fuaran.Core.Idl.VList [ s k; s v ] ]
+          "s", Fuaran.Core.Idl.VList(List.map s set)
+          "h", s "23:59:59.9999999"
+          "d", s "-922337203685.4775808s" ]
+    )
+
+let private wideEncode (v: Fuaran.Core.Idl.IdlValue) : string =
+    match Fuaran.Core.Idl.Encode.encode wideVocab v with
+    | Ok text -> asciiOr text
+    | Error e -> "refused:" + asciiOr e
+
+/// A `W` document with every member canonical but those `over` replaces (raw JSON member values).
+let private wideDoc (over: (string * string) list) : string =
+    let canonical =
+        [ "i", "\"5\""
+          "m", "\"1.5\""
+          "b", "\"AA==\""
+          "t", "[\"1\",\"x\"]"
+          "k", "[[\"-1\",\"a\"],[\"10\",\"b\"],[\"9\",\"c\"]]"
+          "s", "[\"a\",\"b\"]"
+          "h", "\"12:30:00\""
+          "d", "\"90s\"" ]
+
+    let members =
+        canonical
+        |> List.map (fun (k, v) ->
+            let value =
+                over
+                |> List.tryFind (fun (o, _) -> o = k)
+                |> Option.map snd
+                |> Option.defaultValue v
+
+            "\"" + k + "\":" + value)
+
+    "{\"id\":\"n\",\"kind\":{\"$type\":\"W\"," + String.concat "," members + "}}"
+
+/// `Decode.decodeDetailed` then `Encode.encode`: the canonical bytes back, or the refusal.
+let private wideDecode (over: (string * string) list) : string =
+    match Fuaran.Core.Idl.Decode.decodeDetailed wideVocab (wideDoc over) with
+    | Ok v -> wideEncode v
+    | Error e -> "refused:" + refusalOf e
+
+/// The five readers' verdicts on one text, as bits in the order int64, decimal, bytes, timeOfDay,
+/// duration.
+let private admits (s: string) : string =
+    bits
+        [ Fuaran.Core.Idl.ScalarText.isInt64 s
+          Fuaran.Core.Idl.ScalarText.isDecimal s
+          Fuaran.Core.Idl.ScalarText.isBytes s
+          Fuaran.Core.Idl.ScalarText.isTimeOfDay s
+          Fuaran.Core.Idl.ScalarText.isDuration s ]
+
+/// Canonical texts the order separates where a code-unit order would not: U+FFFF and U+E000 against a
+/// surrogate pair, a two-byte letter, and integer texts whose canonical order is not numeric.
+let private orderTexts: string list =
+    [ "\"Z\""
+      "\"a\""
+      "\"" + units [ 0xFFFF ] + "\""
+      "\"" + units [ 0xD83D; 0xDE00 ] + "\""
+      "\"" + units [ 0xE000 ] + "\""
+      "\"" + units [ 0x00E9 ] + "\""
+      "\"10\""
+      "\"9\""
+      "\"-1\""
+      "[10,false]"
+      "[9,true]"
+      "\"\"" ]
+
+/// `ScalarText.compare`'s order over `texts`, as the input indices in sorted order.
+let private orderOf (texts: string list) : string =
+    texts
+    |> List.mapi (fun i t -> i, t)
+    |> List.sortWith (fun (_, a) (_, b) -> Fuaran.Core.Idl.ScalarText.compare a b)
+    |> List.map (fst >> string)
+    |> String.concat ","
+
+/// The sampler at the wider types: `count` nodes from `seed`, `<distinct>:<SHA-256 of the encodings>`.
+let private wideSample (seed: int) (count: int) : string =
+    match Fuaran.Core.Idl.Sample.trySampleNodes wideVocab [ "W" ] seed count with
+    | Error r -> "refused:" + asciiOr r.Describe
+    | Ok nodes ->
+        let texts =
+            nodes
+            |> List.map (fun v ->
+                match Fuaran.Core.Idl.Encode.encode wideVocab v with
+                | Ok t -> t
+                | Error e -> "<unencodable:" + e + ">")
+
+        string (List.length (List.distinct texts))
+        + ":"
+        + Hash.sha256Hex (String.concat "\n" texts)
+
+// -- Phase 640: the number's token text and the lossless document --
+
+let private docLimits = JsonLimits.depthOnly Json.defaultMaxDepth
+
+/// `JDoc.read` then `JDoc.tryWrite`: the document back, or the refusal.
+let private jdocRoundTrip (text: string) : string =
+    match JDoc.read docLimits text |> Result.bind JDoc.tryWrite with
+    | Ok back -> asciiOr back
+    | Error e -> "refused:" + refusalOf e
+
+/// `JDoc.read` then `JDoc.toJVal`, rendered by `Json.render`, or the refusal.
+let private jdocToJVal (text: string) : string =
+    match JDoc.read docLimits text |> Result.bind JDoc.toJVal with
+    | Ok v -> asciiOr (Json.render v)
+    | Error e -> "refused:" + refusalOf e
+
+/// `JDoc.ofJVal` then `JDoc.tryWrite`.
+let private jdocOfJVal (v: JVal) : string =
+    match JDoc.ofJVal v |> Result.bind JDoc.tryWrite with
+    | Ok text -> asciiOr text
+    | Error e -> "refused:" + refusalOf e
+
+/// `JDoc.tryWrite` of a document built by hand, which the reader would not have produced.
+let private jdocWrite (d: JDoc) : string =
+    match JDoc.tryWrite d with
+    | Ok text -> asciiOr text
+    | Error e -> "refused:" + refusalOf e
+
+/// `JDocDecoder.read` of member `a` through `decoder`, the value through `show`.
+let private jdocField (decoder: JDoc -> Result<'a, DecodeError>) (show: 'a -> string) (text: string) : string =
+    match JDocDecoder.read docLimits (JDocDecoder.field "a" decoder) text with
+    | Ok v -> show v
+    | Error e -> "refused:" + refusalOf e
+
+/// `Reader.numberText` of a whole document that is one number.
+let private numberText (text: string) : string =
+    match Reader.read ReadOptions.strict Reader.numberText text with
+    | Ok t -> t
+    | Error e -> "refused:" + refusalOf e
+
+/// `Space.documentOf`: a document's one spelling, or `none`.
+let private documentOf (text: string) : string =
+    match Space.documentOf text with
+    | Some canonical -> asciiOr canonical
+    | None -> "none"
+
 /// The named table: `(label, value)` pairs, each value computed by calling a public surface
 /// and ASCII by construction. Only the first part of what `lines` emits — the hash and
 /// sanitiser sweeps follow it there — and its order is part of the comparison.
@@ -950,7 +1321,226 @@ let vectors: (string * string) list =
       "unit/refusal/prefix-not-allowed", unitRender "kmin"
       "unit/refusal/exponent-range", unitRender "m2147483648"
       "unit/drawn/seed-0", unitDrawn 0
-      "unit/drawn/seed-428", unitDrawn 428 ]
+      "unit/drawn/seed-428", unitDrawn 428
+
+      // ---- Phase 677 — the 0.43 runtime families. Appended, so every earlier row keeps its place. ----
+      // Phases 638 and 642: the identity a grant binds is the capability id and each argument's
+      // canonical spelling in its hole's space — an integer's, and a float's through the shared layout
+      // (`1e21`, `-0`, a value past 2^53, `1e-7`), so these rows are where a float spelled differently
+      // under Node would move an approval's identity.
+      "registry/identity/spellings", identityHex editCap [ "n", "007"; "x", "1.50"; "s", "a" ]
+      "registry/identity/address-order", identityHex editCap [ "s", "a"; "x", "1.5"; "n", "7" ]
+      "registry/identity/float-e21", identityHex editCap [ "n", "-2147483648"; "x", "1e21"; "s", "" ]
+      "registry/identity/float-neg-zero", identityHex editCap [ "n", "0"; "x", "-0"; "s", "z" ]
+      "registry/identity/float-past-2-53", identityHex editCap [ "n", "1"; "x", "123456789012345678"; "s", "z" ]
+      "registry/identity/float-e-7", identityHex editCap [ "n", "1"; "x", "0.0000001"; "s", "z" ]
+      "registry/identity/non-ascii",
+      Hash.sha256Hex (Capability.invocationPreimage editCap [ "n", "1"; "x", "0.1"; "s", unicodeSample ])
+      "registry/identity/document", identityHex noteCap [ "doc", "{\"b\":[1.50,-0],\"a\":{\"z\":true,\"y\":1E+21}}" ]
+      // `Grant.covers` over `Capability.grant`: one invocation in another spelling, other arguments,
+      // another capability, and no grant.
+      "registry/grant/covers",
+      (let own = Capability.grant editCap [ "n", "07"; "x", "1.50"; "s", "a" ]
+
+       bits
+           [ Grant.covers (Capability.invocationPreimage editCap editArgs) [ own ]
+             Grant.covers (Capability.invocationPreimage editCap [ "n", "8"; "x", "1.5"; "s", "a" ]) [ own ]
+             Grant.covers (Capability.invocationPreimage eraseCap [ "n", "7" ]) [ own ]
+             Grant.covers (Capability.invocationPreimage editCap editArgs) [] ])
+      // Phase 650: the named decision under a 64-bit context. 2^53 parks the edit and 2^53 + 1 does
+      // not, so a context read as a double answers `allow` at 2^53. The grant for this invocation
+      // lifts the park and keeps the gate's name; one for other arguments does not; nothing lifts a
+      // deny; an unregistered id and an argument outside its space are the dispatch's own refusals.
+      "registry/decide/at-2-53", capDecide 9007199254740992L None "edit" editArgs
+      "registry/decide/at-2-53-plus-1", capDecide 9007199254740993L None "edit" editArgs
+      "registry/decide/at-int64-min", capDecide System.Int64.MinValue None "edit" editArgs
+      "registry/decide/granted",
+      capDecide 9007199254740992L (Some(Capability.grant editCap [ "x", "1.50"; "n", "07"; "s", "a" ])) "edit" editArgs
+      "registry/decide/granted-other-arguments",
+      capDecide 9007199254740992L (Some(Capability.grant editCap [ "n", "8"; "x", "1.5"; "s", "a" ])) "edit" editArgs
+      "registry/decide/denied",
+      capDecide System.Int64.MaxValue (Some(Capability.grant eraseCap [ "n", "3" ])) "erase" [ "n", "3" ]
+      "registry/decide/unregistered", capDecide 0L None "nope" []
+      "registry/decide/out-of-space", capDecide 0L None "edit" [ "n", "1e3"; "x", "1"; "s", "a" ]
+      "registry/decide/plain", capDecide System.Int64.MaxValue None "note" [ "doc", "{}" ]
+      // Phase 638: dispatch runs the body exactly when the decision is `allow`.
+      "registry/dispatch/parked", capDispatch 9007199254740992L None "edit" editArgs
+      "registry/dispatch/granted",
+      capDispatch 9007199254740992L (Some(Capability.grant editCap editArgs)) "edit" editArgs
+      "registry/dispatch/allowed", capDispatch 9007199254740993L None "edit" editArgs
+      "registry/dispatch/denied", capDispatch 0L None "erase" [ "n", "3" ]
+      "registry/dispatch/unregistered", capDispatch 0L None "nope" []
+      // Phase 642: a capability declares its result. The declaration's bytes, a float bound's spelling
+      // among them; the one spelling of "returns nothing"; a document result; the round trip; a
+      // declaration without `result`; and the two results the admission gate refuses.
+      "capability/codec/value-result", CapabilityCodec.encode editCap
+      "capability/codec/nothing", CapabilityCodec.encode eraseCap
+      "capability/codec/document", CapabilityCodec.encode noteCap
+      "capability/codec/round-trip",
+      (match CapabilityCodec.decode (CapabilityCodec.encode editCap) with
+       | Ok c ->
+           let back = CapabilityCodec.encode c
+
+           if back = CapabilityCodec.encode editCap then
+               "same"
+           else
+               "moved:" + back
+       | Error e -> "refused:" + asciiOr e)
+      "capability/codec/missing-result",
+      (match
+          CapabilityCodec.decode ((CapabilityCodec.encode eraseCap).Replace(",\"result\":{\"$type\":\"nothing\"}", ""))
+       with
+       | Ok c -> "read:" + CapabilityCodec.encode c
+       | Error e -> "refused:" + asciiOr e)
+      "capability/register/empty-result", registerResult (Returns.Value(IntRange(5, 1)))
+      "capability/register/non-finite-result", registerResult (Returns.Value(FloatRange(0.0, infinity)))
+      "capability/register/nothing", registerResult Returns.Nothing
+      // `Space.subsumes`: within a family by its bounds (`-0` against `0` among them), the document
+      // family by its type name, and never across families.
+      "space/subsumes",
+      bits
+          [ Space.subsumes (IntRange(0, 10)) (IntRange(2, 5))
+            Space.subsumes (IntRange(2, 5)) (IntRange(0, 10))
+            Space.subsumes (FloatRange(-0.0, 0.1)) (FloatRange(0.0, 0.1))
+            Space.subsumes (FloatRange(0.0, 0.1)) (FloatRange(-0.0, 0.1))
+            Space.subsumes (FloatRange(0.0, 1e21)) (FloatRange(0.1, 1e21))
+            Space.subsumes (Document None) (Document(Some "Note"))
+            Space.subsumes (Document(Some "Note")) (Document None)
+            Space.subsumes (Document(Some "Note")) (Document(Some "Note"))
+            Space.subsumes AnyString (Document None)
+            Space.subsumes (Document None) AnyString
+            Space.subsumes (FloatRange(0.0, 10.0)) (IntRange(0, 10)) ]
+      // `FunctionEntry.ResultType`: a document result's type, a tree result's kind, and none for a
+      // number or for nothing.
+      "functionEntry/resultType",
+      [ noteCap
+        cap677 "tree" [] (Returns.Value(SlotTree(Some "Doc")))
+        editCap
+        eraseCap ]
+      |> List.map (fun c -> (FunctionRegistry.entry c).ResultType |> Option.defaultValue "<none>")
+      |> String.concat "|"
+      // Phase 644 (the document space): a document's one spelling — members in code-unit order, every
+      // number through the float layout — and the strings that are no document.
+      "space/document/canonical", documentOf "{\"b\":[1.50,-0,1E+21,0.1],\"a\":{\"z\":true,\"y\":\"x\"}}"
+      "space/document/non-ascii-order",
+      documentOf (
+          "{\"z\":1,\""
+          + units [ 0xFFFF ]
+          + "\":2,\""
+          + units [ 0xD83D; 0xDE00 ]
+          + "\":3,\""
+          + units [ 0xE000 ]
+          + "\":4,\""
+          + units [ 0x00E9 ]
+          + "\":5}"
+      )
+      "space/document/refused-null", documentOf "{\"a\":null}"
+      "space/document/refused-non-finite", documentOf "[1e400]"
+      "space/document/refused-repeated-member", documentOf "{\"a\":1,\"a\":2}"
+      // Phases 651 and 650: the query registry. A read's identity carries each cell's kind and text —
+      // a float through the layout, a decimal as written — and a grant for it covers it in any
+      // argument order and no other read.
+      "query/identity/every-kind", queryIdentityHex everyKind677
+      "query/identity/float-e21", queryIdentityHex [ "b", Float 1e21 ]
+      "query/identity/float-neg-zero", queryIdentityHex [ "b", Float -0.0 ]
+      "query/identity/float-past-2-53", queryIdentityHex [ "b", Float 123456789012345678.0 ]
+      "query/identity/null", queryIdentityHex [ "d", Null; "a", Int 1 ]
+      "query/identity/non-ascii", Hash.sha256Hex (Query.invocationPreimage everyQuery [ "d", Str unicodeSample ])
+      "query/grant/covers",
+      (let own = Query.grant everyQuery everyKind677
+
+       bits
+           [ Grant.covers (Query.invocationPreimage everyQuery (List.rev everyKind677)) [ own ]
+             Grant.covers (Query.invocationPreimage everyQuery [ "b", Float 0.1 ]) [ own ]
+             Grant.covers (Query.invocationPreimage ledgerQuery everyKind677) [ own ] ])
+      "query/decide/guest", queryDecide "guest" None "every" everyKind677
+      "query/decide/guest-granted", queryDecide "guest" (Some(Query.grant everyQuery everyKind677)) "every" everyKind677
+      "query/decide/guest-ledger", queryDecide "guest" None "ledger" [ "n", Int 5 ]
+      "query/decide/staff", queryDecide "staff" None "every" []
+      "query/decide/unregistered", queryDecide "staff" None "nope" []
+      "query/decide/type-mismatch", queryDecide "staff" None "ledger" [ "n", Str "5" ]
+      // Phase 639: the five string-borne readers over each type's edges, an int64 one past its range,
+      // and a digit outside ASCII.
+      "idlWide/admits/int64-max", admits "9223372036854775807"
+      "idlWide/admits/int64-past-max", admits "9223372036854775808"
+      "idlWide/admits/int64-min", admits "-9223372036854775808"
+      "idlWide/admits/int64-past-min", admits "-9223372036854775809"
+      "idlWide/admits/past-2-53", admits "9007199254740993"
+      "idlWide/admits/leading-zero", admits "007"
+      "idlWide/admits/decimal", admits "79228162514264337593543950336.5"
+      "idlWide/admits/decimal-trailing-zero", admits "1.50"
+      "idlWide/admits/bytes", admits "SGVsbG8gd29ybGQ="
+      "idlWide/admits/time-of-day", admits "23:59:59.9999999"
+      "idlWide/admits/duration", admits "-922337203685.4775808s"
+      "idlWide/admits/arabic-indic-digit", admits (units [ 0x0661 ])
+      // The canonical order of a set's elements and a keyed map's keys, as the input indices sorted.
+      "idlWide/order/texts", orderOf orderTexts
+      // The encoder writes a set and a keyed map in canonical order, whatever order they were authored.
+      "idlWide/encode/ascii", wideEncode (wideNode [ "b"; "a"; "B"; "_" ] "x")
+      "idlWide/encode/non-ascii",
+      wideEncode (
+          wideNode
+              [ "b"
+                units [ 0xFFFF ]
+                units [ 0xD83D; 0xDE00 ]
+                units [ 0xE000 ]
+                units [ 0x00E9 ]
+                "a" ]
+              unicodeSample
+      )
+      "idlWide/encode/repeat", wideEncode (wideNode [ "a"; "a" ] "x")
+      // The reader holds every member to its one spelling.
+      "idlWide/decode/canonical", wideDecode []
+      "idlWide/decode/past-2-53", wideDecode [ "i", "\"9007199254740993\"" ]
+      "idlWide/decode/int64-past-max", wideDecode [ "i", "\"9223372036854775808\"" ]
+      "idlWide/decode/int64-as-number", wideDecode [ "i", "5" ]
+      "idlWide/decode/int64-leading-zero", wideDecode [ "i", "\"05\"" ]
+      "idlWide/decode/set-disordered", wideDecode [ "s", "[\"b\",\"a\"]" ]
+      "idlWide/decode/set-repeated", wideDecode [ "s", "[\"a\",\"a\"]" ]
+      "idlWide/decode/keys-numeric-order", wideDecode [ "k", "[[\"-1\",\"a\"],[\"9\",\"c\"],[\"10\",\"b\"]]" ]
+      "idlWide/decode/decimal-trailing-zero", wideDecode [ "m", "\"1.50\"" ]
+      "idlWide/decode/tuple-short", wideDecode [ "t", "[\"1\"]" ]
+      // The sampler draws the wider types from their pools and orders what it draws.
+      "idlWide/sample/seed-0", wideSample 0 12
+      "idlWide/sample/seed-677", wideSample 677 12
+      // Phase 640: a number's token text, and the lossless document read, written and converted.
+      "reader/numberText/negative-zero-scale", numberText "-0.000"
+      "reader/numberText/thirty-digits", numberText "123456789012345678901234567890"
+      "reader/numberText/exponent", numberText "1E+400"
+      "reader/numberText/string", numberText "\"7\""
+      "jdoc/read/foreign",
+      jdocRoundTrip "{\"id\":null,\"big\":123456789012345678901234567890,\"qty\":412000.00,\"tags\":[null,1.50,\"x\"]}"
+      "jdoc/read/numbers", jdocRoundTrip "[-0,0.000,1E+400,-1e-400,9007199254740993,412000.00]"
+      "jdoc/read/non-ascii", jdocRoundTrip ("{\"" + units [ 0x00E9 ] + "\":\"" + unicodeSample + "\",\"a\":[null]}")
+      "jdoc/read/repeated-member", jdocRoundTrip "{\"a\":1,\"a\":2}"
+      "jdoc/read/leading-zero", jdocRoundTrip "[01]"
+      "jdoc/write/number-outside-grammar", jdocWrite (DArr [ DNum "1." ])
+      "jdoc/write/lone-surrogate", jdocWrite (DObj [ "a", DStr(units [ 0xD800 ]) ])
+      "jdoc/write/repeated-member", jdocWrite (DObj [ "a", DNull; "a", DBool true ])
+      "jdoc/toJVal/scale", jdocToJVal "412000.00"
+      "jdoc/toJVal/negative-zero", jdocToJVal "[-0,-0.0]"
+      "jdoc/toJVal/past-2-53", jdocToJVal "9007199254740993"
+      "jdoc/toJVal/thirty-digits", jdocToJVal "[123456789012345678901234567890]"
+      "jdoc/toJVal/past-float-range", jdocToJVal "{\"a\":1e400}"
+      "jdoc/toJVal/null", jdocToJVal "[1,null]"
+      "jdoc/ofJVal/floats", jdocOfJVal (JArr [ JFloat 1e21; JFloat 0.1; JFloat -0.0; JFloat 1e-7; JInt -2147483648 ])
+      "jdoc/ofJVal/non-finite", jdocOfJVal (JArr [ JFloat 1.0; JFloat nan ])
+      "jdoc/decode/int-past-int32", jdocField JDocDecoder.int string "{\"a\":2147483648}"
+      "jdoc/decode/number-text", jdocField JDocDecoder.numberText id "{\"a\":1.50}"
+      "jdoc/decode/float", jdocField JDocDecoder.float FloatLayout.canonical "{\"a\":1e-7}"
+      "jdoc/decode/nullable",
+      jdocField
+          (JDocDecoder.nullable JDocDecoder.int)
+          (Option.map string >> Option.defaultValue "<null>")
+          "{\"a\":null}"
+      "jdoc/decode/of-decoder", jdocField (JDocDecoder.ofDecoder Decoder.int) string "{\"a\":-7}"
+      // Phases 638, 642, 643, 650 and 651: the seam laws, run here so their draws and verdicts cross
+      // both pipelines. `policyLaws` holds the state-aware guarded verbs (Phase 643) and the named
+      // decision (Phase 650) over the kit's note-list domain; `capabilityLaws` type-checks drawn
+      // pipelines against each capability's declared result (Phase 642).
+      "laws/capabilityLaws", lawSummary (Conformance.capabilityLaws 4242 200)
+      "laws/queryLaws", lawSummary (Conformance.queryLaws 4242 200)
+      "laws/policyLaws", lawSummary (Conformance.policyLaws 4242 200) ]
 
 /// The hash SWEEP's inputs — absorbed from the retired `tests/hash-parity-probe` (Phase 217), so the
 /// arithmetic cases that separate the two pipelines are run on every cross-pipeline check rather

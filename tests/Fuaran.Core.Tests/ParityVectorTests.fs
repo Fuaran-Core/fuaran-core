@@ -314,7 +314,152 @@ let private expected: (string * string) list =
       "unit/drawn/seed-0",
       "/h2=c:1/1|k[GBP]=x|/ks3=x|dag3=x|1=x|/cPa3/h2=x|/kPa2=x|/min3=x|[GBP]2.[in_i]2=x|cPa3/[in_i]2/um2=x|h3.ms2/dacd3=x|m[GBP]3=x"
       "unit/drawn/seed-428",
-      "/Pa2=c:1/1|%3/uN2/min3=x|[in_i]/mN2=x|daL3=x|/[GBP]/min2=x|/cL3/km3=x|/min3=x|%3.k[GBP]/um=x|/dacd2/min=x|c[GBP]2=x|Pa/min=x|cd3.kcd.min=x" ]
+      "/Pa2=c:1/1|%3/uN2/min3=x|[in_i]/mN2=x|daL3=x|/[GBP]/min2=x|/cL3/km3=x|/min3=x|%3.k[GBP]/um=x|/dacd2/min=x|c[GBP]2=x|Pa/min=x|cd3.kcd.min=x"
+      // Phase 677 — the 0.43 runtime families. The identity rows are the UTF-8 hex of the pre-image:
+      // `edit` SOH, then each binding's address and canonical spelling, address-sorted, each field ended by
+      // SOH, so `007` / `1.50` and `7` / `1.5` are one identity in any argument order, `-0` is `0`, and a
+      // float past 2^53 or below 1e-4 is the shared layout's (`1.2345678901234568E+17`, `1E-07`).
+      "registry/identity/spellings", "65646974016e013701730161017801312e3501"
+      "registry/identity/address-order", "65646974016e013701730161017801312e3501"
+      "registry/identity/float-e21", "65646974016e012d3231343734383336343801730101780131452b323101"
+      "registry/identity/float-neg-zero", "65646974016e01300173017a0178013001"
+      "registry/identity/float-past-2-53",
+      "65646974016e01310173017a017801312e32333435363738393031323334353638452b313701"
+      "registry/identity/float-e-7", "65646974016e01310173017a01780131452d303701"
+      "registry/identity/non-ascii", "f232f2bd7ac1b9caee16cd1d0801c724704e9a0e2eb999f9a63edea83c2efdc2"
+      "registry/identity/document",
+      "6e6f746501646f63017b2261223a7b2279223a31452b32312c227a223a747275657d2c2262223a5b312e352c305d7d01"
+      // The own grant covers its invocation in another spelling (1); other arguments, another capability
+      // and no grant do not (0). The budget gate parks an edit below 2^53 + 1 under its 64-bit context.
+      "registry/grant/covers", "1000"
+      "registry/decide/at-2-53", "budget:needsApproval"
+      "registry/decide/at-2-53-plus-1", "<none>:allow"
+      "registry/decide/at-int64-min", "budget:needsApproval"
+      "registry/decide/granted", "budget:allow"
+      "registry/decide/granted-other-arguments", "budget:needsApproval"
+      "registry/decide/denied", "lock:deny:an erase is locked/edit,note"
+      "registry/decide/unregistered",
+      @"refused:{""$type"":""noSuchCapability"",""id"":""nope"",""known"":[""edit"",""erase"",""note""]}"
+      "registry/decide/out-of-space",
+      @"refused:{""$type"":""argOutOfSpace"",""addr"":""n"",""got"":""1e3"",""space"":{""$type"":""intRange"",""max"":2147483647,""min"":-2147483648}}"
+      "registry/decide/plain", "<none>:allow"
+      "registry/dispatch/parked", @"refused:{""$type"":""approvalRequired"",""policy"":""budget""}"
+      "registry/dispatch/granted", "ran:edit"
+      "registry/dispatch/allowed", "ran:edit"
+      "registry/dispatch/denied",
+      @"refused:{""$type"":""policyRefused"",""allowed"":[""edit"",""note""],""policy"":""lock"",""reason"":""an erase is locked""}"
+      "registry/dispatch/unregistered",
+      @"refused:{""$type"":""noSuchCapability"",""id"":""nope"",""known"":[""edit"",""erase"",""note""]}"
+      // Phase 642 — the declaration carries `result`, a float bound in the layout (`1E+21`).
+      "capability/codec/value-result",
+      @"{""$type"":""capability"",""determinism"":""deterministic"",""id"":""edit"",""placement"":{""$type"":""server""},""result"":{""$type"":""floatRange"",""max"":1E+21,""min"":0.1},""signature"":{""effect"":{""determinism"":""deterministic"",""host"":""pure""},""holes"":[{""addr"":""n"",""kind"":""value"",""name"":""n"",""required"":true,""space"":{""$type"":""intRange"",""max"":2147483647,""min"":-2147483648}},{""addr"":""x"",""kind"":""value"",""name"":""x"",""required"":true,""space"":{""$type"":""floatRange"",""max"":1E+308,""min"":-1E+308}},{""addr"":""s"",""kind"":""value"",""name"":""s"",""required"":true,""space"":{""$type"":""anyString""}}],""name"":""edit""}}"
+      "capability/codec/nothing",
+      @"{""$type"":""capability"",""determinism"":""deterministic"",""id"":""erase"",""placement"":{""$type"":""server""},""result"":{""$type"":""nothing""},""signature"":{""effect"":{""determinism"":""deterministic"",""host"":""pure""},""holes"":[{""addr"":""n"",""kind"":""value"",""name"":""n"",""required"":true,""space"":{""$type"":""intRange"",""max"":99,""min"":0}}],""name"":""erase""}}"
+      "capability/codec/document",
+      @"{""$type"":""capability"",""determinism"":""deterministic"",""id"":""note"",""placement"":{""$type"":""server""},""result"":{""$type"":""document"",""documentType"":""Note""},""signature"":{""effect"":{""determinism"":""deterministic"",""host"":""pure""},""holes"":[{""addr"":""doc"",""kind"":""value"",""name"":""doc"",""required"":true,""space"":{""$type"":""document"",""documentType"":""Note""}}],""name"":""note""}}"
+      "capability/codec/round-trip", "same"
+      "capability/codec/missing-result", "refused:missing property: result"
+      "capability/register/empty-result",
+      @"refused:{""$type"":""illFormedCapability"",""fault"":{""$type"":""emptyResult"",""space"":{""$type"":""intRange"",""max"":1,""min"":5}},""id"":""bad""}"
+      "capability/register/non-finite-result",
+      @"refused:{""$type"":""illFormedCapability"",""fault"":{""$type"":""nonFiniteResult""},""id"":""bad""}"
+      "capability/register/nothing", "admitted"
+      // By bounds within a family (`-0` and `0` one bound), by type name among documents, never across.
+      "space/subsumes", "10111101001"
+      "functionEntry/resultType", "Note|Doc|<none>|<none>"
+      // Phase 644 — a document's one spelling: members in code-unit order, numbers through the layout.
+      "space/document/canonical", @"{""a"":{""y"":""x"",""z"":true},""b"":[1.5,0,1E+21,0.1]}"
+      "space/document/non-ascii-order", "sha:ee33ff4c9a20e59b67dc8a026d07ba5729c93bf14da55da59a28e71e793f3bd0"
+      "space/document/refused-null", "none"
+      "space/document/refused-non-finite", "none"
+      "space/document/refused-repeated-member", "none"
+      // Phase 651 — a read's identity: each binding's name, its cell kind and text, a float in the layout.
+      "query/identity/every-kind",
+      "657665727901610169012d323134373438333634380162016601302e31016301620130016401730165752d776573740165016401323032362d31312d31360166017401323032362d31312d31365430393a33303a30302e3235305a0167016d0131322e353001"
+      "query/identity/float-e21", "6576657279016201660131452b323101"
+      "query/identity/float-neg-zero", "657665727901620166013001"
+      "query/identity/float-past-2-53", "65766572790162016601312e32333435363738393031323334353638452b313701"
+      "query/identity/null", "65766572790161016901310164016e0101"
+      "query/identity/non-ascii", "91afe1b45aef29f68cce827275c341ad4b2fc175ef83b3b0345fffc748108a7f"
+      "query/grant/covers", "100"
+      "query/decide/guest", "disclosure:needsApproval"
+      "query/decide/guest-granted", "disclosure:allow"
+      "query/decide/guest-ledger", "disclosure:deny:the ledger is not open to a guest/"
+      "query/decide/staff", "<none>:allow"
+      "query/decide/unregistered",
+      @"refused:{""$type"":""noSuchQuery"",""id"":""nope"",""known"":[""every"",""ledger""]}"
+      "query/decide/type-mismatch",
+      @"refused:{""$type"":""paramTypeMismatch"",""expected"":""int"",""got"":""string"",""name"":""n""}"
+      // Phase 639 — the readers' verdicts as int64, decimal, bytes, timeOfDay, duration bits. Sixteen
+      // digits are also a well-formed base64 text.
+      "idlWide/admits/int64-max", "11000"
+      "idlWide/admits/int64-past-max", "01000"
+      "idlWide/admits/int64-min", "11000"
+      "idlWide/admits/int64-past-min", "01000"
+      "idlWide/admits/past-2-53", "11100"
+      "idlWide/admits/leading-zero", "00000"
+      "idlWide/admits/decimal", "01000"
+      "idlWide/admits/decimal-trailing-zero", "00000"
+      "idlWide/admits/bytes", "00100"
+      "idlWide/admits/time-of-day", "00010"
+      "idlWide/admits/duration", "00001"
+      "idlWide/admits/arabic-indic-digit", "00000"
+      // The canonical order: the empty string, then `-1`, `10`, `9` (texts, not numbers), `Z`, `a`, `e`-acute,
+      // U+E000, U+FFFF, the surrogate pair (a code point above U+FFFF), then the arrays.
+      "idlWide/order/texts", "11,8,6,7,0,1,5,4,2,3,9,10"
+      // A keyed map and a set in canonical order, a 64-bit integer past 2^53 and the int64 minimum as text.
+      "idlWide/encode/ascii",
+      @"{""id"":""n"",""kind"":{""$type"":""W"",""b"":""SGVsbG8gd29ybGQ="",""d"":""-922337203685.4775808s"",""h"":""23:59:59.9999999"",""i"":""9007199254740993"",""k"":[[""-1"",""minus""],[""10"",""ten""],[""9"",""nine""],[""9007199254740993"",""big""]],""m"":""79228162514264337593543950336.5"",""s"":[""B"",""_"",""a"",""b""],""t"":[""-9223372036854775808"",""x""]}}"
+      "idlWide/encode/non-ascii", "sha:e2348ab8b7ac512eee77599dbb42f67f213fb2e84461d218532fd809e11b5501"
+      "idlWide/encode/repeat", @"refused:duplicate set element ""a"""
+      // The reader refuses a non-canonical spelling, a repeat and a disorder at the member that holds it.
+      "idlWide/decode/canonical",
+      @"{""id"":""n"",""kind"":{""$type"":""W"",""b"":""AA=="",""d"":""90s"",""h"":""12:30:00"",""i"":""5"",""k"":[[""-1"",""a""],[""10"",""b""],[""9"",""c""]],""m"":""1.5"",""s"":[""a"",""b""],""t"":[""1"",""x""]}}"
+      "idlWide/decode/past-2-53",
+      @"{""id"":""n"",""kind"":{""$type"":""W"",""b"":""AA=="",""d"":""90s"",""h"":""12:30:00"",""i"":""9007199254740993"",""k"":[[""-1"",""a""],[""10"",""b""],[""9"",""c""]],""m"":""1.5"",""s"":[""a"",""b""],""t"":[""1"",""x""]}}"
+      "idlWide/decode/int64-past-max", @"refused:OutOfRange@$[""kind""][""i""]"
+      "idlWide/decode/int64-as-number", @"refused:WrongKind@$[""kind""][""i""]"
+      "idlWide/decode/int64-leading-zero", @"refused:OutOfRange@$[""kind""][""i""]"
+      "idlWide/decode/set-disordered", @"refused:OutOfRange@$[""kind""][""s""][1]"
+      "idlWide/decode/set-repeated", @"refused:OutOfRange@$[""kind""][""s""][1]"
+      "idlWide/decode/keys-numeric-order", @"refused:OutOfRange@$[""kind""][""k""][2][0]"
+      "idlWide/decode/decimal-trailing-zero", @"refused:OutOfRange@$[""kind""][""m""]"
+      "idlWide/decode/tuple-short", @"refused:OutOfRange@$[""kind""][""t""]"
+      "idlWide/sample/seed-0", "12:b46f5589cc5ed3f6936e8cb7a60ee32d7654f83134e50a696ee224cd2afe92bc"
+      "idlWide/sample/seed-677", "12:b51ebe3dac09dac2058d659f7b3106209ac6043232a4d0579e0d17c2816d659c"
+      // Phase 640 — a number's token text, and the lossless document: its digits and scale kept, nulls
+      // kept, a conversion refusing what `JVal` cannot hold.
+      "reader/numberText/negative-zero-scale", "-0.000"
+      "reader/numberText/thirty-digits", "123456789012345678901234567890"
+      "reader/numberText/exponent", "1E+400"
+      "reader/numberText/string", "refused:WrongKind@$"
+      "jdoc/read/foreign",
+      @"{""id"":null,""big"":123456789012345678901234567890,""qty"":412000.00,""tags"":[null,1.50,""x""]}"
+      "jdoc/read/numbers", "[-0,0.000,1E+400,-1e-400,9007199254740993,412000.00]"
+      "jdoc/read/non-ascii", "sha:7ef82f5c482bb2a30c494031acb818764e76144f3eab6c6763a60c208b853006"
+      "jdoc/read/repeated-member", "refused:InvalidJson@$"
+      "jdoc/read/leading-zero", "refused:InvalidJson@$"
+      "jdoc/write/number-outside-grammar", "refused:OutOfRange@$[0]"
+      "jdoc/write/lone-surrogate", @"refused:OutOfRange@$[""a""]"
+      "jdoc/write/repeated-member", @"refused:NotAdmitted@$[""a""]"
+      "jdoc/toJVal/scale", "412000"
+      "jdoc/toJVal/negative-zero", "[0,-0]"
+      "jdoc/toJVal/past-2-53", "refused:OutOfRange@$"
+      "jdoc/toJVal/thirty-digits", "refused:OutOfRange@$[0]"
+      "jdoc/toJVal/past-float-range", @"refused:OutOfRange@$[""a""]"
+      "jdoc/toJVal/null", "refused:NotAdmitted@$[1]"
+      "jdoc/ofJVal/floats", "[1E+21,0.1,-0,1E-07,-2147483648]"
+      "jdoc/ofJVal/non-finite", "refused:OutOfRange@$[1]"
+      "jdoc/decode/int-past-int32", @"refused:OutOfRange@$[""a""]"
+      "jdoc/decode/number-text", "1.50"
+      "jdoc/decode/float", "1E-07"
+      "jdoc/decode/nullable", "<null>"
+      "jdoc/decode/of-decoder", "-7"
+      // The seam laws at seed 4242, 200 iterations: passed / results, and the digest of each law's
+      // statement, verdict and evidence.
+      "laws/capabilityLaws", "11/11:dc161c6ccaef3dcdda46c3c0ce31ae4b71d1f80acf31714af7a571e3779c712f"
+      "laws/queryLaws", "13/13:2b1e93a2c0732a3c1d729bf9ea518a2590d1377d21828c297557818fd059cf52"
+      "laws/policyLaws", "15/15:89aa33f6237458904fec75d36f59c079faa58ec393207d60abcb2c5bb669eb8c" ]
 
 /// The families the table must keep covering. A vector set is only as good as what it reaches, and
 /// nothing about a green comparison says the list was not quietly emptied of the hard cases — the
@@ -345,6 +490,50 @@ let private families =
       "decimalAggregate/"
       "sample/"
       "unit/" ]
+
+/// Phase 677 — the census of the 0.43 runtime families: for each family the slot added or changed,
+/// the row prefixes that reach its value-bearing functions (a decision, a grant, an identity, a rendered
+/// document, an ordering). Until Phase 677 the table reached none of them, so the receiving gate
+/// compiled them under Fable and their laws ran on .NET alone. A family that loses its last row under
+/// any of its prefixes reds the census law below, named, so the next slot cannot fall back to
+/// compile-only by omission. Two families of the slot have nothing value-bearing to reach and are not
+/// listed: Phase 641 changed the proof kit, which no package ships, and Phase 656 changed the
+/// generators' internal printers, which are off the Fable surface (`fable-exclusions.json`).
+let private census: (string * string list) list =
+    [ "Phase 638 (the decision context and the grant)",
+      [ "registry/identity/"
+        "registry/grant/"
+        "registry/dispatch/"
+        "laws/capabilityLaws" ]
+      "Phase 639 (the wider data universe)",
+      [ "idlWide/admits/"
+        "idlWide/order/"
+        "idlWide/encode/"
+        "idlWide/decode/"
+        "idlWide/sample/" ]
+      "Phase 640 (the token text and the lossless document)",
+      [ "reader/numberText/"
+        "jdoc/read/"
+        "jdoc/write/"
+        "jdoc/toJVal/"
+        "jdoc/ofJVal/"
+        "jdoc/decode/" ]
+      "Phase 642 (the declared result)",
+      [ "capability/codec/"
+        "capability/register/"
+        "space/subsumes"
+        "functionEntry/resultType" ]
+      "Phase 643 (the state-aware guarded witness)", [ "laws/policyLaws" ]
+      "Phase 644 (the document space)", [ "space/document/" ]
+      "Phase 650 (the named decision)", [ "registry/decide/"; "query/decide/" ]
+      "Phase 651 (the query registry's context and grant)", [ "query/identity/"; "query/grant/"; "laws/queryLaws" ] ]
+
+/// The census entries no label reaches: `(family, prefix)` for each prefix no label starts with.
+let private uncovered (labels: string list) : (string * string) list =
+    [ for family, prefixes in census do
+          for prefix in prefixes do
+              if not (labels |> List.exists (fun l -> l.StartsWith prefix)) then
+                  yield family, prefix ]
 
 /// The hash SWEEP (Phase 217 — the retired `tests/hash-parity-probe` corpus, absorbed): 124 rows,
 /// each four digests wide. Pinned as a COUNT and a DIGEST over the rows rather than row by row — the
@@ -395,6 +584,20 @@ let tests =
                   Expect.isTrue
                       (labels |> List.exists (fun l -> l.StartsWith family))
                       (sprintf "the table still carries a %s vector" family)
+
+          // Phase 677 — the census law. The first assertion is the probe's own control: over no labels it
+          // names every entry, so a green over the table is a reading and not a vacuity.
+          testCase "every family the 0.43 census names keeps a row"
+          <| fun _ ->
+              Expect.equal
+                  (uncovered [] |> List.length)
+                  (census |> List.sumBy (snd >> List.length))
+                  "the census law names every entry over a table with no rows"
+
+              Expect.equal
+                  (uncovered (ParityVectors.vectors |> List.map fst))
+                  []
+                  "a 0.43 runtime family with no row is compiled under Fable and never run there"
 
           // The runner compares the two pipelines' STDOUT line by line. .NET and node do not agree
           // about how to write a lone surrogate or a control byte to a terminal, so a table whose
