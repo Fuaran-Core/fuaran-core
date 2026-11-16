@@ -89,10 +89,17 @@ module SpineAdoption =
     /// The Rust spine's measurement at Core 0.43.0 as released: its Phase 665 (its D13) moved its pin to
     /// the commit tagged `v0.43.0`, adopted the document family (18 of 18) and certified the families
     /// below again at their counts, at this spine commit (its CHANGELOG 0.0.4-alpha.1; recorded here by
-    /// Phase 677). `queryGrantLaws` and `identity` stay proposed: the spine holds no query declaration
-    /// and no IDL vocabulary reader (its D13.5, D13.6).
+    /// Phase 677). `identity` stays proposed: the spine holds no IDL vocabulary reader beyond the
+    /// canonical-form slice (its D13.6); `queryGrantLaws`, not answered at this commit (its D13.5), is
+    /// recorded at its Phase 679 measurement below.
     let private rs665 =
         AdoptionSource.Host("0.43.0", "03bdc2daa7231f8648ecb16ed394d094382cfcdf")
+
+    /// The Rust spine's query grant leg (its Phase 679): `queryGrantLaws` answered with a counted leg, 19
+    /// vectors (11 identity, 8 coverage) on both profiles, against Core 0.43.0 as released, at this spine
+    /// commit (recorded here by Phase 677). Every other family keeps `rs665`.
+    let private rs679 =
+        AdoptionSource.Host("0.43.0", "f1dd15ec5aa33eefcf1c5b847276f30c93a4ebae")
 
     /// The Rust spine (`Fuaran-Core/fuaran-core-rs`). A family whose leg did not change keeps the
     /// measurement that stands.
@@ -109,6 +116,7 @@ module SpineAdoption =
               "skeletonDiff", 14, rs665
               "capabilityLaws", 144, rs665
               "capabilityDocumentLaws", 18, rs665
+              "queryGrantLaws", 19, rs679
               "capabilityGateLaws", 41, rs665
               "decimal", 75, rs665
               "fieldLaws", 43, rs665
