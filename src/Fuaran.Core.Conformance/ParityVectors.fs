@@ -560,13 +560,15 @@ let private unitDrawn (seed: int) : string =
 // as ASCII, from inputs that exercise what the two pipelines carry differently: 64-bit integers past
 // 2^53, float and decimal spellings, non-ASCII order, and map- or set-ordered output.
 
+/// Printable ASCII — the module's own promise: a console-encoding difference must never read as a
+/// value divergence.
+let private printable (s: string) =
+    s |> Seq.forall (fun ch -> ch >= ' ' && ch <= '~')
+
 /// `s` itself when it is printable ASCII, else `sha:` and its SHA-256: a message or a document that
 /// may carry non-ASCII text is compared by digest, never echoed.
 let private asciiOr (s: string) : string =
-    if s |> Seq.forall (fun ch -> ch >= ' ' && ch <= '~') then
-        s
-    else
-        "sha:" + Hash.sha256Hex s
+    if printable s then s else "sha:" + Hash.sha256Hex s
 
 /// A decode refusal as `<code>@<path>`.
 let private refusalOf (e: DecodeError) : string =
@@ -1721,11 +1723,6 @@ let sanitiseSweep: (string * string) list =
        |> List.map (fun (label, input, expected) ->
            "idlSanitize/url/" + label,
            exactly (renderUrl expected) (renderUrl (Fuaran.Core.Idl.Sanitize.sanitizeUrl input))))
-
-/// Printable ASCII — the module's own promise: a console-encoding difference must never read as a
-/// value divergence.
-let private printable (s: string) =
-    s |> Seq.forall (fun ch -> ch >= ' ' && ch <= '~')
 
 /// A label a `VEC` line can split on: non-empty and carrying no space.
 let private splittable (label: string) = label <> "" && not (label.Contains " ")
