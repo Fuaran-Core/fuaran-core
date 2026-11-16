@@ -1106,6 +1106,11 @@ module Ops =
                 // write inside the removed subtree. The cost is the same pinned over-approximation
                 // the remove/move pay: an update is independent only of a structure-free script,
                 // so two updates of different nodes are reported dependent.
+                // D262 (Phase 669) — and it cannot be traded for the node alone: under a grammar a
+                // rewrite reads its parent's kind, under references it drops the declarations its
+                // node carried, and under a keyed scope it replaces its node's keyed subtrees, so
+                // two rewrites of DIFFERENT nodes can fail to commute in each, and the script names
+                // none of those addresses (`FootprintInTests`, the D262 cases).
                 let target = key (w.Id node)
                 // Phase 247 — under the keyed engine the payload's keyed subtrees are new content
                 // (`validateUpdate` checks their ids for duplicates), so they are read and written as
@@ -1328,6 +1333,12 @@ module Ops =
     /// and content-written, and the script is threaded through the keyed engine with an admitting
     /// container capability — the tree every script the keyed engine accepts reaches; the resolution
     /// still locates structurally (D166). A policy's `Refs` adds `footprint`'s reference reads.
+    ///
+    /// **Its soundness is the plain engine's (D262.3).** The arms resolve what the plain engine reads,
+    /// and the theorems model that engine alone. Under a `Grammar` (a rewrite reads its parent's
+    /// kind), under `Refs` (a rewrite or a removal drops declarations, by name) and under a keyed
+    /// scope (a rewrite replaces its node's keyed subtrees) it can report independent a pair that
+    /// does not commute; the pure `footprint` refuses each such pair.
     let footprintIn
         (policy: Policy<'Node, 'Id>)
         (scope: OpScope<'Node, 'Id>)

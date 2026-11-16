@@ -475,3 +475,120 @@ let lawTests =
               Expect.isTrue
                   (results |> List.exists (fun r -> not r.Passed && r.Law.Contains "refinement"))
                   "the refinement law names the pair the pure footprint frees and the coarse one refuses" ]
+
+// ---- Phase 669 / D262 — the pure `UpdateNode` unknown-parent write is load-bearing ----
+// Each case is a pair of in-place rewrites of two DIFFERENT nodes that each apply alone and do not
+// commute, under one of the three configurations where the engine reads more than the plain
+// engine does: a containment grammar (the rewritten node's PARENT kind is read), references (the
+// declarations the rewritten node used to carry are dropped) and a keyed scope (the rewritten
+// node's old keyed subtrees are replaced). The pure footprint can name none of those addresses,
+// and refuses each pair only because an update carries the unknown-parent write. A pure footprint
+// that named the rewritten node alone (fuaran-core#669's proposal) would free all three; these
+// cases go red if it does. The plain-engine control shows the pair is not refused by the engine.
+
+/// Both orders, as the refusal or the tree each reaches.
+let private bothOrders (policy: Policy<RNode, string>) (scope: OpScope<RNode, string>) (t: RNode) (a: Op) (b: Op) =
+    let run ops =
+        Ops.applyAll policy scope ops t
+        |> Result.map (Tree.encodeHash scope.Nodes encNode)
+        |> Result.mapError _.Rejection
+
+    run [ a ], run [ b ], run [ a; b ], run [ b; a ]
+
+let private updateLoadBearing =
+    let plain = OpScope.plain nodew idw
+
+    testList
+        "D262 - the pure UpdateNode unknown-parent write is load-bearing beyond the plain engine"
+        [ testCase "under a grammar: a rewrite of a parent and of its child each apply and do not commute"
+          <| fun _ ->
+              let allowed k =
+                  match k with
+                  | "doc" -> Some [ "section"; "list" ]
+                  | "section" -> Some [ "para"; "note" ]
+                  | "list" -> Some [ "para" ]
+                  | _ -> None
+
+              let policy = Policy.grammar allowed
+
+              let t =
+                  RNode.node "r" "doc" [ RNode.node "s" "section" [ RNode.leaf "a" "para" "1" ] ]
+
+              let toList: Op = UpdateNode(RNode.node "s" "list" [])
+              let toNote: Op = UpdateNode(RNode.leaf "a" "note" "1")
+              let alone1, alone2, ab, ba = bothOrders policy plain t toList toNote
+              Expect.isOk alone1 "the parent's rewrite applies alone"
+              Expect.isOk alone2 "the child's rewrite applies alone"
+              Expect.isError ab "the child's rewrite is refused after the parent's"
+              Expect.isError ba "the parent's rewrite is refused after the child's"
+
+              Expect.isFalse
+                  (Ops.independent (Ops.footprint policy plain [ toList ]) (Ops.footprint policy plain [ toNote ]))
+                  "the pure footprint refuses the pair"
+
+              let _, _, ab0, ba0 = bothOrders Policy.none plain t toList toNote
+              Expect.isTrue (Result.isOk ab0 && ab0 = ba0) "control: without the grammar the pair commutes"
+
+          testCase "under references: a rewrite that drops a declaration and one that refers to it do not commute"
+          <| fun _ ->
+              let refw: RefWitness<RNode, string> =
+                  { RefsOf = fun n -> if n.Kind = "ref" then [ n.Value ] else []
+                    DeclsOf = fun n -> if n.Kind = "def" then [ n.Value ] else [] }
+
+              let policy = Policy.referenced refw
+
+              let t =
+                  RNode.node "r" "doc" [ RNode.leaf "d" "def" "name"; RNode.leaf "z" "para" "" ]
+
+              let rename: Op = UpdateNode(RNode.leaf "d" "def" "other")
+              let refer: Op = UpdateNode(RNode.leaf "z" "ref" "name")
+              let alone1, alone2, ab, ba = bothOrders policy plain t rename refer
+              Expect.isOk alone1 "the rename applies alone"
+              Expect.isOk alone2 "the reference applies alone"
+              Expect.isOk ab "the reference lands after the rename (it dangled before its own step)"
+              Expect.isError ba "the rename is refused after the reference (StillReferenced)"
+
+              Expect.isFalse
+                  (Ops.independent (Ops.footprint policy plain [ rename ]) (Ops.footprint policy plain [ refer ]))
+                  "the pure footprint refuses the pair"
+
+          testCase "under a keyed scope: a rewrite of a holder replaces the keyed node a rewrite of that node names"
+          <| fun _ ->
+              let isKeyed (n: RNode) = n.Kind = "k"
+
+              let w: NodeWitness<RNode, string> =
+                  { nodew with
+                      Children = fun n -> n.Children |> List.filter (isKeyed >> not)
+                      ReplaceChildren =
+                          fun n cs ->
+                              { n with
+                                  Children = (n.Children |> List.filter isKeyed) @ cs } }
+
+              let keyw: KeyedWitness<RNode, string> =
+                  { Surface = "the D262 keyed probe"
+                    KeyedChildren = fun n -> n.Children |> List.filter isKeyed
+                    ReplaceKeyedChildren =
+                      fun n ks ->
+                          { n with
+                              Children = (n.Children |> List.filter (isKeyed >> not)) @ ks }
+                    PlaceKeyedChild = fun _ _ -> None
+                    IdsUnique = fun _ -> true }
+
+              let scope = OpScope.keyed keyw (fun _ -> true) w idw
+              let t = RNode.node "r" "doc" [ RNode.node "y" "box" [ RNode.leaf "x" "k" "old" ] ]
+              let holder: Op = UpdateNode(RNode.node "y" "box" [])
+              let held: Op = UpdateNode(RNode.leaf "x" "k" "new")
+              let alone1, alone2, ab, ba = bothOrders Policy.none scope t holder held
+              Expect.isOk alone1 "the holder's rewrite applies alone"
+              Expect.isOk alone2 "the held node's rewrite applies alone"
+              Expect.isError ab "the held node is gone after the holder's rewrite"
+              Expect.isOk ba "the holder's rewrite lands after the held node's"
+
+              Expect.isFalse
+                  (Ops.independent
+                      (Ops.footprint Policy.none scope [ holder ])
+                      (Ops.footprint Policy.none scope [ held ]))
+                  "the pure footprint refuses the pair" ]
+
+[<Tests>]
+let d262Tests = updateLoadBearing
