@@ -381,6 +381,9 @@ The commit in this repository stays the caller's, after the corpus push, as for 
 it. The release act's moved number (`0.35.0`, `0.38.0`) stays the release act's. From major 1 an additive draft's advance by
 a breaking change (the major over a minor draft) is the same rule and needs no case of its own.
 
+**D265.6 — landing order.** This entry lands with D264's text and ahead of D264's build: D264 describes code that is
+not on `main` yet, and its point 8 runs the act this entry adds.
+
 ## 2026-11-17 — D264: what the query declaration's writer does with a literal the gate refuses, whether the gate refuses a budget that is not positive, and what the effect reader's unknown-tag refusals name
 
 **Status:** Live
@@ -882,7 +885,8 @@ and 245). The standing draft `0.43.1` is a patch slot over `v0.43.0` whose own e
 to `0.44.0` (docs/releases/0.43.1.md:3-8). It advances by Core's own act, with no override. That act is
 `open-slot` (RELEASING.md:15-28, D218), and today it refuses while a DRAFT slot stands: "this act opens a slot over a
 released version only" (tests/Fuaran.Core.Tests/OpenSlot.fs:396-400), and no verb advances a standing draft. So the act
-gains that case, in the same landing and under its own tests: over a standing draft of a lower class, `open-slot
+gains that case in a landing of its own, ahead of this design's build and under its own tests (Phase 687, D265): over
+a standing draft of a lower class, `open-slot
 0.44.0 --class breaking` heads the draft's ledger file never released, its entries shipping in `0.44.0`, as `0.30.1`'s
 did in `0.31.0` (docs/releases/README.md:95), and otherwise acts as it does over a release — it moves `<Version>`,
 re-stamps the law files' `kitVersion`, commits the re-stamp of the declared copies in the shared corpus and moves
@@ -917,9 +921,9 @@ moves; internal.
 
 *11. The files beyond those Phase 685 first declared.* In the conformance kit, `QuerySeamLaws.fs`, `PolicySeamLaws.fs`,
 `ParityVectors.fs` and `RegistrySeamLaws.fs`, and `Families.fs` where a family lists `QueryRegistry.admit`. In
-`tests/`, the 13 files point 2 counts, less the two already declared. The version act:
-`tests/Fuaran.Core.Tests/OpenSlot.fs`, `OpenSlotTests.fs` and `tools/Fuaran.Core.Tools/Program.fs` for the advance
-(point 8), and the files the act writes, every law file's `kitVersion` stamp among them. Under point 3:
+`tests/`, the 13 files point 2 counts, less the two already declared. The version act's advance lands apart (point 8,
+D265), so this phase touches only the files the act writes, every law file's `kitVersion` stamp among them. Under
+point 3:
 `SeamRefusalLaws.fs` and `tests/Fuaran.Core.Tests/SeamIdl.fs`, and under (A-iii) or (A-ii) `Fuaran.Core.Idl.Codegen`
 and its baseline. Under point 1's held question, if it is ruled to close the gap: the seam declaration, and the
 `seamRefusals` exporter and file, for the refusal case it adds.
