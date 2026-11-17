@@ -86,20 +86,14 @@ module SpineAdoption =
     let private rs651 =
         AdoptionSource.Host("0.43.0", "55c145f2852088c53760eb53bbae9afaac95d026")
 
-    /// The Rust spine's measurement at Core 0.43.0 as released: its Phase 665 (its D13) moved its pin to
-    /// the commit tagged `v0.43.0`, adopted the document family (18 of 18) and certified the families
-    /// below again at their counts, at this spine commit (its CHANGELOG 0.0.4-alpha.1; recorded here by
-    /// Phase 677). `identity` stays proposed: the spine holds no IDL vocabulary reader beyond the
-    /// canonical-form slice (its D13.6); `queryGrantLaws`, not answered at this commit (its D13.5), is
-    /// recorded at its Phase 679 measurement below.
-    let private rs665 =
-        AdoptionSource.Host("0.43.0", "03bdc2daa7231f8648ecb16ed394d094382cfcdf")
-
-    /// The Rust spine's query grant leg (its Phase 679): `queryGrantLaws` answered with a counted leg, 19
-    /// vectors (11 identity, 8 coverage) on both profiles, against Core 0.43.0 as released, at this spine
-    /// commit (recorded here by Phase 677). Every other family keeps `rs665`.
-    let private rs679 =
-        AdoptionSource.Host("0.43.0", "f1dd15ec5aa33eefcf1c5b847276f30c93a4ebae")
+    /// The Rust spine's measurement at Core 0.43.1 (a draft): its Phase 683 (its D14) answered the query
+    /// declaration family with a counted leg, 84 vectors (36 declarationRefused, 21 admissionFault, 4
+    /// register, 14 validateParams, 9 dispatch), and certified the families below again at their counts,
+    /// unchanged, against Core commit `bd1a339`, at this spine commit, the head of its `main` (recorded
+    /// here by Phase 684). `identity` stays proposed, as at its Phase 665; the families above keep the
+    /// measurements that stand.
+    let private rs683 =
+        AdoptionSource.Host("0.43.1", "282ff93fc5a83a162bdb479fbb1ab6dc841ab61b")
 
     /// The Rust spine (`Fuaran-Core/fuaran-core-rs`). A family whose leg did not change keeps the
     /// measurement that stands.
@@ -112,16 +106,17 @@ module SpineAdoption =
               "skeletonDag", 12, rs651
               "codecRefusals", 101, rs564
               "seamRefusals", 142, rs651
-              "skeletonMerge", 13, rs665
-              "skeletonDiff", 14, rs665
-              "capabilityLaws", 144, rs665
-              "capabilityDocumentLaws", 18, rs665
-              "queryGrantLaws", 19, rs679
-              "capabilityGateLaws", 41, rs665
-              "decimal", 75, rs665
-              "fieldLaws", 43, rs665
-              "propagationLaws", 73, rs665
-              "canonicalFormLaws", 17, rs665
+              "skeletonMerge", 13, rs683
+              "skeletonDiff", 14, rs683
+              "capabilityLaws", 144, rs683
+              "capabilityDocumentLaws", 18, rs683
+              "queryGrantLaws", 19, rs683
+              "queryDeclarationLaws", 84, rs683
+              "capabilityGateLaws", 41, rs683
+              "decimal", 75, rs683
+              "fieldLaws", 43, rs683
+              "propagationLaws", 73, rs683
+              "canonicalFormLaws", 17, rs683
               "premiseStringModel", 29, rs564
               "premiseFloatDigits", 163, rs564
               "premiseInt53", 29, rs564
