@@ -379,15 +379,153 @@ never reaches `EffectCodec`.
 *The refusals the Rust port's adoption found unpinned (its D17.9 and D17.10).* Each holds against the source: `params`
 absent is `MissingField` at `params` (QueryCodec.fs:158), `resultSchema` not a list `WrongKind` at `resultSchema` (160,
 65), `effect` absent `MissingField` at `effect` (162); the reason for `-Infinity` is `the float -Infinity is not
-finite, and the wire has no non-finite float` (Query.fs:47), and the family pins only NaN's; no file under
-`conformance/` holds a date not in canonical form, and the gate refuses `2026-2-1` with the column layer's reason
-(Column.fs:528-532) while the reader refuses its text at `value`. Decimal text with a trailing zero is two clauses: the
-column layer's refusal of `12.50` is pinned already, in the `decimal` family (`decimal-laws.json`,
-`encode-refuses-non-canonical`), which the Rust port has adopted; the gate's refusal of it is not (the declaration
-family pins `01.50`), and the reader admits `12.50` canonicalised, as above.
+finite, and the wire has no non-finite float` (Query.fs:47), and the family pins only NaN's. A date not in canonical
+form and decimal text with a trailing zero are each two clauses, and the column layer's is pinned already in a column
+family the Rust port has adopted: the column decoder's refusal of an unpadded date in `codecRefusals`
+(`refusals/codec-refusals.json`, `date-unpadded`, `2026-6-1`), and the column encoder's refusal of `12.50` in the
+`decimal` family (`decimal-laws.json`, `encode-refuses-non-canonical`). The gate's clause is pinned for neither: it
+refuses `2026-2-1` and `12.50` with the column layer's reason (Column.fs:528-532 and the decimal row's), and the
+declaration family pins `2026-02-30` and `01.50` instead; the reader refuses `2026-2-1` at `value` and admits `12.50`
+canonicalised, as above.
 
 No premise the phase was filed on is false. D263.1's third observation is corrected in its mechanism only: the empty
 string is the string column's absent slot, not the fallback.
+
+**D264.2 — the writer: the alternatives.** What each moves is stated against the class rules of `STABILITY.md`:
+"Public-surface baselines" for `api/` and "The wire surface" for `api/wire/`, where "the same structure emitted as
+different bytes" is `breaking`; through the `0.x` line a breaking class advances the minor, so the open `0.43.1` slot
+would become `0.44.0`. Adoption is read from `conformance/laws/manifest.json` and `conformance/refusals/manifest.json`:
+of the eight hosts each family lists, the Rust port alone has adopted `queryDeclarationLaws` (84 cases, at its
+`282ff93`) and `seamRefusals` (142, at its `55c145f`), and the Rust port's own writer is a twin of Core's (its
+`src/query.rs`:125-145, 205-216), the empty string included, so whatever is ruled here reaches it in a phase of its
+own.
+
+- **(a) The writer stays total, and its contract says it is defined over admitted declarations.** The doc comments of
+  `literalJson`, `comparedMembers` and `QueryCodec.encode` say that a declaration the gate refuses is written as
+  something, and that what it reads back as is not promised; the identity theorems' "accepted or not" (Query.fst:1291)
+  and the ladder row `query-renderers-abstract` name the second pair at which the filter renderer is not injective.
+  Moves: no `api/` or `api/wire/` baseline; no family (a vector here would bind every host to writing `""`, so the
+  writer's behaviour is stated by a Core test instead); no adopted reader; the proof model keeps `all_carried` with its
+  reason, that a `Null` literal does not round-trip. Class: internal, riding `0.43.1`. What it leaves: a hand-built
+  declaration still arrives at another host as another filter, and a grant for the `Null` read still covers the
+  empty-string read; the defect is documented, not removed.
+- **(b) The writer spells a `Null` literal so that no reader admits the text.** A comparison whose literal is `Null`
+  is written with no `type` and no `value`, `{"$type":"equalTo","column":"c"}`, which is the spelling the proof
+  model's `predicate_json` already gives a comparison without a literal (Query.fst:2455), and which every reader of a
+  comparison refuses: `MissingField` at `where.i.type` in a declaration, at `predicate.type` in a query-error document.
+  `literalJson`'s unreachable third branch goes with it. Moves: no `api/` baseline (`comparedMembers` is internal and
+  no signature changes); `api/wire/Fuaran.Core.Query.txt` rows `query / Cell.Null` and `queryError / Cell.Null` change
+  bytes, class `breaking`; the identity of a hand-built `Null` read moves and no longer equals the empty-string read's,
+  so the renderer premise holds again at that pair (no registered read can carry a `Null` literal, and no vector or
+  parity row pins one); `queryDeclarationLaws` gains vectors stating what the writer does with a declaration the gate
+  refuses, a case the Rust port's adopted leg does not know until it adopts it; `seamRefusals` need not move. The
+  proof model's `predicate_json` takes the same spelling for a `Null` literal; `all_carried` stays the round trip's
+  premise and its reason is restated (a `Null` literal is refused, not round-tripped), beside a lemma that its text is
+  refused at `type`; the extracted oracle is regenerated. Class: wire `breaking`, so `0.44.0`. The decimal case is not
+  changed: decimal text not in canonical form is written as handed and read back as the same number, canonical, which
+  is the reader's own rule (D72), and the writer's contract says so.
+- **(b′) Every literal the gate refuses as `IllFormedLiteral` is written without a literal.** It moves six more wire
+  rows (the sampler's date, decimal and timestamp documents, lines 33-34, 39, 82-83, 88), and it makes a `Null`, a
+  `12.50` and a NaN literal on one column one rendering, which breaks the renderer's injectivity among refused
+  declarations where (b) restores it. Lost.
+- **(c) The writer refuses, through a changed entry point or a new one.** `QueryCodec.encode` answers a `Result` after
+  the gate, and `encodeColumnPredicate` and `encodeQueryError` refuse a comparison with a `Null` literal. Moves: a
+  `retype` of `QueryCodec.encode`, `QueryCodec.encodeQueryError` and both `QuerySeamCodec` writers
+  (`api/Fuaran.Core.Query.txt`:61, 63, 108-109), at every caller; the identity functions either retype as well or keep a
+  total renderer, and with it the collision; the seam codec is generated, and the generator's writers are total by
+  design, so a refusing writer is a generator feature first; the sampler's two `Cell.Null` documents become refusals,
+  documents removed, `breaking`. A new entry point alone (`tryEncode`, additive) leaves `encode` writing `""`, which
+  does not answer the phase. Family and adopted readers as in (b). The proof model's `query_json` becomes partial, and
+  its round trip is restated over admission, the premise `query_roundtrip_identity` already carries. Class: `retype` and
+  wire `breaking`, so `0.44.0`, with the widest cost to callers.
+- **(d) The literal's type makes a `Null` unrepresentable.** The five comparison cases carry a present-literal type in
+  place of `Cell`. Moves: a `retype` of the five cases (`api/Fuaran.Core.Query.txt`:178-179, 181-182, 185) and of
+  `QueryShape.literal`, at every consumer that builds a comparison; the gate's `Null` clause (Query.fs:82-84) and its
+  sentence are deleted; the hosted codec's declared type moves; the sampler's literal documents are renamed or
+  removed, wire `breaking`; `queryDeclarationLaws` loses `admission-a-null-literal`, which can no longer be stated (the
+  Rust port's record keeps its 84 at its commit); `queryGrantLaws` does not move, since an argument still takes a
+  `Null`. The proof model refines the literal, and `literal_carried`, `all_carried` and `query_error_carried`'s
+  predicate clause go: the round trip becomes unconditional in the literal. Class: `retype`, so `0.44.0`; the strongest
+  guarantee, at the highest cost to every consumer.
+
+Two spellings for (b) lost: `"type":"null"` invents a column type no reader declares, and a JSON `null` value cannot be
+written, because the value model carries no null (D213).
+
+**D264.3 — the budgets: the alternatives.**
+
+- **(a) Core carries them unchecked and says so, with vectors that pin the admission.** The doc comments of
+  `TimeoutMs` and `PageSize` say that Core admits any integer and that the host's resolver alone gives a budget its
+  meaning; `queryDeclarationLaws` gains `admissionFault` vectors (`admitted`) and text vectors at `0` and `-1` for each
+  member. Moves: no `api/` or `api/wire/` baseline; `seamRefusals` does not move; the declaration family's count moves,
+  in cases the Rust port already reads, and it answers them as Core does today; the proof model does not move (a lemma
+  that the gate reads no budget may be added). Class: internal, riding `0.43.1`. What it leaves: two hosts may give a
+  page of `-5` rows different meanings, and nothing refuses it; Core states the gap rather than closing it.
+- **(b) The gate refuses a value that is not positive.** One new case of `QueryError`, proposed as
+  `BudgetNotPositive of budget: string * value: int` (wire `budgetNotPositive`, members `budget` and `value`), raised at
+  the path `timeoutMs` or `pageSize`, after a parameter declared twice and before the filter, which is the order the
+  reader reads the members in. Moves: `api/Fuaran.Core.Query.txt` gains the case, its tag and its nested type,
+  `union-widening` (every exhaustive `match` on `QueryError` becomes incomplete); `api/wire/` gains a `queryError`
+  document, `additive`; the generated seam codec gains the case through its declaration; `seamRefusals` gains a
+  `queryError` vector, which the Rust port's adopted reader refuses as an unknown tag until it adopts it;
+  `queryDeclarationLaws` gains refusals at both paths, and the census test then finds the case covered;
+  `QueryError.describe` gains its sentence. The proof model's `query_error` gains the case, `admission_fault` and
+  `admission_fault_at` the clause, the refusal codec's model and `query_error_roundtrip` the case, and the oracle is
+  regenerated; `query_roundtrip`'s statement keeps its form. A declaration that registered under `0.43.0` can be
+  refused. Class: `union-widening`, so `0.44.0`.
+- **(c) The type makes a budget that is not positive unrepresentable.** `TimeoutMs` and `PageSize` become a
+  positive-integer type, and the reader refuses `OutOfRange` at the member. Moves: a `retype` of two record fields and
+  the constructor (`api/Fuaran.Core.Query.txt`:10, 114, 118) at every consumer that builds a declaration; no new
+  `QueryError` case and no `seamRefusals` move; the proof model refines the two fields. Class: `retype`, so `0.44.0`.
+
+Two lost outright: clamping or normalising a budget at the reader changes a declaration's meaning without a refusal;
+refusing at the reader alone, outside the gate, makes the reader and the gate disagree on one declaration, which
+D263.1 found nowhere.
+
+**D264.4 — the sentences.** `EffectCodec.hostDecoder` and `determinismDecoder` pass what was found, as every other
+`UnknownTag` of the declaration reader does: `host effect '<s>'` and `determinism '<s>'`, read as `unknown host effect
+'everywhere'; expected one of 'pure', 'readsHost', 'writesHost'` and `unknown determinism 'sometimes'; expected a
+determinism tag`. A test over the declaration readers' `UnknownTag` refusals fails on a sentence that doubles its lead.
+The capability declaration's reader and the IDL artifact's change the same way, since they are the same two readers.
+Nothing a host certifies moves: hosts certify a refusal on its code and path (D188), no vector or baseline holds the
+text, and no `api/` member changes. Class: internal.
+
+**D264.5 — the recommendation.**
+
+- **The writer: (b).** It is the smallest change that makes the writer's text for a refused `Null` literal one that
+  every reader refuses, which is what the phase asks. It invents no spelling (the proof model already has it), keeps
+  every writer total (no retype, no generator feature), and closes the identity collision as a side effect, restoring
+  the renderer premise the injectivity theorems stand on. Its one cost is a `breaking` wire class over two documents no
+  registered declaration can produce. (a) keeps a filter that changes silently and a grant that covers another read,
+  a known defect documented in place. (c) and (d) buy the same wire move and add a retype at every caller.
+- **The budgets: (b).** One refusal every host shares replaces each host's own reading of a page of `-5` rows. It is
+  cheapest now: one host has adopted the two families it moves, the Go and the Python ports hold no declaration yet,
+  and under the writer's (b) the slot advances to `0.44.0` in any case, so the union widening rides the same minor. If
+  the writer is ruled (a), (b) here is the only reason to advance the minor, and (a) here is the internal choice.
+- **The sentences**, as D264.4.
+
+With both (b)s the slot advances to `0.44.0` by Core's own act, with its corpus half, and the ledger entry says what a
+consumer does: match the new `QueryError` case, and expect a hand-built `Null` comparison to be written as text no
+reader admits. Of the six refusals the Rust port's adoption found unpinned, the gate's and the reader's clauses go in
+`queryDeclarationLaws`; the column layer's clauses of the date and the decimal are pinned already, in `codecRefusals`
+and `decimal` (D264.1), so no column family gains a vector.
+
+Each choice reaches files outside those the phase declares, and the list is part of what is ruled. The
+writer's (a): the ladder's source, `proofs.json`. The writer's (b), (c) and (d): the extracted oracle under
+`proofs/oracle/`; (c) and (d) also the seam declaration the generated codec is derived from. The budgets' (b): that
+seam declaration, the `seamRefusals` exporter (`Conformance/SeamRefusalLaws.fs`), `conformance/refusals/seam-refusals.json`
+and its manifest, and the extracted oracle. The sentences: none beyond `Effect.fs` and a test.
+
+**D264.6 — the questions for the ruling.**
+
+1. Which of (a), (b), (c) or (d) does the writer take?
+2. Is a decimal literal written as handed and read back as the same number in canonical form "another declaration",
+   or does the writer's contract stand for it as it does for the reader?
+3. Which of (a), (b) or (c) do the budgets take?
+4. Under the budgets' (b): is zero refused for both members, or is a `pageSize` or a `timeoutMs` of zero a meaning a
+   host may declare?
+5. Under the budgets' (b): is the case one, `BudgetNotPositive(budget, value)`, or one per member, and does the gate
+   check the budgets before the filter, as proposed?
+6. Do the writer's and the budgets' changes ride one `0.44.0` slot together, or does either wait for a slot of its own?
 
 ## 2026-11-17 — D263: Core emits the query declaration's refusals as a law family of its own, `queryDeclarationLaws`
 
