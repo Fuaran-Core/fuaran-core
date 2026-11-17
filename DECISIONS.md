@@ -361,6 +361,73 @@ for carried literals only (proofs/Query.fst, `all_carried`). A negative `pageSiz
 effect reader's sentence for an unknown host tag doubles its "unknown". .NET against Node is not measured here: no
 parity row reaches a declaration refusal, and a row is a change to a packed project.
 
+**D263.2 — a family of its own, with every host's adoption `proposed`.** `conformance/laws/query-declaration-laws.json`
+(id `queryDeclarationLaws`), rendered by the exporter and indexed in this repository's own `laws/manifest.json` with
+every host's adoption `proposed`, the Rust port's included. No file a host already reads gains a case, and nothing is
+rendered into the shared corpus: this is D255.1, D260.17 and D261.8 applied, for their reason. Three alternatives
+lost, each to a reader a host runs today. New cases in `query-grant-laws.json`: the Rust port adopted that family at
+its `f1dd15e`, and its reader fails on a `case` it does not know (`tests/query_grant.rs`, the `unknown case` arm), so
+an adopted host turns red. A `query` reader in `seam-refusals.json`: the same port adopted that family with 142 cases
+and fails on a reader it does not have (`tests/seams.rs`, `no reader`). A section of `capability-laws.json`: the wrong seam, and D255.1's three hosts fail on it.
+
+**D263.3 — the cases, and what a vector pins.** Five cases, in the order a declaration meets them.
+`declarationRefused`: a declaration's TEXT and the reader's refusal on `code` and `path`, exactly as
+`capabilityLaws`' `declarationRefused` pins it, and for its reason: the sentence a reader gives is prose its host
+words, and the code and the path are what a caller repairs from. `admissionFault`: a declaration held to the gate,
+and the gate's verdict, `admitted`, or `refused` with the path to the member at fault (`at`) and the refusal.
+`register`: the declaration registered into the registry the file's `registry` holds. `validateParams`: a read's
+arguments held to its declaration. `dispatch`: a read dispatched through that registry under the file's gate table,
+with a grant presented or not, `performed` or `refused`. Every refusal outside the reader is pinned as its
+QUERY-ERROR DOCUMENT (`QuerySeamCodec.encodeQueryError`, an object under `error`): the seam's own spelling of the
+typed value, carrying every field of the case (the names, the declared lists, the column types, the policy, its reason
+and alternatives), which every host that answers `seamRefusals` already reads and writes (its 37 `queryError`
+vectors). Three alternatives lost. The code and the path alone: at `where.i` five of the gate's refusals share both,
+so a vector could not tell an undeclared column from a literal of another type. The sentence (`QueryError.describe`):
+it is computed from the value (Query.fs:159-278), so the value pins everything the sentence says, and a family of
+sentences would bind every host to this repository's English; the one piece of prose a case carries, the column
+layer's reason inside `illFormedLiteral`, is pinned because the value carries it. The case's name alone: it drops the
+declared lists and the types a caller repairs from.
+
+**D263.4 — a declaration no text can carry is stated as data.** The gate refuses two things no declaration TEXT
+reaches (D263.1): a `Null` literal, because the parser refuses every `null`, and a literal its column cannot carry,
+because the reader reads a literal through the column codec, which refuses it or canonicalises it first. Only a
+declaration built by hand reaches them, which is how a host's resolver, a model's planner or a test meets the gate.
+So `admissionFault` and `register` state the declaration as data: `query`, a declaration of the file's `registry`
+(canonical text, which the reader admits), and the members that replace its own, each stated as data, never as
+text a reader would refuse first: `id`, a string; `params`, a list of `{name, type, required}`; `where`, a list of
+`{predicate, column}` with `cell` for a comparison and `text` for `contains`; `orderBy`, a list of `{column,
+direction}`. A cell is spelled as `queryGrantLaws` spells one, `{kind, text}` with no text for a null, its text as it
+stands and never canonicalised, so `{kind: "decimal", text: "01.50"}` is the text the gate refuses. The vectors that
+reach the gate through text are also `declarationRefused` vectors, so the reader's path and the gate's are pinned on
+the same declarations. Three alternatives lost. No vector, a recorded reason: two of the gate's eight refusals would
+stay uncertified, and the Rust port's two port-side pins with them. The declaration's text with a `null` in it: the
+vector would pin the parser, not the gate. A literal spelled as the column codec writes a value: that codec reads a
+value canonically, so it cannot carry the text the gate must refuse.
+
+**D263.5 — what answers each vector.** The extracted query model (`proofs/Query.fst`, model `Query`) answers four of
+the five cases, and the export runs it on every vector it stamps and fails on a disagreement: `declarationRefused` by
+`query_of_j` over the parser model (ladder row `query-codec-differential`), `admissionFault` by
+`admission_fault_at` (the gate the model's reader runs, the same row), `register` by `register` and `validateParams`
+by `validate_params` (row `query-differential`). Two sets of vectors are the reference's alone, named in the file's
+`referenceOnly` with the reason: the `admissionFault` vectors whose literal its column cannot carry, because the
+model does not restate `whereFault`'s carriability clause (`predicate_fault`'s comment in `proofs/Query.fst`); and
+every `dispatch` vector, because the model's gated dispatch is stated and proved (section 11) and not extracted, so
+no oracle function runs a gate. No stamp claims an answer the export did not compute.
+
+**D263.6 — the cases of `QueryError` the family does not raise, by name.** The file's `unreached` names the six
+cases no declaration and no typed call's validation raises (D263.1), each with its raiser and its reason:
+`unreadableArgs`, raised only by the argument DOCUMENT's reader (`QueryCodec.decodeArgs`), whose refusals are a
+reader's of another document; and the five a host's resolver answers (`sourceNotResolved`, `executionFailed`,
+`timeout`, `predicateNotHonoured`, `orderNotHonoured`), which Core only renames. The census test
+(`QueryDeclarationVectorTests`) reads the union's cases by reflection and fails, naming each, when a case has no
+vector in the file and no entry in `unreached`, when a case has both, or when an entry has no reason; so a case added
+to `QueryError` is red until it is given one or the other.
+
+**D263.7 — what moves.** Nothing a package ships: the file is in no package, the exporter and the tests are in
+projects that do not pack, and no `api/` baseline moves, so the family rides the open `0.43.1` slot as internal.
+The suite holds the committed file to the exporter's output (the `laws` row of the exporter table), and the
+evidence map (`docs/host-evidence-map.json`) gains the family under the query model's rows. No host adopts it here.
+
 ## 2026-11-16 — D262: the pure footprint keeps an `UpdateNode`'s unknown-parent write, because under a grammar, references or a keyed scope a rewrite reads or destroys addresses the script cannot name; and `footprintIn`'s rewrite arm is unsound in exactly those three configurations
 
 **Status:** Live
