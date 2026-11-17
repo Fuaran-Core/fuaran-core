@@ -8,8 +8,9 @@ namespace Fuaran.Core.Tests
 //  propagation vectors (`laws/propagation-laws.json`, Phase 538, rendered by
 //  `PropagationVectorExport`), the capability gate family
 //  (`laws/capability-gate-laws.json`, Phase 650), the document family
-//  (`laws/capability-document-laws.json`, Phase 644) and the query grant
-//  family (`laws/query-grant-laws.json`, Phase 651).
+//  (`laws/capability-document-laws.json`, Phase 644), the query grant
+//  family (`laws/query-grant-laws.json`, Phase 651) and the query
+//  declaration family (`laws/query-declaration-laws.json`, Phase 680).
 //
 //  Until Phase 258 this module also exported `Conformance.transformLaws`'
 //  reference answers (`laws/transform-laws.json`, fuaran#1479). Those answers
@@ -23,6 +24,11 @@ namespace Fuaran.Core.Tests
 // ============================================================================
 
 module LawVectorExport =
+
+    // The extracted query and capability models, named before `Fuaran.Core` is opened: production's
+    // `Query` and `Capability` modules share their names (the query declaration family asks them).
+    module ModelQuery = Query
+    module ModelCap = Capability
 
     open System.IO
     open System.Reflection
@@ -292,12 +298,12 @@ module LawVectorExport =
             | other -> failwithf "not a declaration: %A" other
 
         /// A refusal's cells: its code and its path, each segment as written.
-        let private refusalCells (code: DecodeCode) (path: string list) : (string * CorpusCell) list =
+        let internal refusalCells (code: DecodeCode) (path: string list) : (string * CorpusCell) list =
             [ "verdict", jstr "reject"
               "code", jstr (string code)
               "path", jarr (path |> List.map jstr) ]
 
-        let private segText (s: PathSegment) =
+        let internal segText (s: PathSegment) =
             match s with
             | PathSegment.Key k -> k
             | PathSegment.Index i -> string i
@@ -659,8 +665,8 @@ module LawVectorExport =
             |> jarr
 
         /// The `grant` member: the identity a presented grant carries, and no member when none is
-        /// presented (the wire carries no null).
-        let private grantMember (grant: Grant option) : (string * CorpusCell) list =
+        /// presented (the wire carries no null). The query families present a grant the same way.
+        let internal grantMember (grant: Grant option) : (string * CorpusCell) list =
             match grant with
             | Some g -> [ "grant", jstr g.Invocation ]
             | None -> []
@@ -931,7 +937,7 @@ module LawVectorExport =
 
         let familyId = "queryGrantLaws"
 
-        let private param (name: string) (t: ColumnType) (required: bool) : QueryParam =
+        let internal param (name: string) (t: ColumnType) (required: bool) : QueryParam =
             { Name = name
               Type = t
               Required = required }
@@ -979,7 +985,7 @@ module LawVectorExport =
 
         /// A cell as the vectors spell it: its kind and its text, and no text for a null. A float's text
         /// is its shortest round-trip form; a boolean's is `true` or `false`.
-        let private cellJson (c: Cell) : CorpusCell =
+        let internal cellJson (c: Cell) : CorpusCell =
             match c with
             | Null -> jobj [ "kind", jstr "null" ]
             | Int i -> jobj [ "kind", jstr "int"; "text", jstr (string i) ]
@@ -990,15 +996,10 @@ module LawVectorExport =
             | Timestamp s -> jobj [ "kind", jstr "timestamp"; "text", jstr s ]
             | Decimal s -> jobj [ "kind", jstr "decimal"; "text", jstr s ]
 
-        let private argsJson (args: (string * Cell) list) : CorpusCell =
+        let internal argsJson (args: (string * Cell) list) : CorpusCell =
             args
             |> List.map (fun (name, cell) -> jobj [ "name", jstr name; "cell", cellJson cell ])
             |> jarr
-
-        let private grantMember (grant: Grant option) : (string * CorpusCell) list =
-            match grant with
-            | Some g -> [ "grant", jstr g.Invocation ]
-            | None -> []
 
         // ---- the identity ----
 
@@ -1056,7 +1057,7 @@ module LawVectorExport =
                 @ (match pageToken with
                    | Some t -> [ "pageToken", jstr t ]
                    | None -> [])
-                @ grantMember grant
+                @ Gates.grantMember grant
               Expected =
                 [ "covers",
                   CorpusCell.Value(JBool(Grant.covers (Query.invocationPreimage q args) (Option.toList grant))) ] }
@@ -1117,6 +1118,699 @@ module LawVectorExport =
                       "kitVersion", jstr stamp
                       "description", jstr description
                       "registry", jarr (queries |> List.map (QueryCodec.encode >> jstr)) ]
+                  Items = "vectors"
+                  Rows = allVectors () |> List.map renderVector }
+
+        let render () : string = renderAt (kitVersion ())
+
+    // -----------------------------------------------------------------------
+    //  the query declaration's refusals (Phase 680)
+    // -----------------------------------------------------------------------
+    //  DECISIONS.md D263. The refusals a query declaration and a read of it can meet: the declaration
+    //  reader's, on code and path (`declarationRefused`, as `capabilityLaws` pins a capability
+    //  declaration's); the admission gate's, held to a declaration stated as DATA, because two of its
+    //  refusals no declaration text can carry (`admissionFault`); registration's (`register`); argument
+    //  validation's (`validateParams`); and the registry's under a gate table (`dispatch`). Every refusal
+    //  outside the reader is pinned as the query-error document the seam codec writes. A family of its
+    //  own (D263.2): no file a host reads gains a case. Every `expected` is computed by CALLING the kit,
+    //  and the extracted query model answers every vector it states (D263.5). No seed: nothing is drawn.
+
+    module QueryDeclarations =
+
+        let fileName = "query-declaration-laws.json"
+
+        let familyId = "queryDeclarationLaws"
+
+        let private declaration (id: string) (ps: QueryParam list) (schema: Schema) : Query =
+            { Id = id
+              Params = ps
+              ResultSchema = schema
+              Effect =
+                { Host = ReadsHost
+                  Determinism = Effect.network }
+              Source = Ref id
+              TimeoutMs = None
+              PageSize = None
+              Where = []
+              OrderBy = [] }
+
+        /// The registry the vectors read, in id order: `bare`, with no parameter and no column; `ledger`
+        /// and `payroll`, one required integer each, which the gate parks and denies; and `sales`, four
+        /// parameters and six result columns, one of each type a literal is held to.
+        let queries: Query list =
+            [ declaration "bare" [] []
+              declaration "ledger" [ QueryGrants.param "n" IntType true ] [ Field.create "n" IntType ]
+              declaration "payroll" [ QueryGrants.param "n" IntType true ] [ Field.create "n" IntType ]
+              { declaration
+                    "sales"
+                    [ QueryGrants.param "n" IntType true
+                      QueryGrants.param "rate" FloatType false
+                      QueryGrants.param "tag" StringType false
+                      QueryGrants.param "cap" DecimalType false ]
+                    [ Field.create "n" IntType
+                      Field.create "region" StringType
+                      Field.create "at" (TimestampType TimeUnit.Milliseconds)
+                      Field.create "amount" DecimalType
+                      Field.create "day" DateType
+                      Field.create "score" FloatType ] with
+                  PageSize = Some 50 } ]
+
+        let private queryOf (id: string) =
+            queries |> List.find (fun q -> q.Id = id)
+
+        /// The one gate the registry runs (`ceiling`): it parks every read of `ledger`, denies every read
+        /// of `payroll` naming `ledger` as the alternative, and allows the rest.
+        let gate: string * (string * PolicyDecision) list =
+            "ceiling",
+            [ "ledger", PolicyDecision.NeedsApproval
+              "payroll", PolicyDecision.denyWith "payroll is closed to this reader" [ "ledger" ] ]
+
+        /// The production registry the head declares: the four queries, under the gate.
+        let registry: QueryRegistry<unit> =
+            let policy, rules = gate
+
+            queries
+            |> List.fold (fun r q -> r |> Result.bind (QueryRegistry.register q)) (Ok QueryRegistry.empty)
+            |> Result.defaultWith (fun e -> failwithf "the declaration family's registry did not build: %A" e)
+            |> QueryRegistry.withGate
+                { Policy = policy
+                  Decide =
+                    fun () q _ ->
+                        rules
+                        |> List.tryPick (fun (id, d) -> if id = q.Id then Some d else None)
+                        |> Option.defaultValue PolicyDecision.Allow }
+
+        /// The model's registry over the same queries (no gate: the model's gated dispatch is not
+        /// extracted, D263.5).
+        let private modelRegistry: ModelQuery.registry =
+            queries
+            |> List.fold
+                (fun r q ->
+                    match ModelQuery.register (QueryOracle.queryToModel q) r with
+                    | ModelQuery.Ok r' -> r'
+                    | ModelQuery.Error e -> failwithf "the model refused %s: %A" q.Id e)
+                ModelQuery.empty
+
+        // ---- the refusal, as the seam codec writes it ----
+
+        let private errorCell (e: QueryError) : CorpusCell =
+            CorpusCell.Value(QuerySeamCodec.encodeQueryError e)
+
+        let private modelErrorCell (e: ModelQuery.query_error) : CorpusCell =
+            CorpusCell.Value(
+                CapabilityOracle.jvalOfModel (
+                    ModelQuery.query_error_json QueryOracle.columnCodec (ModelQuery.QRefused e)
+                )
+            )
+
+        /// The query model's answer under the ladder row that holds its codec (the reader and the gate it
+        /// runs) to production.
+        let private codecAnswer (cells: (string * CorpusCell) list) : VectorOracle.Answer option =
+            Some
+                { Model = QueryOracle.QueryModel
+                  LadderRow = QueryOracle.Seams.QueryRow
+                  Cell = jobj cells }
+
+        let private modelSegText (s: ModelCap.path_seg) : string =
+            match s with
+            | ModelCap.Key k -> k
+            | ModelCap.Index n -> string n
+
+        /// The reference's admission gate, `QueryRegistry.admissionFaultAt`: the refusal with the path to the
+        /// member at fault. It is internal to its package (the registry and the reader are its callers), so
+        /// it is called by reflection, which is the reference's own function and no restatement of it.
+        let admissionFaultAt (q: Query) : (PathSegment list * QueryError) option =
+            let gateFn =
+                typeof<QueryRegistry<unit>>.Assembly
+                    .GetType("Fuaran.Core.QueryRegistryModule", true)
+                    .GetMethod(
+                        "admissionFaultAt",
+                        BindingFlags.Static ||| BindingFlags.NonPublic ||| BindingFlags.Public
+                    )
+
+            gateFn.Invoke(null, [| box q |])
+            |> unbox<(PathSegment list * QueryError) option>
+
+        // ---- a declaration stated as data (D263.4) ----
+
+        /// A predicate's tag, as the wire spells it.
+        let private predicateTag (p: ColumnPredicate) : string =
+            match p with
+            | ColumnPredicate.EqualTo _ -> "equalTo"
+            | ColumnPredicate.GreaterThan _ -> "greaterThan"
+            | ColumnPredicate.AtLeast _ -> "atLeast"
+            | ColumnPredicate.LessThan _ -> "lessThan"
+            | ColumnPredicate.AtMost _ -> "atMost"
+            | ColumnPredicate.Contains _ -> "contains"
+            | ColumnPredicate.IsNull _ -> "isNull"
+            | ColumnPredicate.IsNotNull _ -> "isNotNull"
+
+        let private predicateData (p: ColumnPredicate) : CorpusCell =
+            let head c =
+                [ "predicate", jstr (predicateTag p); "column", jstr c ]
+
+            match p with
+            | ColumnPredicate.EqualTo(c, v)
+            | ColumnPredicate.GreaterThan(c, v)
+            | ColumnPredicate.AtLeast(c, v)
+            | ColumnPredicate.LessThan(c, v)
+            | ColumnPredicate.AtMost(c, v) -> jobj (head c @ [ "cell", QueryGrants.cellJson v ])
+            | ColumnPredicate.Contains(c, t) -> jobj (head c @ [ "text", jstr t ])
+            | ColumnPredicate.IsNull c
+            | ColumnPredicate.IsNotNull c -> jobj (head c)
+
+        let private paramData (p: QueryParam) : CorpusCell =
+            jobj
+                [ "name", jstr p.Name
+                  "type", jstr (ColumnType.tag p.Type)
+                  "required", CorpusCell.Value(JBool p.Required) ]
+
+        let private keyData (k: SortKey) : CorpusCell =
+            jobj
+                [ "column", jstr k.Column
+                  "direction",
+                  jstr (
+                      match k.Direction with
+                      | SortDirection.Ascending -> "ascending"
+                      | SortDirection.Descending -> "descending"
+                  ) ]
+
+        /// A declaration a vector states: a declaration of the registry, with the members given replacing
+        /// its own.
+        type Stated =
+            { Base: string
+              Id: string option
+              Params: QueryParam list option
+              Where: ColumnPredicate list option
+              OrderBy: SortKey list option }
+
+        let private on (baseId: string) : Stated =
+            { Base = baseId
+              Id = None
+              Params = None
+              Where = None
+              OrderBy = None }
+
+        let private build (s: Stated) : Query =
+            let b = queryOf s.Base
+
+            { b with
+                Id = Option.defaultValue b.Id s.Id
+                Params = Option.defaultValue b.Params s.Params
+                Where = Option.defaultValue b.Where s.Where
+                OrderBy = Option.defaultValue b.OrderBy s.OrderBy }
+
+        let private statedInput (s: Stated) : (string * CorpusCell) list =
+            [ "query", jstr s.Base ]
+            @ (s.Id |> Option.map (fun id -> "id", jstr id) |> Option.toList)
+            @ (s.Params
+               |> Option.map (fun ps -> "params", jarr (ps |> List.map paramData))
+               |> Option.toList)
+            @ (s.Where
+               |> Option.map (fun w -> "where", jarr (w |> List.map predicateData))
+               |> Option.toList)
+            @ (s.OrderBy
+               |> Option.map (fun o -> "orderBy", jarr (o |> List.map keyData))
+               |> Option.toList)
+
+        let private salesParams = (queryOf "sales").Params
+
+        let private eq (c: string) (v: Cell) = ColumnPredicate.EqualTo(c, v)
+
+        let private key (c: string) (d: SortDirection) : SortKey = { Column = c; Direction = d }
+
+        /// The admission vectors' declarations, each with its id. The ones whose literal its column cannot
+        /// carry are `uncarried`: no text reaches them, and the model does not restate the clause.
+        let private admissions: (string * Stated) list =
+            let sales = on "sales"
+
+            [ "admission-a-parameter-declared-twice",
+              { sales with
+                  Params = Some(salesParams @ [ QueryGrants.param "rate" StringType false ])
+                  Where = Some [ ColumnPredicate.IsNull "nope" ] }
+              "admission-an-undeclared-column",
+              { sales with
+                  Where = Some [ ColumnPredicate.IsNull "nope" ] }
+              "admission-an-undeclared-column-of-no-columns",
+              { on "bare" with
+                  Where = Some [ ColumnPredicate.IsNotNull "n" ] }
+              "admission-contains-on-an-undeclared-column",
+              { sales with
+                  Where = Some [ ColumnPredicate.Contains("nope", "x") ] }
+              "admission-contains-off-a-string-column",
+              { sales with
+                  Where = Some [ ColumnPredicate.Contains("n", "x") ] }
+              "admission-contains-on-a-string-column",
+              { sales with
+                  Where = Some [ ColumnPredicate.Contains("region", "eu") ] }
+              "admission-a-null-literal",
+              { sales with
+                  Where = Some [ eq "n" Null ] }
+              "admission-a-literal-of-another-type",
+              { sales with
+                  Where = Some [ eq "region" (Int 1) ] }
+              "admission-an-integer-on-a-decimal-column",
+              { sales with
+                  Where = Some [ eq "amount" (Int 1) ] }
+              "admission-an-integer-on-a-float-column",
+              { sales with
+                  Where = Some [ eq "score" (Int 1) ] }
+              "admission-a-timestamp-coarser-than-its-column",
+              { sales with
+                  Where = Some [ eq "at" (Timestamp "2026-11-15T09:30:00Z") ] }
+              "admission-a-timestamp-finer-than-its-column",
+              { sales with
+                  Where = Some [ eq "at" (Timestamp "2026-11-15T09:30:00.000001Z") ] }
+              "admission-a-date-that-names-no-day",
+              { sales with
+                  Where = Some [ eq "day" (Date "2026-02-30") ] }
+              "admission-a-timestamp-not-canonical",
+              { sales with
+                  Where = Some [ eq "at" (Timestamp "2026-11-15 09:30:00Z") ] }
+              "admission-decimal-text-not-canonical",
+              { sales with
+                  Where = Some [ eq "amount" (Decimal "01.50") ] }
+              "admission-a-float-not-finite",
+              { sales with
+                  Where = Some [ eq "score" (Float nan) ] }
+              "admission-the-second-predicate",
+              { sales with
+                  Where = Some [ ColumnPredicate.IsNull "n"; ColumnPredicate.Contains("n", "x") ] }
+              "admission-an-order-on-an-undeclared-column",
+              { sales with
+                  OrderBy = Some [ key "nope" SortDirection.Ascending ] }
+              "admission-an-order-naming-a-column-twice",
+              { sales with
+                  OrderBy =
+                      Some
+                          [ key "n" SortDirection.Ascending
+                            key "region" SortDirection.Ascending
+                            key "n" SortDirection.Descending ] }
+              "admission-the-filter-before-the-order",
+              { sales with
+                  Where = Some [ ColumnPredicate.IsNull "nope" ]
+                  OrderBy = Some [ key "nope" SortDirection.Ascending ] }
+              "admission-admitted",
+              { sales with
+                  Where =
+                      Some
+                          [ ColumnPredicate.Contains("region", "eu")
+                            ColumnPredicate.AtLeast("amount", Decimal "12.5")
+                            ColumnPredicate.LessThan("day", Date "2026-11-15")
+                            ColumnPredicate.IsNotNull "score" ]
+                  OrderBy = Some [ key "at" SortDirection.Descending; key "n" SortDirection.Ascending ] } ]
+
+        /// The admission vectors whose literal its column cannot carry: the model's `predicate_fault`
+        /// does not restate `whereFault`'s carriability clause (proofs/Query.fst), so these are the
+        /// reference's alone.
+        let uncarried: string list =
+            [ "admission-a-date-that-names-no-day"
+              "admission-a-timestamp-not-canonical"
+              "admission-decimal-text-not-canonical"
+              "admission-a-float-not-finite" ]
+
+        let private gateCells (fault: (string list * CorpusCell) option) : (string * CorpusCell) list =
+            match fault with
+            | None -> [ "verdict", jstr "admitted" ]
+            | Some(at, error) -> [ "verdict", jstr "refused"; "at", jarr (at |> List.map jstr); "error", error ]
+
+        let private admissionVector (id: string, s: Stated) : Vector =
+            let q = build s
+
+            let reference =
+                admissionFaultAt q
+                |> Option.map (fun (at, e) -> at |> List.map Capabilities.segText, errorCell e)
+
+            let model =
+                if List.contains id uncarried then
+                    None
+                else
+                    ModelQuery.admission_fault_at (QueryOracle.queryToModel q)
+                    |> VectorOracle.ofMOpt
+                    |> Option.map (fun (at, e) -> at |> List.map modelSegText, modelErrorCell e)
+                    |> gateCells
+                    |> codecAnswer
+
+            { Id = id
+              Case = "admissionFault"
+              Model = model
+              Input = statedInput s
+              Expected = gateCells reference }
+
+        // ---- the reader, over a declaration's text ----
+
+        let private salesText = QueryCodec.encode (queryOf "sales")
+
+        /// The `sales` declaration's text with `member` set to `raw` (JSON text), or removed for `None`.
+        let private edited (edits: (string * string option) list) : string =
+            match Json.parse salesText with
+            | Ok(JObj ms) ->
+                let apply (ms: (string * JVal) list) (name: string, raw: string option) =
+                    match raw with
+                    | None -> ms |> List.filter (fun (k, _) -> k <> name)
+                    | Some text ->
+                        let v =
+                            match Json.parse text with
+                            | Ok v -> v
+                            | Error e -> failwithf "an edit is not JSON: %s (%s)" text e
+
+                        if ms |> List.exists (fun (k, _) -> k = name) then
+                            ms |> List.map (fun (k, x) -> if k = name then k, v else k, x)
+                        else
+                            ms @ [ name, v ]
+
+                Canonical.write Rendering.CrossHost (JObj(List.fold apply ms edits))
+            | _ -> failwith "the sales declaration does not read back as an object"
+
+        let private readerCells (text: string) : (string * CorpusCell) list =
+            match QueryCodec.decodeDetailedWith ReadPolicy.Lenient text with
+            | Error e -> Capabilities.refusalCells e.Code (e.Path |> List.map Capabilities.segText)
+            | Ok _ -> [ "verdict", jstr "accept" ]
+
+        /// The model's reader: the parser model, then `query_of_j` over production's column codec.
+        let private modelReaderCells (text: string) : (string * CorpusCell) list =
+            match VectorOracle.JsonModel.readStrict text with
+            | Error _ -> Capabilities.refusalCells DecodeCode.InvalidJson []
+            | Ok j ->
+                match ModelQuery.query_of_j QueryOracle.columnCodec (CapabilityOracle.jvalToModel j) with
+                | ModelCap.Ok _ -> [ "verdict", jstr "accept" ]
+                | ModelCap.Error e ->
+                    Capabilities.refusalCells
+                        (CapabilityOracle.modelCodeOf e.d_code)
+                        (e.d_path |> List.map modelSegText)
+
+        let private refused (id: string) (text: string) : Vector =
+            { Id = id
+              Case = "declarationRefused"
+              Model = codecAnswer (modelReaderCells text)
+              Input = [ "declaration", jstr text ]
+              Expected = readerCells text }
+
+        /// The text of an admission vector's declaration (one whose text reaches the gate).
+        let private textOf (admission: string) =
+            admissions
+            |> List.find (fun (id, _) -> id = admission)
+            |> snd
+            |> build
+            |> QueryCodec.encode
+
+        let internal declarationVectors () : Vector list =
+            [ refused "declaration-not-json" "{"
+              refused "declaration-a-null" (salesText.Replace("\"pageSize\":50", "\"pageSize\":null"))
+              refused
+                  "declaration-a-number-past-the-float-range"
+                  (salesText.Replace("\"pageSize\":50", "\"pageSize\":1e999"))
+              refused "declaration-not-an-object" "[]"
+              refused "declaration-no-type" (edited [ "$type", None ])
+              refused "declaration-another-type" (edited [ "$type", Some "\"capability\"" ])
+              refused "declaration-an-id-not-a-string" (edited [ "id", Some "1" ])
+              refused "declaration-the-id-before-the-params" (edited [ "id", None; "params", Some "7" ])
+              refused "declaration-params-not-a-list" (edited [ "params", Some "{}" ])
+              refused
+                  "declaration-a-parameter-without-a-name"
+                  (edited [ "params", Some """[{"required":true,"type":"int"}]""" ])
+              refused
+                  "declaration-a-parameter-type-unknown"
+                  (edited [ "params", Some """[{"name":"n","required":true,"type":"integer"}]""" ])
+              refused
+                  "declaration-a-parameter-required-not-a-boolean"
+                  (edited [ "params", Some """[{"name":"n","required":"yes","type":"int"}]""" ])
+              refused "declaration-no-result-schema" (edited [ "resultSchema", None ])
+              refused
+                  "declaration-a-result-column-unread"
+                  (edited [ "resultSchema", Some """[{"name":"n","type":"integer"}]""" ])
+              refused
+                  "declaration-an-effect-host-unknown"
+                  (edited [ "effect", Some """{"determinism":"network","host":"everywhere"}""" ])
+              refused "declaration-a-timeout-with-a-fraction" (edited [ "timeoutMs", Some "1.5" ])
+              refused "declaration-a-page-size-as-a-string" (edited [ "pageSize", Some "\"50\"" ])
+              refused "declaration-a-filter-not-a-list" (edited [ "where", Some "{}" ])
+              refused
+                  "declaration-a-predicate-tag-unknown"
+                  (edited [ "where", Some """[{"$type":"like","column":"region"}]""" ])
+              refused
+                  "declaration-a-literal-its-column-cannot-carry"
+                  (edited
+                      [ "where", Some """[{"$type":"equalTo","column":"day","type":"date","value":"2026-02-30"}]""" ])
+              refused
+                  "declaration-a-literal-not-of-its-stated-type"
+                  (edited [ "where", Some """[{"$type":"equalTo","column":"n","type":"int","value":1.5}]""" ])
+              refused
+                  "declaration-an-order-direction-unknown"
+                  (edited [ "orderBy", Some """[{"column":"n","direction":"up"}]""" ])
+              refused "declaration-the-filter-before-the-source" (edited [ "where", Some "7"; "source", None ])
+              refused "declaration-no-source" (edited [ "source", None ])
+              refused "declaration-a-source-unread" (edited [ "source", Some "5" ])
+              refused
+                  "declaration-the-source-before-the-gate"
+                  (edited [ "where", Some """[{"$type":"isNull","column":"nope"}]"""; "source", Some "5" ])
+              refused "declaration-gate-a-parameter-declared-twice" (textOf "admission-a-parameter-declared-twice")
+              refused "declaration-gate-an-undeclared-column" (textOf "admission-an-undeclared-column")
+              refused "declaration-gate-contains-off-a-string-column" (textOf "admission-contains-off-a-string-column")
+              refused "declaration-gate-a-literal-of-another-type" (textOf "admission-a-literal-of-another-type")
+              refused "declaration-gate-the-second-predicate" (textOf "admission-the-second-predicate")
+              refused
+                  "declaration-gate-an-order-on-an-undeclared-column"
+                  (textOf "admission-an-order-on-an-undeclared-column")
+              refused
+                  "declaration-gate-an-order-naming-a-column-twice"
+                  (textOf "admission-an-order-naming-a-column-twice")
+              refused "declaration-gate-the-filter-before-the-order" (textOf "admission-the-filter-before-the-order")
+              refused
+                  "declaration-decimal-text-read-canonical"
+                  (edited
+                      [ "where", Some """[{"$type":"equalTo","column":"amount","type":"decimal","value":"01.50"}]""" ])
+              refused "declaration-admitted" (textOf "admission-admitted") ]
+
+        let internal admissionVectors () : Vector list = admissions |> List.map admissionVector
+
+        // ---- registration ----
+
+        let private registerVector (id: string) (s: Stated) : Vector =
+            let q = build s
+
+            let cells (r: Result<unit, CorpusCell>) =
+                match r with
+                | Ok() -> [ "verdict", jstr "registered" ]
+                | Error e -> [ "verdict", jstr "refused"; "error", e ]
+
+            let model =
+                match ModelQuery.register (QueryOracle.queryToModel q) modelRegistry with
+                | ModelQuery.Ok _ -> Ok()
+                | ModelQuery.Error e -> Error(modelErrorCell e)
+
+            { Id = id
+              Case = "register"
+              Model = QueryOracle.queryAnswer (cells model)
+              Input = statedInput s
+              Expected =
+                cells (
+                    QueryRegistry.register q registry
+                    |> Result.map ignore
+                    |> Result.mapError errorCell
+                ) }
+
+        let internal registerVectors () : Vector list =
+            let sales = on "sales"
+
+            [ registerVector "register-a-held-id" (on "ledger")
+              registerVector
+                  "register-a-held-id-before-the-gate"
+                  { sales with
+                      Where = Some [ ColumnPredicate.IsNull "nope" ] }
+              registerVector
+                  "register-a-new-id-held-to-the-gate"
+                  { sales with
+                      Id = Some "sales-eu"
+                      Where = Some [ ColumnPredicate.IsNull "nope" ] }
+              registerVector "register-a-new-id" { sales with Id = Some "sales-eu" } ]
+
+        // ---- argument validation ----
+
+        let private validate (id: string) (queryId: string) (args: (string * Cell) list) : Vector =
+            let q = queryOf queryId
+
+            let cells (r: Result<unit, CorpusCell>) =
+                match r with
+                | Ok() -> [ "verdict", jstr "accept" ]
+                | Error e -> [ "verdict", jstr "reject"; "error", e ]
+
+            let model =
+                match ModelQuery.validate_params (QueryOracle.queryToModel q) (QueryOracle.qArgsToModel args) with
+                | ModelQuery.Ok _ -> Ok()
+                | ModelQuery.Error e -> Error(modelErrorCell e)
+
+            { Id = id
+              Case = "validateParams"
+              Model = QueryOracle.queryAnswer (cells model)
+              Input = [ "query", jstr queryId; "args", QueryGrants.argsJson args ]
+              Expected = cells (Query.validateParams q args |> Result.mapError errorCell) }
+
+        let internal validationVectors () : Vector list =
+            [ validate "validate-accepted" "sales" [ "n", Int 1 ]
+              validate "validate-an-integer-fills-a-float" "sales" [ "n", Int 1; "rate", Int 2 ]
+              validate "validate-an-integer-fills-a-decimal" "sales" [ "n", Int 1; "cap", Int 2 ]
+              validate "validate-a-null-binds-an-optional" "sales" [ "n", Int 1; "tag", Null ]
+              validate "validate-a-name-bound-twice" "sales" [ "n", Int 1; "nope", Int 1; "n", Int 2 ]
+              validate "validate-a-null-then-a-value-is-twice" "sales" [ "n", Null; "n", Int 1 ]
+              validate "validate-an-unknown-name-before-a-later-type" "sales" [ "nope", Int 1; "n", Str "x" ]
+              validate "validate-a-type-before-a-later-unknown-name" "sales" [ "n", Str "x"; "nope", Int 1 ]
+              validate "validate-a-float-for-an-integer" "sales" [ "n", Float 1.0 ]
+              validate "validate-a-decimal-for-a-float" "sales" [ "n", Int 1; "rate", Decimal "1.5" ]
+              validate "validate-a-required-name-left-out" "sales" [ "rate", Float 1.5 ]
+              validate "validate-a-type-before-a-name-left-out" "sales" [ "rate", Str "x" ]
+              validate "validate-a-required-name-bound-to-null" "sales" [ "n", Null ]
+              validate "validate-a-query-with-no-parameters" "bare" [ "x", Int 1 ] ]
+
+        // ---- the registry ----
+
+        let private dispatch
+            (id: string)
+            (queryId: string)
+            (args: (string * Cell) list)
+            (grant: Grant option)
+            : Vector =
+            let mutable ran = 0
+
+            let outcome =
+                QueryRegistry.dispatch registry () grant queryId args (fun _ ->
+                    ran <- ran + 1
+                    Deferred.Pending)
+
+            let expected =
+                match outcome with
+                | Ok _ when ran = 1 -> [ "verdict", jstr "performed" ]
+                | Ok _ -> failwithf "%s: the resolver ran %d times" id ran
+                | Error e when ran = 0 -> [ "verdict", jstr "refused"; "error", errorCell e ]
+                | Error _ -> failwithf "%s: a refused dispatch ran the resolver" id
+
+            { Id = id
+              Case = "dispatch"
+              Model = None
+              Input =
+                [ "query", jstr queryId; "args", QueryGrants.argsJson args ]
+                @ Gates.grantMember grant
+              Expected = expected }
+
+        let internal dispatchVectors () : Vector list =
+            let own q args = Some(Query.grant (queryOf q) args)
+
+            [ dispatch "dispatch-unregistered" "nope" [] None
+              dispatch "dispatch-unregistered-with-a-grant" "nope" [ "n", Int 7 ] (own "ledger" [ "n", Int 7 ])
+              dispatch "dispatch-validated-before-the-gate" "payroll" [ "n", Str "9" ] None
+              dispatch "dispatch-denied" "payroll" [ "n", Int 9 ] None
+              dispatch "dispatch-denied-with-its-own-grant" "payroll" [ "n", Int 9 ] (own "payroll" [ "n", Int 9 ])
+              dispatch "dispatch-parked" "ledger" [ "n", Int 7 ] None
+              dispatch "dispatch-parked-with-another-reads-grant" "ledger" [ "n", Int 7 ] (own "ledger" [ "n", Int 6 ])
+              dispatch "dispatch-granted" "ledger" [ "n", Int 7 ] (own "ledger" [ "n", Int 7 ])
+              dispatch "dispatch-allowed" "sales" [ "n", Int 1 ] None ]
+
+        let internal allVectors () : Vector list =
+            declarationVectors ()
+            @ admissionVectors ()
+            @ registerVectors ()
+            @ validationVectors ()
+            @ dispatchVectors ()
+
+        /// The vectors no extracted model answers, with the reason (D263.5).
+        let referenceOnly: (string * string list * string) list =
+            [ "admissionFault",
+              uncarried,
+              "a literal its column cannot carry: the model's predicate_fault does not restate whereFault's carriability clause (Table.validate's), which its comment in proofs/Query.fst says"
+              "dispatch",
+              [],
+              "the model states the query registry's gated dispatch and proves it (proofs/Query.fst section 11), but it is not extracted, so no oracle function runs a gate" ]
+
+        /// The cases of `QueryError` no vector raises, each with what raises it and why the family does
+        /// not (D263.6).
+        let unreached: (string * string * string) list =
+            let resolver =
+                "the host's resolver, through Query.invokeWithArgs' projection of a ResolveFault"
+
+            let why =
+                "a declaration and a typed call's validation never raise it: it is the host's resolver's refusal, which Core only renames"
+
+            [ "unreadableArgs",
+              "QueryCodec.decodeArgs, the reader of a model's argument document",
+              "a declaration and a typed call never raise it: it is a refusal of another document's reader, which reads arguments from JSON text"
+              "sourceNotResolved", resolver, why
+              "executionFailed", resolver, why
+              "timeout", resolver, why
+              "predicateNotHonoured", resolver, why
+              "orderNotHonoured", resolver, why ]
+
+        let private description =
+            "The refusals a query declaration and a read of it meet (Phase 680, DECISIONS.md D263). Authored inputs, each `expected` computed by "
+            + "calling the pinned kit; no seed. `registry` holds the queries the vectors read, each a canonical declaration as a JSON string, in "
+            + "id order. `gates` is the gate table the registry runs: a gate answers the `decision` of its rule for a query, and `allow` for a "
+            + "query it has no rule for. Every refusal but the reader's is pinned as its query-error document, an object under `error`, as the "
+            + "seam codec writes it (the document seam-refusals.json certifies a reader of); no sentence is pinned. `declarationRefused` vectors "
+            + "read `declaration`, a declaration's text, with the declaration reader (lenient: an unknown member is read past) and expect `accept`, "
+            + "or `reject` with the decode `code` and the `path` to the fault: the members are read in the order $type, id, params, resultSchema, "
+            + "effect, timeoutMs, pageSize, where, orderBy, source, and the admission gate last, whose refusal is OutOfRange at the gate's path; "
+            + "the parser refuses every null and every number past the finite double range, InvalidJson at the root. `admissionFault` and "
+            + "`register` vectors state a declaration as DATA, because two of the gate's refusals no text can carry: `query` names a declaration "
+            + "of `registry`, and `id` (a string), `params` (a list of {name, type, required}), `where` (a list of {predicate, column}, with "
+            + "`cell` for a comparison and `text` for contains) and `orderBy` (a list of {column, direction}), when present, replace its own. A "
+            + "cell is {kind, text}, no text for a null, its text as it stands and never canonicalised (a float's is its shortest round-trip "
+            + "form, a non-finite float's the token in quotes, as the canonical float layout writes it). `admissionFault` vectors hold the "
+            + "declaration to the admission gate and expect `admitted`, or `refused` with `at`, the path to the member at fault, and `error`: a "
+            + "parameter declared twice at [params]; then each predicate in turn at [where, i] (an undeclared column, then contains off a string "
+            + "column, then a null literal, then a literal of another type, with no widening and a timestamp fitting a column at least as fine "
+            + "as its own unit, then a literal its column cannot carry, with the column layer's reason); then each order key at [orderBy, i] (an "
+            + "undeclared column, then a column named before). `register` vectors register the declaration into the registry and expect "
+            + "`registered`, or `refused` with `error`: an id the registry holds is refused before the gate. `validateParams` vectors hold `args` "
+            + "(a list of {name, cell}) to `query`'s parameters and expect `accept`, or `reject` with the first refusal: a name bound twice; then "
+            + "per argument in order an unknown name or a cell that does not widen to its parameter's type (an int fills a float or a decimal, a "
+            + "null fills any); then every required name left out; then every required name bound only to null. `dispatch` vectors dispatch a "
+            + "read through the registry, a `grant` (an identity, as query-grant-laws.json writes one) presented or not, and expect `performed` "
+            + "when the resolver ran, exactly once, or `refused` with `error`: an unregistered id whatever is presented, then validation, then "
+            + "the gate, a deny lifted by no grant and a needsApproval by a grant for exactly this read only. `referenceOnly` names the vectors "
+            + "no extracted model answers (a case whole, or the `vectors` it lists), with the reason; every other vector's `answeredBy` names the query model. `unreached` names each "
+            + "case of QueryError no vector raises, with what raises it and why."
+
+        /// Rendered with an explicit `kitVersion`, as every law file is (Phase 560).
+        let renderAt (stamp: string) : string =
+            let policy, rules = gate
+
+            let ruleCell (queryId: string, d: PolicyDecision) =
+                let decision =
+                    match d with
+                    | PolicyDecision.Allow -> [ "decision", jstr "allow" ]
+                    | PolicyDecision.NeedsApproval -> [ "decision", jstr "needsApproval" ]
+                    | PolicyDecision.Deny g ->
+                        [ "decision", jstr "deny"
+                          "message", jstr g.Message
+                          "alternatives", jarr (g.Alternatives |> List.map jstr) ]
+
+                jobj ([ "query", jstr queryId ] @ decision)
+
+            CorpusFile.render
+                { Head =
+                    [ "family", jstr familyId
+                      "kitVersion", jstr stamp
+                      "description", jstr description
+                      "registry", jarr (queries |> List.map (QueryCodec.encode >> jstr))
+                      "gates", jarr [ jobj [ "policy", jstr policy; "rules", jarr (rules |> List.map ruleCell) ] ]
+                      "referenceOnly",
+                      jarr (
+                          referenceOnly
+                          |> List.map (fun (case, vectors, why) ->
+                              jobj (
+                                  [ "case", jstr case ]
+                                  @ (if List.isEmpty vectors then
+                                         []
+                                     else
+                                         [ "vectors", jarr (vectors |> List.map jstr) ])
+                                  @ [ "reason", jstr why ]
+                              ))
+                      )
+                      "unreached",
+                      jarr (
+                          unreached
+                          |> List.map (fun (error, by, why) ->
+                              jobj [ "error", jstr error; "raisedBy", jstr by; "reason", jstr why ])
+                      ) ]
                   Items = "vectors"
                   Rows = allVectors () |> List.map renderVector }
 
@@ -1758,6 +2452,9 @@ module LawVectorExport =
     let queryGrantPath (corpusDir: string) : string =
         Path.Combine(familyDir corpusDir, QueryGrants.fileName)
 
+    let queryDeclarationPath (corpusDir: string) : string =
+        Path.Combine(familyDir corpusDir, QueryDeclarations.fileName)
+
     /// Every law file under `corpusDir`, rendered with `stamp` as its `kitVersion` (Phase 560): opening
     /// a version slot stamps the version it opens, which is not yet the version this kit was built at.
     let emittedAt (stamp: string) (corpusDir: string) : (string * string) list =
@@ -1768,7 +2465,8 @@ module LawVectorExport =
           canonicalFormPath corpusDir, CanonicalFormVectorExport.renderAt stamp
           gatePath corpusDir, Gates.renderAt stamp
           documentPath corpusDir, Documents.renderAt stamp
-          queryGrantPath corpusDir, QueryGrants.renderAt stamp ]
+          queryGrantPath corpusDir, QueryGrants.renderAt stamp
+          queryDeclarationPath corpusDir, QueryDeclarations.renderAt stamp ]
 
     /// Every law file under `corpusDir`, stamped with this kit's own version.
     let emitted (corpusDir: string) : (string * string) list = emittedAt (kitVersion ()) corpusDir
