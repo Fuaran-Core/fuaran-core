@@ -86,7 +86,7 @@ module SpineAdoption =
     let private rs651 =
         AdoptionSource.Host("0.43.0", "55c145f2852088c53760eb53bbae9afaac95d026")
 
-    /// The Rust spine's measurement at Core 0.43.1 (a draft): its Phase 683 (its D14) answered the query
+    /// The Rust spine's measurement at Core 0.43.1 (a draft): its Phase 683 (its D17) answered the query
     /// declaration family with a counted leg, 84 vectors (36 declarationRefused, 21 admissionFault, 4
     /// register, 14 validateParams, 9 dispatch), and certified the families below again at their counts,
     /// unchanged, against Core commit `bd1a339`, at this spine commit, the head of its `main` (recorded
