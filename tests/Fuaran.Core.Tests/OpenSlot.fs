@@ -12,6 +12,11 @@
 /// the corpus HEAD that carries the re-stamp. Every refusal is raised by `plan`, so a refused opening
 /// writes nothing anywhere. The commit in this repository is left to the caller, who pushes the
 /// corpus first: the act prints both.
+///
+/// Phase 687 (D265): over a standing DRAFT of a lower class, the same act ADVANCES it. The version is
+/// still the one the class opens over the newest release tag; the draft's ledger file is re-headed never
+/// released, its entries shipping in the new version and kept as written, and everything else is written
+/// as over a release. A draft of the same or a higher class is ridden, never advanced.
 module Fuaran.Core.Tests.OpenSlot
 
 open System
@@ -53,12 +58,28 @@ type Request =
         Date: string
     }
 
+/// The standing draft an opening advances, read from its ledger file.
+type StandingDraft =
+    {
+        Version: string
+        /// The class its slot paragraph states (`**Slot class: <c>.**`).
+        Class: SlotClass
+        /// Its ledger file, repo-relative and forward-slashed.
+        Path: string
+        /// That file's text.
+        Text: string
+    }
+
 /// Everything the act will write, computed with nothing written.
 type Plan =
     {
         Request: Request
-        /// The standing `<Version>` the slot replaces, which is the newest release tag's.
+        /// The standing `<Version>` the slot replaces: the newest release tag's, or the draft's it advances.
         Previous: string
+        /// The newest release, `X.Y.Z`: the version the slot opens over.
+        Newest: string
+        /// The standing draft the slot advances, `None` when it opens over a release.
+        Advances: StandingDraft option
         /// The corpus files, absolute, with their new text: only the declared copies and shared indexes.
         CorpusWrites: (string * string) list
         /// Those files, relative to the corpus and forward-slashed: the set a corpus commit may carry.
@@ -137,58 +158,48 @@ let wrap (width: int) (text: string) : string list =
         []
     |> List.rev
 
-/// The slot file a new slot opens with: its DRAFT heading and the slot paragraph, in the shape the
-/// `0.40.1`-`0.40.3` slots were opened with by hand.
-let slotText (version: string) (previous: string) (cls: SlotClass) (openedBy: string) : string =
+/// `major`, `minor` or `patch`: what moved from `previous` to `version`.
+let private kindOf (version: string) (previous: string) =
     let (a, b, _) = defaultArg (triple version) (0, 0, 0)
     let (pa, pb, _) = defaultArg (triple previous) (0, 0, 0)
 
-    let kind =
-        if a <> pa then "major"
-        elif b <> pb then "minor"
-        else "patch"
+    if a <> pa then "major"
+    elif b <> pb then "minor"
+    else "patch"
 
-    let why =
-        match cls with
-        | Breaking when a = 0 ->
-            "through the `0.x` line a breaking class advances the MINOR, which makes it a MINOR slot, and every later member rides it"
-        | Breaking ->
-            "a breaking class advances the MAJOR, which makes it a MAJOR slot, and every later member rides it"
-        | _ ->
-            let higher, next =
-                if kind = "patch" && (a = 0 || cls = Internal) then
-                    "a member of a higher class", sprintf "the `%s` minor" (show (a, b + 1, 0))
-                else
-                    "a breaking member", sprintf "the `%s` major" (show (a + 1, 0, 0))
+/// Why a slot of `cls` at `version` (a `kind` slot) is the number it is, and what a later member does.
+let private classWhy (version: string) (kind: string) (cls: SlotClass) =
+    let (a, b, _) = defaultArg (triple version) (0, 0, 0)
 
-            sprintf
-                "the work in this slot is %s, which makes it a %s slot, and %s advances it to %s rather than riding it"
-                (className cls)
-                (kind.ToUpperInvariant())
-                higher
-                next
+    match cls with
+    | Breaking when a = 0 ->
+        "through the `0.x` line a breaking class advances the MINOR, which makes it a MINOR slot, and every later member rides it"
+    | Breaking -> "a breaking class advances the MAJOR, which makes it a MAJOR slot, and every later member rides it"
+    | _ ->
+        let higher, next =
+            if kind = "patch" && (a = 0 || cls = Internal) then
+                "a member of a higher class", sprintf "the `%s` minor" (show (a, b + 1, 0))
+            else
+                "a breaking member", sprintf "the `%s` major" (show (a + 1, 0, 0))
 
-    // `Phase 555` opens, `Phases 487 and 491` open
-    let verb =
-        if openedBy.StartsWith("Phases ", StringComparison.Ordinal) then
-            "open"
-        else
-            "opens"
-
-    let paragraph =
         sprintf
-            "**Slot class: %s.** The %s after the released `%s`. It opens over `v%s`, which is a consumer's contract, so nothing rides it; %s ([`STABILITY.md`](../../STABILITY.md), \"Versioning policy\"). %s %s it. The conformance `kitVersion` stamp lines move to `%s` with the slot, and the corpus pin moves to the re-stamp of the declared copies."
+            "the work in this slot is %s, which makes it a %s slot, and %s advances it to %s rather than riding it"
             (className cls)
-            kind
-            previous
-            previous
-            why
-            openedBy
-            verb
-            version
+            (kind.ToUpperInvariant())
+            higher
+            next
 
-    // The section headings the class admits, empty, in the order an entry is read: a breaking slot
-    // carries both, an additive slot `### Additive`, an internal slot neither.
+/// The verb in number with who acts: `Phase 555 opens`, `Phases 487 and 491 open`.
+let private agreeing (openedBy: string) (singular: string) (plural: string) =
+    if openedBy.StartsWith("Phases ", StringComparison.Ordinal) then
+        plural
+    else
+        singular
+
+/// A slot file: its DRAFT heading, `paragraph` wrapped, and the section headings `cls` admits, empty, in
+/// the order an entry is read: a breaking slot carries both, an additive slot `### Additive`, an internal
+/// slot neither.
+let private draftFile (version: string) (cls: SlotClass) (paragraph: string) =
     let sections =
         match cls with
         | Breaking -> [ "### Breaking"; "### Additive" ]
@@ -198,6 +209,74 @@ let slotText (version: string) (previous: string) (cls: SlotClass) (openedBy: st
         |> String.concat ""
 
     sprintf "## %s — DRAFT\n\n%s\n%s" version (String.concat "\n" (wrap 115 paragraph)) sections
+
+/// The slot file a new slot opens with: its DRAFT heading and the slot paragraph, in the shape the
+/// `0.40.1`-`0.40.3` slots were opened with by hand.
+let slotText (version: string) (previous: string) (cls: SlotClass) (openedBy: string) : string =
+    let kind = kindOf version previous
+
+    let paragraph =
+        sprintf
+            "**Slot class: %s.** The %s after the released `%s`. It opens over `v%s`, which is a consumer's contract, so nothing rides it; %s ([`STABILITY.md`](../../STABILITY.md), \"Versioning policy\"). %s %s it. The conformance `kitVersion` stamp lines move to `%s` with the slot, and the corpus pin moves to the re-stamp of the declared copies."
+            (className cls)
+            kind
+            previous
+            previous
+            (classWhy version kind cls)
+            openedBy
+            (agreeing openedBy "opens" "open")
+            version
+
+    draftFile version cls paragraph
+
+/// The slot file an ADVANCE opens with (D265): its DRAFT heading and a slot paragraph naming the untagged
+/// draft it advances, whose entries ship in it, as `0.31.0` said of `0.30.1`.
+let advanceText (version: string) (newest: string) (draft: StandingDraft) (cls: SlotClass) (openedBy: string) =
+    let kind = kindOf version newest
+
+    let paragraph =
+        sprintf
+            "**Slot class: %s.** The %s after the released `%s`. It advances the untagged `%s` draft, a %s slot of class %s, which a member of a higher class does not ride: %s ([`STABILITY.md`](../../STABILITY.md), \"Versioning policy\"). No `v%s` tag was cut, so the entries under `%s` ship in `%s`, and its file keeps them as the record of their class. %s %s it. The conformance `kitVersion` stamp lines move to `%s` with the slot, and the corpus pin moves to the re-stamp of the declared copies."
+            (className cls)
+            kind
+            newest
+            draft.Version
+            ((kindOf draft.Version newest).ToUpperInvariant())
+            (className draft.Class)
+            (classWhy version kind cls)
+            draft.Version
+            draft.Version
+            version
+            openedBy
+            (agreeing openedBy "advances" "advance")
+            version
+
+    draftFile version cls paragraph
+
+/// The draft's ledger file once `version` advances it (D265): its heading turns to `never released; its
+/// entries ship in `<version>``, a paragraph says who advanced it, and every other line is kept as written,
+/// as `0.30.1`'s file reads.
+let neverReleasedText (draft: StandingDraft) (version: string) (advancedBy: string) : string =
+    let text = draft.Text.Replace("\r\n", "\n")
+    let lines = text.Split('\n')
+
+    match (Ledger.parse draft.Version draft.Path text).Heading with
+    | None -> text
+    | Some(line, _) ->
+        let note =
+            sprintf
+                "**This slot was a draft that was never tagged.** %s advanced it to `%s` before any release, so no `v%s` exists. Every entry below ships in `%s`, and they are kept here, under the slot they were written for, as the record of their class."
+                advancedBy
+                version
+                draft.Version
+                version
+
+        [ yield! lines[.. line - 2]
+          yield sprintf "## %s — never released; its entries ship in `%s`" draft.Version version
+          yield ""
+          yield! wrap 115 note
+          yield! lines[line..] ]
+        |> String.concat "\n"
 
 /// `names` as prose: `a`, `a and b`, `a, b and c`.
 let private prose (names: string list) =
@@ -376,9 +455,83 @@ let private checkInputs (r: Request) : Result<int * int * int, string list> =
     | Ok v, [] -> Ok v
     | v, rest -> Error(errors [ v |> Result.map ignore ] @ rest)
 
-/// The version against the tags and the standing `<Version>`: the standing version, which the slot
-/// replaces, when `wanted` is the one version the stated class opens over the newest release tag.
-let private checkVersion (r: Request) (wanted: int * int * int) : Result<string, string list> =
+/// A class's place in the order a draft is advanced by: internal, then additive, then breaking.
+let private rank =
+    function
+    | Internal -> 0
+    | Additive -> 1
+    | Breaking -> 2
+
+let private slotClassRe =
+    Regex(@"^\*\*Slot class: (?<c>[a-z]+)\b", RegexOptions.Compiled)
+
+/// The standing draft `standing` over the release `newestTag`, read from its ledger file, or why the act
+/// cannot account for it: no file, a file not headed DRAFT, no stated class, or a stated class that does
+/// not open the draft's version over the newest release.
+let private readDraft
+    (root: string)
+    (standing: string)
+    (newestTag: string)
+    (newest: int * int * int)
+    : Result<StandingDraft, string> =
+    let rel = sprintf "%s/%s.md" Ledger.Dir standing
+    let path = Path.Combine(root, rel)
+
+    let cannot (why: string) =
+        Error(
+            sprintf
+                "the standing <Version> %s is not the newest release %s, and %s: the act cannot account for the draft"
+                standing
+                newestTag
+                why
+        )
+
+    if not (File.Exists path) then
+        cannot (sprintf "%s is missing" rel)
+    else
+        let text = File.ReadAllText path
+        let slot = Ledger.parse standing rel text
+
+        let stated =
+            slot.Paragraphs
+            |> List.tryPick (fun p ->
+                let m = slotClassRe.Match p
+
+                if m.Success then Some m.Groups["c"].Value else None)
+
+        if slot.State <> Ledger.Draft then
+            cannot (sprintf "%s is not headed `## %s — DRAFT`" rel standing)
+        else
+            match stated |> Option.bind parseClass with
+            | None -> cannot (sprintf "%s states no slot class (`**Slot class: <breaking|additive|internal>.**`)" rel)
+            | Some cls when triple standing <> Some(expectedOver cls newest) ->
+                cannot (
+                    sprintf
+                        "%s states class %s, which opens %s over %s, not %s"
+                        rel
+                        (className cls)
+                        (show (expectedOver cls newest))
+                        newestTag
+                        standing
+                )
+            | Some cls ->
+                Ok
+                    { Version = standing
+                      Class = cls
+                      Path = rel
+                      Text = text }
+
+/// What the version check admits: the standing version the slot replaces, the newest release, and the
+/// draft the slot advances when one stands.
+type private Admitted =
+    { Previous: string
+      Newest: string
+      Advances: StandingDraft option }
+
+/// The version against the tags and the standing `<Version>`, admitted when `wanted` is the one version
+/// the stated class opens over the newest release tag and either no draft stands or the class is higher
+/// than the standing draft's and opens a version past it (D265).
+let private checkVersion (r: Request) (wanted: int * int * int) : Result<Admitted, string list> =
     let fail (why: string) = Error [ why ]
 
     match standingVersion (File.ReadAllText(Path.Combine(r.Root, "Directory.Build.props"))) with
@@ -393,38 +546,60 @@ let private checkVersion (r: Request) (wanted: int * int * int) : Result<string,
                 let newest = Option.get (ChildProcess.Tags.version newestTag)
                 let (major, _, _) = newest
 
-                if standing <> show newest then
+                let draft =
+                    if standing = show newest then
+                        Ok None
+                    else
+                        readDraft r.Root standing newestTag newest |> Result.map Some
+
+                match draft with
+                | Error why -> fail why
+                | Ok(Some d) when rank r.Class <= rank d.Class ->
                     fail (
                         sprintf
-                            "the standing <Version> %s is not the newest release %s: a DRAFT slot stands, and a change rides it or advances it (STABILITY.md, \"Versioning policy\"); this act opens a slot over a released version only"
-                            standing
-                            newestTag
-                    )
-                elif not (List.contains wanted (candidatesOver newest)) then
-                    fail (
-                        sprintf
-                            "%s is not the next %s over %s (%s)"
-                            r.Version
-                            (if major = 0 then
-                                 "patch or minor"
-                             else
-                                 "patch, minor or major")
-                            newestTag
-                            (candidatesOver newest |> List.map show |> String.concat ", ")
-                    )
-                elif expectedOver r.Class newest <> wanted then
-                    fail (
-                        sprintf
-                            "a %s slot over %s opens at %s, not %s: the version and the class you state disagree"
+                            "a DRAFT slot stands at %s, of class %s, and a change of class %s rides it (STABILITY.md, \"Versioning policy\"): this act advances a draft only for a change of a higher class"
+                            d.Version
+                            (className d.Class)
                             (className r.Class)
-                            newestTag
-                            (show (expectedOver r.Class newest))
-                            r.Version
                     )
-                elif File.Exists(Path.Combine(r.Root, Ledger.Dir, r.Version + ".md")) then
-                    fail (sprintf "%s/%s.md already exists: the %s slot is open" Ledger.Dir r.Version r.Version)
-                else
-                    Ok standing
+                | Ok draft ->
+                    if not (List.contains wanted (candidatesOver newest)) then
+                        fail (
+                            sprintf
+                                "%s is not the next %s over %s (%s)"
+                                r.Version
+                                (if major = 0 then
+                                     "patch or minor"
+                                 else
+                                     "patch, minor or major")
+                                newestTag
+                                (candidatesOver newest |> List.map show |> String.concat ", ")
+                        )
+                    elif expectedOver r.Class newest <> wanted then
+                        fail (
+                            sprintf
+                                "a %s slot over %s opens at %s, not %s: the version and the class you state disagree"
+                                (className r.Class)
+                                newestTag
+                                (show (expectedOver r.Class newest))
+                                r.Version
+                        )
+                    elif draft |> Option.exists (fun d -> d.Version = r.Version) then
+                        fail (
+                            sprintf
+                                "a change of class %s opens %s over %s, which is the standing draft's own version: it rides the %s draft (STABILITY.md, \"Versioning policy\")"
+                                (className r.Class)
+                                r.Version
+                                newestTag
+                                r.Version
+                        )
+                    elif File.Exists(Path.Combine(r.Root, Ledger.Dir, r.Version + ".md")) then
+                        fail (sprintf "%s/%s.md already exists: the %s slot is open" Ledger.Dir r.Version r.Version)
+                    else
+                        Ok
+                            { Previous = standing
+                              Newest = show newest
+                              Advances = draft }
 
 /// The corpus's laws manifest rows restamped from `files`, exactly as `LawVectorExport.writeFiles`
 /// restamps them; `[]` where the checkout carries no manifest.
@@ -447,7 +622,7 @@ let private manifestWrite (corpus: string) (files: (string * string) list) =
         [ manifest, LawVectorExport.restampManifest (File.ReadAllText manifest) rows ]
 
 /// Everything the act writes, once the version is admitted.
-let private planWith (r: Request) (previous: string) : Result<Plan, string list> =
+let private planWith (r: Request) (admitted: Admitted) : Result<Plan, string list> =
     let file (rel: string) = Path.Combine(r.Root, rel)
     let read (rel: string) = File.ReadAllText(file rel)
 
@@ -543,16 +718,36 @@ let private planWith (r: Request) (previous: string) : Result<Plan, string list>
                                       r.Corpus ]
 
         let slotRel = sprintf "%s/%s.md" Ledger.Dir r.Version
-        let slot = slotText r.Version previous r.Class r.OpenedBy
+
+        let slot =
+            match admitted.Advances with
+            | None -> slotText r.Version admitted.Previous r.Class r.OpenedBy
+            | Some d -> advanceText r.Version admitted.Newest d r.Class r.OpenedBy
+
+        // An advance re-heads the draft's file; every other slot file is read as it stands.
+        let retired =
+            admitted.Advances
+            |> Option.map (fun d -> d.Path, neverReleasedText d r.Version r.OpenedBy)
 
         let index =
             let slots, _ = Ledger.read r.Root
+
+            let slots =
+                slots
+                |> List.map (fun s ->
+                    match retired with
+                    | Some(rel, text) when s.Path = rel -> Ledger.parse s.Version rel text
+                    | _ -> s)
+
             Ledger.renderIndex (read Ledger.IndexPath) (Ledger.parse r.Version slotRel slot :: slots)
 
         let coreWrites =
-            [ file "Directory.Build.props", withVersion (read "Directory.Build.props") r.Version
-              file slotRel, slot
-              file Ledger.IndexPath, index ]
+            [ yield file "Directory.Build.props", withVersion (read "Directory.Build.props") r.Version
+              yield file slotRel, slot
+              match retired with
+              | Some(rel, text) -> yield file rel, text
+              | None -> ()
+              yield file Ledger.IndexPath, index ]
             @ coreLaws
 
         let coreFaults =
@@ -574,7 +769,9 @@ let private planWith (r: Request) (previous: string) : Result<Plan, string list>
         | [] ->
             Ok
                 { Request = r
-                  Previous = previous
+                  Previous = admitted.Previous
+                  Newest = admitted.Newest
+                  Advances = admitted.Advances
                   CorpusWrites =
                     (corpusFiles |> List.collect snd)
                     @ (manifests
@@ -691,10 +888,12 @@ let nextSteps (p: Plan) (o: Outcome) : string list =
       "the two commits, the corpus FIRST (a pin naming a commit only one clone holds fails every CI checkout):"
       sprintf "  1. git -C \"%s\" push %s" r.Corpus (pushTarget o.CorpusBranch)
       sprintf
-          "  2. git -C \"%s\" add %s; git -C \"%s\" commit -m \"release(core): open the %s slot\"; git -C \"%s\" push %s"
+          "  2. git -C \"%s\" add %s; git -C \"%s\" commit -m \"release(core): %s\"; git -C \"%s\" push %s"
           r.Root
           (String.concat " " o.CoreFiles)
           r.Root
-          r.Version
+          (match p.Advances with
+           | None -> sprintf "open the %s slot" r.Version
+           | Some d -> sprintf "advance the %s draft to %s" d.Version r.Version)
           r.Root
           (pushTarget o.CoreBranch) ]

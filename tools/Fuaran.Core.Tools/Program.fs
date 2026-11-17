@@ -21,8 +21,11 @@ module Fuaran.Core.Tools.Program
 //                              open a version slot in one act (Phase 560, `OpenSlot`): `<Version>`,
 //                              the law files' `kitVersion` stamps, a corpus commit of exactly the
 //                              declared copies, the corpus pin naming it, and the DRAFT ledger file
-//                              with its index; or refuse, writing nothing. It prints the commit this
-//                              repository still needs, after the corpus push.
+//                              with its index; or refuse, writing nothing. Over a standing DRAFT of a
+//                              lower class it ADVANCES the draft (Phase 687, D265): the same writes,
+//                              and the draft's ledger file headed never released, its entries
+//                              shipping in <version>. It prints the commit this repository still
+//                              needs, after the corpus push.
 //    compliance <host-compliance.json>
 //                              validate a host's compliance declaration against this checkout
 //                              (Phase 484, `HostCompliance.cli`): the verdict on stdout and exit 0,

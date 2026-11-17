@@ -434,7 +434,47 @@ let tests =
                   (fun f -> f.Request("0.10.0", OpenSlot.Additive))
                   "the version and the class you state disagree"
 
-          testCase "go-red: a DRAFT slot already stands"
+          testCase "go-red: a DRAFT slot of the same class stands, and the change rides it"
+          <| fun _ ->
+              refuses
+                  None
+                  (fun f -> openDraft f opening OpenSlot.Additive)
+                  (fun f -> f.Request(opening, OpenSlot.Additive))
+                  "a DRAFT slot stands at 0.9.1, of class additive, and a change of class additive rides it"
+
+          testCase "go-red: a DRAFT slot of a higher class stands, and the change rides it"
+          <| fun _ ->
+              refuses
+                  None
+                  (fun f -> openDraft f "0.10.0" OpenSlot.Breaking)
+                  (fun f -> f.Request(opening, OpenSlot.Additive))
+                  "a DRAFT slot stands at 0.10.0, of class breaking, and a change of class additive rides it"
+
+          testCase "go-red: a higher class that opens the draft's own version rides the draft"
+          <| fun _ ->
+              refuses
+                  None
+                  (fun f -> openDraft f opening OpenSlot.Internal)
+                  (fun f -> f.Request(opening, OpenSlot.Additive))
+                  "which is the standing draft's own version: it rides the 0.9.1 draft"
+
+          testCase "go-red: an advance to a version that is not the next patch or minor over the newest tag"
+          <| fun _ ->
+              refuses
+                  None
+                  (fun f -> openDraft f opening OpenSlot.Internal)
+                  (fun f -> f.Request("0.10.1", OpenSlot.Breaking))
+                  "0.10.1 is not the next patch or minor over v0.9.0"
+
+          testCase "go-red: an advance to a version the stated class does not open over the newest tag"
+          <| fun _ ->
+              refuses
+                  None
+                  (fun f -> openDraft f opening OpenSlot.Internal)
+                  (fun f -> f.Request("0.10.0", OpenSlot.Additive))
+                  "slot over v0.9.0 opens at 0.9.1, not 0.10.0"
+
+          testCase "go-red: a standing <Version> with no ledger file is a draft the act cannot account for"
           <| fun _ ->
               refuses
                   None
@@ -442,8 +482,93 @@ let tests =
                       let props = Path.Combine(f.Core, "Directory.Build.props")
                       File.WriteAllText(props, OpenSlot.withVersion (File.ReadAllText props) opening)
                       commitAll f.Core "draft")
-                  (fun f -> f.Request("0.9.2", OpenSlot.Additive))
-                  "a DRAFT slot stands"
+                  (fun f -> f.Request("0.10.0", OpenSlot.Breaking))
+                  "docs/releases/0.9.1.md is missing: the act cannot account for the draft"
+
+          testCase "go-red: a standing draft whose file is not headed DRAFT"
+          <| fun _ ->
+              refuses
+                  None
+                  (fun f ->
+                      openDraft f opening OpenSlot.Internal
+                      let p = Path.Combine(f.Core, Ledger.Dir, opening + ".md")
+                      File.WriteAllText(p, File.ReadAllText(p).Replace(" — DRAFT", " — draft"))
+                      commitAll f.Core "heading")
+                  (fun f -> f.Request("0.10.0", OpenSlot.Breaking))
+                  "docs/releases/0.9.1.md is not headed `## 0.9.1 — DRAFT`"
+
+          testCase "go-red: a standing draft whose file states no class"
+          <| fun _ ->
+              refuses
+                  None
+                  (fun f ->
+                      openDraft f opening OpenSlot.Internal
+                      let p = Path.Combine(f.Core, Ledger.Dir, opening + ".md")
+                      File.WriteAllText(p, File.ReadAllText(p).Replace("**Slot class: internal.** ", ""))
+                      commitAll f.Core "no class")
+                  (fun f -> f.Request("0.10.0", OpenSlot.Breaking))
+                  "docs/releases/0.9.1.md states no slot class"
+
+          testCase "go-red: a standing draft whose stated class does not open its version"
+          <| fun _ ->
+              refuses
+                  None
+                  (fun f ->
+                      openDraft f opening OpenSlot.Internal
+                      let p = Path.Combine(f.Core, Ledger.Dir, opening + ".md")
+
+                      File.WriteAllText(
+                          p,
+                          File.ReadAllText(p).Replace("**Slot class: internal.**", "**Slot class: breaking.**")
+                      )
+
+                      commitAll f.Core "class")
+                  (fun f -> f.Request("0.10.0", OpenSlot.Breaking))
+                  "docs/releases/0.9.1.md states class breaking, which opens 0.10.0 over v0.9.0, not 0.9.1"
+
+          testCase "go-red: an advance refuses uncommitted changes in the draft's file, which it writes"
+          <| fun _ ->
+              refuses
+                  None
+                  (fun f ->
+                      openDraft f opening OpenSlot.Internal
+                      File.AppendAllText(Path.Combine(f.Core, Ledger.Dir, opening + ".md"), "\nan uncommitted line\n"))
+                  (fun f -> f.Request("0.10.0", OpenSlot.Breaking))
+                  "uncommitted changes in files the act writes (docs/releases/0.9.1.md)"
+
+          testCase "the advanced draft's file keeps every line below its heading"
+          <| fun _ ->
+              let draft: OpenSlot.StandingDraft =
+                  { Version = "0.9.1"
+                    Class = OpenSlot.Internal
+                    Path = Ledger.Dir + "/0.9.1.md"
+                    Text =
+                      OpenSlot.slotText "0.9.1" "0.9.0" OpenSlot.Internal "Phase 555"
+                      + "\n- an entry\n" }
+
+              let advanced = OpenSlot.neverReleasedText draft "0.10.0" "Phases 556 and 557"
+              let lines = advanced.Split('\n')
+
+              Expect.equal lines[0] "## 0.9.1 — never released; its entries ship in `0.10.0`" "the heading turns"
+
+              Expect.stringContains
+                  (advanced.Replace("\n", " "))
+                  "Phases 556 and 557 advanced it to `0.10.0` before any release, so no `v0.9.1` exists."
+                  "who advanced it"
+
+              Expect.isTrue
+                  (advanced.EndsWith(draft.Text.Substring(draft.Text.IndexOf '\n')))
+                  "everything below the old heading is kept byte for byte"
+
+              let slot =
+                  OpenSlot.advanceText "0.10.0" "0.9.0" draft OpenSlot.Breaking "Phases 556 and 557"
+
+              Expect.stringContains (slot.Replace("\n", " ")) "Phases 556 and 557 advance it." "in number"
+
+              Expect.equal
+                  (Ledger.versionHeadings slot)
+                  [ "0.10.0", "## 0.10.0 — DRAFT" ]
+                  "one DRAFT heading, no other slot's"
 
           testCase "go-red: the slot's ledger file already exists"
           <| fun _ ->
