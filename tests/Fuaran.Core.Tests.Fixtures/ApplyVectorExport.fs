@@ -88,9 +88,10 @@ module SpineAdoption =
 
     /// The Rust spine's measurement at Core 0.43.1 (a draft): its Phase 683 (its D17) answered the query
     /// declaration family with a counted leg, 84 vectors (36 declarationRefused, 21 admissionFault, 4
-    /// register, 14 validateParams, 9 dispatch), and certified the families below again at their counts,
-    /// unchanged, against Core commit `bd1a339`, at this spine commit, the head of its `main` (recorded
-    /// here by Phase 684). `identity` stays proposed, as at its Phase 665; the families above keep the
+    /// register, 14 validateParams, 9 dispatch), and certified the families below again at their counts
+    /// against Core commit `bd1a339`, at this spine commit, the head of its `main` (recorded here by
+    /// Phase 684; Phase 686 corrected `canonicalFormLaws` to its 20, a count the record had held at 17 since
+    /// the family grew). `identity` stays proposed, as at its Phase 665; the families above keep the
     /// measurements that stand.
     let private rs683 =
         AdoptionSource.Host("0.43.1", "282ff93fc5a83a162bdb479fbb1ab6dc841ab61b")
@@ -116,7 +117,7 @@ module SpineAdoption =
               "decimal", 75, rs683
               "fieldLaws", 43, rs683
               "propagationLaws", 73, rs683
-              "canonicalFormLaws", 17, rs683
+              "canonicalFormLaws", 20, rs683
               "premiseStringModel", 29, rs564
               "premiseFloatDigits", 163, rs564
               "premiseInt53", 29, rs564
