@@ -227,6 +227,93 @@ let private refuses
         Expect.equal (git f.Core [ "rev-parse"; "HEAD" ]) coreHead "no Core commit"
         Expect.equal (git f.Corpus [ "rev-parse"; "HEAD" ]) corpusHead "no corpus commit")
 
+/// The five artefacts of a slot the act opened at `version`, agreeing: `<Version>`, every law file Core
+/// emits stamped, a corpus commit of exactly the declared set, the pin naming it, and a well-shaped ledger
+/// with `version` standing DRAFT over the released `v0.9.0`; Core's change is the commit the act prints.
+let private expectSlotAt (f: Fixture) (outcome: OpenSlot.Outcome) (version: string) =
+    // 1. <Version>
+    Expect.equal
+        (OpenSlot.standingVersion (File.ReadAllText(Path.Combine(f.Core, "Directory.Build.props"))))
+        (Ok version)
+        "<Version> is the opened slot"
+
+    // 2. Core's law files, every one it emits, each stamped
+    let coreLaws = Directory.GetFiles(Path.Combine(f.Core, "conformance", "laws"))
+
+    Expect.equal coreLaws.Length lawsAtReleased.Value.Length "Core's own conformance/ keeps every file it emits"
+
+    for p in coreLaws do
+        Expect.equal (stampsIn (File.ReadAllText p)) [ version ] (sprintf "%s is stamped %s" p version)
+
+    // 3. the corpus commit: exactly the declared copies and the shared index, each stamped
+    let declared =
+        (Exporters.declared registry.Value lawsRow.Value |> Set.toList)
+        @ [ "laws/" + LawVectorExport.manifestFileName ]
+        |> List.sort
+
+    let changed =
+        git f.Corpus [ "diff"; "--name-only"; "HEAD~1"; "HEAD" ]
+        |> fun s -> s.Replace("\r\n", "\n").Split('\n') |> Array.toList |> List.sort
+
+    Expect.equal changed declared "the corpus commit carries exactly the declared set"
+    Expect.equal (Some(git f.Corpus [ "rev-parse"; "HEAD" ])) outcome.CorpusCommit "the act made it"
+    Expect.equal (changedIn f.Corpus) [] "and left the corpus clean"
+
+    Expect.isFalse
+        (File.Exists(Path.Combine(f.Corpus, "laws", CanonicalFormVectorExport.fileName)))
+        "an emitted file the corpus does not declare never lands there"
+
+    for rel in declared do
+        let stamps = stampsIn (File.ReadAllText(Path.Combine(f.Corpus, rel)))
+
+        if rel.EndsWith LawVectorExport.manifestFileName then
+            Expect.equal
+                stamps
+                ((LawVectorExport.manifestRows |> List.map (fun _ -> version)) @ [ "0.40.0" ])
+                "every Core row is restamped, and the foreign row is not"
+        else
+            Expect.equal stamps [ version ] (sprintf "%s is stamped %s" rel version)
+
+    // 4. the pin names the corpus HEAD that carries the re-stamp
+    match SiblingCorpus.readPin (File.ReadAllText(Path.Combine(f.Core, "copies.json"))) with
+    | Error es -> failtestf "%A" es
+    | Ok pin ->
+        Expect.equal pin.Sha (git f.Corpus [ "rev-parse"; "HEAD" ]) "the pin names the corpus HEAD"
+        Expect.equal pin.Date "2026-10-22" "dated"
+
+        Expect.stringContains pin.Reason (sprintf "The %s slot (opened by Phase 999)" version) "and says why"
+
+    // 5. the ledger: the DRAFT file and its rendered index, a well-shaped ledger
+    let slots, strays = Ledger.read f.Core
+
+    Expect.equal
+        (Ledger.shapeFaults (Set.ofList [ "v" + released ]) (Some version) slots strays)
+        []
+        "the ledger is well shaped with the new DRAFT standing"
+
+    Expect.equal
+        (File.ReadAllText(Path.Combine(f.Core, Ledger.IndexPath)))
+        (Ledger.renderIndex (File.ReadAllText(Path.Combine(f.Core, Ledger.IndexPath))) slots)
+        "the index is the render of the slots"
+
+    Expect.equal (slots |> List.find (fun s -> s.Version = version)).State Ledger.Draft "the slot opens headed DRAFT"
+
+    // Core is left with exactly the files the act names for its commit.
+    Expect.equal (changedIn f.Core) (List.sort outcome.CoreFiles) "Core's change is the commit the act prints"
+
+/// Open a draft at `version` by the act and commit Core's half, as a caller does after the corpus push.
+let private openDraft (f: Fixture) (version: string) (cls: OpenSlot.SlotClass) =
+    match
+        OpenSlot.plan
+            { f.Request(version, cls) with
+                OpenedBy = "Phase 998" }
+    with
+    | Error es -> failtestf "the draft could not be opened: %A" es
+    | Ok p ->
+        match OpenSlot.apply p with
+        | Error e -> failtest e
+        | Ok _ -> commitAll f.Core (sprintf "open the %s slot" version)
+
 [<Tests>]
 let tests =
     testSequenced
@@ -245,92 +332,95 @@ let tests =
                       | Ok o -> o
                       | Error e -> failtest e
 
-                  // 1. <Version>
-                  Expect.equal
-                      (OpenSlot.standingVersion (File.ReadAllText(Path.Combine(f.Core, "Directory.Build.props"))))
-                      (Ok opening)
-                      "<Version> is the opened slot"
-
-                  // 2. Core's law files, every one it emits, each stamped
-                  let coreLaws = Directory.GetFiles(Path.Combine(f.Core, "conformance", "laws"))
-
-                  Expect.equal
-                      coreLaws.Length
-                      lawsAtReleased.Value.Length
-                      "Core's own conformance/ keeps every file it emits"
-
-                  for p in coreLaws do
-                      Expect.equal (stampsIn (File.ReadAllText p)) [ opening ] (sprintf "%s is stamped %s" p opening)
-
-                  // 3. the corpus commit: exactly the declared copies and the shared index, each stamped
-                  let declared =
-                      (Exporters.declared registry.Value lawsRow.Value |> Set.toList)
-                      @ [ "laws/" + LawVectorExport.manifestFileName ]
-                      |> List.sort
-
-                  let changed =
-                      git f.Corpus [ "diff"; "--name-only"; "HEAD~1"; "HEAD" ]
-                      |> fun s -> s.Replace("\r\n", "\n").Split('\n') |> Array.toList |> List.sort
-
-                  Expect.equal changed declared "the corpus commit carries exactly the declared set"
-                  Expect.equal (Some(git f.Corpus [ "rev-parse"; "HEAD" ])) outcome.CorpusCommit "the act made it"
-                  Expect.equal (changedIn f.Corpus) [] "and left the corpus clean"
-
-                  Expect.isFalse
-                      (File.Exists(Path.Combine(f.Corpus, "laws", CanonicalFormVectorExport.fileName)))
-                      "an emitted file the corpus does not declare never lands there"
-
-                  for rel in declared do
-                      let stamps = stampsIn (File.ReadAllText(Path.Combine(f.Corpus, rel)))
-
-                      if rel.EndsWith LawVectorExport.manifestFileName then
-                          Expect.equal
-                              stamps
-                              ((LawVectorExport.manifestRows |> List.map (fun _ -> opening)) @ [ "0.40.0" ])
-                              "every Core row is restamped, and the foreign row is not"
-                      else
-                          Expect.equal stamps [ opening ] (sprintf "%s is stamped %s" rel opening)
-
-                  // 4. the pin names the corpus HEAD that carries the re-stamp
-                  match SiblingCorpus.readPin (File.ReadAllText(Path.Combine(f.Core, "copies.json"))) with
-                  | Error es -> failtestf "%A" es
-                  | Ok pin ->
-                      Expect.equal pin.Sha (git f.Corpus [ "rev-parse"; "HEAD" ]) "the pin names the corpus HEAD"
-                      Expect.equal pin.Date "2026-10-22" "dated"
-
-                      Expect.stringContains
-                          pin.Reason
-                          (sprintf "The %s slot (opened by Phase 999)" opening)
-                          "and says why"
-
-                  // 5. the ledger: the DRAFT file and its rendered index, a well-shaped ledger
-                  let slots, strays = Ledger.read f.Core
-
-                  Expect.equal
-                      (Ledger.shapeFaults (Set.ofList [ "v" + released ]) (Some opening) slots strays)
-                      []
-                      "the ledger is well shaped with the new DRAFT standing"
-
-                  Expect.equal
-                      (File.ReadAllText(Path.Combine(f.Core, Ledger.IndexPath)))
-                      (Ledger.renderIndex (File.ReadAllText(Path.Combine(f.Core, Ledger.IndexPath))) slots)
-                      "the index is the render of the slots"
-
-                  Expect.equal
-                      (slots |> List.find (fun s -> s.Version = opening)).State
-                      Ledger.Draft
-                      "the slot opens headed DRAFT"
-
-                  // Core is left with exactly the files the act names for its commit.
-                  Expect.equal
-                      (changedIn f.Core)
-                      (List.sort outcome.CoreFiles)
-                      "Core's change is the commit the act prints"
+                  expectSlotAt f outcome opening
 
                   // And a second opening is refused: the slot now stands as a DRAFT.
                   match OpenSlot.plan (f.Request("0.9.2", OpenSlot.Additive)) with
                   | Ok _ -> failtest "a second opening over an open DRAFT was admitted"
                   | Error es -> Expect.exists es (fun s -> s.Contains "a DRAFT slot stands") "named")
+
+          testCase
+              "one act advances a standing draft of a lower class: the draft's file is headed never released and keeps its entries"
+          <| fun _ ->
+              using None (fun f ->
+                  // an internal draft opened by the act, committed, and ridden by one entry
+                  openDraft f opening OpenSlot.Internal
+                  let draftPath = Path.Combine(f.Core, Ledger.Dir, opening + ".md")
+
+                  let entry =
+                      "### Internal\n\n- **A ridden entry** (Phase 998) — class **internal**.\n"
+
+                  File.AppendAllText(draftPath, entry)
+                  commitAll f.Core "an entry rides the draft"
+                  let draftBefore = File.ReadAllText draftPath
+
+                  let plan =
+                      match OpenSlot.plan (f.Request("0.10.0", OpenSlot.Breaking)) with
+                      | Ok p -> p
+                      | Error es -> failtestf "refused: %A" es
+
+                  let outcome =
+                      match OpenSlot.apply plan with
+                      | Ok o -> o
+                      | Error e -> failtest e
+
+                  expectSlotAt f outcome "0.10.0"
+
+                  // the pin's reason names the kitVersion it moves from, the draft's
+                  match SiblingCorpus.readPin (File.ReadAllText(Path.Combine(f.Core, "copies.json"))) with
+                  | Ok pin ->
+                      Expect.stringContains pin.Reason (sprintf "(kitVersion %s)" opening) "from the draft's stamp"
+                  | Error es -> failtestf "%A" es
+
+                  // the draft's file: headed never released, its entries shipping in the new version, the rest kept
+                  let slots, _ = Ledger.read f.Core
+                  let draft = slots |> List.find (fun s -> s.Version = opening)
+
+                  Expect.equal
+                      (draft.Heading |> Option.map snd)
+                      (Some(sprintf "## %s — never released; its entries ship in `0.10.0`" opening))
+                      "the draft is headed never released"
+
+                  Expect.equal draft.State Ledger.Other "no longer DRAFT"
+
+                  Expect.stringContains
+                      (draft.Text.Replace("\n", " "))
+                      "**This slot was a draft that was never tagged.** Phase 999 advanced it to `0.10.0`"
+                      "and says who advanced it"
+
+                  let after = File.ReadAllText draftPath
+                  let tail (t: string) = t.Substring(t.IndexOf "**Slot class:")
+
+                  Expect.equal (tail after) (tail draftBefore) "its slot paragraph and its entries are kept as written"
+
+                  Expect.contains
+                      outcome.CoreFiles
+                      (Ledger.Dir + "/" + opening + ".md")
+                      "the commit carries the re-heading"
+
+                  // the new slot says what it advanced
+                  let slotText =
+                      File.ReadAllText(Path.Combine(f.Core, Ledger.Dir, "0.10.0.md")).Replace("\n", " ")
+
+                  Expect.stringContains slotText "**Slot class: breaking.**" "its class"
+
+                  Expect.stringContains
+                      slotText
+                      (sprintf "the entries under `%s` ship in `0.10.0`" opening)
+                      "and the draft it advanced"
+
+                  Expect.stringContains slotText "Phase 999 advances it." "and who"
+
+                  // the release gesture's view: the standing version is DRAFT and nothing untagged claims released
+                  Expect.equal
+                      (Ledger.releaseFaults
+                          Ledger.recordFloor
+                          Map.empty
+                          (Set.ofList [ "v" + released ])
+                          (Some "0.10.0")
+                          slots)
+                      []
+                      "the release clauses hold over the advanced ledger")
 
           testCase "go-red: a version that is not the next patch or minor over the newest tag"
           <| fun _ ->
