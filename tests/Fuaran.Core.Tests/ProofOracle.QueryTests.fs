@@ -2037,4 +2037,32 @@ let tests =
                       Expect.equal
                           model
                           production
-                          (sprintf "the model and the gate on %A with %d parameters" t ps.Length) ]
+                          (sprintf "the model and the gate on %A with %d parameters" t ps.Length)
+
+          // ---- Phase 692 (DECISIONS.md D267.7) — the model holds a resolver's rows ----
+
+          testCase
+              "Phase 692 - the query model holds a resolver's rows: invoke takes the column layer's verdict, and the column codec states the rows' verdict and normal form"
+          <| fun _ ->
+              let modelModule = typeof<ModelQuery.query>.DeclaringType
+
+              let parameters (name: string) =
+                  modelModule.GetMethods()
+                  |> Array.filter (fun m -> m.Name = name)
+                  |> Array.collect (fun m -> m.GetParameters() |> Array.map _.Name)
+                  |> List.ofArray
+
+              Expect.contains
+                  (parameters "invoke")
+                  "vf"
+                  (sprintf
+                      "the model's invoke takes the column layer's verdict on an answer (it takes %A)"
+                      (parameters "invoke"))
+
+              let fields =
+                  FSharp.Reflection.FSharpType.GetRecordFields(typedefof<ModelQuery.column_codec<int>>)
+                  |> Array.map _.Name
+                  |> List.ofArray
+
+              Expect.contains fields "rows_fault" "the column codec states the rows' verdict"
+              Expect.contains fields "rows_norm" "the column codec states the rows' normal form" ]
