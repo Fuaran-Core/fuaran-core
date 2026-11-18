@@ -36,8 +36,9 @@ module internal QuerySeamLaws =
     /// either, and round-trips the codec; a predicate naming an undeclared column is refused by
     /// `register` and by the declaration reader with one error; a declaration with neither member
     /// writes neither; and a resolver that cannot honour the predicate or the order is refused
-    /// `PredicateNotHonoured` / `OrderNotHonoured` naming it, live and on replay. Counted once per
-    /// iteration.
+    /// `PredicateNotHonoured` / `OrderNotHonoured` naming it, live and on replay; since Phase 685 a
+    /// resolver naming a predicate the declaration does not hold is refused `ExecutionFailed` naming
+    /// it, never `PredicateNotHonoured`. Counted once per iteration.
     let queryLaws (runner: LawKit.Runner) (iterations: int) : LawResult list =
         let validation =
             LawKit.LawCell
@@ -639,6 +640,19 @@ module internal QuerySeamLaws =
 
                     let refusedP = QueryRegistry.dispatchWithArgs regS () None qS.Id goodArgs unhonoured
 
+                    // Phase 685 (D264.8 point 3): a predicate the declaration does not hold is the
+                    // resolver's fault, never `PredicateNotHonoured`; no drawn literal reaches 100.
+                    let foreignP = ColumnPredicate.EqualTo("n", Int(100 + lit))
+
+                    let refusedForeign =
+                        QueryRegistry.dispatchWithArgs regS () None qS.Id goodArgs (fun _ _ ->
+                            Error(ResolveFault.PredicateUnsupported foreignP))
+
+                    let heldToOwn =
+                        match refusedForeign with
+                        | Error(ExecutionFailed(detail, [])) -> detail.Contains "'equalTo'" && detail.Contains "'n'"
+                        | _ -> false
+
                     let refusedO =
                         QueryRegistry.dispatchWithArgs regS () None qS.Id goodArgs (fun _ _ ->
                             Error(ResolveFault.OrderUnsupported orderColumn))
@@ -668,6 +682,7 @@ module internal QuerySeamLaws =
                         && seen.Value = Some([ predicate ], order)
                         && refusedP = Error(PredicateNotHonoured predicate)
                         && refusedO = Error(OrderNotHonoured orderColumn)
+                        && heldToOwn
                         && capturedP = refusedP
                         && replayedP = Result.mapError ReplayFailure.Refused refusedP
                         && QueryCodec.decode (QueryCodec.encode qS) = Ok qS
@@ -677,13 +692,14 @@ module internal QuerySeamLaws =
                         fun () ->
                             at (
                                 sprintf
-                                    "filter %A order %A: served %A seen %A refused %A / %A captured %A replayed %A keysApart %b admitted %b absentOmitted %b"
+                                    "filter %A order %A: served %A seen %A refused %A / %A / foreign %A captured %A replayed %A keysApart %b admitted %b absentOmitted %b"
                                     predicate
                                     order
                                     served
                                     seen.Value
                                     refusedP
                                     refusedO
+                                    refusedForeign
                                     capturedP
                                     replayedP
                                     keysApart

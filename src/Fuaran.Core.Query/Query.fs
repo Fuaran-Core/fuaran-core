@@ -577,7 +577,10 @@ module Query =
     /// (Phase 398), and one it cannot honour answers `PredicateUnsupported` / `OrderUnsupported`,
     /// which reach the caller as `PredicateNotHonoured` / `OrderNotHonoured` naming the predicate or
     /// the column — a fetch that cannot apply the declared filter or order is refused, not run
-    /// without it.
+    /// without it. Since Phase 685 (DECISIONS.md D264.8 point 3) the predicate is held to the
+    /// declaration's own: `PredicateNotHonoured` names only a predicate of its `Where`, so the
+    /// refusal's document reads back as itself, and a predicate the declaration does not hold is the
+    /// resolver's fault, `ExecutionFailed` naming its tag and column.
     let invokePageWithArgs
         (q: Query)
         (args: (string * Cell) list)
@@ -600,7 +603,18 @@ module Query =
             | Error(ResolveFault.SourceMissing r) -> Error(SourceNotResolved r)
             | Error ResolveFault.TimedOut -> Error Timeout
             | Error(ResolveFault.Failed(detail, recoverable)) -> Error(ExecutionFailed(detail, recoverable))
-            | Error(ResolveFault.PredicateUnsupported p) -> Error(PredicateNotHonoured p)
+            | Error(ResolveFault.PredicateUnsupported p) when List.contains p q.Where -> Error(PredicateNotHonoured p)
+            | Error(ResolveFault.PredicateUnsupported p) ->
+                Error(
+                    ExecutionFailed(
+                        "the resolver refused filter '"
+                        + QueryShape.tag p
+                        + "' on column '"
+                        + QueryShape.column p
+                        + "', which the declaration does not hold",
+                        []
+                    )
+                )
             | Error(ResolveFault.OrderUnsupported c) -> Error(OrderNotHonoured c))
 
     /// `invoke`, with the resolver handed the validated argument list — typed, as `Cell`s, the list
