@@ -2758,6 +2758,9 @@ let deferred_result_norm = (fun ( cc  :  column_codec<'r> ) ( d  :  Capability.d
 
 let rows_verdict = (fun ( cc  :  column_codec<'r> ) ( qr  :  query_result<'r> ) -> (cc.rows_fault qr.qr_rows))
 
+
+let settle_pending = (fun ( q  :  query ) ( a  :  arguments ) ( vf  :  'v  ->  FStar_Pervasives_Native.option<Prims.string> ) ( ans  :  deferred<'v> ) -> (invoke q a vf (fun ( uu___  :  query ) -> ans)))
+
 type wire_seg =
 | WKey of Prims.string
 | WIndex of Prims.int
@@ -3186,6 +3189,9 @@ if (ListAlgebra.mem p q.q_where) then begin
      end else begin
      QRefused (ExecutionFailed ((detail p), []))
      end)
+
+
+let settle_pending_predicate : (predicate  ->  Prims.string)  ->  query  ->  predicate  ->  wire_query_error = (fun ( detail  :  predicate  ->  Prims.string ) ( q  :  query ) ( p  :  predicate ) -> (unsupported_predicate detail q p))
 
 
 

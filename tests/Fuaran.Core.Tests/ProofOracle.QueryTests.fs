@@ -2202,4 +2202,105 @@ let tests =
                       Expect.equal
                           (ModelQuery.result_of_j columnCodec (ModelQuery.result_json columnCodec mr))
                           (ModelCap.Ok(ModelQuery.result_norm columnCodec mr))
-                          (sprintf "the dispatched page %A reads back as its normal form" t) ]
+                          (sprintf "the dispatched page %A reads back as its normal form" t)
+
+          // ---- Phase 695 (DECISIONS.md D268.11) — settling a pending capture ----
+
+          testCase
+              "Phase 695 - QueryRegistry.settleCaptured's outcome is the model's settle_pending over drawn declarations, arguments and answers, and a verb that skipped the step would disagree"
+          <| fun _ ->
+              let mutable rng = ConfRng.ofSeed 6950
+              let mutable compared = 0
+              let mutable refusedRows = 0
+              let mutable skipCaught = 0
+
+              let render (o: Result<Deferred<QueryResult>, QueryError>) (page: QueryResult) =
+                  match o with
+                  | Ok(Ready r) -> sprintf "Ready %b" (r = page)
+                  | Ok d -> sprintf "%A" d
+                  | Error e -> prodQueryErrRender e
+
+              for trial in 1..2000 do
+                  let drawn, r1 = genQueryDecl "q-settle" rng
+
+                  // a network read, so the dispatch journals and leaves a capture open
+                  let q =
+                      { drawn with
+                          Effect =
+                              { drawn.Effect with
+                                  Determinism = Effect.network } }
+
+                  let args, r2 = genQueryArgs q r1
+                  let kind, r3 = ConfRng.intBelow 3 r2
+                  let n, r4 = ConfRng.intBelow 5 r3
+                  rng <- r4
+
+                  match QueryRegistry.register q QueryRegistry.empty with
+                  | Error _ -> ()
+                  | Ok preg ->
+                      let pending =
+                          QueryRegistry.dispatchCaptured
+                              OpStream.defaultHash
+                              QueryCodec.encodeResult
+                              preg
+                              ()
+                              None
+                              "q-settle"
+                              args
+                              (fun _ -> Pending)
+                              []
+
+                      match pending.Ticket with
+                      | None -> ()
+                      | Some ticket ->
+                          let page = if kind = 1 then refusedResultOf n else queryResultOf n
+
+                          let answer, manswer =
+                              if kind = 2 then
+                                  Error(ResolveFault.Failed("unreachable source", [])),
+                                  ModelQuery.Failed "unreachable source"
+                              else
+                                  Ok page, ModelQuery.Ready page
+
+                          let admitted = QueryRegistry.tryFind "q-settle" preg |> Option.get
+
+                          let production =
+                              match
+                                  QueryRegistry.settleCaptured
+                                      OpStream.defaultHash
+                                      QueryCodec.encodeResult
+                                      admitted
+                                      args
+                                      None
+                                      ticket
+                                      answer
+                                      pending.Journal
+                              with
+                              | Ok s -> render s.Outcome page
+                              | Error f -> failtestf "trial %d: the settlement was refused %A" trial f
+
+                          let model =
+                              match
+                                  ModelQuery.settle_pending (queryToModel q) (qArgsToModel args) rowsVerdict manswer
+                              with
+                              | ModelQuery.Ok(ModelQuery.Ready r) -> sprintf "Ready %b" (r = page)
+                              | ModelQuery.Ok d -> sprintf "%A" d
+                              | ModelQuery.Error e -> modelQueryErrRender e
+
+                          Expect.equal production model (sprintf "trial %d: the verb and the model on %A" trial q)
+                          compared <- compared + 1
+
+                          // The negative case: a verb that skipped the step would answer the settled page as
+                          // given; over rows the validation refuses the model does not, so this test fails
+                          // for such a verb.
+                          if kind = 1 then
+                              refusedRows <- refusedRows + 1
+                              let skipping = render (Ok(Ready page)) page
+
+                              if skipping <> model then
+                                  skipCaught <- skipCaught + 1
+
+              Expect.isGreaterThan compared 300 "enough settlements compared"
+              Expect.isGreaterThan refusedRows 100 "enough refused rows drawn"
+
+              Expect.equal skipCaught refusedRows "every refused-rows draw tells a step-skipping verb from the model" ]

@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 434 claims — 320 proved (319 across 40 models, 1 a host's own proof), 68 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
+**The ladder, counted:** 435 claims — 321 proved (320 across 40 models, 1 a host's own proof), 68 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -401,14 +401,14 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Ops` | 63 | 21 | 12 | 14 | 0 | 0 | 0 | 16 |
 | `Fuaran.Core.Projection` | 13 | 0 | 8 | 0 | 0 | 0 | 0 | 5 |
 | `Fuaran.Core.Propagation` | 27 | 8 | 5 | 0 | 0 | 0 | 0 | 14 |
-| `Fuaran.Core.Query` | 63 | 32 | 16 | 0 | 0 | 0 | 0 | 15 |
+| `Fuaran.Core.Query` | 64 | 33 | 16 | 0 | 0 | 0 | 0 | 15 |
 | `Fuaran.Core.Relation` | 11 | 11 | 0 | 0 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Text` | 30 | 5 | 2 | 1 | 2 | 0 | 0 | 20 |
 | `Fuaran.Core.Tree` | 48 | 12 | 8 | 0 | 0 | 0 | 0 | 28 |
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 64 | 0 | 25 | 3 | 0 | 0 | 0 | 36 |
 | `Fuaran.Core.Wire` | 193 | 116 | 11 | 3 | 4 | 0 | 0 | 59 |
-| **Total** | 1419 | 394 | 432 | 38 | 15 | 0 | 3 | 537 |
+| **Total** | 1420 | 395 | 432 | 38 | 15 | 0 | 3 | 537 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence
@@ -3597,7 +3597,7 @@ table (`data_source`), which the admission reads first. Since Phase 692 `invoke`
 column layer's VERDICT on what the resolver answered (`vf`, the oracle host's `Table.validate`
 over a page's rows), and a `Ready` answer the verdict refuses is `ExecutionFailed` naming it.
 
-**Proved** (31)
+**Proved** (32)
 
 - <a id="row-query-unregistered-refused"></a>**`query-unregistered-refused`** — `unregistered_refused` · fuaran-core#187
 
@@ -3623,7 +3623,15 @@ over a page's rows), and a `Ready` answer the verdict refuses is `ExecutionFaile
 
   _With:_ `invoke_ready_rows_ok`, `invoke_refuses_rows`, `dispatched_result_roundtrip`.
 
-  _Boundary:_ The verdict is the model's parameter: the column layer's `Table.validate` is its own model's grammar, not restated here, and the oracle host computes the verdict from the rows at the edge, as it computes a source's. The captured dispatch and the replay are outside the model: they journal and replay what the dispatch answered, which `QueryTests` pins on production (a refused page journalled as its refusal, never a completion). A page a host settles a pending capture with later is not a dispatch, and is promised nothing here.
+  _Boundary:_ The verdict is the model's parameter: the column layer's `Table.validate` is its own model's grammar, not restated here, and the oracle host computes the verdict from the rows at the edge, as it computes a source's. The captured dispatch and the replay are outside the model: they journal and replay what the dispatch answered, which `QueryTests` pins on production (a refused page journalled as its refusal, never a completion). A pending capture a host settles later through `QueryRegistry.settleCaptured` passes the same step (`query-settle-holds-rows`); one it settles through the generic `KeyedCapture.settleEffectKeyed` is not a dispatch, and is promised nothing here.
+
+- <a id="row-query-settle-holds-rows"></a>**`query-settle-holds-rows`** — `settled_ready_rows_ok` · fuaran-core#695
+
+  A SETTLED CAPTURE HOLDS ITS ROWS. `settle_pending`, the seam's answer when a capture a dispatch left open under `Pending` is settled with the answer the fetch came back with, is DEFINED as `invoke` over a resolver giving that answer at once; that the two agree holds by unfolding, and is not counted here. Over it: a settlement settles, never `Ok Pending` and never `Ok (Failed _)` (`settle_pending_never_pending`); a settled `Ready` carries rows the column layer's verdict accepts (`settled_ready_rows_ok`), and under the column codec's own verdict it is written as text that reads back as that page with its rows in their normal form (`settled_result_roundtrip`); and a settled `PredicateNotHonoured` names one of the declaration's own predicates (`settled_predicate_own`).
+
+  _With:_ `settle_pending_never_pending`, `settled_result_roundtrip`, `settled_predicate_own`.
+
+  _Boundary:_ The model holds the step, not the journal. The settlement record (the phase and the value a dispatch answered at once journals, and the whole journal byte for byte when nothing is journalled between the attempt and the settlement), each invocation's replay over it, and the ticket's checks (its key, the arguments against the declaration's parameters, which the key does not cover, a deterministic label, an occurrence with no attempt or already settled) are pinned on production by `QueryTests`, and so are the typed faults other than the predicate's. What ties `QueryRegistry.settleCaptured` to the definition is the oracle's differential test over drawn declarations, argument sets and answers, which a verb that skipped the step fails. A capture settled through the generic `KeyedCapture.settleEffectKeyed` is promised nothing here.
 
 - <a id="row-query-enumerate-is-registry"></a>**`query-enumerate-is-registry`** — `enumerate_is_registry` · fuaran-core#187
 
@@ -3799,9 +3807,9 @@ over a page's rows), and a `Ready` answer the verdict refuses is `ExecutionFaile
 
 **Tested** (2)
 
-- <a id="row-query-differential"></a>**`query-differential`** — `Proofs.Oracle`, 7 cases · fuaran-core#187
+- <a id="row-query-differential"></a>**`query-differential`** — `Proofs.Oracle`, 8 cases · fuaran-core#187
 
-  The extracted seam model agrees with the shipped `QueryRegistry.register`, `enumerate`, `tryFind` and `dispatch` and with `Query.validateParams`, `invocationKey` and `determinismTag` over generated registries, declarations and argument sets — the generator `queryLaws` uses, widened: a three-id pool so duplicates arise, up to three params over all six column types with names drawn with replacement so the registration refusal of a repeated name is compared (500 registries drawn, to keep the sample's floors), argument sets that bind, skip, null, mistype, repeat and reverse, and declarations carrying a drawn filter and order over a drawn schema — undeclared columns, `contains` on a column that is not a string, a `Null` literal, a literal of another type and an order naming a column twice among them, every literal one the column layer carries — and sources that are a `Ref` or an embedded table, in schema order, out of it, or one `Table.validate` refuses (ragged, a schema name with no column, a column of another type), the model reading the column layer's verdict the bridge computes from the table — so the admission's refusals are compared, the source's first. The capture key, the identity and the grant are compared on the declarations the registry holds, which its gate admitted, as production keys only an admitted declaration. Compared: the verdict, an accepted `Deferred` ENVELOPE rendered case for case (the draw reaches a settling, a pending and a failing resolver, and, beside every draw of one of the two settling answers, the same invocation over rows `Table.validate` refuses, which both sides refuse `ExecutionFailed` naming the column layer's reason, the model reading the verdict the bridge computes from the rows; and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the capture key byte for byte for every argument set accepted or not, with the shape fields of a filtered or ordered declaration in its pre-image, and the PAGE key `invocationKeyPage` byte for byte under six tokens carrying the page tag and the encoding's own symbols, with the first page's key held equal to `invocationKey`, the shipped key held still under a reordering of distinct names, and, per dispatch, an instrumented resolver on each side that must have run on both or on neither and never past a refusal that is not its own. The read's identity is compared byte for byte with `Query.invocationPreimage`, and `granted` with `Grant.covers` for the read's own grant, another query's and none, on every argument set a key is compared on and over the adversarial string alphabet. Two go-reds, one per half of the model: a bridge that forgets `Required` must lose on the required-params step, and an order-blind comparator must lose on the capture key, the identity (its pre-image) and the grant's coverage, which reads the identity, and on nothing else.
+  The extracted seam model agrees with the shipped `QueryRegistry.register`, `enumerate`, `tryFind` and `dispatch` and with `Query.validateParams`, `invocationKey` and `determinismTag` over generated registries, declarations and argument sets — the generator `queryLaws` uses, widened: a three-id pool so duplicates arise, up to three params over all six column types with names drawn with replacement so the registration refusal of a repeated name is compared (500 registries drawn, to keep the sample's floors), argument sets that bind, skip, null, mistype, repeat and reverse, and declarations carrying a drawn filter and order over a drawn schema — undeclared columns, `contains` on a column that is not a string, a `Null` literal, a literal of another type and an order naming a column twice among them, every literal one the column layer carries — and sources that are a `Ref` or an embedded table, in schema order, out of it, or one `Table.validate` refuses (ragged, a schema name with no column, a column of another type), the model reading the column layer's verdict the bridge computes from the table — so the admission's refusals are compared, the source's first. The capture key, the identity and the grant are compared on the declarations the registry holds, which its gate admitted, as production keys only an admitted declaration. Compared: the verdict, an accepted `Deferred` ENVELOPE rendered case for case (the draw reaches a settling, a pending and a failing resolver, and, beside every draw of one of the two settling answers, the same invocation over rows `Table.validate` refuses, which both sides refuse `ExecutionFailed` naming the column layer's reason, the model reading the verdict the bridge computes from the rows; and neither side may hand out an `Ok (Failed _)`), a refusal by class AND payload, the capture key byte for byte for every argument set accepted or not, with the shape fields of a filtered or ordered declaration in its pre-image, and the PAGE key `invocationKeyPage` byte for byte under six tokens carrying the page tag and the encoding's own symbols, with the first page's key held equal to `invocationKey`, the shipped key held still under a reordering of distinct names, and, per dispatch, an instrumented resolver on each side that must have run on both or on neither and never past a refusal that is not its own. The read's identity is compared byte for byte with `Query.invocationPreimage`, and `granted` with `Grant.covers` for the read's own grant, another query's and none, on every argument set a key is compared on and over the adversarial string alphabet. A settlement is compared too: `QueryRegistry.settleCaptured`'s outcome against the model's `settle_pending`, over drawn declarations made network reads, their drawn argument sets and an answer that is a page, a page whose rows `Table.validate` refuses or a failure, on every draw the dispatch left a capture open for; a verb that skipped the step would answer the refused page as given, which the model does not, on every such draw. Two go-reds, one per half of the model: a bridge that forgets `Required` must lose on the required-params step, and an order-blind comparator must lose on the capture key, the identity (its pre-image) and the grant's coverage, which reads the identity, and on nothing else.
 
   _Boundary:_ Agreement is over the pools drawn, never over all inputs. The generator draws no character of the key encoding, so it cannot tell an escaping `field` from a bare one (measured: a `field` that only appends the terminator leaves it green); the escaper case compares the capture key over string cells drawn from an adversarial alphabet, and it goes red on exactly that. Seeded and replayable: the same seed reproduces the same tally, asserted, and the count of resolvers that ran is asserted equal to settled plus pending plus `ExecutionFailed`.
 

@@ -3103,6 +3103,52 @@ let dispatched_result_roundtrip (#r:Type) (cc:column_codec r) (rg:registry) (id:
     | Ok (Ready qr) -> result_roundtrip cc qr
     | _ -> ()
 
+(* F#: `QueryRegistry.settleCaptured` (Phase 695, DECISIONS.md D268.11) — the seam's answer when a
+   capture a dispatch left open under `Pending` is settled later with the answer the fetch came back
+   with. A DEFINITION, not a law: settling puts the answer through the step a dispatch puts its
+   resolver's answer through, so it is `invoke` over a resolver giving that answer at once, and that
+   the two agree holds by unfolding. What ties production to it is the oracle's differential test,
+   which runs the production verb's `Outcome` against this function. The answer is never `Pending`:
+   a host settles only when the fetch has answered. The journal, the ticket's checks and the typed
+   faults other than the predicate's (below) are outside the model. *)
+let settle_pending (#v:Type) (q:query) (a:arguments) (vf:v -> option string)
+                   (ans:deferred v{~(Pending? ans)})
+  : Tot (outcome (deferred v) query_error) =
+  invoke q a vf (fun _ -> ans)
+
+(* A settlement settles: the seam's answer is a `Ready` or a refusal, never `Ok Pending` and never
+   `Ok (Failed _)`. *)
+let settle_pending_never_pending (#v:Type) (q:query) (a:arguments) (vf:v -> option string)
+                                 (ans:deferred v{~(Pending? ans)})
+  : Lemma (ensures (match settle_pending q a vf ans with
+                    | Ok Pending -> False
+                    | Ok (Failed _) -> False
+                    | _ -> True))
+  = ()
+
+(* THE SETTLED ROWS ARE HELD. A settled `Ready` carries a value the column layer's verdict accepts,
+   as a dispatched one does (`invoke_ready_rows_ok`). *)
+let settled_ready_rows_ok (#v:Type) (q:query) (a:arguments) (vf:v -> option string)
+                          (ans:deferred v{~(Pending? ans)})
+  : Lemma (ensures (match settle_pending q a vf ans with
+                    | Ok (Ready x) -> vf x == None
+                    | _ -> True))
+  = invoke_ready_rows_ok q a vf (fun _ -> ans)
+
+(* ... so, under the column codec's own verdict, a page a settlement answers is written as text that
+   reads back as that page with its rows in normal form: no rows a settled capture holds read back as
+   others (`dispatched_result_roundtrip`, for the settled entry). *)
+let settled_result_roundtrip (#r:Type) (cc:column_codec r) (q:query) (a:arguments)
+                             (ans:deferred (query_result r){~(Pending? ans)})
+  : Lemma (requires column_codec_laws cc)
+          (ensures (match settle_pending q a (rows_verdict cc) ans with
+                    | Ok (Ready qr) -> result_of_j cc (result_json cc qr) == C.Ok (result_norm cc qr)
+                    | _ -> True))
+  = settled_ready_rows_ok q a (rows_verdict cc) ans;
+    match settle_pending q a (rows_verdict cc) ans with
+    | Ok (Ready qr) -> result_roundtrip cc qr
+    | _ -> ()
+
 let deferred_result_refusals_resolve (#r:Type) (cc:column_codec r) : Lemma (C.sound (deferred_result_of_j cc)) =
   result_refusals_resolve cc;
   C.deferred_dec_sound (result_of_j cc)
@@ -3291,6 +3337,18 @@ let unsupported_predicate_carried (detail:predicate -> string) (q:admitted_query
   : Lemma (query_error_carried (unsupported_predicate detail q p))
   = admitted_carried q;
     if mem p q.q_where then mem_carried p q.q_where else ()
+
+(* F#: `QueryRegistry.settleCaptured`'s answer to a settled `ResolveFault.PredicateUnsupported p`
+   (Phase 695, DECISIONS.md D268.11): the step a dispatch runs, over the declaration the ticket was
+   issued for. *)
+let settle_pending_predicate (detail:predicate -> string) (q:query) (p:predicate) : Tot wire_query_error =
+  unsupported_predicate detail q p
+
+(* So a settlement, like a dispatch, answers `PredicateNotHonoured` only for one of the declaration's
+   own predicates: no settled refusal reads back as one a dispatch of the invocation never answers. *)
+let settled_predicate_own (detail:predicate -> string) (q:query) (p:predicate)
+  : Lemma (QPredicateNotHonoured? (settle_pending_predicate detail q p) ==> mem p q.q_where)
+  = unsupported_predicate_own detail q p
 
 let rec path_roundtrip (p:list wire_seg) : Lemma (path_items (path_json p) == Some p) =
   match p with [] -> () | _ :: t -> path_roundtrip t
