@@ -433,7 +433,9 @@ module QueryRegistry =
     /// `Ticket` the ticket settled, `Journal` the journal with the settlement.
     ///
     /// Refused, with the journal unmoved: `NotAttempted ticket` when the ticket's key is not this
-    /// invocation's (`Query.invocationKeyPage`), or the declaration is labelled `deterministic` (its
+    /// invocation's (`Query.invocationKeyPage`), when the arguments do not validate against the declaration
+    /// (`Query.validateParams`: the key does not cover the declaration's parameters, and a dispatch refuses
+    /// such arguments before the attempt), or when the declaration is labelled `deterministic` (its
     /// dispatch journals nothing); then `KeyedCapture.settleEffectKeyed`'s `NotAttempted` for an
     /// occurrence with no attempt and `AlreadySettled` for one already settled. Everything that reads the
     /// ticket is in this verb. `KeyedCapture.settleEffectKeyed` used directly on a query's ticket runs no
@@ -452,7 +454,14 @@ module QueryRegistry =
         let q = query.Declaration
         let key, occurrence = ticket
 
-        if c.Label q = EffectCapture.deterministicTag || key <> c.Key q args then
+        // The key covers the id, the filter, the order, the bindings and the page token, not the
+        // declaration's parameters: a declaration with the same id and other parameters keys the same, and
+        // arguments it refuses were never an attempt of it (a dispatch refuses them before the attempt).
+        if
+            c.Label q = EffectCapture.deterministicTag
+            || key <> c.Key q args
+            || Query.validateParams q args <> Ok()
+        then
             Error(KeyedCaptureFault.NotAttempted ticket)
         else
             let outcome =
