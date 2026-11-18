@@ -2025,3 +2025,135 @@ let sourceGateTests688 =
 
           testCase "a ref is not read"
           <| fun _ -> Expect.isOk (QueryRegistry.admit (declaring688 (Ref ""))) "an empty ref is admitted" ]
+
+// ---------------------------------------------------------------------------
+// Phase 692 (DECISIONS.md D267) — the dispatch holds a resolver's rows to the table's validation.
+// ---------------------------------------------------------------------------
+
+let private schema692 = [ Field.create "a" IntType; Field.create "b" StringType ]
+
+let private ints692 (name: string) (xs: int list) =
+    Column.ofInts name (Vector.ofList xs) AllValid
+
+let private strs692 (name: string) (xs: string list) =
+    Column.ofStrs name (Vector.ofList xs) AllValid
+
+/// Rows `Table.validate` accepts, in schema order: the normal form, which the result's reader answers.
+let private inOrder692 =
+    { Schema = schema692
+      Columns = [ ints692 "a" [ 1; 2 ]; strs692 "b" [ "x"; "y" ] ] }
+
+/// The same rows, accepted, with the columns out of schema order.
+let private outOfOrder692 =
+    { Schema = schema692
+      Columns = [ strs692 "b" [ "x"; "y" ]; ints692 "a" [ 1; 2 ] ] }
+
+/// Rows `Table.validate` refuses, one per kind of fault the column layer names. The result's writer writes
+/// each; its reader reads some back as OTHER rows (a column named twice, a column absent from the schema, decimal
+/// text not canonical) and refuses the rest.
+let private refusedRows692: (string * Table) list =
+    [ "a column named twice",
+      { Schema = schema692
+        Columns = [ ints692 "a" [ 1; 2 ]; strs692 "b" [ "x"; "y" ]; ints692 "a" [ 9; 9 ] ] }
+      "a column absent from the schema",
+      { Schema = schema692
+        Columns = [ ints692 "a" [ 1; 2 ]; strs692 "b" [ "x"; "y" ]; ints692 "z" [ 9; 9 ] ] }
+      "a schema name with no column",
+      { Schema = schema692 @ [ Field.create "c" StringType ]
+        Columns = [ ints692 "a" [ 1; 2 ]; strs692 "b" [ "x"; "y" ] ] }
+      "a column of another type",
+      { Schema = schema692
+        Columns = [ ints692 "a" [ 1; 2 ]; ints692 "b" [ 3; 4 ] ] }
+      "ragged columns",
+      { Schema = schema692
+        Columns = [ ints692 "a" [ 1; 2 ]; strs692 "b" [ "x" ] ] }
+      "decimal text not canonical",
+      { Schema = [ Field.create "d" DecimalType ]
+        Columns = [ Column.ofDecimals "d" (Vector.ofList [ "12.50" ]) AllValid ] }
+      "a float not finite",
+      { Schema = [ Field.create "f" FloatType ]
+        Columns = [ Column.ofFloats "f" (Vector.ofList [ nan ]) AllValid ] } ]
+
+/// The refusal a resolver's rows earn: the resolver's fault, in the column layer's words.
+let private rowsRefusal692 (t: Table) : QueryError =
+    match Table.validate t with
+    | Ok() -> failwith "the rows must be ones the validation refuses"
+    | Error e ->
+        ExecutionFailed(
+            "the resolver answered rows the column layer refuses: "
+            + ColumnCodec.errorString e,
+            []
+        )
+
+/// A declaration whose answers are journalled (a network read).
+let private query692: Query =
+    { Id = "rows"
+      Params = []
+      ResultSchema = schema692
+      Effect =
+        { Host = ReadsHost
+          Determinism = Effect.network }
+      Source = Ref "rows"
+      TimeoutMs = None
+      PageSize = None
+      Where = []
+      OrderBy = [] }
+
+let private registry692 =
+    QueryRegistry.register query692 QueryRegistry.empty
+    |> Result.toOption
+    |> Option.get
+
+let private page692 (t: Table) (token: string option) : QueryResult =
+    { Rows = t
+      PageNum = 0
+      TotalRowCount = None
+      NextPageToken = token }
+
+/// Every verb that returns a `Ready` result, plain (not journalled), each over a resolver answering `t` as the
+/// page with the token `next`.
+let private plainVerbs692 (t: Table) (next: string option) : (string * Result<Deferred<QueryResult>, QueryError>) list =
+    let page = page692 t next
+    let ready = fun (_: Query) -> Ready page
+    let readyPage = fun (_: Query) (_: string option) -> Ready page
+    let typed = fun (_: Query) (_: (string * Cell) list) -> Ok(Ready page)
+
+    let typedPage =
+        fun (_: Query) (_: string option) (_: (string * Cell) list) -> Ok(Ready page)
+
+    [ "Query.invoke", Query.invoke query692 [] ready
+      "Query.invokePage", Query.invokePage query692 [] (Some "p1") readyPage
+      "Query.invokeWithArgs", Query.invokeWithArgs query692 [] typed
+      "Query.invokePageWithArgs", Query.invokePageWithArgs query692 [] (Some "p1") typedPage
+      "dispatch", QueryRegistry.dispatch registry692 () None "rows" [] ready
+      "dispatchWithArgs", QueryRegistry.dispatchWithArgs registry692 () None "rows" [] typed
+      "dispatchPage", QueryRegistry.dispatchPage registry692 () None "rows" [] (Some "p1") readyPage
+      "dispatchPageWith", QueryRegistry.dispatchPageWith registry692 () None "rows" [] (Some "p1") typedPage ]
+
+[<Tests>]
+let dispatchRowsTests692 =
+    testList
+        "Phase 692 - the dispatch holds a resolver's rows to the table's validation"
+        [ testCase "rows the validation refuses are the resolver's fault, ExecutionFailed in the column layer's words"
+          <| fun _ ->
+              for label, t in refusedRows692 do
+                  for next in [ None; Some "p2" ] do
+                      for verb, answered in plainVerbs692 t next do
+                          Expect.equal
+                              answered
+                              (Error(rowsRefusal692 t))
+                              (sprintf "%s, %s, next page %A" verb label next)
+
+          testCase "rows the validation accepts are answered as the resolver gave them, in either column order"
+          <| fun _ ->
+              for t in [ inOrder692; outOfOrder692 ] do
+                  for next in [ None; Some "p2" ] do
+                      for verb, answered in plainVerbs692 t next do
+                          Expect.equal answered (Ok(Ready(page692 t next))) (sprintf "%s, next page %A" verb next)
+
+          testCase "a pending answer carries no rows and stays pending"
+          <| fun _ ->
+              Expect.equal
+                  (QueryRegistry.dispatch registry692 () None "rows" [] (fun _ -> Pending))
+                  (Ok Pending)
+                  "pending" ]
