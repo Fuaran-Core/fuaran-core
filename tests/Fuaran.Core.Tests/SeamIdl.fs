@@ -390,6 +390,22 @@ let seamCodecTests =
                       generated
                       (sprintf "regenerate with: FUARAN_REGEN=%s dotnet <the test dll>" m.Stem)
 
+          // Phase 685 (DECISIONS.md D264.8 point 3, (A-iii)): the predicate's own writer leaves the
+          // public surface; its two readers stay public.
+          testCase "the query seam's predicate writer is internal and its two readers public"
+          <| fun _ ->
+              let codec =
+                  typeof<Fuaran.Core.ColumnPredicate>.Assembly.GetType "Fuaran.Core.QuerySeamCodec"
+
+              let isPublic (name: string) =
+                  codec.GetMethod(name, System.Reflection.BindingFlags.Public ||| System.Reflection.BindingFlags.Static)
+                  <> null
+
+              Expect.isFalse (isPublic "encodeColumnPredicate") "encodeColumnPredicate is not public"
+              Expect.isTrue (isPublic "decodeColumnPredicate") "decodeColumnPredicate is public"
+              Expect.isTrue (isPublic "decodeColumnPredicateStrict") "decodeColumnPredicateStrict is public"
+              Expect.isTrue (isPublic "encodeQueryError") "encodeQueryError is public"
+
           testCase "every seam vocabulary declares itself without a fault"
           <| fun _ ->
               for m in modules do
