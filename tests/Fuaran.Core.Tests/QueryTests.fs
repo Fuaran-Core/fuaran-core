@@ -1874,3 +1874,24 @@ let dispatchHoldTests685 =
                    | Error(ExecutionFailed _) -> true
                    | _ -> false)
                   (sprintf "paged: %A" paged) ]
+
+// ---------------------------------------------------------------------------
+// Phase 688 (DECISIONS.md D266.9, D266.10) — the admission gate reads a declaration's embedded table.
+// ---------------------------------------------------------------------------
+
+/// The `illFormedSource` refusal document, as the seam's codec writes it.
+let private illFormedSourceDoc688 =
+    "{\"$type\":\"illFormedSource\",\"reason\":\"ragged table\"}"
+
+[<Tests>]
+let illFormedSourceTests688 =
+    testList
+        "Phase 688 - IllFormedSource"
+        [ testCase "the illFormedSource refusal document reads as IllFormedSource and writes back as itself"
+          <| fun _ ->
+              match QueryCodec.decodeQueryError illFormedSourceDoc688 with
+              | Ok e ->
+                  Expect.equal (caseOf528 (box e)) "IllFormedSource" "the case read"
+                  Expect.equal (QueryCodec.encodeQueryError e) illFormedSourceDoc688 "written back"
+                  Expect.stringContains (QueryError.describe e) "ragged table" "its sentence carries the reason"
+              | Error m -> failtestf "the refusal document was refused: %s" m ]
