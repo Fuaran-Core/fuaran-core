@@ -227,11 +227,13 @@ module QueryCodec =
     ///
     /// Total, and what it promises (Phase 692, DECISIONS.md D267.8): a page a dispatch answered reads
     /// back through `decodeResult` as that page, its rows in schema order, since every dispatch verb
-    /// refuses rows `Table.validate` refuses before it answers them. Rows out of schema order read
-    /// back in schema order. A result built by hand, or one a host settles a pending capture with,
-    /// whose rows `Table.validate` refuses is written as it is, and its text may read back as OTHER
-    /// rows (a column named twice keeps its first, a column absent from the schema is dropped,
-    /// decimal text is canonicalised) or be refused by the reader; validate such rows first.
+    /// refuses rows `Table.validate` refuses before it answers them; so does a page a pending capture
+    /// is settled with through `QueryRegistry.settleCaptured`, which refuses them the same way (Phase
+    /// 695). Rows out of schema order read back in schema order. A result built by hand, or one a host
+    /// settles a pending capture with through the generic `KeyedCapture.settleEffectKeyed`, whose rows
+    /// `Table.validate` refuses is written as it is, and its text may read back as OTHER rows (a column
+    /// named twice keeps its first, a column absent from the schema is dropped, decimal text is
+    /// canonicalised) or be refused by the reader; validate such rows first.
     let encodeResult (qr: QueryResult) : string =
         Canonical.write Rendering.CrossHost (resultJson qr)
 

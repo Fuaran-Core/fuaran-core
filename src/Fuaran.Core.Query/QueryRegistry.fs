@@ -309,7 +309,13 @@ module QueryRegistry =
     /// `QueryError.describe`'s sentence before Phase 385), and `Pending` leaves it open with the
     /// returned `Ticket`. Rows `Table.validate` refuses are the resolver's fault, refused before
     /// anything is settled (Phase 692), so they are journalled as that refusal and never as a
-    /// completion whose text reads back as other rows. A refusal before the resolver journals nothing; a deterministic query
+    /// completion whose text reads back as other rows. A capture left open is settled later with
+    /// `settleCaptured`, which puts the settled answer through the same step (Phase 695):
+    /// `KeyedCapture.settleEffectKeyed` used directly on a query's ticket runs no step, so what it
+    /// journals is under the result writers' contract (rows `Table.validate` refuses may replay as other
+    /// rows or be `Unanswered`), and a reason it journals replays as whatever query-error document its
+    /// text spells, any other text as `ExecutionFailed`, so it can record a refusal no dispatch of the
+    /// invocation answers. A refusal before the resolver journals nothing; a deterministic query
     /// journals nothing. The `Outcome` is exactly `dispatch`'s; a `CapturedDispatch` since Phase 391
     /// (a positional triple before `0.37.0`).
     let dispatchCaptured
@@ -336,7 +342,8 @@ module QueryRegistry =
             journal
 
     /// `dispatchPage`, journalled under `Query.invocationKeyPage` (Phase 318), so every page of a
-    /// non-deterministic query has its own capture and replays from it.
+    /// non-deterministic query has its own capture and replays from it. A page's capture left open is
+    /// settled with `settleCaptured` under the same page token, as `dispatchCaptured` says.
     let dispatchPageCaptured
         (hashFn: HashFn)
         (encode: QueryResult -> string)
@@ -364,7 +371,9 @@ module QueryRegistry =
     /// `dispatchCaptured` with the typed resolver (Phase 385): `dispatchWithArgs`, journalled under
     /// `Query.invocationKey`, so a `ResolveFault` is captured as the refusal it names
     /// (`SourceNotResolved`, `Timeout`, `ExecutionFailed` with its `recoverable`) and
-    /// `dispatchReplayedWith` answers it back unchanged. The result is exactly `dispatchWithArgs`'s.
+    /// `dispatchReplayedWith` answers it back unchanged. The result is exactly `dispatchWithArgs`'s. A
+    /// capture left open is settled with `settleCaptured`, a fault in the typed resolver's words, as
+    /// `dispatchCaptured` says.
     let dispatchCapturedWith
         (hashFn: HashFn)
         (encode: QueryResult -> string)
@@ -390,7 +399,8 @@ module QueryRegistry =
 
     /// `dispatchPageCaptured` with the typed resolver (Phase 385): `dispatchPageWith`, journalled
     /// under `Query.invocationKeyPage`, so each page's answer — a result or a `ResolveFault` — is
-    /// captured under that page's key. The result is exactly `dispatchPageWith`'s.
+    /// captured under that page's key. The result is exactly `dispatchPageWith`'s. A page's capture left
+    /// open is settled with `settleCaptured` under the same page token, as `dispatchCaptured` says.
     let dispatchPageCapturedWith
         (hashFn: HashFn)
         (encode: QueryResult -> string)
@@ -496,8 +506,9 @@ module QueryRegistry =
     /// from a journal written before 0.36.0, as `ExecutionFailed` with the recorded text), an
     /// unsettled attempt as `Pending`. A deterministic query resolves live, through the clause every
     /// dispatch passes (Phase 692: rows `Table.validate` refuses are `ExecutionFailed`); an entry a
-    /// captured dispatch settled holds no rows that read back as others (a pending capture the host
-    /// settles later is not one). A journal that cannot
+    /// captured dispatch or `settleCaptured` settled holds no rows that read back as others, and a
+    /// recorded refusal is one a dispatch of the invocation answers (Phase 695); an entry settled
+    /// through the generic `KeyedCapture.settleEffectKeyed` is under the writers' contract. A journal that cannot
     /// answer is `ReplayFailure.Unanswered` with the `KeyedCaptureFault`, never a live fetch; every
     /// refusal of the seam, live or recorded, is `ReplayFailure.Refused`. A `ReplayedDispatch` since
     /// Phase 391 (a nested `Result` before `0.37.0`).
