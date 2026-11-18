@@ -476,28 +476,49 @@ module Query =
             else
                 Error(RequiredParamsNull nullBound))
 
+    /// The seam's answer to a resolver's envelope — the one step every invocation, and so every
+    /// dispatch verb, passes once the resolver has answered. `Pending` is `Ok Pending`; a resolver's
+    /// `Failed m` is `ExecutionFailed(m, [])`; and since Phase 692 (DECISIONS.md D267) a `Ready`
+    /// result is held to the column layer: rows `Table.validate` refuses are the resolver's fault,
+    /// `ExecutionFailed` naming the column layer's reason, so the seam never answers rows its result
+    /// writer would write as text that reads back as other rows, or that the reader refuses. Rows it
+    /// accepts are answered as the resolver gave them, in whatever column order.
+    let private settle (answer: Deferred<QueryResult>) : Result<Deferred<QueryResult>, QueryError> =
+        match answer with
+        | Ready r ->
+            match Table.validate r.Rows with
+            | Ok() -> Ok(Ready r)
+            | Error e ->
+                Error(
+                    ExecutionFailed(
+                        "the resolver answered rows the column layer refuses: "
+                        + ColumnCodec.errorString e,
+                        []
+                    )
+                )
+        | Pending -> Ok Pending
+        | Failed m -> Error(ExecutionFailed(m, []))
+
     /// Invoke a query: validate the params, then run the host `resolve` (which performs the actual
     /// fetch per the query's source + effect/placement). The resolver answers in the shipped
     /// `Deferred` envelope, so a fetch it has not completed is `Pending` rather than a failure or a
     /// host-invented shape; a resolver failure is the named `ExecutionFailed`, never a throw and
-    /// never an untyped `Failed` riding out of the seam. Deterministic queries re-evaluate freely;
-    /// for a non-`Deterministic` query the caller journals the realized result (the `Ready` payload —
-    /// `Pending` is not captured, replay re-issues) via `EffectCapture.captureEffect` keyed by
-    /// `invocationKey` + `determinismTag` (Phase 27), so the query replays exactly.
+    /// never an untyped `Failed` riding out of the seam, and so are rows the column layer refuses
+    /// (Phase 692: `Table.validate`'s reason, in the column layer's words). Deterministic queries
+    /// re-evaluate freely; for a non-`Deterministic` query the caller journals the realized result
+    /// (the `Ready` payload — `Pending` is not captured, replay re-issues) via
+    /// `EffectCapture.captureEffect` keyed by `invocationKey` + `determinismTag` (Phase 27), so the
+    /// query replays exactly.
     ///
-    /// The three outcomes, exhaustively: `Ok(Ready r)` settled · `Ok Pending` in flight · `Error e`
-    /// refused, typed. `Ok(Failed _)` cannot occur — certified by `queryLaws`.
+    /// The three outcomes, exhaustively: `Ok(Ready r)` settled, its rows ones `Table.validate`
+    /// accepts · `Ok Pending` in flight · `Error e` refused, typed. `Ok(Failed _)` cannot occur —
+    /// certified by `queryLaws`.
     let invoke
         (q: Query)
         (args: (string * Cell) list)
         (resolve: Query -> Deferred<QueryResult>)
         : Result<Deferred<QueryResult>, QueryError> =
-        validateParams q args
-        |> Result.bind (fun () ->
-            match resolve q with
-            | Ready r -> Ok(Ready r)
-            | Pending -> Ok Pending
-            | Failed m -> Error(ExecutionFailed(m, [])))
+        validateParams q args |> Result.bind (fun () -> settle (resolve q))
 
     /// Invoke ONE PAGE of a query (Phase 316): `invoke`, with the page token handed to the resolver
     /// beside the declaration, so a host pages through the seam — default-deny and `validateParams`
@@ -584,7 +605,9 @@ module Query =
     /// without it. Since Phase 685 (DECISIONS.md D264.8 point 3) the predicate is held to the
     /// declaration's own: `PredicateNotHonoured` names only a predicate of its `Where`, so the
     /// refusal's document reads back as itself, and a predicate the declaration does not hold is the
-    /// resolver's fault, `ExecutionFailed` naming its tag and column.
+    /// resolver's fault, `ExecutionFailed` naming its tag and column. A `Ready` answer is held to
+    /// the column layer as `invoke` holds it (Phase 692): rows `Table.validate` refuses are
+    /// `ExecutionFailed` naming its reason.
     let invokePageWithArgs
         (q: Query)
         (args: (string * Cell) list)
@@ -601,9 +624,7 @@ module Query =
                     | None -> name, cell)
 
             match resolve q pageToken typed with
-            | Ok(Ready r) -> Ok(Ready r)
-            | Ok Pending -> Ok Pending
-            | Ok(Failed m) -> Error(ExecutionFailed(m, []))
+            | Ok answer -> settle answer
             | Error(ResolveFault.SourceMissing r) -> Error(SourceNotResolved r)
             | Error ResolveFault.TimedOut -> Error Timeout
             | Error(ResolveFault.Failed(detail, recoverable)) -> Error(ExecutionFailed(detail, recoverable))

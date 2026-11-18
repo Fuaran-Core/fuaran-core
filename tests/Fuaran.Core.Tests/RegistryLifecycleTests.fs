@@ -349,7 +349,7 @@ let pagingTests =
                   Ready
                       { Rows =
                           { Schema = [ Field.create "n" IntType ]
-                            Columns = [] }
+                            Columns = [ Column.ofInts "n" (Vector.ofList []) AllValid ] }
                         PageNum = (if token.IsNone then 0 else 1)
                         TotalRowCount = None
                         NextPageToken = None }
