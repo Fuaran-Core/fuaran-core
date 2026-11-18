@@ -2157,3 +2157,61 @@ let dispatchRowsTests692 =
                   (QueryRegistry.dispatch registry692 () None "rows" [] (fun _ -> Pending))
                   (Ok Pending)
                   "pending" ]
+
+/// Every captured verb, over a resolver answering `t` as the page, from an empty journal.
+let private capturedVerbs692 (t: Table) : (string * CapturedDispatch<QueryResult, QueryError>) list =
+    let page = page692 t None
+    let ready = fun (_: Query) -> Ready page
+    let readyPage = fun (_: Query) (_: string option) -> Ready page
+    let typed = fun (_: Query) (_: (string * Cell) list) -> Ok(Ready page)
+
+    let typedPage =
+        fun (_: Query) (_: string option) (_: (string * Cell) list) -> Ok(Ready page)
+
+    let h = OpStream.defaultHash
+    let w = QueryCodec.encodeResult
+
+    [ "dispatchCaptured", QueryRegistry.dispatchCaptured h w registry692 () None "rows" [] ready []
+      "dispatchPageCaptured", QueryRegistry.dispatchPageCaptured h w registry692 () None "rows" [] None readyPage []
+      "dispatchCapturedWith", QueryRegistry.dispatchCapturedWith h w registry692 () None "rows" [] typed []
+      "dispatchPageCapturedWith",
+      QueryRegistry.dispatchPageCapturedWith h w registry692 () None "rows" [] None typedPage [] ]
+
+/// The rows each completion in a journal reads back as, through the result's reader.
+let private completions692 (journal: KeyedCapture list) : Result<Table, string> list =
+    journal
+    |> List.filter (fun c -> c.Phase = CapturePhase.Completed)
+    |> List.map (fun c -> QueryCodec.decodeResult c.Value |> Result.map _.Rows)
+
+[<Tests>]
+let capturedRowsTests692 =
+    testList
+        "Phase 692 - the captured dispatch journals no rows that read back as others"
+        [ testCase "rows the validation refuses are refused, and journalled as the refusal, never as a completion"
+          <| fun _ ->
+              for label, t in refusedRows692 do
+                  for verb, c in capturedVerbs692 t do
+                      Expect.equal c.Outcome (Error(rowsRefusal692 t)) (sprintf "%s, %s: the outcome" verb label)
+                      Expect.isEmpty (completions692 c.Journal) (sprintf "%s, %s: no completion" verb label)
+
+                      Expect.isTrue
+                          (c.Journal |> List.exists (fun e -> e.Phase = CapturePhase.Refused))
+                          (sprintf "%s, %s: the refusal is journalled" verb label)
+
+          testCase "rows the validation accepts are journalled, and read back as their normal form"
+          <| fun _ ->
+              for t in [ inOrder692; outOfOrder692 ] do
+                  for verb, c in capturedVerbs692 t do
+                      Expect.equal c.Outcome (Ok(Ready(page692 t None))) (sprintf "%s: the outcome" verb)
+                      Expect.equal (completions692 c.Journal) [ Ok inOrder692 ] (sprintf "%s: the completion" verb)
+
+          testCase "the result's writers stay total: a result built by hand is written whatever its rows"
+          <| fun _ ->
+              for label, t in refusedRows692 do
+                  let text = QueryCodec.encodeResult (page692 t None)
+
+                  match QueryCodec.decodeResult text with
+                  | Ok back -> Expect.notEqual back.Rows t (sprintf "%s: read back as other rows" label)
+                  | Error _ -> ()
+
+                  Expect.isNonEmpty (QueryCodec.encodeDeferredResult (Ready(page692 t None))) label ]
