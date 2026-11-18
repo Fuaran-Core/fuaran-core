@@ -82,7 +82,7 @@ let modelStamps: (string * (string * int)) list =
       "laws/capability-document-laws.json", ("Capability", 11)
       "laws/capability-gate-laws.json", ("Capability", 14)
       "laws/query-grant-laws.json", ("Query", 19)
-      "laws/query-declaration-laws.json", ("Query", 71)
+      "laws/query-declaration-laws.json", ("Query", 81)
       "laws/decimal-laws.json", ("DecimalText", 49)
       "laws/decimal-laws.json", ("WireColumn", 7)
       "laws/field-laws.json", ("WireColumn", 24)

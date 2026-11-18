@@ -29,7 +29,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 | `DecodeLayer` | 4 | `decodeRejects` (28) | — |
 | `JsonParse` | 17 | `decodeRejects` (8), `premiseInt53` (29), `premiseRecursionDepth` (13), `premiseStringModel` (10), `codecRefusals` (59) | `json.parse`, `wire.decode` |
 | `Propagation` | 15 | `propagationLaws` (73) | — |
-| `Query` | 32 | `queryDeclarationLaws` (71), `queryGrantLaws` (19), `seamRefusals` (45) | — |
+| `Query` | 32 | `queryDeclarationLaws` (81), `queryGrantLaws` (19), `seamRefusals` (45) | — |
 | `TreeOps` | 19 | `skeletonApply` (25) | `tree.apply`, `dag.fold` |
 | `WireCanon` | 16 | `stringEscape` (38) | `wire.render` |
 | `WireColumn` | 7 | `decimal` (7), `fieldLaws` (24), `codecRefusals` (13) | — |

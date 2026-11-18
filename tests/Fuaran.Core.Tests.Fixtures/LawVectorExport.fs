@@ -1402,6 +1402,18 @@ module LawVectorExport =
               "admission-a-float-not-finite",
               { sales with
                   Where = Some [ eq "score" (Float nan) ] }
+              // Phase 685 (D264.8 point 7): the gate's clause for three literals the Rust port's adoption
+              // found no vector pinning: the reason a negative infinity is refused with, a date not in
+              // canonical form, and decimal text with a trailing zero.
+              "admission-a-float-negative-infinity",
+              { sales with
+                  Where = Some [ eq "score" (Float -infinity) ] }
+              "admission-a-date-not-in-canonical-form",
+              { sales with
+                  Where = Some [ eq "day" (Date "2026-2-1") ] }
+              "admission-decimal-text-with-a-trailing-zero",
+              { sales with
+                  Where = Some [ eq "amount" (Decimal "12.50") ] }
               "admission-the-second-predicate",
               { sales with
                   Where = Some [ ColumnPredicate.IsNull "n"; ColumnPredicate.Contains("n", "x") ] }
@@ -1436,7 +1448,10 @@ module LawVectorExport =
             [ "admission-a-date-that-names-no-day"
               "admission-a-timestamp-not-canonical"
               "admission-decimal-text-not-canonical"
-              "admission-a-float-not-finite" ]
+              "admission-a-float-not-finite"
+              "admission-a-float-negative-infinity"
+              "admission-a-date-not-in-canonical-form"
+              "admission-decimal-text-with-a-trailing-zero" ]
 
         let private gateCells (fault: (string list * CorpusCell) option) : (string * CorpusCell) list =
             match fault with
@@ -1590,7 +1605,25 @@ module LawVectorExport =
                   "declaration-decimal-text-read-canonical"
                   (edited
                       [ "where", Some """[{"$type":"equalTo","column":"amount","type":"decimal","value":"01.50"}]""" ])
-              refused "declaration-admitted" (textOf "admission-admitted") ]
+              refused "declaration-admitted" (textOf "admission-admitted")
+              // Phase 685 (D264.7 point 3, D264.8 point 7): a budget is a positive integer, refused
+              // OutOfRange at its member at 0 and below; 1 is the boundary and reads.
+              refused "declaration-a-timeout-of-zero" (edited [ "timeoutMs", Some "0" ])
+              refused "declaration-a-timeout-below-zero" (edited [ "timeoutMs", Some "-1" ])
+              refused "declaration-a-page-size-of-zero" (edited [ "pageSize", Some "0" ])
+              refused "declaration-a-page-size-below-zero" (edited [ "pageSize", Some "-1" ])
+              refused "declaration-budgets-of-one" (edited [ "timeoutMs", Some "1"; "pageSize", Some "1" ])
+              // ... and the reader's clauses the Rust port's adoption found no vector pinning.
+              refused "declaration-no-params" (edited [ "params", None ])
+              refused "declaration-a-result-schema-not-a-list" (edited [ "resultSchema", Some "{}" ])
+              refused "declaration-no-effect" (edited [ "effect", None ])
+              refused
+                  "declaration-a-date-not-in-canonical-form"
+                  (edited [ "where", Some """[{"$type":"equalTo","column":"day","type":"date","value":"2026-2-1"}]""" ])
+              refused
+                  "declaration-decimal-text-with-a-trailing-zero-read-canonical"
+                  (edited
+                      [ "where", Some """[{"$type":"equalTo","column":"amount","type":"decimal","value":"12.50"}]""" ]) ]
 
         let internal admissionVectors () : Vector list = admissions |> List.map admissionVector
 
@@ -1759,6 +1792,7 @@ module LawVectorExport =
             + "read `declaration`, a declaration's text, with the declaration reader (lenient: an unknown member is read past) and expect `accept`, "
             + "or `reject` with the decode `code` and the `path` to the fault: the members are read in the order $type, id, params, resultSchema, "
             + "effect, timeoutMs, pageSize, where, orderBy, source, and the admission gate last, whose refusal is OutOfRange at the gate's path; "
+            + "timeoutMs and pageSize are positive integers, and one that is not is OutOfRange at its member (Phase 685); "
             + "the parser refuses every null and every number past the finite double range, InvalidJson at the root. `admissionFault` and "
             + "`register` vectors state a declaration as DATA, because two of the gate's refusals no text can carry: `query` names a declaration "
             + "of `registry`, and `id` (a string), `params` (a list of {name, type, required}), `where` (a list of {predicate, column}, with "
