@@ -67,18 +67,6 @@ let qCellOfModel (c: ModelQuery.cell) : Cell =
     | ModelQuery.Decimal v -> Cell.Decimal v
     | ModelQuery.Null -> Cell.Null
 
-/// The declaration a shape renderer encodes: everything but the member it reads is fixed.
-let shapeCarrier: Query =
-    { Id = "shape"
-      Params = []
-      ResultSchema = []
-      Effect = Effect.pureDeterministic
-      Source = Ref "shape"
-      TimeoutMs = None
-      PageSize = None
-      Where = []
-      OrderBy = [] }
-
 let qColOfModel (t: ModelQuery.column_type) : ColumnType =
     match t with
     | ModelQuery.IntType -> IntType
@@ -141,8 +129,8 @@ let queryToModelWith (keepRequired: bool) (q: Query) : ModelQuery.query =
         { ModelQuery.effect_class.host = qHostToModel q.Effect.Host
           ModelQuery.effect_class.determinism = qDetToModel q.Effect.Determinism }
       ModelQuery.query.q_source = sprintf "%A" q.Source
-      ModelQuery.query.q_timeout_ms = toMOpt (Option.map (fun (n: int) -> bigint n) q.TimeoutMs)
-      ModelQuery.query.q_page_size = toMOpt (Option.map (fun (n: int) -> bigint n) q.PageSize)
+      ModelQuery.query.q_timeout_ms = toMOpt (Option.map (fun (n: PositiveInt) -> bigint n.Value) q.TimeoutMs)
+      ModelQuery.query.q_page_size = toMOpt (Option.map (fun (n: PositiveInt) -> bigint n.Value) q.PageSize)
       ModelQuery.query.q_where = q.Where |> List.map qPredToModel
       ModelQuery.query.q_order_by = q.OrderBy |> List.map qKeyToModel }
 
@@ -166,16 +154,10 @@ let qKeyOfModel (k: ModelQuery.sort_key) : SortKey =
         | ModelQuery.Ascending -> SortDirection.Ascending
         | ModelQuery.Descending -> SortDirection.Descending }
 
-/// The canonical text production's codec writes for one member of a declaration — the member the
-/// capture key's shape fields carry (`QueryShape.keyFields` renders the same array through the same
-/// `Canonical.write Rendering.CrossHost`). Read off the PUBLIC codec, so the renderer is production's own call, not a copy.
-let memberText (name: string) (q: Query) : string =
-    match Json.parse (QueryCodec.encode q) with
-    | Ok(JObj ms) ->
-        match ms |> List.tryFind (fun (k, _) -> k = name) with
-        | Some(_, v) -> Canonical.write Rendering.CrossHost v
-        | None -> ""
-    | _ -> ""
+/// The canonical text of a list of member documents, as `QueryShape.keyFields` renders a filter or
+/// an order (`Canonical.write Rendering.CrossHost` over the array).
+let private shapeText (docs: JVal list) : string =
+    Canonical.write Rendering.CrossHost (JArr docs)
 
 /// Production's own seven calls. `compare` on two F# strings is ordinal, which is what
 /// `List.sortBy fst` sorts a name by; `field` is the Phase 225 canonicaliser both seams share; the
@@ -188,18 +170,13 @@ let queryRenderers: ModelQuery.renderers =
       ModelQuery.renderers.hash = Hash.fnv1a
       ModelQuery.renderers.name_le = fun (a: string) (b: string) -> System.String.CompareOrdinal(a, b) <= 0
       ModelQuery.renderers.field = Hash.canonicalField
+      // Phase 685: the model renders the shape of every declaration it is handed, refused ones among
+      // them, so each predicate is written through the total query-error writer's body and each key
+      // through the published sort-key writer, the bodies the key's shape fields are written through.
       ModelQuery.renderers.render_where =
-        fun (w: ModelQuery.predicate list) ->
-            memberText
-                "where"
-                { shapeCarrier with
-                    Where = w |> List.map qPredOfModel }
+        fun (w: ModelQuery.predicate list) -> shapeText (w |> List.map (qPredOfModel >> QuerySeamLaws.predicateJson))
       ModelQuery.renderers.render_order =
-        fun (o: ModelQuery.sort_key list) ->
-            memberText
-                "orderBy"
-                { shapeCarrier with
-                    OrderBy = o |> List.map qKeyOfModel } }
+        fun (o: ModelQuery.sort_key list) -> shapeText (o |> List.map (qKeyOfModel >> QuerySeamCodec.encodeSortKey)) }
 
 // ---- Phase 651: the identity a grant for a read is bound to, as the exporters ask it ----
 
@@ -226,22 +203,51 @@ let queryAnswer (expected: (string * CorpusCell) list) : Answer option =
           LadderRow = QueryLadderRow
           Cell = CorpusCell.Row expected }
 
-/// A predicate literal's value as `QueryCodec` writes it — read off the PUBLIC encoder, over a
-/// declaration whose only filter compares with that literal, so the writer is production's own call.
-let literalValueJson (v: Cell) : JVal =
-    let q =
-        { shapeCarrier with
-            ResultSchema = [ Field.create "v" (Cell.typeOf v |> Option.defaultValue StringType) ]
-            Where = [ ColumnPredicate.EqualTo("v", v) ] }
+/// A declaration's text, for a declaration the gate may refuse (Phase 685: the declaration's writer
+/// takes only an admitted declaration). It is the text of the same declaration with no parameter,
+/// filter or order — which the gate admits — with those three members written over it as the writer
+/// writes them: a parameter as `{name, required, type}`, a predicate through the predicate writer's
+/// body (`QuerySeamLaws.predicateJson`) and an order key through the published sort-key writer. For
+/// an admitted declaration it is `QueryCodec.encode`'s text byte for byte.
+let declarationText (q: Query) : string =
+    let bare =
+        QuerySeamLaws.admitted
+            { q with
+                Params = []
+                Where = []
+                OrderBy = [] }
 
-    match Json.parse (QueryCodec.encode q) with
+    let paramJson (p: QueryParam) =
+        JObj
+            [ "name", JStr p.Name
+              "required", JBool p.Required
+              "type", JStr(ColumnType.tag p.Type) ]
+
+    let written =
+        [ "params", JArr(q.Params |> List.map paramJson) ]
+        @ (if List.isEmpty q.Where then
+               []
+           else
+               [ "where", JArr(q.Where |> List.map QuerySeamLaws.predicateJson) ])
+        @ (if List.isEmpty q.OrderBy then
+               []
+           else
+               [ "orderBy", JArr(q.OrderBy |> List.map QuerySeamCodec.encodeSortKey) ])
+
+    match Json.parse (QueryCodec.encode bare) with
     | Ok(JObj ms) ->
-        match ms |> List.tryFind (fun (k, _) -> k = "where") with
-        | Some(_, JArr [ JObj p ]) ->
-            match p |> List.tryFind (fun (k, _) -> k = "value") with
-            | Some(_, v) -> v
-            | None -> JObj []
-        | _ -> JObj []
+        Canonical.write Rendering.CrossHost (JObj((ms |> List.filter (fun (k, _) -> k <> "params")) @ written))
+    | other -> failwithf "an admitted declaration's text did not read back as an object: %A" other
+
+/// A predicate literal's value as production writes it: the `value` member of a comparison with
+/// that literal, written through the predicate writer's body (`QuerySeamLaws.predicateJson`, Phase
+/// 685), so the writer is production's own call.
+let literalValueJson (v: Cell) : JVal =
+    match QuerySeamLaws.predicateJson (ColumnPredicate.EqualTo("v", v)) with
+    | JObj p ->
+        match p |> List.tryFind (fun (k, _) -> k = "value") with
+        | Some(_, v) -> v
+        | None -> JObj []
     | _ -> JObj []
 
 /// A literal read at a stated type as `QueryShape.literalOf` reads it: the one cell of a one-row

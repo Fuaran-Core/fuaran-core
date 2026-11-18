@@ -951,7 +951,7 @@ module LawVectorExport =
                   Determinism = Effect.network }
               Source = Ref id
               TimeoutMs = None
-              PageSize = Some 50
+              PageSize = PositiveInt.tryCreate 50
               Where = where
               OrderBy = order }
 
@@ -1010,7 +1010,7 @@ module LawVectorExport =
               Case = "invocationIdentity"
               Model = QueryOracle.queryAnswer [ "identity", jstr (QueryOracle.queryIdentity q args) ]
               Input = [ "query", jstr queryId; "args", argsJson args ]
-              Expected = [ "identity", jstr (Query.invocationPreimage q args) ] }
+              Expected = [ "identity", jstr (Query.invocationPreimage (QuerySeamLaws.admitted q) args) ] }
 
         /// One binding of each kind, in parameter order.
         let everyKind: (string * Cell) list =
@@ -1060,18 +1060,27 @@ module LawVectorExport =
                 @ Gates.grantMember grant
               Expected =
                 [ "covers",
-                  CorpusCell.Value(JBool(Grant.covers (Query.invocationPreimage q args) (Option.toList grant))) ] }
+                  CorpusCell.Value(
+                      JBool(
+                          Grant.covers (Query.invocationPreimage (QuerySeamLaws.admitted q) args) (Option.toList grant)
+                      )
+                  ) ] }
 
         let internal grantVectors () : Vector list =
             let args = [ "n", Int 5 ]
-            let ledger = queryOf "ledger"
+            let ledger = QuerySeamLaws.admitted (queryOf "ledger")
             let own = Query.grant ledger args
 
             [ covers "query-grant-own" "ledger" args None (Some own)
               // a later page of the same read: the token is in neither identity (D261.4)
               covers "query-grant-own-a-later-page" "ledger" args (Some "page-2") (Some own)
               covers "query-grant-other-arguments" "ledger" args None (Some(Query.grant ledger [ "n", Int 6 ]))
-              covers "query-grant-other-query" "ledger" args None (Some(Query.grant (queryOf "summary") args))
+              covers
+                  "query-grant-other-query"
+                  "ledger"
+                  args
+                  None
+                  (Some(Query.grant (QuerySeamLaws.admitted (queryOf "summary")) args))
               covers
                   "query-grant-the-capture-key"
                   "ledger"
@@ -1089,7 +1098,7 @@ module LawVectorExport =
                   "every"
                   [ "b", Int 5 ]
                   None
-                  (Some(Query.grant (queryOf "every") [ "b", Float 5.0 ]))
+                  (Some(Query.grant (QuerySeamLaws.admitted (queryOf "every")) [ "b", Float 5.0 ]))
               covers "query-grant-none" "ledger" args None None ]
 
         let internal allVectors () : Vector list = identityVectors () @ grantVectors ()
@@ -1117,7 +1126,7 @@ module LawVectorExport =
                     [ "family", jstr familyId
                       "kitVersion", jstr stamp
                       "description", jstr description
-                      "registry", jarr (queries |> List.map (QueryCodec.encode >> jstr)) ]
+                      "registry", jarr (queries |> List.map (QuerySeamLaws.admitted >> QueryCodec.encode >> jstr)) ]
                   Items = "vectors"
                   Rows = allVectors () |> List.map renderVector }
 
@@ -1173,7 +1182,7 @@ module LawVectorExport =
                       Field.create "amount" DecimalType
                       Field.create "day" DateType
                       Field.create "score" FloatType ] with
-                  PageSize = Some 50 } ]
+                  PageSize = PositiveInt.tryCreate 50 } ]
 
         let private queryOf (id: string) =
             queries |> List.find (fun q -> q.Id = id)
@@ -1459,7 +1468,7 @@ module LawVectorExport =
 
         // ---- the reader, over a declaration's text ----
 
-        let private salesText = QueryCodec.encode (queryOf "sales")
+        let private salesText = QueryCodec.encode (QuerySeamLaws.admitted (queryOf "sales"))
 
         /// The `sales` declaration's text with `member` set to `raw` (JSON text), or removed for `None`.
         let private edited (edits: (string * string option) list) : string =
@@ -1506,13 +1515,14 @@ module LawVectorExport =
               Input = [ "declaration", jstr text ]
               Expected = readerCells text }
 
-        /// The text of an admission vector's declaration (one whose text reaches the gate).
+        /// The text of an admission vector's declaration (one whose text reaches the gate), written by
+        /// edit (`QueryOracle.declarationText`, Phase 685: no writer writes a declaration the gate refuses).
         let private textOf (admission: string) =
             admissions
             |> List.find (fun (id, _) -> id = admission)
             |> snd
             |> build
-            |> QueryCodec.encode
+            |> QueryOracle.declarationText
 
         let internal declarationVectors () : Vector list =
             [ refused "declaration-not-json" "{"
@@ -1693,7 +1703,8 @@ module LawVectorExport =
               Expected = expected }
 
         let internal dispatchVectors () : Vector list =
-            let own q args = Some(Query.grant (queryOf q) args)
+            let own q args =
+                Some(Query.grant (QuerySeamLaws.admitted (queryOf q)) args)
 
             [ dispatch "dispatch-unregistered" "nope" [] None
               dispatch "dispatch-unregistered-with-a-grant" "nope" [ "n", Int 7 ] (own "ledger" [ "n", Int 7 ])
@@ -1790,7 +1801,7 @@ module LawVectorExport =
                     [ "family", jstr familyId
                       "kitVersion", jstr stamp
                       "description", jstr description
-                      "registry", jarr (queries |> List.map (QueryCodec.encode >> jstr))
+                      "registry", jarr (queries |> List.map (QuerySeamLaws.admitted >> QueryCodec.encode >> jstr))
                       "gates", jarr [ jobj [ "policy", jstr policy; "rules", jarr (rules |> List.map ruleCell) ] ]
                       "referenceOnly",
                       jarr (

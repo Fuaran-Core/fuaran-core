@@ -354,7 +354,7 @@ module internal RegistrySeamLaws =
             CapabilityRegistry.enumerate r |> List.map _.Id
 
         let qIds (r: QueryRegistry<unit>) =
-            QueryRegistry.enumerate r |> List.map _.Id
+            QueryRegistry.enumerate r |> List.map _.Declaration.Id
 
         // Both associations of a union agree: refused together, or equal under `same`.
         let associates (same: 'r -> 'r -> bool) (left: Result<'r, 'e>) (right: Result<'r, 'e>) : bool =
@@ -462,7 +462,9 @@ module internal RegistrySeamLaws =
 
                      let qOk =
                          match QueryRegistry.replace swappedQuery qr with
-                         | Ok r2 -> QueryRegistry.tryFind k r2 = Some swappedQuery && qIds r2 = qIds qr
+                         | Ok r2 ->
+                             QueryRegistry.tryFind k r2 = Some(QuerySeamLaws.admitted swappedQuery)
+                             && qIds r2 = qIds qr
                          | Error _ -> false
 
                      let vOk =

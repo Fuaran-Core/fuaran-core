@@ -54,10 +54,27 @@ module QueryRegistry =
     /// The registration refusal a declaration earns, or `None` — `admissionFaultAt` without the path.
     let internal admissionFault (q: Query) : QueryError option = admissionFaultAt q |> Option.map snd
 
+    /// THE GATE, answering the admitted declaration (Phase 685, DECISIONS.md D264.8 point 1):
+    /// `admissionFaultAt`'s refusal with its path, or the declaration as an `AdmittedQuery`. The one
+    /// place a declaration becomes an admitted one; `admit` and the declaration reader answer it.
+    let internal admitAt (q: Query) : Result<AdmittedQuery, PathSegment list * QueryError> =
+        match admissionFaultAt q with
+        | Some fault -> Error fault
+        | None -> Ok(Admitted q)
+
+    /// The admission gate (Phase 685): the declaration as an `AdmittedQuery` when the gate admits it,
+    /// or the refusal `register` would answer for it (a parameter named twice, then the filter, then
+    /// the order). What a host runs before it writes a declaration (`QueryCodec.encode`) or keys a
+    /// read of it (`Query.invocationKey`, `invocationPreimage`, `grant`). It reads the declaration's
+    /// own fields and nothing of a registry, so a declaration is admitted wherever it is admitted.
+    let admit (q: Query) : Result<AdmittedQuery, QueryError> = admitAt q |> Result.mapError snd
+
     /// The query seam's vocabulary (Phase 509): `NoSuchQuery` / `DuplicateQuery`, `admissionFault`
     /// as the registration gate, `Query.validateParams` before the policy, and `QueryPolicyRefused` /
     /// `QueryApprovalRequired` for its gates. `Invocation` is `Query.invocationPreimage` (Phase 638;
-    /// named and public since Phase 651): the identity a presented `Grant` is compared with.
+    /// named and public since Phase 651): the identity a presented `Grant` is compared with. A
+    /// declaration the seam holds is one `register` or `replace` admitted, so it is handed to the
+    /// identity as the `AdmittedQuery` it is (Phase 685), as the journal keys below are.
     let private vocabulary: SeamVocabulary<Query, (string * Cell) list, QueryError> =
         { Id = _.Id
           NoSuch = fun id known -> NoSuchQuery(id, known)
@@ -66,7 +83,7 @@ module QueryRegistry =
           Validate = Query.validateParams
           Refused = fun policy g -> QueryPolicyRefused(policy, g.Message, g.Alternatives)
           Approval = QueryApprovalRequired
-          Invocation = Query.invocationPreimage
+          Invocation = fun q args -> Query.invocationPreimage (Admitted q) args
           Describe = QueryError.describe }
 
     /// The registry with no queries: every dispatch against it is `NoSuchQuery` with an empty
@@ -83,12 +100,15 @@ module QueryRegistry =
         Seam.register q r.Seam |> lift
 
     /// The query registered under `id`, or `None`. A bare lookup: unlike `dispatch` it
-    /// validates nothing and names no alternatives.
-    let tryFind (id: string) (r: QueryRegistry<'Ctx>) : Query option = Seam.tryFind id r.Seam
+    /// validates nothing and names no alternatives. Since Phase 685 it answers an `AdmittedQuery`:
+    /// `register` and `replace` hold only declarations the gate admitted.
+    let tryFind (id: string) (r: QueryRegistry<'Ctx>) : AdmittedQuery option =
+        Seam.tryFind id r.Seam |> Option.map Admitted
 
     /// Enumerate the registry in a stable order (by id) — the discovery surface; stability is part of
-    /// the contract (`queryLaws` certifies it).
-    let enumerate (r: QueryRegistry<'Ctx>) : Query list = Seam.enumerate r.Seam
+    /// the contract (`queryLaws` certifies it). Each an `AdmittedQuery` since Phase 685.
+    let enumerate (r: QueryRegistry<'Ctx>) : AdmittedQuery list =
+        Seam.enumerate r.Seam |> List.map Admitted
 
     // ---- the policy gate (Phase 318) ----
 
@@ -258,11 +278,11 @@ module QueryRegistry =
                 | None -> ExecutionFailed(reason, []) }
 
     /// Journalled under `Query.invocationKey`.
-    let private unpaged = capture Query.invocationKey
+    let private unpaged = capture (fun q args -> Query.invocationKey (Admitted q) args)
 
     /// Journalled under `Query.invocationKeyPage` for the page `pageToken`.
     let private paged (pageToken: string option) =
-        capture (fun q args -> Query.invocationKeyPage q args pageToken)
+        capture (fun q args -> Query.invocationKeyPage (Admitted q) args pageToken)
 
     /// `dispatch`, journalling the invocation in the KEYED capture journal under
     /// `Query.invocationKey` (Phase 318): the attempt after the id resolved, the parameters validated

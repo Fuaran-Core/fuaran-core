@@ -351,7 +351,7 @@ let tests =
                           Determinism = Effect.network }
                     Source = Ref "feed"
                     TimeoutMs = None
-                    PageSize = Some 1
+                    PageSize = PositiveInt.tryCreate 1
                     Where = []
                     OrderBy = [] }
 
@@ -437,7 +437,11 @@ let tests =
 
               Expect.equal
                   never.Outcome
-                  (Error(ReplayFailure.Unanswered(KeyedCaptureFault.NoCapture(Query.invocationKeyPage q [] (Some "3")))))
+                  (Error(
+                      ReplayFailure.Unanswered(
+                          KeyedCaptureFault.NoCapture(Query.invocationKeyPage (QuerySeamLaws.admitted q) [] (Some "3"))
+                      )
+                  ))
                   "a page never captured refuses rather than fetching"
 
               Expect.equal never.Cursor Map.empty "and consumes nothing"

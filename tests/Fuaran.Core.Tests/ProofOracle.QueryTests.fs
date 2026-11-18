@@ -423,8 +423,12 @@ let private genQueryDecl (id: string) (r: ConfRng.T) : Query * ConfRng.T =
       ResultSchema = schema
       Effect = { Host = ReadsHost; Determinism = det }
       Source = Ref("src-" + id)
-      TimeoutMs = (if page = 0 then None else Some(1000 * page))
-      PageSize = (if page = 2 then Some 50 else None)
+      TimeoutMs =
+        (if page = 0 then
+             None
+         else
+             PositiveInt.tryCreate (1000 * page))
+      PageSize = (if page = 2 then PositiveInt.tryCreate 50 else None)
       Where = where
       OrderBy = order },
     rng
@@ -548,7 +552,7 @@ let private queryProbe
         | _ -> t <- Tally.disagree (sprintf "seed %d: register verdict differs on %s" seedTag id) t
 
     // enumerate + tryFind agree (membership, and the entries themselves, sorted by id)
-    let penum = QueryRegistry.enumerate preg |> List.map bridge
+    let penum = QueryRegistry.enumerate preg |> List.map (fun a -> bridge a.Declaration)
     let menum = ModelQuery.enumerate mreg |> List.sortBy _.q_id
 
     t <-
@@ -556,7 +560,7 @@ let private queryProbe
         |> Differential.check (penum = menum) (fun () -> sprintf "seed %d: enumerate differs" seedTag)
 
     for id in "q-x" :: queryIdPool do
-        let p = QueryRegistry.tryFind id preg |> Option.map bridge
+        let p = QueryRegistry.tryFind id preg |> Option.map (fun a -> bridge a.Declaration)
         let m = ofMOpt (ModelQuery.try_find_query id mreg)
 
         t <-
@@ -572,7 +576,7 @@ let private queryProbe
 
         let args, r6 =
             match QueryRegistry.tryFind id preg with
-            | Some q -> genQueryArgs q rng
+            | Some q -> genQueryArgs q.Declaration rng
             | None -> [ "p0", Cell.Int 1 ], rng
 
         let margs = qArgsToModel args
@@ -689,7 +693,8 @@ let private queryProbe
         // declaration — the key for EVERY argument set, accepted or not: `invocationKey` is total
         // and asks nothing of validation.
         match QueryRegistry.tryFind id preg with
-        | Some q ->
+        | Some aq ->
+            let q = aq.Declaration
             let mq = bridge q
 
             t <-
@@ -705,7 +710,7 @@ let private queryProbe
                         me
                 | _ -> Tally.disagree (sprintf "seed %d: validateParams verdict differs on %s" seedTag id) t
 
-            let pKey = Query.invocationKey q args
+            let pKey = Query.invocationKey aq args
             let mKey = ModelQuery.invocation_key rn mq margs
 
             t <-
@@ -720,10 +725,12 @@ let private queryProbe
             // presented grant covers the read: the model's `granted` beside production's
             // `Grant.covers`, for the read's own grant, a grant for the same arguments to another
             // query id, and no grant at all.
-            let pId = Query.invocationPreimage q args
+            let pId = Query.invocationPreimage aq args
             let mId = ModelQuery.invocation_identity rn mq margs
-            let own = Query.grant q args
-            let forOther = Query.grant { q with Id = q.Id + "-other" } args
+            let own = Query.grant aq args
+
+            let forOther =
+                Query.grant (QuerySeamLaws.admitted { q with Id = q.Id + "-other" }) args
 
             t <-
                 t
@@ -761,7 +768,7 @@ let private queryProbe
                     | None -> FStar_Pervasives_Native.None
                     | Some t -> FStar_Pervasives_Native.Some t
 
-                let pPage = Query.invocationKeyPage q args token
+                let pPage = Query.invocationKeyPage aq args token
                 let mPage = ModelQuery.invocation_key_page rn mq margs mToken
 
                 t <-
@@ -786,7 +793,7 @@ let private queryProbe
                 t <-
                     t
                     |> Tally.bump "KeysPermuted"
-                    |> Differential.check (Query.invocationKey q (List.rev args) = pKey) (fun () ->
+                    |> Differential.check (Query.invocationKey aq (List.rev args) = pKey) (fun () ->
                         sprintf "seed %d: the shipped invocationKey moved under a reordering of %A" seedTag args)
 
             t <-
@@ -924,7 +931,7 @@ let private genWireError (r: ConfRng.T) : QueryError * ConfRng.T =
 /// The codec tally: the documents read, the refusals compared (and of them the unmutated
 /// declarations the admission gate refused), and the refusal codes reached.
 let private queryCodecTally =
-    Tally.empty [ "Documents"; "AdmissionRefused"; "Refused" ]
+    Tally.empty [ "Documents"; "AdmissionRefused"; "Refused"; "DeclarationsRefusedUnwritten" ]
     |> Tally.sets [ "Codes" ]
 
 /// Runs the model's query codec beside `QueryCodec` over its own column codec: each encoding, and
@@ -990,17 +997,27 @@ let private queryCodecDifferential (queryJson: ModelQuery.query -> ModelCap.jval
         // ---- the declaration, drawn by the seam differential's own generator ----
         let q, r1 = genQueryDecl (sprintf "q-%d" i) rng
         rng <- r1
-        let text = QueryCodec.encode q
+        // Phase 685: only an admitted declaration is written (`QueryCodec.encode` takes one), so the
+        // writer is compared over the drawn declarations the gate admits; a refused one's text is
+        // written by edit (`QueryOracle.declarationText`), so the reader still meets it and its
+        // mutations, and the gate's refusal on read is still compared.
+        let text, written =
+            match QueryRegistry.admit q with
+            | Ok aq -> QueryCodec.encode aq, true
+            | Error _ -> QueryOracle.declarationText q, false
 
         match Json.parse text with
         | Error e -> t <- Tally.disagree (sprintf "seed %d: the declaration did not parse: %A" i e) t
         | Ok j0 ->
             // The encoding is compared as the canonical TEXT both write.
             t <-
-                t
-                |> Differential.check
-                    (Canonical.write Rendering.CrossHost (jvalOfModel (queryJson (codecQueryToModel q))) = text)
-                    (fun () -> sprintf "seed %d: the declaration encodes differently: %s" i text)
+                if written then
+                    t
+                    |> Differential.check
+                        (Canonical.write Rendering.CrossHost (jvalOfModel (queryJson (codecQueryToModel q))) = text)
+                        (fun () -> sprintf "seed %d: the declaration encodes differently: %s" i text)
+                else
+                    Tally.bump "DeclarationsRefusedUnwritten" t
 
             for unmutated, j in mutations j0 do
                 t <-
@@ -1009,7 +1026,7 @@ let private queryCodecDifferential (queryJson: ModelQuery.query -> ModelCap.jval
                         j
                         (QueryCodec.decodeDetailedWith ReadPolicy.Lenient (Canonical.write Rendering.CrossHost j))
                         (ModelQuery.query_of_j columnCodec (jvalToModel j))
-                        (fun a b -> codecQueryToModel a = b)
+                        (fun a b -> codecQueryToModel a.Declaration = b)
                         unmutated
                         t
 
@@ -1349,8 +1366,8 @@ let tests =
                       admitted <- admitted + 1
 
                       Expect.equal
-                          (QueryCodec.decode (QueryCodec.encode q))
-                          (Ok q)
+                          (QueryCodec.decode (QueryCodec.encode (QuerySeamLaws.admitted q)))
+                          (Ok(QuerySeamLaws.admitted q))
                           "an admitted declaration round-trips"
 
                       if not (List.isEmpty q.Where && List.isEmpty q.OrderBy) then
@@ -1366,7 +1383,9 @@ let tests =
 
                           Expect.equal
                               (ModelQuery.invocation_key queryRenderers bare args)
-                              (Query.invocationKey { q with Where = []; OrderBy = [] } [ "p0", Cell.Int 1 ])
+                              (Query.invocationKey
+                                  (QuerySeamLaws.admitted { q with Where = []; OrderBy = [] })
+                                  [ "p0", Cell.Int 1 ])
                               "an unshaped declaration keys as production's"
 
                       if not (List.isEmpty q.Where) then
@@ -1607,13 +1626,13 @@ let tests =
                   "the two exhibits no longer share a PRE-IMAGE"
 
               Expect.notEqual
-                  (Query.invocationKey q one)
-                  (Query.invocationKey q two)
+                  (Query.invocationKey (QuerySeamLaws.admitted q) one)
+                  (Query.invocationKey (QuerySeamLaws.admitted q) two)
                   "and so no longer share a capture key on production"
 
               Expect.equal
                   (ModelQuery.invocation_key queryRenderers mq ModelQuery.collision_one)
-                  (Query.invocationKey q one)
+                  (Query.invocationKey (QuerySeamLaws.admitted q) one)
                   "and the model's key is still production's"
 
               // The one place the float renderer's injectivity premise fails, pinned so it cannot
@@ -1635,8 +1654,8 @@ let tests =
                   "production calls the two argument sets equal"
 
               Expect.equal
-                  (Query.invocationKey qz [ "x", Cell.Float -0.0 ])
-                  (Query.invocationKey qz [ "x", Cell.Float 0.0 ])
+                  (Query.invocationKey (QuerySeamLaws.admitted qz) [ "x", Cell.Float -0.0 ])
+                  (Query.invocationKey (QuerySeamLaws.admitted qz) [ "x", Cell.Float 0.0 ])
                   "and keys them alike"
 
               // The capability seam's pre-225 join spliced `addr=value` pairs on U+0001, so its
@@ -1809,6 +1828,7 @@ let tests =
                     OrderBy = [] }
 
               let mqa = queryToModel qa
+              let admittedQa = QuerySeamLaws.admitted qa
               let mutable qCompared = 0
 
               for _ in 1..500 do
@@ -1819,7 +1839,7 @@ let tests =
 
                   Expect.equal
                       (ModelQuery.invocation_key queryRenderers mqa (qArgsToModel args))
-                      (Query.invocationKey qa args)
+                      (Query.invocationKey admittedQa args)
                       (sprintf "the query model's key is production's on %A" args)
 
                   // Phase 651 — the identity a grant for a read is bound to, over string cells
@@ -1827,14 +1847,14 @@ let tests =
                   // model's beside production's. The "other" grant changes one value.
                   Expect.equal
                       (ModelQuery.invocation_identity queryRenderers mqa (qArgsToModel args))
-                      (Query.invocationPreimage qa args)
+                      (Query.invocationPreimage admittedQa args)
                       (sprintf "the query model's identity is production's on %A" args)
 
-                  let own = Query.grant qa args
+                  let own = Query.grant admittedQa args
 
                   let other =
                       Query.grant
-                          qa
+                          admittedQa
                           (args
                            |> List.mapi (fun i (n, c) ->
                                match c with
@@ -1848,7 +1868,7 @@ let tests =
                               mqa
                               (qArgsToModel args)
                               (FStar_Pervasives_Native.Some grant.Invocation))
-                          (Grant.covers (Query.invocationPreimage qa args) [ grant ])
+                          (Grant.covers (Query.invocationPreimage admittedQa args) [ grant ])
                           (sprintf "the query model's granted is production's covers on %A" args)
 
               Expect.equal qCompared 500 "every drawn argument set was compared"

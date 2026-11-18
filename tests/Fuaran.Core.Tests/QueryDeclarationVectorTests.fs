@@ -129,7 +129,7 @@ let private registryOf (j: JVal) : Query list =
         match d with
         | JStr t ->
             match QueryCodec.decode t with
-            | Ok q -> q
+            | Ok q -> q.Declaration
             | Error e -> failwithf "a declaration of the head is refused: %s" e
         | other -> failwithf "a registry entry is not a string: %A" other)
 
@@ -376,7 +376,8 @@ let private readerAgainstGate (j: JVal) : (string * string) list =
                   let expected = field "expected" v |> Option.get
 
                   match
-                      QueryCodec.decodeDetailedWith ReadPolicy.Lenient (QueryCodec.encode q), text "verdict" expected
+                      QueryCodec.decodeDetailedWith ReadPolicy.Lenient (QueryOracle.declarationText q),
+                      text "verdict" expected
                   with
                   | Ok _, "admitted" -> ()
                   | Error e, "refused" ->

@@ -117,8 +117,8 @@ let private readings: Query =
         { Host = ReadsHost
           Determinism = Effect.network }
       Source = Ref "sensor-archive"
-      TimeoutMs = Some 2000
-      PageSize = Some 50
+      TimeoutMs = PositiveInt.tryCreate 2000
+      PageSize = PositiveInt.tryCreate 50
       Where = []
       OrderBy = [] }
 
@@ -839,15 +839,19 @@ let tests =
 
                 testCase "the query codec's documents read strictly, and an unknown member is refused"
                 <| fun _ ->
-                    let decl = QueryCodec.encode invoices
-                    Expect.equal (QueryCodec.decodeWith ReadPolicy.Strict decl) (Ok invoices) "a declaration"
+                    let decl = QueryCodec.encode (QuerySeamLaws.admitted invoices)
+
+                    Expect.equal
+                        (QueryCodec.decodeWith ReadPolicy.Strict decl)
+                        (Ok(QuerySeamLaws.admitted invoices))
+                        "a declaration"
 
                     for path in [ []; [ "params"; "0" ]; [ "resultSchema"; "1" ]; [ "effect" ] ] do
                         let tampered = injectInto path decl
 
                         Expect.equal
                             (QueryCodec.decodeWith ReadPolicy.Lenient tampered)
-                            (Ok invoices)
+                            (Ok(QuerySeamLaws.admitted invoices))
                             (sprintf "Lenient at %A" path)
 
                         match QueryCodec.decodeWith ReadPolicy.Strict tampered with

@@ -116,6 +116,27 @@ type SortKey =
         Direction: SortDirection
     }
 
+/// A positive integer (Phase 685, DECISIONS.md D264.8 point 4): a whole number of at least 1. Built
+/// only by `PositiveInt.tryCreate`, which answers `None` for any other value, so a value of this type
+/// is positive wherever it is read. It says nothing of what it counts; the member that carries it
+/// gives it its meaning.
+type PositiveInt =
+    internal
+    | PositiveInt of int
+
+    /// The integer, at least 1.
+    member this.Value: int =
+        let (PositiveInt n) = this
+        n
+
+/// Building a `PositiveInt`.
+[<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
+module PositiveInt =
+
+    /// `Some` positive integer for a value of at least 1, `None` for any other: the way to build one.
+    let tryCreate (n: int) : PositiveInt option =
+        if n >= 1 then Some(PositiveInt n) else None
+
 /// A query declaration: a named, registrable data-acquisition contract. Pure data — it carries no
 /// host code. `Effect` reuses `Function`'s two-axis `EffectClass` verbatim (an empty determinism set = pure
 /// relational/synthetic, re-evaluable; a set naming `Network` and/or `Clock` = captured result replayed). `Source`
@@ -139,11 +160,13 @@ type Query =
         /// can resolve (one it cannot is answered as `SourceNotResolved`).
         Source: DataSource
         /// The fetch's time budget in milliseconds, for the host resolver to honour; the seam
-        /// itself times nothing. `None` declares no budget, and the codec omits the member.
-        TimeoutMs: int option
+        /// itself times nothing. `None` declares no budget, and the codec omits the member. A
+        /// positive integer since Phase 685: the reader refuses one that is not, at `timeoutMs`.
+        TimeoutMs: PositiveInt option
         /// The rows per page the host should return; `None` leaves paging to the source, and
-        /// the codec omits the member.
-        PageSize: int option
+        /// the codec omits the member. A positive integer since Phase 685: the reader refuses one
+        /// that is not, at `pageSize`.
+        PageSize: PositiveInt option
         /// The filter the host applies to the rows (Phase 398): a CONJUNCTION — a row is returned
         /// when it satisfies every predicate. Empty declares no filter, and the codec omits the
         /// member, so a declaration without one encodes as it did before the member existed.
@@ -152,6 +175,28 @@ type Query =
         /// leaves the order to the source, and the codec omits the member.
         OrderBy: SortKey list
     }
+
+/// A declaration the admission gate admits (Phase 685, DECISIONS.md D264.7 point 1 and D264.8 point
+/// 1): what the declaration's writer (`QueryCodec.encode`), the read's identity
+/// (`Query.invocationKey`, `invocationKeyPage`, `invocationPreimage`) and `Query.grant` take, so no
+/// declaration the gate refuses can be written or keyed. Only the gate makes one from a declaration
+/// (`QueryRegistry.admit`); the declaration reader and the registry's two readers (`tryFind`,
+/// `enumerate`) answer one, and the registry keys its journal and its grants over one, since it
+/// holds only declarations the gate admitted. Its fields are the
+/// declaration's, read through `Declaration`; two admissions of one declaration are equal.
+///
+/// The writer's contract: an admitted declaration's text reads back as the same declaration where
+/// its embedded table, if it has one, is one the column codec reads. The gate does not read the
+/// source, so an embedded table the column codec refuses is written as text the reader refuses at
+/// `source` (D264.8 point 1).
+type AdmittedQuery =
+    internal
+    | Admitted of Query
+
+    /// The declaration the gate admitted.
+    member this.Declaration: Query =
+        let (Admitted q) = this
+        q
 
 /// A query invocation result — a page of typed rows. `TotalRowCount`/`NextPageToken` are present
 /// when the source can report them (streaming/paging); `None` when unknown.
@@ -300,22 +345,23 @@ module internal QueryWire =
         Decoder.oneOf (predicateTags |> List.map (fun t -> t, t))
 
     /// A literal's JSON value: the value the column codec writes for that cell in a column of its
-    /// type (`ColumnCodec.writeCell`, Phase 514). A literal is written only after admission, which
-    /// holds it to its column's exact type, so the first write succeeds. A literal its type cannot
-    /// hold is written total rather than raised on: a date or timestamp as its text (Phase 422: the
-    /// column holds integers, the text is what was declared), any other cell at its own type, which
-    /// holds every cell of it.
+    /// own type (`ColumnCodec.writeCell`, Phase 514). It is called at the literal's own type, where
+    /// only a date or timestamp whose text names no instant fails, and that is written as its text
+    /// (Phase 422: the column holds integers, the text is what was declared). Every other cell is
+    /// written at its own type; the last arm is unreachable (Phase 685's census, D264.1).
     let private literalJson (ty: ColumnType) (c: Cell) : JVal =
         match ColumnCodec.writeCell "v" ty c, c with
         | Ok v, _ -> v
         | Error _, (Date s | Timestamp s) -> JStr s
-        | Error _, other ->
-            ColumnCodec.writeCell "v" (Cell.typeOf other |> Option.defaultValue ty) other
-            |> Result.defaultValue (JStr "")
+        | Error _, _ -> JStr ""
 
-    /// A comparison's members beside its tag: `column`, the literal's `type` and its `value`.
+    /// A comparison's members beside its tag: `column`, the literal's `type` and its `value`. Defined
+    /// over the literals the admission gate admits (Phase 685): an admitted declaration's predicates
+    /// reach it through the declaration's writer and the read's identity, and a refusal the dispatch
+    /// raises names only such a predicate. A literal the gate refuses reaches it only through a
+    /// query-error document built by hand, which is written total: a `Null` has no type and is
+    /// written as an empty `string`, and what such a document reads back as is not promised.
     let comparedMembers (column: string, v: Cell) : (string * JVal) list =
-        // `Null` has no type: admission refuses it, and nothing reaches here with one.
         let ty = Cell.typeOf v |> Option.defaultValue StringType
 
         [ "column", JStr column

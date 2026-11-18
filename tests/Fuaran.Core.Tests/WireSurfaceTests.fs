@@ -336,13 +336,20 @@ let rec private friendly (t: Type) : string =
 type internal WireRoot =
     /// Built by reflection from a root type: one base document, one document per case of every
     /// union the root reaches, and two per set of a union's cases it reaches (empty, two members).
-    | Derived of package: string * label: string * rootType: Type * encode: (obj -> string)
+    /// `encode` answers `None` for a sample its writer cannot be handed, and `omitted` names every
+    /// such document, so a document goes missing only by name (Phase 685).
+    | Derived of
+        package: string *
+        label: string *
+        rootType: Type *
+        encode: (obj -> string option) *
+        omitted: string list
     /// Written by hand, for a root whose values reflection cannot construct.
     | Specimens of package: string * label: string * docs: (unit -> (string * string) list)
 
 let internal packageOf (r: WireRoot) =
     match r with
-    | Derived(p, _, _, _)
+    | Derived(p, _, _, _, _)
     | Specimens(p, _, _) -> p
 
 /// A witness whose op encoding is a JSON string, so the stream envelopes embed a known payload.
@@ -352,14 +359,87 @@ let private stringStream: StreamWitness<string, unit, string> =
       Decode = fun _ -> Error "not decoded here" }
 
 let private derived<'T> (package: string) (label: string) (encode: 'T -> string) =
-    Derived(package, label, typeof<'T>, (fun o -> encode (unbox<'T> o)))
+    Derived(package, label, typeof<'T>, (fun o -> Some(encode (unbox<'T> o))), [])
+
+/// Phase 685 (DECISIONS.md D264.8 point 6) — a sampled declaration as the admission gate admits it,
+/// reaching the discriminator it was sampled for: the declaration's writer takes only an admitted
+/// declaration. A comparison's literal and its column are made to agree — an integer literal (the
+/// sampler's default) takes the column's type, any other literal is put in canonical form and its
+/// column takes the literal's type — and `contains` is made to read a string column. A `Null` literal
+/// has no type a column could take, so no admitted declaration carries one: `None`.
+let private admittedSample (q: Query) : AdmittedQuery option =
+    let sampleOf (t: ColumnType) : Cell =
+        match t with
+        | IntType -> Int 1
+        | FloatType -> Float 1.5
+        | BoolType -> Bool true
+        | StringType -> Str "s"
+        | DecimalType -> Decimal "1.5"
+        | DateType -> Date "1970-01-01"
+        | TimestampType _ -> Timestamp "1970-01-01T00:00:01Z"
+
+    let canonical (c: Cell) : Cell =
+        match c with
+        | Date _
+        | Timestamp _
+        | Decimal _ -> sampleOf (Cell.typeOf c |> Option.get)
+        | other -> other
+
+    let typeOf (column: string) =
+        q.ResultSchema |> List.tryFind (fun f -> f.Name = column) |> Option.map _.Type
+
+    let retype (column: string) (t: ColumnType) (schema: Schema) =
+        schema |> List.map (fun f -> if f.Name = column then Field.withType t f else f)
+
+    let agree (schema: Schema) (column: string) (v: Cell) : (Schema * Cell) option =
+        match v, typeOf column with
+        | Null, _ -> None
+        | Int _, Some t when t <> IntType -> Some(schema, sampleOf t)
+        | other, _ ->
+            let lit = canonical other
+            Some(retype column (Cell.typeOf lit |> Option.get) schema, lit)
+
+    let step (acc: (Schema * ColumnPredicate list) option) (p: ColumnPredicate) =
+        acc
+        |> Option.bind (fun (schema, ps) ->
+            let compared (make: string * Cell -> ColumnPredicate) (column, v) =
+                agree schema column v
+                |> Option.map (fun (schema', lit) -> schema', ps @ [ make (column, lit) ])
+
+            match p with
+            | ColumnPredicate.EqualTo(c, v) -> compared ColumnPredicate.EqualTo (c, v)
+            | ColumnPredicate.GreaterThan(c, v) -> compared ColumnPredicate.GreaterThan (c, v)
+            | ColumnPredicate.AtLeast(c, v) -> compared ColumnPredicate.AtLeast (c, v)
+            | ColumnPredicate.LessThan(c, v) -> compared ColumnPredicate.LessThan (c, v)
+            | ColumnPredicate.AtMost(c, v) -> compared ColumnPredicate.AtMost (c, v)
+            | ColumnPredicate.Contains(c, _) -> Some(retype c StringType schema, ps @ [ p ])
+            | ColumnPredicate.IsNull _
+            | ColumnPredicate.IsNotNull _ -> Some(schema, ps @ [ p ]))
+
+    q.Where
+    |> List.fold step (Some(q.ResultSchema, []))
+    |> Option.map (fun (schema, where) ->
+        match
+            QueryRegistry.admit
+                { q with
+                    ResultSchema = schema
+                    Where = where }
+        with
+        | Ok a -> a
+        | Error e -> failwithf "a sampled declaration restated for the gate is still refused: %A" e)
 
 /// Every root of the wire surface, per package. Adding a wire-bearing package means adding its
 /// roots here; the roster test below refuses a packable package that is neither here nor in
 /// `notWire`, so the choice cannot be skipped.
 let internal roots: WireRoot list =
     [ derived<DataSource> "Fuaran.Core.Column" "dataSource" ColumnCodec.encode
-      derived<Query> "Fuaran.Core.Query" "query" QueryCodec.encode
+      Derived(
+          "Fuaran.Core.Query",
+          "query",
+          typeof<Query>,
+          (fun o -> unbox<Query> o |> admittedSample |> Option.map QueryCodec.encode),
+          [ "query / Cell.Null" ]
+      )
       derived<QueryResult> "Fuaran.Core.Query" "queryResult" QueryCodec.encodeResult
       derived<Deferred<QueryResult>> "Fuaran.Core.Query" "deferredQueryResult" QueryCodec.encodeDeferredResult
       derived<Capability> "Fuaran.Core.Function" "capability" CapabilityCodec.encode
@@ -413,15 +493,27 @@ let internal notWire: (string * string) list =
 let internal documentsOf (r: WireRoot) : (string * string) list * (string * Type * string * (Type * string) list) list =
     match r with
     | Specimens(_, _, docs) -> docs (), []
-    | Derived(_, label, rootType, encode) ->
-        let emit (name: string) (v: obj) =
-            try
-                encode v
-            with e ->
-                failwithf "wire root %s: encoding document `%s` threw — %s" label name e.Message
+    | Derived(_, label, rootType, encode, omitted) ->
+        let emit (name: string) (v: obj) : string option =
+            let written =
+                try
+                    encode v
+                with e ->
+                    failwithf "wire root %s: encoding document `%s` threw — %s" label name e.Message
+
+            match written, List.contains name omitted with
+            | Some _, false
+            | None, true -> written
+            | None, false ->
+                failwithf "wire root %s: document `%s` was not written, and is not named omitted" label name
+            | Some _, true -> failwithf "wire root %s: document `%s` is named omitted, and was written" label name
 
         let baseLog = ResizeArray()
-        let baseDoc = label, emit label (build OneMember None baseLog [] rootType)
+
+        let baseDoc =
+            match emit label (build OneMember None baseLog [] rootType) with
+            | Some text -> label, text
+            | None -> failwithf "wire root %s: its base document was not written" label
 
         let perCase =
             [ for u in reachableUnions rootType |> List.sortBy friendly do
@@ -429,7 +521,10 @@ let internal documentsOf (r: WireRoot) : (string * string) list * (string * Type
                       let log = ResizeArray()
                       let v = build OneMember (Some(u, c)) log [] rootType
                       let name = sprintf "%s / %s.%s" label (friendly u) c.Name
-                      yield (name, emit name v), (name, u, c.Name, List.ofSeq log) ]
+
+                      match emit name v with
+                      | Some text -> yield (name, text), (name, u, c.Name, List.ofSeq log)
+                      | None -> () ]
 
         // A per-case document draws a set of union cases with one member; a set's empty and
         // several-member spellings are documents of their own (for `DeterminismSource`, the
@@ -445,7 +540,10 @@ let internal documentsOf (r: WireRoot) : (string * string) list * (string * Type
                       let log = ResizeArray()
                       let v = build shape (Some(u, first)) log [] rootType
                       let name = sprintf "%s / Set<%s>.%s" label (friendly u) (setShapeName shape)
-                      yield (name, emit name v), (name, st, setShapeName shape, List.ofSeq log) ]
+
+                      match emit name v with
+                      | Some text -> yield (name, text), (name, st, setShapeName shape, List.ofSeq log)
+                      | None -> () ]
 
         let perDoc = perCase @ perSetShape
         baseDoc :: (perDoc |> List.map fst), perDoc |> List.map snd

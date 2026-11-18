@@ -71,11 +71,16 @@ module QueryCodec =
         | Some n -> [ name, JInt n ]
         | None -> []
 
+    /// A budget's member, written as its value, or nothing for `None`.
+    let private budgetJson (name: string) (v: PositiveInt option) : (string * JVal) list =
+        optIntJson name (v |> Option.map _.Value)
+
     // ---- query declaration ----
 
     /// A budget (`timeoutMs`, `pageSize`): a positive integer (Phase 685, D264.7). A value that is not
     /// positive is refused `OutOfRange` at the member; a fraction or a string is `WrongKind`.
-    let private budgetOf: Decoder<int> = Decoder.intRange 1 System.Int32.MaxValue
+    let private budgetOf: Decoder<PositiveInt> =
+        Decoder.intRange 1 System.Int32.MaxValue >> Result.map PositiveInt.PositiveInt
 
     let internal queryJson (q: Query) : JVal =
         JObj(
@@ -85,8 +90,8 @@ module QueryCodec =
               "resultSchema", schemaJson q.ResultSchema
               "effect", EffectCodec.toJson q.Effect
               "source", ColumnCodec.encodeJson q.Source ]
-            @ optIntJson "timeoutMs" q.TimeoutMs
-            @ optIntJson "pageSize" q.PageSize
+            @ budgetJson "timeoutMs" q.TimeoutMs
+            @ budgetJson "pageSize" q.PageSize
             @ (if List.isEmpty q.Where then
                    []
                else
@@ -104,8 +109,13 @@ module QueryCodec =
     /// `value`; `contains` with its `text`; `isNull`, `isNotNull`) and a non-empty `OrderBy` the
     /// `orderBy` array of `{column, direction}` keys; both are omitted when empty, so a declaration
     /// with neither renders the bytes it rendered before the members existed.
-    let encode (q: Query) : string =
-        Canonical.write Rendering.CrossHost (queryJson q)
+    ///
+    /// Since Phase 685 it takes an `AdmittedQuery` (DECISIONS.md D264.7 point 1): a declaration is
+    /// admitted (`QueryRegistry.admit`) before it is written, so no declaration the gate refuses is
+    /// written as one it admits. The text reads back as the same declaration where its embedded
+    /// table, if it has one, is one the column codec reads (D264.8 point 1).
+    let encode (q: AdmittedQuery) : string =
+        Canonical.write Rendering.CrossHost (queryJson q.Declaration)
 
     // Phase 295 — a decode failure is a decode failure: the readers answer a typed `DecodeError` (the
     // `…Detailed` entry points, Phase 310's convention) and the string forms its sentence, as
@@ -155,7 +165,7 @@ module QueryCodec =
         (predicate: Decoder<ColumnPredicate>)
         (sortKey: Decoder<SortKey>)
         (el: JVal)
-        : Result<Query, DecodeError> =
+        : Result<AdmittedQuery, DecodeError> =
         Decoder.field "$type" (Decoder.oneOf [ "query", () ]) el
         |> Result.bind (fun () -> Decoder.field "id" Decoder.str el)
         |> Result.bind (fun id ->
@@ -189,11 +199,10 @@ module QueryCodec =
                                                       Where = wh |> Option.defaultValue []
                                                       OrderBy = ob |> Option.defaultValue [] }
 
-                                                match QueryRegistry.admissionFaultAt q with
-                                                | Some(path, e) -> Error(admissionRefused path e)
-                                                | None -> Ok q)))))))))
+                                                QueryRegistry.admitAt q
+                                                |> Result.mapError (fun (path, e) -> admissionRefused path e))))))))))
 
-    let internal queryOf: Decoder<Query> =
+    let internal queryOf: Decoder<AdmittedQuery> =
         queryUnder QuerySeamCodec.decodeColumnPredicate QuerySeamCodec.decodeSortKey
 
     // ---- query result ----
@@ -421,8 +430,9 @@ module QueryCodec =
     /// Decode a query declaration under a read policy, answering a typed refusal (Phase 295; Phase
     /// 310's convention): its code, the path to the value at fault, and `decodeWith`'s sentence.
     /// `Strict` refuses an unknown member of the declaration, its parameters, its result columns or
-    /// its effect. A parse failure is refused at the root.
-    let decodeDetailedWith (policy: ReadPolicy) (s: string) : Result<Query, DecodeError> =
+    /// its effect. A parse failure is refused at the root. It runs the admission gate last, so it
+    /// answers an `AdmittedQuery` (Phase 685).
+    let decodeDetailedWith (policy: ReadPolicy) (s: string) : Result<AdmittedQuery, DecodeError> =
         match policy with
         | ReadPolicy.Lenient -> readWith policy strictQuery queryOf s
         | ReadPolicy.Strict ->
@@ -450,7 +460,7 @@ module QueryCodec =
 
     /// Decode a query declaration — `Result`-typed with a named error, as `CapabilityCodec.decode`
     /// (Phase 295: the sentence of `decodeDetailedWith`'s refusal; it was an `ExecutionFailed` before).
-    let decode (s: string) : Result<Query, string> =
+    let decode (s: string) : Result<AdmittedQuery, string> =
         decodeDetailedWith ReadPolicy.Lenient s |> Result.mapError DecodeError.describe
 
     /// Decode a `QueryResult`, `Result`-typed with a named error (Phase 295).
@@ -465,7 +475,7 @@ module QueryCodec =
 
     /// `decode` under a read policy: `Strict` refuses an unknown member of the declaration, its
     /// parameters, its result columns or its effect.
-    let decodeWith (policy: ReadPolicy) (s: string) : Result<Query, string> =
+    let decodeWith (policy: ReadPolicy) (s: string) : Result<AdmittedQuery, string> =
         decodeDetailedWith policy s |> Result.mapError DecodeError.describe
 
     /// `decodeResult` under a read policy.

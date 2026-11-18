@@ -3,6 +3,26 @@ namespace Fuaran.Core
 /// The query seam family (Phase 198; `SeamLaws` until the Phase 388 split along its banners).
 module internal QuerySeamLaws =
 
+    /// A declaration the kit builds, as the admission gate admits it (Phase 685: the writer and the
+    /// read's identity take only an admitted declaration). Every declaration the kit writes or keys
+    /// is admitted by construction, so a refusal here is the kit's own defect, raised as one.
+    let internal admitted (q: Query) : AdmittedQuery =
+        match QueryRegistry.admit q with
+        | Ok a -> a
+        | Error e -> failwithf "the kit built a declaration the gate refuses: %A (%A)" q e
+
+    /// A predicate's document, for a predicate the gate may refuse (Phase 685): the predicate's own
+    /// writer is internal to its package (DECISIONS.md D264.8 point 3), and the query-error writer,
+    /// total for an error built by hand, writes the `predicate` member of the refusal that carries it
+    /// through the same body. What a vector or a re-encoding that states a refused predicate reads.
+    let internal predicateJson (p: ColumnPredicate) : JVal =
+        match QuerySeamCodec.encodeQueryError (PredicateNotHonoured p) with
+        | JObj ms ->
+            match ms |> List.tryPick (fun (k, v) -> if k = "predicate" then Some v else None) with
+            | Some v -> v
+            | None -> failwithf "a predicateNotHonoured document carries no predicate: %A" ms
+        | other -> failwithf "a query-error document is not an object: %A" other
+
     /// Certify the `Fuaran.Core.Query` data-acquisition seam (Phase 46): typed-param validation
     /// (in-type accepts; wrong-type + unknown reject; since Phase 226 the all-`Null` argument set,
     /// built from the declaration, is refused as `RequiredParamsNull` naming every required param,
@@ -124,10 +144,12 @@ module internal QuerySeamLaws =
                     { Host = ReadsHost
                       Determinism = Effect.network }
                   Source = Ref("src-" + string i)
-                  TimeoutMs = Some 5000
+                  TimeoutMs = PositiveInt.tryCreate 5000
                   PageSize = None
                   Where = []
                   OrderBy = [] }
+
+            let aq = admitted q
 
             // param-validation: in-type accepts; wrong-type + unknown reject.
             (match Query.validateParams q [ "p0", Int 42 ] with
@@ -179,7 +201,7 @@ module internal QuerySeamLaws =
                   TotalRowCount = Some nRows
                   NextPageToken = None }
 
-            let key = Query.invocationKey q [ "p0", Int 42 ]
+            let key = Query.invocationKey aq [ "p0", Int 42 ]
             let det = Query.determinismTag q
 
             let _, caps =
@@ -231,7 +253,7 @@ module internal QuerySeamLaws =
                     | Ok(Ready r), Ok(Ready r') when r = r' -> Some r
                     | _ -> None)
 
-            let keys = tokens |> List.map (Query.invocationKeyPage q pagedArgs)
+            let keys = tokens |> List.map (Query.invocationKeyPage aq pagedArgs)
 
             // Capture every page under its own key, then replay strictly: each key yields its page,
             // and the journal is consumed exactly.
@@ -267,7 +289,7 @@ module internal QuerySeamLaws =
             paging.Check(
                 pageNums = List.init pages Some
                 && List.distinct keys = keys
-                && Query.invocationKeyPage q pagedArgs None = Query.invocationKey q pagedArgs
+                && Query.invocationKeyPage aq pagedArgs None = Query.invocationKey aq pagedArgs
                 && fst replayed = served
                 && List.isEmpty (snd replayed)
                 && Query.invokePage q pagedArgs (Some "t") resolver = Error(ExecutionFailed("no such page", []))
@@ -307,7 +329,7 @@ module internal QuerySeamLaws =
                 |> Result.bind (QueryRegistry.register qB)
              with
              | Ok r ->
-                 let ids = QueryRegistry.enumerate r |> List.map _.Id
+                 let ids = QueryRegistry.enumerate r |> List.map _.Declaration.Id
                  enumeration.Check((ids = List.sort ids), fun () -> at (sprintf "enumerate not id-sorted: %A" ids))
              | Error e -> enumeration.Check(false, fun () -> at (sprintf "register failed: %A" e)))
 
@@ -367,8 +389,8 @@ module internal QuerySeamLaws =
             )
 
             // declaration + result round-trip.
-            (match QueryCodec.decode (QueryCodec.encode q) with
-             | Ok q2 -> roundtrip.Check((q2 = q), fun () -> at "query ≠ round-trip")
+            (match QueryCodec.decode (QueryCodec.encode aq) with
+             | Ok q2 -> roundtrip.Check((q2 = aq), fun () -> at "query ≠ round-trip")
              | Error m -> roundtrip.Check(false, fun () -> at (sprintf "query decode failed: %A" m)))
 
             (match QueryCodec.decodeResult (QueryCodec.encodeResult realized) with
@@ -601,9 +623,24 @@ module internal QuerySeamLaws =
 
                 let strayError = UnknownColumn("absent", [ "n"; "s" ])
 
-                let admitted =
+                // Its text is an admitted declaration's with the `where` member edited (Phase 685: no
+                // writer writes a declaration the gate refuses).
+                let strayText =
+                    match Decoder.parse ReadOptions.strict (QueryCodec.encode (admitted qS)) with
+                    | Ok(JObj ms) ->
+                        let isNullAbsent = JObj [ "$type", JStr "isNull"; "column", JStr "absent" ]
+
+                        Canonical.write
+                            Rendering.CrossHost
+                            (JObj(
+                                ms
+                                |> List.map (fun (k, v) -> if k = "where" then k, JArr [ isNullAbsent ] else k, v)
+                            ))
+                    | other -> failwithf "an admitted declaration's text did not read back as an object: %A" other
+
+                let strayRefused =
                     QueryRegistry.register stray QueryRegistry.empty = Error strayError
-                    && (match QueryCodec.decodeDetailedWith ReadPolicy.Lenient (QueryCodec.encode stray) with
+                    && (match QueryCodec.decodeDetailedWith ReadPolicy.Lenient strayText with
                         | Error e ->
                             // the code, the path, and the sentence as the projection of the registry's
                             // own error (Phase 520: no reader re-spells a refusal)
@@ -613,17 +650,17 @@ module internal QuerySeamLaws =
                         | Ok _ -> false)
 
                 // Absent is absent: a declaration with neither member writes neither.
-                let bare = QueryCodec.encode { qS with Where = []; OrderBy = [] }
+                let bare = QueryCodec.encode (admitted { qS with Where = []; OrderBy = [] })
 
                 let absentOmitted =
                     not (bare.Contains "\"where\"") && not (bare.Contains "\"orderBy\"")
 
                 let keysApart =
-                    let k = Query.invocationKey qS goodArgs
+                    let k = Query.invocationKey (admitted qS) goodArgs
 
-                    k <> Query.invocationKey { qS with Where = [] } goodArgs
-                    && k <> Query.invocationKey { qS with OrderBy = [] } goodArgs
-                    && Query.invocationKeyPage qS goodArgs None = k
+                    k <> Query.invocationKey (admitted { qS with Where = [] }) goodArgs
+                    && k <> Query.invocationKey (admitted { qS with OrderBy = [] }) goodArgs
+                    && Query.invocationKeyPage (admitted qS) goodArgs None = k
 
                 match QueryRegistry.register qS QueryRegistry.empty with
                 | Error e -> shape.Fail(at (sprintf "a well-formed filtered declaration was refused: %A" e))
@@ -685,14 +722,14 @@ module internal QuerySeamLaws =
                         && heldToOwn
                         && capturedP = refusedP
                         && replayedP = Result.mapError ReplayFailure.Refused refusedP
-                        && QueryCodec.decode (QueryCodec.encode qS) = Ok qS
+                        && QueryCodec.decode (QueryCodec.encode (admitted qS)) = Ok(admitted qS)
                         && keysApart
-                        && admitted
+                        && strayRefused
                         && absentOmitted,
                         fun () ->
                             at (
                                 sprintf
-                                    "filter %A order %A: served %A seen %A refused %A / %A / foreign %A captured %A replayed %A keysApart %b admitted %b absentOmitted %b"
+                                    "filter %A order %A: served %A seen %A refused %A / %A / foreign %A captured %A replayed %A keysApart %b stray %b absentOmitted %b"
                                     predicate
                                     order
                                     served
@@ -703,7 +740,7 @@ module internal QuerySeamLaws =
                                     capturedP
                                     replayedP
                                     keysApart
-                                    admitted
+                                    strayRefused
                                     absentOmitted
                             )
                     ))
@@ -765,7 +802,7 @@ module internal QuerySeamLaws =
             | Some q ->
                 match w.Dispatch id args (fun q' -> resolver args q') with
                 | Ok(Ready r) ->
-                    let schemaOk = r.Rows.Schema = q.ResultSchema
+                    let schemaOk = r.Rows.Schema = q.Declaration.ResultSchema
 
                     let rowsOk =
                         match Table.validate r.Rows with
@@ -780,7 +817,7 @@ module internal QuerySeamLaws =
                                     "query %s settled with schema %A (declared %A)%s"
                                     id
                                     r.Rows.Schema
-                                    q.ResultSchema
+                                    q.Declaration.ResultSchema
                                     (match rowsOk with
                                      | Some e -> sprintf " and rows Table.validate refuses: %A" e
                                      | None -> "")

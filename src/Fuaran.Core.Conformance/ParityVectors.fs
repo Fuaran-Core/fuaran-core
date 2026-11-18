@@ -702,7 +702,7 @@ let private query677 (id: string) (ps: QueryParam list) : Query =
           Determinism = Effect.network }
       Source = Ref id
       TimeoutMs = None
-      PageSize = Some 50
+      PageSize = PositiveInt.tryCreate 50
       Where = []
       OrderBy = [] }
 
@@ -724,6 +724,10 @@ let private ledgerQuery: Query =
         [ { qParam "n" IntType with
               Required = true } ]
 
+/// The two declarations as the gate admits them: what the identity and the grant take (Phase 685).
+let private everyAdmitted = QuerySeamLaws.admitted everyQuery
+let private ledgerAdmitted = QuerySeamLaws.admitted ledgerQuery
+
 /// `disclosure` parks a guest's read of `every` and denies a guest the ledger.
 let private queries677: QueryRegistry<string> =
     [ everyQuery; ledgerQuery ]
@@ -739,7 +743,7 @@ let private queries677: QueryRegistry<string> =
                 | _ -> PolicyDecision.Allow }
 
 let private queryIdentityHex (args: (string * Cell) list) : string =
-    hexOf (Hash.utf8Bytes (Query.invocationPreimage everyQuery args))
+    hexOf (Hash.utf8Bytes (Query.invocationPreimage everyAdmitted args))
 
 let private queryDecide (ctx: string) (grant: Grant option) (id: string) (args: (string * Cell) list) =
     namedText QueryCodec.encodeQueryError (QueryRegistry.decideNamed queries677 ctx grant id args)
@@ -1447,16 +1451,17 @@ let vectors: (string * string) list =
       "query/identity/float-neg-zero", queryIdentityHex [ "b", Float -0.0 ]
       "query/identity/float-past-2-53", queryIdentityHex [ "b", Float 123456789012345678.0 ]
       "query/identity/null", queryIdentityHex [ "d", Null; "a", Int 1 ]
-      "query/identity/non-ascii", Hash.sha256Hex (Query.invocationPreimage everyQuery [ "d", Str unicodeSample ])
+      "query/identity/non-ascii", Hash.sha256Hex (Query.invocationPreimage everyAdmitted [ "d", Str unicodeSample ])
       "query/grant/covers",
-      (let own = Query.grant everyQuery everyKind677
+      (let own = Query.grant everyAdmitted everyKind677
 
        bits
-           [ Grant.covers (Query.invocationPreimage everyQuery (List.rev everyKind677)) [ own ]
-             Grant.covers (Query.invocationPreimage everyQuery [ "b", Float 0.1 ]) [ own ]
-             Grant.covers (Query.invocationPreimage ledgerQuery everyKind677) [ own ] ])
+           [ Grant.covers (Query.invocationPreimage everyAdmitted (List.rev everyKind677)) [ own ]
+             Grant.covers (Query.invocationPreimage everyAdmitted [ "b", Float 0.1 ]) [ own ]
+             Grant.covers (Query.invocationPreimage ledgerAdmitted everyKind677) [ own ] ])
       "query/decide/guest", queryDecide "guest" None "every" everyKind677
-      "query/decide/guest-granted", queryDecide "guest" (Some(Query.grant everyQuery everyKind677)) "every" everyKind677
+      "query/decide/guest-granted",
+      queryDecide "guest" (Some(Query.grant everyAdmitted everyKind677)) "every" everyKind677
       "query/decide/guest-ledger", queryDecide "guest" None "ledger" [ "n", Int 5 ]
       "query/decide/staff", queryDecide "staff" None "every" []
       "query/decide/unregistered", queryDecide "staff" None "nope" []

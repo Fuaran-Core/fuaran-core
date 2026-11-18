@@ -376,8 +376,8 @@ module Query =
     /// tag `w` (the filter) or `o` (the order), and its canonical text — so the same arguments to
     /// two declarations that filter or order differently key apart. A declaration with neither adds
     /// nothing, and its key is byte for byte the key it had before.
-    let invocationKey (q: Query) (args: (string * Cell) list) : string =
-        Hash.keyedBy q.Id (grammarFields q args)
+    let invocationKey (q: AdmittedQuery) (args: (string * Cell) list) : string =
+        Hash.keyedBy q.Declaration.Id (grammarFields q.Declaration args)
 
     /// The capture key of ONE PAGE of an invocation (Phase 316): `invocationKey`'s pre-image with
     /// the page token in front of it, so a paged `Network` query captured page by page replays each
@@ -390,10 +390,10 @@ module Query =
     /// token) pairs share a pre-image only when they hold the same bindings AND the same token, so
     /// distinct tokens give distinct pre-images. That two distinct pre-images hash apart is a property
     /// of `Hash.fnv1a` and is not claimed.
-    let invocationKeyPage (q: Query) (args: (string * Cell) list) (pageToken: string option) : string =
+    let invocationKeyPage (q: AdmittedQuery) (args: (string * Cell) list) (pageToken: string option) : string =
         match pageToken with
         | None -> invocationKey q args
-        | Some token -> Hash.keyedBy q.Id ([ ""; "p"; token ] @ grammarFields q args)
+        | Some token -> Hash.keyedBy q.Declaration.Id ([ ""; "p"; token ] @ grammarFields q.Declaration args)
 
     /// The IDENTITY of one read (Phase 638 stated it, Phase 651 names it) — what a `Grant` for a
     /// read is for: the query id, then the fields `invocationKey` hashes (the declaration's filter
@@ -403,12 +403,12 @@ module Query =
     /// bindings (`invocation_identity_injective` in `proofs/Query.fst`). The page token is not in
     /// it, so a grant for a read covers every page of it (DECISIONS.md D261.4); `invocationKey`
     /// ends in a 32-bit cache hash, so an approval is never bound to it.
-    let invocationPreimage (q: Query) (args: (string * Cell) list) : string =
-        Hash.canonicalFields (q.Id :: grammarFields q args)
+    let invocationPreimage (q: AdmittedQuery) (args: (string * Cell) list) : string =
+        Hash.canonicalFields (q.Declaration.Id :: grammarFields q.Declaration args)
 
     /// The grant for exactly this read of `q` (Phase 651): `Grant.ofInvocation` of its
     /// `invocationPreimage`. What a host mints when an approval is given for a previewed read.
-    let grant (q: Query) (args: (string * Cell) list) : Grant =
+    let grant (q: AdmittedQuery) (args: (string * Cell) list) : Grant =
         Grant.ofInvocation (invocationPreimage q args)
 
     /// Validate typed `args` (name -> bound `Cell`) against the query's declared params *before* any

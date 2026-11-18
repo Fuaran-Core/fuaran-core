@@ -113,7 +113,7 @@ let private check (file: JVal) : (string * string) list =
             match d with
             | JStr s ->
                 match QueryCodec.decode s, Json.parse s with
-                | Ok q, Ok j -> q.Id, (q, j)
+                | Ok q, Ok j -> q.Declaration.Id, (q, j)
                 | e, _ -> failwithf "a registry declaration does not decode: %A" e
             | other -> failwithf "a registry entry is not a string: %A" other)
         |> Map.ofList

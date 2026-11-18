@@ -129,7 +129,7 @@ let private readingsQuery: Query =
         { Host = ReadsHost
           Determinism = Effect.network }
       Source = Ref "readings"
-      TimeoutMs = Some 5000
+      TimeoutMs = PositiveInt.tryCreate 5000
       PageSize = None
       Where = []
       OrderBy = [] }
@@ -181,7 +181,7 @@ let private resolverBeforeRefusal
     : Result<Deferred<QueryResult>, QueryError> =
     match QueryRegistry.tryFind id queryRegistry with
     | Some q ->
-        let early = resolve q
+        let early = resolve q.Declaration
         QueryRegistry.dispatch queryRegistry () None id args (fun _ -> early)
     | None -> QueryRegistry.dispatch queryRegistry () None id args resolve
 

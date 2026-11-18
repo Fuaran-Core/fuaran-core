@@ -17,8 +17,8 @@ let private sampleQuery: Query =
         { Host = ReadsHost
           Determinism = Effect.network }
       Source = Ref "sales"
-      TimeoutMs = Some 5000
-      PageSize = Some 100
+      TimeoutMs = PositiveInt.tryCreate 5000
+      PageSize = PositiveInt.tryCreate 100
       Where = []
       OrderBy = [] }
 
@@ -98,7 +98,7 @@ let tests =
                   |> Result.toOption
                   |> Option.get
 
-              Expect.equal (QueryRegistry.enumerate r |> List.map _.Id) [ "aaa"; "zzz" ] "id-sorted"
+              Expect.equal (QueryRegistry.enumerate r |> List.map _.Declaration.Id) [ "aaa"; "zzz" ] "id-sorted"
 
           testCase "dispatch validates params before running the resolver"
           <| fun _ ->
@@ -119,8 +119,8 @@ let tests =
 
           testCase "query declaration round-trips through the codec"
           <| fun _ ->
-              match QueryCodec.decode (QueryCodec.encode sampleQuery) with
-              | Ok q2 -> Expect.equal q2 sampleQuery "declaration round-trip"
+              match QueryCodec.decode (QueryCodec.encode (QuerySeamLaws.admitted sampleQuery)) with
+              | Ok q2 -> Expect.equal q2 (QuerySeamLaws.admitted sampleQuery) "declaration round-trip"
               | Error e -> failtestf "decode failed: %A" e
 
           testCase "a query with a multi-factor determinism round-trips and keys its capture by the canonical label"
@@ -133,8 +133,8 @@ let tests =
 
               Expect.equal (Query.determinismTag q) "clock+network" "the capture label names both factors"
 
-              match QueryCodec.decode (QueryCodec.encode q) with
-              | Ok q2 -> Expect.equal q2 q "a multi-factor declaration round-trips"
+              match QueryCodec.decode (QueryCodec.encode (QuerySeamLaws.admitted q)) with
+              | Ok q2 -> Expect.equal q2 (QuerySeamLaws.admitted q) "a multi-factor declaration round-trips"
               | Error e -> failtestf "decode failed: %A" e
 
           testCase "query result round-trips through the codec"
@@ -155,9 +155,15 @@ let tests =
 
           testCase "invocationKey is param-order-independent and arg-sensitive"
           <| fun _ ->
-              let k1 = Query.invocationKey sampleQuery [ "year", Int 2026; "region", Str "UK" ]
-              let k2 = Query.invocationKey sampleQuery [ "region", Str "UK"; "year", Int 2026 ]
-              let k3 = Query.invocationKey sampleQuery [ "year", Int 2025; "region", Str "UK" ]
+              let k1 =
+                  Query.invocationKey (QuerySeamLaws.admitted sampleQuery) [ "year", Int 2026; "region", Str "UK" ]
+
+              let k2 =
+                  Query.invocationKey (QuerySeamLaws.admitted sampleQuery) [ "region", Str "UK"; "year", Int 2026 ]
+
+              let k3 =
+                  Query.invocationKey (QuerySeamLaws.admitted sampleQuery) [ "year", Int 2025; "region", Str "UK" ]
+
               Expect.equal k1 k2 "order-independent"
               Expect.notEqual k1 k3 "arg-sensitive"
 
@@ -342,8 +348,8 @@ let readerAdmissionTests =
         "Query readers admit what the registry admits (Phase 385)"
         [ testCase "a query document whose $type is not query is a DecodeError naming the tag"
           <| fun _ ->
-              let text = QueryCodec.encode sampleQuery
-              Expect.equal (QueryCodec.decode text) (Ok sampleQuery) "round trip"
+              let text = QueryCodec.encode (QuerySeamLaws.admitted sampleQuery)
+              Expect.equal (QueryCodec.decode text) (Ok(QuerySeamLaws.admitted sampleQuery)) "round trip"
 
               let other = retag "query" (Some "queryResult") text
               Expect.notEqual other text "the probe edited the tag"
@@ -405,7 +411,7 @@ let readerAdmissionTests =
 
               Expect.equal registryRefusal (DuplicateParam "year") "the registry's refusal"
 
-              match QueryCodec.decodeDetailedWith ReadPolicy.Lenient (QueryCodec.encode twice) with
+              match QueryCodec.decodeDetailedWith ReadPolicy.Lenient (QueryOracle.declarationText twice) with
               | Error e ->
                   Expect.equal e.Code DecodeCode.OutOfRange "a declaration the registry does not admit"
 
@@ -671,7 +677,7 @@ let typedDispatchTests =
                       OpStream.defaultHash
                       QueryCodec.encodeResult
                       (Query.determinismTag sampleQuery)
-                      (Query.invocationKey sampleQuery args)
+                      (Query.invocationKey (QuerySeamLaws.admitted sampleQuery) args)
                       (fun () -> Some(Error sentence))
                       []
 
@@ -741,13 +747,13 @@ let whereOrderByTests =
               // The encoder appends the two members only when non-empty, so with both empty its bytes
               // are the encoder's before Phase 398; this pins them.
               Expect.equal
-                  (QueryCodec.encode sampleQuery)
+                  (QueryCodec.encode (QuerySeamLaws.admitted sampleQuery))
                   "{\"$type\":\"query\",\"effect\":{\"determinism\":\"network\",\"host\":\"readsHost\"},\"id\":\"sales-by-region\",\"pageSize\":100,\"params\":[{\"name\":\"year\",\"required\":true,\"type\":\"int\"},{\"name\":\"region\",\"required\":false,\"type\":\"string\"}],\"resultSchema\":[{\"name\":\"region\",\"type\":\"string\"},{\"name\":\"revenue\",\"type\":\"float\"}],\"source\":{\"ref\":\"sales\",\"schema\":[]},\"timeoutMs\":5000}"
                   "byte-identical"
 
           testCase "every predicate kind and the order round-trip the codec, under both read policies"
           <| fun _ ->
-              let text = QueryCodec.encode shaped
+              let text = QueryCodec.encode (QuerySeamLaws.admitted shaped)
               Expect.stringContains text "\"where\":[" "the filter is written"
               Expect.stringContains text "\"orderBy\":[" "the order is written"
 
@@ -762,8 +768,8 @@ let whereOrderByTests =
                   "a decimal literal is decimal text, as the column codec writes it"
 
               Expect.stringContains text "{\"column\":\"day\",\"direction\":\"descending\"}" "an order key"
-              Expect.equal (QueryCodec.decode text) (Ok shaped) "lenient"
-              Expect.equal (QueryCodec.decodeWith ReadPolicy.Strict text) (Ok shaped) "strict"
+              Expect.equal (QueryCodec.decode text) (Ok(QuerySeamLaws.admitted shaped)) "lenient"
+              Expect.equal (QueryCodec.decodeWith ReadPolicy.Strict text) (Ok(QuerySeamLaws.admitted shaped)) "strict"
 
           testCase "a literal of every column type round-trips with the bytes the column codec writes (Phase 514)"
           <| fun _ ->
@@ -800,7 +806,7 @@ let whereOrderByTests =
                           literals
                           |> List.mapi (fun i (_, cell, _) -> ColumnPredicate.EqualTo(sprintf "c%d" i, cell)) }
 
-              let text = QueryCodec.encode q
+              let text = QueryCodec.encode (QuerySeamLaws.admitted q)
 
               literals
               |> List.iteri (fun i (ty, _, bytes) ->
@@ -814,8 +820,8 @@ let whereOrderByTests =
                       (ColumnType.tag ty))
 
               Expect.isOk (QueryRegistry.register q QueryRegistry.empty) "the registry admits every literal"
-              Expect.equal (QueryCodec.decode text) (Ok q) "lenient"
-              Expect.equal (QueryCodec.decodeWith ReadPolicy.Strict text) (Ok q) "strict"
+              Expect.equal (QueryCodec.decode text) (Ok(QuerySeamLaws.admitted q)) "lenient"
+              Expect.equal (QueryCodec.decodeWith ReadPolicy.Strict text) (Ok(QuerySeamLaws.admitted q)) "strict"
 
           testCase
               "a declaration's result fields carry a unit, a label, a description and extensions through the codec and the registry (Phase 427)"
@@ -837,18 +843,21 @@ let whereOrderByTests =
                       ResultSchema = [ Field.create "region" StringType; revenue ]
                       Where = [ ColumnPredicate.GreaterThan("revenue", Float 0.0) ] }
 
-              let text = QueryCodec.encode q
+              let text = QueryCodec.encode (QuerySeamLaws.admitted q)
 
               Expect.stringContains
                   text
                   "{\"description\":\"Net revenue in the period.\",\"ext\":{\"vendor.format\":\"#,##0\"},\"label\":\"Revenue\",\"name\":\"revenue\",\"type\":\"float\",\"unit\":\"[GBP]\"}"
                   "the result column is written as the column codec's schema entry"
 
-              Expect.equal (QueryCodec.decode text) (Ok q) "and read back, members and all (the lenient reader)"
+              Expect.equal
+                  (QueryCodec.decode text)
+                  (Ok(QuerySeamLaws.admitted q))
+                  "and read back, members and all (the lenient reader)"
 
               Expect.equal
                   (QueryCodec.decodeDetailedWith ReadPolicy.Strict text)
-                  (Ok q)
+                  (Ok(QuerySeamLaws.admitted q))
                   "the strict reader admits the four metadata members of a result column"
 
               Expect.isOk
@@ -966,7 +975,7 @@ let whereOrderByTests =
 
           testCase "the declaration reader refuses what the registry refuses, at the member at fault"
           <| fun _ ->
-              let text = QueryCodec.encode shaped
+              let text = QueryCodec.encode (QuerySeamLaws.admitted shaped)
               let declared = shaped.ResultSchema |> List.map _.Name
 
               let refusedAt (edited: string) =
@@ -1049,7 +1058,7 @@ let whereOrderByTests =
 
           testCase "the strict policy refuses an undeclared member of a predicate or an order key"
           <| fun _ ->
-              let text = QueryCodec.encode shaped
+              let text = QueryCodec.encode (QuerySeamLaws.admitted shaped)
 
               for edited in
                   [ text.Replace(
@@ -1058,17 +1067,21 @@ let whereOrderByTests =
                     )
                     text.Replace("{\"column\":\"day\",", "{\"column\":\"day\",\"nulls\":\"first\",") ] do
                   Expect.notEqual edited text "the probe edited the document"
-                  Expect.equal (QueryCodec.decode edited) (Ok shaped) "lenient reads past it"
+                  Expect.equal (QueryCodec.decode edited) (Ok(QuerySeamLaws.admitted shaped)) "lenient reads past it"
                   Expect.isError (QueryCodec.decodeWith ReadPolicy.Strict edited) "strict refuses it"
 
           testCase "the invocation key sees the filter and the order"
           <| fun _ ->
-              let k = Query.invocationKey shaped shapedArgs
-              let noWhere = Query.invocationKey { shaped with Where = [] } shapedArgs
-              let noOrder = Query.invocationKey { shaped with OrderBy = [] } shapedArgs
+              let k = Query.invocationKey (QuerySeamLaws.admitted shaped) shapedArgs
+
+              let noWhere =
+                  Query.invocationKey (QuerySeamLaws.admitted { shaped with Where = [] }) shapedArgs
+
+              let noOrder =
+                  Query.invocationKey (QuerySeamLaws.admitted { shaped with OrderBy = [] }) shapedArgs
 
               let neither =
-                  Query.invocationKey { shaped with Where = []; OrderBy = [] } shapedArgs
+                  Query.invocationKey (QuerySeamLaws.admitted { shaped with Where = []; OrderBy = [] }) shapedArgs
 
               Expect.equal
                   (List.length (List.distinct [ k; noWhere; noOrder; neither ]))
@@ -1077,20 +1090,25 @@ let whereOrderByTests =
 
               Expect.notEqual
                   (Query.invocationKey
-                      { shaped with
-                          Where = [ ColumnPredicate.AtMost("n", Int 11) ] }
+                      (QuerySeamLaws.admitted
+                          { shaped with
+                              Where = [ ColumnPredicate.AtMost("n", Int 11) ] })
                       shapedArgs)
                   (Query.invocationKey
-                      { shaped with
-                          Where = [ ColumnPredicate.AtMost("n", Int 10) ] }
+                      (QuerySeamLaws.admitted
+                          { shaped with
+                              Where = [ ColumnPredicate.AtMost("n", Int 10) ] })
                       shapedArgs)
                   "the literal is keyed"
 
-              Expect.equal (Query.invocationKeyPage shaped shapedArgs None) k "the first page keys as the invocation"
+              Expect.equal
+                  (Query.invocationKeyPage (QuerySeamLaws.admitted shaped) shapedArgs None)
+                  k
+                  "the first page keys as the invocation"
 
               Expect.notEqual
-                  (Query.invocationKeyPage shaped shapedArgs (Some "t"))
-                  (Query.invocationKeyPage { shaped with Where = [] } shapedArgs (Some "t"))
+                  (Query.invocationKeyPage (QuerySeamLaws.admitted shaped) shapedArgs (Some "t"))
+                  (Query.invocationKeyPage (QuerySeamLaws.admitted { shaped with Where = [] }) shapedArgs (Some "t"))
                   "a page of a filtered declaration keys apart"
 
           testCase "the query keys' bytes are pinned: no journal moved when they came to share Hash.keyedBy"
@@ -1109,23 +1127,29 @@ let whereOrderByTests =
                     "n", Null ]
 
               Expect.equal
-                  (Query.invocationKey sampleQuery [ "year", Int 2026; "region", Str "UK" ])
+                  (Query.invocationKey (QuerySeamLaws.admitted sampleQuery) [ "year", Int 2026; "region", Str "UK" ])
                   "sales-by-region#cfb323a8"
                   "unshaped"
 
-              Expect.equal (Query.invocationKey shaped shapedArgs) "shaped#05ad7cda" "filtered and ordered"
+              Expect.equal
+                  (Query.invocationKey (QuerySeamLaws.admitted shaped) shapedArgs)
+                  "shaped#05ad7cda"
+                  "filtered and ordered"
 
               Expect.equal
-                  (Query.invocationKeyPage shaped shapedArgs (Some "tok-1"))
+                  (Query.invocationKeyPage (QuerySeamLaws.admitted shaped) shapedArgs (Some "tok-1"))
                   "shaped#f968c101"
                   "a page of a shaped declaration"
 
               Expect.equal
-                  (Query.invocationKeyPage sampleQuery every (Some "p\u0001"))
+                  (Query.invocationKeyPage (QuerySeamLaws.admitted sampleQuery) every (Some "p\u0001"))
                   "sales-by-region#78d1824c"
                   "every cell kind, behind a token that spells the separator"
 
-              Expect.equal (Query.invocationKey sampleQuery every) "sales-by-region#71c4e9e0" "every cell kind"
+              Expect.equal
+                  (Query.invocationKey (QuerySeamLaws.admitted sampleQuery) every)
+                  "sales-by-region#71c4e9e0"
+                  "every cell kind"
 
           testCase "the resolver receives the filter and the order, and refuses one it cannot honour by name"
           <| fun _ ->
@@ -1526,8 +1550,8 @@ let seamBaselineTests528 =
 
           testCase "a declaration's Where and OrderBy write their pinned bytes and read back"
           <| fun _ ->
-              Expect.equal (QueryCodec.encode shapeQuery528) shapeHost528 "bytes"
-              Expect.equal (QueryCodec.decode shapeHost528) (Ok shapeQuery528) "round trip"
+              Expect.equal (QueryCodec.encode (QuerySeamLaws.admitted shapeQuery528)) shapeHost528 "bytes"
+              Expect.equal (QueryCodec.decode shapeHost528) (Ok(QuerySeamLaws.admitted shapeQuery528)) "round trip"
 
           testCase "a planted predicate or sort key is refused with its pinned code and path, under both policies"
           <| fun _ ->

@@ -5793,7 +5793,8 @@
         "model": "proofs/Query.fst",
         "prover": "proofs/fstar-pin.json",
         "operations": [
-          "QueryRegistry.register"
+          "QueryRegistry.register",
+          "QueryRegistry.admit"
         ]
       }
     },
@@ -5826,7 +5827,8 @@
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "QueryCodec.decode",
-          "QueryCodec.encode"
+          "QueryCodec.encode",
+          "PositiveInt.tryCreate"
         ]
       }
     },

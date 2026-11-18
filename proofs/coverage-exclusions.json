@@ -101,6 +101,14 @@
     },
     {
       "members": [
+        "Idl.Gen.fsharpCodecModuleWith"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Phase 685 (D264.8 point 3): the codec-only module with a per-root internal writer; the stand-in generates every seam codec through it, byte for byte against the committed modules, and holds the option's internal writer, its public readers, its empty-list identity with fsharpCodecModule and its refusal of a name that is no root.",
+      "standIn": "tests/Fuaran.Core.Tests/SeamIdl.fs"
+    },
+    {
+      "members": [
         "Idl.ScalarText.isInt64",
         "Idl.ScalarText.isDecimal",
         "Idl.ScalarText.isBytes",

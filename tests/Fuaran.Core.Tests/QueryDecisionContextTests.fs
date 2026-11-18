@@ -95,7 +95,7 @@ let tests =
 
           testCase "a needs-approval query runs with the grant for exactly its invocation"
           <| fun () ->
-              let grant = Query.grant (query "ledger") args
+              let grant = Query.grant (QuerySeamLaws.admitted (query "ledger")) args
 
               Expect.equal
                   (dispatch Remote (Some grant) "ledger" args)
@@ -114,11 +114,11 @@ let tests =
 
               Expect.equal
                   grant.Invocation
-                  (Query.invocationPreimage (query "ledger") args)
+                  (Query.invocationPreimage (QuerySeamLaws.admitted (query "ledger")) args)
                   "a grant carries the invocation's identity"
 
               Expect.equal
-                  (Query.grant (query "ledger") [ "n", Int 5 ])
+                  (Query.grant (QuerySeamLaws.admitted (query "ledger")) [ "n", Int 5 ])
                   grant
                   "one argument set has one grant, minted again"
 
@@ -127,9 +127,10 @@ let tests =
               let refused = Error(QueryApprovalRequired "disclosure"), []
 
               let others =
-                  [ "other arguments", Query.grant (query "ledger") [ "n", Int 6 ]
-                    "another query", Query.grant (query "summary") args
-                    "the hashed capture key", Grant.ofInvocation (Query.invocationKey (query "ledger") args)
+                  [ "other arguments", Query.grant (QuerySeamLaws.admitted (query "ledger")) [ "n", Int 6 ]
+                    "another query", Query.grant (QuerySeamLaws.admitted (query "summary")) args
+                    "the hashed capture key",
+                    Grant.ofInvocation (Query.invocationKey (QuerySeamLaws.admitted (query "ledger")) args)
                     "a capability's identity", Grant.ofInvocation "ledger\u0001n\u00015\u0001"
                     "an empty identity", Grant.ofInvocation "" ]
 
@@ -145,7 +146,7 @@ let tests =
 
           testCase "a denied query reaches no resolver, whatever grant is presented"
           <| fun () ->
-              let own = Query.grant (query "secrets") args
+              let own = Query.grant (QuerySeamLaws.admitted (query "secrets")) args
 
               let denied =
                   Error(QueryPolicyRefused("disclosure", "the remote side never reads the secrets", [])), []
@@ -160,7 +161,7 @@ let tests =
 
           testCase "an allow is unchanged by any grant"
           <| fun () ->
-              let stray = Query.grant (query "ledger") args
+              let stray = Query.grant (QuerySeamLaws.admitted (query "ledger")) args
 
               Expect.equal
                   (dispatch Remote (Some stray) "summary" args)
@@ -168,7 +169,7 @@ let tests =
                   "a grant for another invocation changes nothing"
 
               Expect.equal
-                  (dispatch Remote (Some(Query.grant (query "summary") args)) "summary" args)
+                  (dispatch Remote (Some(Query.grant (QuerySeamLaws.admitted (query "summary")) args)) "summary" args)
                   (Ok(Ready rows), [ "summary" ])
                   "and neither does its own"
 
@@ -179,8 +180,8 @@ let tests =
               for side in [ Local; Remote ] do
                   for grant in
                       [ None
-                        Some(Query.grant (query "audit") args)
-                        Some(Query.grant (query "ledger") args) ] do
+                        Some(Query.grant (QuerySeamLaws.admitted (query "audit")) args)
+                        Some(Query.grant (QuerySeamLaws.admitted (query "ledger")) args) ] do
                       Expect.equal (dispatch side grant "audit" args) refused "default-deny by shape"
 
           testCase "parameters that do not validate are refused before any gate, whatever is presented"
@@ -199,7 +200,7 @@ let tests =
               let bad = [ "n", Str "five" ]
 
               for side in [ Local; Remote ] do
-                  for grant in [ None; Some(Query.grant (query "ledger") bad) ] do
+                  for grant in [ None; Some(Query.grant (QuerySeamLaws.admitted (query "ledger")) bad) ] do
                       let ran = ResizeArray<string>()
 
                       Expect.equal
@@ -213,7 +214,7 @@ let tests =
 
           testCase "the grant for a read covers every page of it"
           <| fun () ->
-              let grant = Query.grant (query "ledger") args
+              let grant = Query.grant (QuerySeamLaws.admitted (query "ledger")) args
 
               for token in [ None; Some "page-2"; Some "page-3" ] do
                   let ran = ResizeArray<string>()
@@ -232,13 +233,15 @@ let tests =
                       "and refused with none"
 
               Expect.notEqual
-                  (Grant.ofInvocation (Query.invocationKeyPage (query "ledger") args (Some "page-2")))
+                  (Grant.ofInvocation (
+                      Query.invocationKeyPage (QuerySeamLaws.admitted (query "ledger")) args (Some "page-2")
+                  ))
                   grant
                   "a page's capture key is not the identity a grant is bound to"
 
           testCase "the decision is a function of the declaration, the arguments, the context and the grant"
           <| fun () ->
-              let grant = Some(Query.grant (query "ledger") args)
+              let grant = Some(Query.grant (QuerySeamLaws.admitted (query "ledger")) args)
               let seen = ResizeArray<Side * string * (string * Cell) list>()
 
               let recording =
@@ -292,7 +295,7 @@ let tests =
                   Expect.equal
                       (QueryRegistry.decide unitRegistry () None id args)
                       (match QueryRegistry.tryFind id unitRegistry with
-                       | Some q -> old q args
+                       | Some q -> old q.Declaration args
                        | None -> QueryRegistry.decide unitRegistry () None id args)
                       "the gate decides as the old one did"
 
@@ -304,7 +307,7 @@ let tests =
               let run grant =
                   QueryRegistry.dispatch observed Remote grant "ledger" args (fun _ -> Ready rows)
 
-              run (Some(Query.grant (query "ledger") args)) |> ignore
+              run (Some(Query.grant (QuerySeamLaws.admitted (query "ledger")) args)) |> ignore
               Expect.isEmpty told "a granted dispatch is not a refusal"
               run None |> ignore
 
@@ -335,7 +338,7 @@ let tests =
           testCase "the named decision is the refusal every dispatch verb makes, under each context and grant"
           <| fun () ->
               for side in [ Local; Remote ] do
-                  for grant in [ None; Some(Query.grant (query "ledger") args) ] do
+                  for grant in [ None; Some(Query.grant (QuerySeamLaws.admitted (query "ledger")) args) ] do
                       for id in [ "summary"; "ledger"; "secrets"; "audit" ] do
                           let named = QueryRegistry.decideNamed registry side grant id args
 

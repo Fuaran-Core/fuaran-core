@@ -633,9 +633,9 @@ module internal PolicySeamLaws =
 
                 // the same on the query registry: a needs-approval read runs with the grant for exactly
                 // its invocation, a denied one reaches no resolver whatever is presented
-                let qOwn = Query.grant (queryOf target) qargs
-                let qForOtherArgs = Query.grant (queryOf target) qOtherArgs
-                let qForOtherQuery = Query.grant (queryOf otherId) qargs
+                let qOwn = Query.grant (QuerySeamLaws.admitted (queryOf target)) qargs
+                let qForOtherArgs = Query.grant (QuerySeamLaws.admitted (queryOf target)) qOtherArgs
+                let qForOtherQuery = Query.grant (QuerySeamLaws.admitted (queryOf otherId)) qargs
                 let qBefore = resolved.Count
                 let qWithOwn = qDispatchAt false (Some qOwn)
                 let qRanWithOwn = resolved.Count - qBefore
@@ -643,7 +643,9 @@ module internal PolicySeamLaws =
                 let qWithOtherQuery = qDispatchAt false (Some qForOtherQuery)
 
                 let qWithKey =
-                    qDispatchAt false (Some(Grant.ofInvocation (Query.invocationKey (queryOf target) qargs)))
+                    qDispatchAt
+                        false
+                        (Some(Grant.ofInvocation (Query.invocationKey (QuerySeamLaws.admitted (queryOf target)) qargs)))
 
                 let qRanWithOthers = resolved.Count - qBefore - qRanWithOwn
 
@@ -663,7 +665,7 @@ module internal PolicySeamLaws =
                     && QueryRegistry.dispatch qCtxReg false (Some qOwn) "missing" qargs resolveQ = Error(
                         NoSuchQuery("missing", ids)
                     )
-                    && Query.grant (queryOf target) qargs = qOwn
+                    && Query.grant (QuerySeamLaws.admitted (queryOf target)) qargs = qOwn
 
                 grants.Check(
                     // the decision: lifted by its own grant only, and only from NeedsApproval

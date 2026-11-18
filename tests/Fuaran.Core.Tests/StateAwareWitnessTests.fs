@@ -464,7 +464,9 @@ let tests =
               // trusted context admits every drawn call; the untrusted one parks and denies.
               let gated: QueryRegistry<bool> =
                   QueryRegistry.enumerate WitnessTakingFamiliesTests.queryRegistry
-                  |> List.fold (fun r q -> QueryRegistry.register q r |> Result.defaultValue r) QueryRegistry.empty
+                  |> List.fold
+                      (fun r q -> QueryRegistry.register q.Declaration r |> Result.defaultValue r)
+                      QueryRegistry.empty
                   |> QueryRegistry.withGate
                       { Policy = "stations"
                         Decide =

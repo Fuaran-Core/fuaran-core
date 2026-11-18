@@ -40,7 +40,7 @@ let private query (id: string) : Query =
           Determinism = Effect.network }
       Source = Ref id
       TimeoutMs = None
-      PageSize = Some 2
+      PageSize = PositiveInt.tryCreate 2
       Where = []
       OrderBy = [] }
 
@@ -216,7 +216,7 @@ let tests =
               Expect.equal
                   (QueryRegistry.restrict keep (queries [ "a"; "b" ])
                    |> QueryRegistry.enumerate
-                   |> List.map _.Id)
+                   |> List.map _.Declaration.Id)
                   [ "b" ]
                   "query"
 
@@ -361,13 +361,13 @@ let pagingTests =
               Expect.equal seen [ Some "cursor-2" ] "the token reached the resolver"
 
               Expect.equal
-                  (Query.invocationKeyPage q args None)
-                  (Query.invocationKey q args)
+                  (Query.invocationKeyPage (QuerySeamLaws.admitted q) args None)
+                  (Query.invocationKey (QuerySeamLaws.admitted q) args)
                   "the first page keys exactly as before paging, so existing journals replay"
 
               let keys =
                   [ None; Some ""; Some "p"; Some "cursor-2" ]
-                  |> List.map (Query.invocationKeyPage q args)
+                  |> List.map (Query.invocationKeyPage (QuerySeamLaws.admitted q) args)
 
               Expect.equal (List.distinct keys) keys "distinct tokens give distinct keys"
 
