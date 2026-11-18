@@ -393,7 +393,8 @@ not on `main` yet, and its point 8 runs the act this entry adds.
 sentence doubles its lead. Two of the remedies move a released baseline or widen a closed union, so this entry took
 the census first (D264.1), set out the alternatives with what each moves (D264.2 to D264.4), and proposed a choice
 and put six questions (D264.5, D264.6). The ruling is D264.7 and the design built to it is D264.8; where D264.5
-differs from them, they govern. Two questions in D264.8 are held for a ruling of their own and are marked there.
+differs from them, they govern. Two questions D264.8 first held were ruled on 2026-11-17, and each ruling stands
+where its question was put (D264.8, points 1 and 3).
 
 **D264.1 — the census.** Taken at `98aed011`; each behavioural claim was probed with the kit built from that commit in
 both directions where a writer and a reader meet (the hand-built declaration through `QueryRegistry.register`, its
@@ -690,15 +691,16 @@ hash alike), so a decoded declaration compares with a registered one as it does 
   `Query.invoke*` and the conformance kit's `QuerySeamWitness.Dispatch` (`api/Fuaran.Core.Conformance.txt`:37, 382),
   for a resolver that writes and keys nothing. The type and the gate in one module with a module-private
   representation: the gate would move ahead of `Query.fs` in compile order, with the filter's admission.
-- **Held for a ruling: an admitted declaration whose embedded table the reader refuses.** The gate does not read
-  the source, and the column codec's `encode` assumes an embedded table is valid (Fuaran.Core.Column/ColumnCodec.fs:10-11),
-  so an admitted declaration whose table `Table.validate` refuses is written as text the reader refuses at `source`
-  (QueryCodec.fs:174-175). Six of the wire baseline's sampled declarations are such (point 6). It is the converse of
-  this phase's defect, admitted and unreadable rather than refused and written as admitted, and closing it means the
-  gate refusing a source with a refusal `QueryError` has no case for. Until it is ruled, the writer's contract says an
-  admitted declaration reads back where its embedded table is one the column codec reads, which is the column codec's
-  own `encode` contract and the proof model's premise `column_codec_laws` (proofs/Query.fst:2403-2407). The question:
-  is an embedded table the column codec cannot read inside what the admitted type promises?
+- **An admitted declaration whose embedded table the reader refuses is a stated limit** (ruled 2026-11-17). The gate
+  does not read the source, and the column codec's `encode` assumes an embedded table is valid
+  (Fuaran.Core.Column/ColumnCodec.fs:10-11), so an admitted declaration whose table `Table.validate` refuses is written
+  as text the reader refuses at `source` (QueryCodec.fs:174-175). Six of the wire baseline's sampled declarations are
+  such (point 6). It is the converse of this phase's defect, admitted and unreadable rather than refused and written as
+  admitted, and closing it means the gate refusing a source with a refusal `QueryError` has no case for. The admitted
+  type does not promise it: the writer's contract says an admitted declaration reads back where its embedded table is
+  one the column codec reads, which is the column codec's own `encode` contract and the proof model's premise
+  `column_codec_laws` (proofs/Query.fst:2403-2407). The six sampled wire documents of that kind stand. Whether the gate
+  reads the source is Phase 688's question; this phase does not move it.
 
 *2. The public members that change*, in `api/Fuaran.Core.Query.txt`:
 
@@ -737,7 +739,7 @@ hash alike), so a decoded declaration compares with a registered one as it does 
   the exporter already takes for its other refused texts (`edited`, LawVectorExport.fs:1464-1482), and the vectors'
   bytes do not move. No caller needs to write a refused declaration for any other reason.
 
-*3. The two writers that carry a predicate outside a declaration — held for a ruling.* Both reach a comparison's
+*3. The two writers that carry a predicate outside a declaration — ruled 2026-11-17.* Both reach a comparison's
 literal through `QueryWire.comparedMembers` (QueryTypes.fs:317-323), which writes a `Null` as `"type":"string",
 "value":""` and the other literals the gate refuses as D264.1 found: decimal text not in canonical form as handed,
 which reads back canonicalised, another predicate under D264.7's second point. Ruling point 1's last sentence binds
@@ -768,8 +770,16 @@ both: an alternative that gives a refused literal a spelling of its own (D264.2'
   | (B-iii) it leaves the public surface | not open: the query-error document is the seam's refusal on the wire and in the journal, which every host reads and writes | — |
   | (B-iv) it stays total, and its contract says so, for an error built by hand | the doc of the two writers; nothing else | internal |
 
-  **Recommended: (A-iii) for the predicate's writer, and (B-i) with (B-iv) for the error's.** The two holes differ in
-  reach. A predicate is built by hand in ordinary use, since every filter is, so the predicate's public writer is the
+  **Ruled on 2026-11-17: (A-iii) for the predicate's writer, and (B-i) with (B-iv) for the error's**, as recommended.
+
+  1. **The predicate's own public writer leaves the public surface.** `encodeColumnPredicate` is emitted `internal`
+     through a per-root visibility option of the IDL generator (`Fuaran.Core.Idl.Codegen`, additive; its baseline
+     moves). Its two readers stay public.
+  2. **The error document's predicate rests on the dispatch.** A resolver's unsupported predicate is
+     `PredicateNotHonoured` only when it is one of the declaration's own; otherwise it is the resolver's fault,
+     `ExecutionFailed` naming it. The error's writer stays total for an error built by hand, and its contract says so.
+
+  The reasons, as recommended: the two holes differ in reach. A predicate is built by hand in ordinary use, since every filter is, so the predicate's public writer is the
   one path left on which ordinary use writes a refused literal as an admitted one; taking it off the public surface
   closes that path with no spelling (ruling point 1), no second admitted type and no retype a host matches, at the cost
   of a generator option and a removal that rides the breaking slot. An error carrying a predicate is made by the
@@ -778,10 +788,6 @@ both: an alternative that gives a refused literal a spelling of its own (D264.2'
   refusal case every adopting host matches to close a path no honest caller takes. (A-iv) leaves the ordinary path
   open, documented, which is the outcome D264.5 gave as the reason the declaration's writer did not take (a); (A-ii)
   buys the same closure as (A-iii) with a retype and a generator feature.
-
-  The question: **does the predicate's own writer leave the public surface (A-iii), take a predicate admitted at its own
-  type (A-ii), or stay total under a stated contract (A-iv); and does the error's predicate rest on the dispatch's hold
-  with a total writer (B-i with B-iv), or carry an admitted predicate type (B-i with B-ii)?**
 
 *4. The positive-integer type.* **`PositiveInt`**, declared in `Fuaran.Core.Query`'s `QueryTypes.fs` before `Query`:
 `type PositiveInt = internal PositiveInt of int`, with `Value : int` and the smart constructor
@@ -823,8 +829,8 @@ it its meaning. Probed on the model: a referencing assembly cannot build the cas
 - The budgets: `q_timeout_ms` and `q_page_size` (178-179) become `option pos`; `query_of_j` reads each with a `d_pos`
   that refuses a value that is not positive `OutOfRange` at the member (2617-2622), with its soundness lemma;
   `opt_int_json` (2528) and `query_tail_members` (2662-2676) keep their form, since `pos` is a subtype of `int`.
-- Point 3's alternatives move the model as their rows say; under the recommendation, the invoke model's membership
-  clause only.
+- Point 3's alternatives move the model as their rows say; under its ruling, the invoke model's membership clause
+  only.
 - `proofs.json`'s rows that move: `query-invocation-key-injective`, `query-grant-identity-injective`,
   `query-grant-for-another-read-refused` and `query-renderers-abstract` (the restated premise),
   `query-codec-declaration-roundtrip` (the premise discharged) and `query-differential`, whose drawn declarations
@@ -848,11 +854,11 @@ documents (lines 31-79) the declaration reader admits 25 and refuses 24 (probed)
   written through `QueryRegistry.admit` then `encode`; how it builds an admitted sample is the test's.
 - 6 are declarations the gate admits whose embedded table the reader refuses at `source` (`ColumnData.Bools`, `Dates`,
   `Decimals`, `Floats`, `Strs`, `Timestamps`: 40-43, 45-46). The admitted writer still writes them, and they stand,
-  pending point 1's held question.
+  as point 1's ruling on the embedded table states.
 - The other 25 stand, the base document's budgets (`1` and `1`, line 31) among them. A document the root newly
   reaches through `PositiveInt`'s one case would have the base document's bytes: additive.
 - The `queryError` documents do not move under the ruling as it stands; **`queryError / Cell.Null` (86) stands**,
-  with its empty-string spelling, unless point 3 takes (B-ii).
+  with its empty-string spelling, since point 3 is ruled (B-i) with (B-iv).
 
 The class is `breaking`: a document removed, and the same structure emitted as different bytes (STABILITY.md:245).
 
@@ -876,8 +882,8 @@ its `282ff93`. The admitted type removes no vector: the gate's refusals stand, `
 and `readerAgainstGate` builds a refused declaration's text by edit (point 2); its skip of a `Null` filter stays, now
 because no text spells one. No vector pins what the writer does with a refused declaration, because no caller can
 hand it one; that is the type's, and the `api/` baseline holds the signature. No other family moves:
-`queryGrantLaws`' declarations are admitted ones, and `seamRefusals` moves only under point 3's (B-ii), where no
-vector moves either. No family this design moves is a declared copy in `copies.json`.
+`queryGrantLaws`' declarations are admitted ones, and `seamRefusals` does not move under point 3's ruling (it
+would have moved only under (B-ii), where no vector moves either). No family this design moves is a declared copy in `copies.json`.
 
 *8. The class and the slot.* The managed class is `retype`, with additive rows beside it; the wire class is
 `breaking`. Through the `0.x` line a breaking class advances the minor (STABILITY.md:15-17; the class tables at 174
@@ -908,7 +914,7 @@ Core's (its `src/query.rs` at `282ff93`); the Go and Python ports hold no declar
 4. `timeout_ms` and `page_size` (295-298) become a positive integer; `optional_int` (720-722) refuses a value that is
    not positive `OutOfRange` at the member; the writer (754-759) writes the value.
 5. Its `ColumnPredicate::to_json` (125-145), `literal_json` (205-216) and `dispatch` (1280-1300) follow point 3's
-   ruling: under the recommendation the writer leaves its public surface and `dispatch` holds a returned
+   ruling: the writer leaves its public surface and `dispatch` holds a returned
    `PredicateNotHonoured` to the declaration's filter.
 6. Its `queryDeclarationLaws` leg answers 97, and Core's record of it moves to its new commit; its `queryGrantLaws` and
    `seamRefusals` legs do not move.
@@ -925,8 +931,8 @@ moves; internal.
 D265), so this phase touches only the files the act writes, every law file's `kitVersion` stamp among them. Under
 point 3:
 `SeamRefusalLaws.fs` and `tests/Fuaran.Core.Tests/SeamIdl.fs`, and under (A-iii) or (A-ii) `Fuaran.Core.Idl.Codegen`
-and its baseline. Under point 1's held question, if it is ruled to close the gap: the seam declaration, and the
-`seamRefusals` exporter and file, for the refusal case it adds.
+and its baseline. Point 1's ruling on the embedded table leaves the seam declaration and the `seamRefusals` exporter
+and file unmoved; closing that gap would have touched them, and is Phase 688's question.
 
 ## 2026-11-17 — D263: Core emits the query declaration's refusals as a law family of its own, `queryDeclarationLaws`
 
