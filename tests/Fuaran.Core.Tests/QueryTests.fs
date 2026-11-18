@@ -2644,3 +2644,68 @@ let settleCapturedTests695 =
                       p.Journal)
                   (Error(KeyedCaptureFault.NotAttempted pureTicket))
                   "a deterministic declaration journals nothing to settle" ]
+
+/// A declaration with a required parameter, and one admitted with the same id, filter and order and no
+/// parameters: the capture key covers the id, the filter, the order, the bindings and the page token, not the
+/// declaration's parameters, so a ticket the first issued has the second's key too (DECISIONS.md D268, change A).
+let private withParam695: Query =
+    { query692 with
+        Id = "param695"
+        Params =
+            [ { Name = "n"
+                Type = IntType
+                Required = true } ] }
+
+let private withoutParam695 =
+    QueryRegistry.admit { withParam695 with Params = [] }
+    |> Result.toOption
+    |> Option.get
+
+[<Tests>]
+let settleCapturedParamsTests695 =
+    testList
+        "Phase 695 - a settlement is refused for a declaration whose parameters the arguments do not fill"
+        [ testCase "a declaration with other parameters settles nothing, and the journal does not move"
+          <| fun _ ->
+              let reg =
+                  QueryRegistry.register withParam695 QueryRegistry.empty
+                  |> Result.toOption
+                  |> Option.get
+
+              let args = [ "n", Int 1 ]
+
+              let p =
+                  QueryRegistry.dispatchCaptured h695 w695 reg () None "param695" args (fun _ -> Pending) []
+
+              Expect.equal
+                  (Query.invocationKey withoutParam695 args)
+                  (fst p.Ticket.Value)
+                  "the premise: the key does not cover the parameters"
+
+              Expect.equal
+                  (QueryRegistry.settleCaptured
+                      h695
+                      w695
+                      withoutParam695
+                      args
+                      None
+                      p.Ticket.Value
+                      (Ok(page692 inOrder692 None))
+                      p.Journal)
+                  (Error(KeyedCaptureFault.NotAttempted p.Ticket.Value))
+                  "the arguments do not validate against this declaration"
+
+              let admitted = QueryRegistry.tryFind "param695" reg |> Option.get
+
+              let s =
+                  QueryRegistry.settleCaptured
+                      h695
+                      w695
+                      admitted
+                      args
+                      None
+                      p.Ticket.Value
+                      (Ok(page692 inOrder692 None))
+                      p.Journal
+
+              Expect.isOk s "the control: the declaration dispatched settles" ]
