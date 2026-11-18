@@ -368,6 +368,264 @@ journal. So no: on the capability seam the generic verb writes what the dispatch
 seam's own, because only it holds an answer to a clause (D267) and reads a refusal's text as a typed refusal. This is
 a report: nothing is changed or filed for the capability seam.
 
+**D268.3 — the proposal, in brief.** One verb of the query seam, `QueryRegistry.settleCaptured`, settles a pending
+query capture. It takes the invocation the ticket was issued for, the ticket, and the answer the fetch came back with
+(a result or a typed resolver fault, never `Pending`). It puts that answer through the step a dispatch puts its
+resolver's answer through, then journals what that step answers, as the captured verbs do. So the journal a pending
+capture ends with is, byte for byte, the journal the dispatch writes when its resolver gives the same answer at once,
+and the replay answers what that dispatch answered. The generic verb is not changed. Used directly on a query's
+ticket it still runs no clause, and the docs say what holds for what it settles. D268.4 to D268.13 take the ten
+points one by one, each with the alternatives that lose. The ticket's type (D268.9) is the one point weighed for a
+ruling; the rest is proposed under the class the phase declares, additive.
+
+**D268.4 — one clause, not two.** The verb does not hold the rows itself. It calls `Query.invokePageWithArgs` over
+the declaration, the arguments and the page token, with a resolver that returns the settled answer. That function is
+what the typed captured verbs run as their body, and it passes D267's private `settle` (Query.fs:486-500), and also
+the fault mapping beside it (Query.fs:626-643), which holds a `PredicateNotHonoured` to the declaration's own
+predicates (D264.8 point 3). So rows, faults and predicates are held by the code the dispatch runs, and there is no
+second copy. The parameters are validated again on the way. They are the parameters the dispatch validated, because
+the verb first checks that the ticket's key is this invocation's key (D268.8), so they validate again; the cost is a
+walk of the parameter list, nothing beside the rows. `Query.invoke` and `invokePage`, the plain verbs' bodies, answer
+what `invokePageWithArgs` answers for the same resolver answer: `invoke` is `invokePage` with no token, and a
+plain resolver's `Failed m` and the typed `ResolveFault.Failed (m, [])` are both `ExecutionFailed (m, [])`. Probed:
+the plain verb's journal and the typed paged verb's journal are each matched byte for byte by this composition
+(D268.7). No file outside the declared list is needed. Alternatives that lose:
+
+- *Make `settle` internal and call it from the verb.* `Query.fs` is not in the declared list. It reaches the rows
+  only: the fault mapping is written inline in `invokePageWithArgs`, so the verb would need a second copy of it, or a
+  second extraction. Two undeclared changes to `Query.fs`, and nothing gained in behaviour.
+- *Extract the step after validation into a new internal function of `Query` that both call.* This saves the second
+  validation and nothing else, and it also needs `Query.fs`. It is the right move only if a later change makes the
+  validation costly or able to answer differently. Neither is the case.
+- *Hold the rows in the verb with its own `Table.validate` call.* That is the second copy this point rules out, and
+  it would leave the fault mapping unheld.
+
+**D268.5 — the verb's name, home and signature.** In `QueryRegistry` (QueryRegistry.fs), beside the captured verbs:
+
+```fsharp
+val settleCaptured :
+    hashFn: HashFn ->
+    encode: (QueryResult -> string) ->
+    query: AdmittedQuery ->
+    args: (string * Cell) list ->
+    pageToken: string option ->
+    ticket: (string * int) ->
+    answer: Result<QueryResult, ResolveFault> ->
+    journal: KeyedCapture list ->
+        Result<CapturedDispatch<QueryResult, QueryError>, KeyedCaptureFault>
+```
+
+The verb takes the hash and the writer because the captured verbs take them: the settlement must be written in the
+form, and chained under the hash, that the attempt was. It journals under `StreamConfig.canonical`, as they do
+(KeyedRegistry.fs:351-352). The key is computed by the seam's own capture record (`paged pageToken`,
+QueryRegistry.fs:301-302), and a refusal is written by its `Record`, so how the seam journals is still written in one
+place. The answer is `CapturedDispatch`, the captured verbs' own type: `Outcome` is what the dispatch answers when its
+resolver gives this answer at once (`Ok (Ready r)` or `Error e`, never `Ok Pending`), `Ticket` is the ticket
+settled, and `Journal` carries the settlement. A host learns from the answer, not from a replay, whether its rows were
+refused.
+
+**One verb for the four captured forms.** A page token of `None` keys exactly as the unpaged verbs do
+(`invocationKeyPage q args None` is `invocationKey q args`, byte for byte). The answer type serves the plain verbs and
+the typed ones alike (D268.6). The dispatch needs four verbs because its resolvers have four types; a settlement
+has one answer type, so four settle verbs would be four names for one function.
+
+Alternatives that lose:
+
+- *A name of its own kind* (`settlePending`, `completeCaptured`). `settleCaptured` sits with `dispatchCaptured` and
+  `dispatchReplayed`, and keeps the word the generic verb and the docs already use.
+- *A home in `Query`, `QueryCodec` or `KeyedCapture`.* `Query` and `QueryCodec` hold no journal, and the capture
+  record the verb reuses is private to `QueryRegistry`. `KeyedCapture` is the operation stream's generic journal, and
+  it knows no table. The phase does not change it, and Core's mechanisms stay generic.
+- *The registry and the id instead of the admitted declaration,* shaped like the replay. That would resolve the id and
+  run the policy again at settlement. A settlement is not an invocation: the fetch was admitted when it was
+  dispatched. A policy that now refuses would leave the capture open for good, and its replay would answer `Pending`
+  for ever. A declaration replaced in between would key differently, or be held to rules it was not dispatched
+  under. The host passes the declaration it dispatched with (`tryFind` answers it).
+- *Answering only the journal,* as the generic verb does (`Result<KeyedCapture list, KeyedCaptureFault>`). The host
+  would not see that its rows were refused.
+- *A new record type for the answer.* It would be a second type for the same three fields.
+
+**D268.6 — what it accepts as the answer.** `Result<QueryResult, ResolveFault>`: a result, or a fault in the typed
+resolver's words (`SourceMissing`, `TimedOut`, `Failed (detail, recoverable)`, `PredicateUnsupported`,
+`OrderUnsupported`). A plain resolver's failure is `ResolveFault.Failed (m, [])`, which the step answers as
+`ExecutionFailed (m, [])`, as a plain dispatch answers `Failed m`. `Pending` cannot be written in this type: a host
+that has no answer yet does not settle, and the capture stays open, which its replay answers as `Ok Pending`
+(D268.1). Inside the verb, the step's answer is projected as the captured dispatch projects it
+(`Deferred.settled`, KeyedRegistry.fs:358-362). Its `Pending` arm, which would leave the capture open, is the same
+projection's, and the answer type keeps it from being reached. Alternatives that lose:
+
+- *`Result<QueryResult, QueryError>`.* It would let a host journal any refusal, including the ones no dispatch of the
+  invocation answers: `NoSuchQuery`, `QueryPolicyRefused`, or a `PredicateNotHonoured` naming a predicate the
+  declaration does not hold (D268.1). The resolver's own vocabulary is exactly what a dispatch maps.
+- *`Deferred<QueryResult>`.* It has no typed fault, so a timeout or a missing source settled later could only be
+  `ExecutionFailed` text. And `Pending` would be written in the type, so the verb would have to answer something
+  for it.
+- *`Result<Deferred<QueryResult>, ResolveFault>`,* the typed resolver's own type. It also writes `Pending` in the
+  type, and either answer the verb could give then loses. Leaving the capture open and answering the journal
+  unchanged reads, to the caller, like a settlement. Refusing it needs a fault the journal does not have, and
+  `KeyedCaptureFault` is the operation stream's, which a new case would break.
+
+**D268.7 — what it journals for rows the validation refuses.** It journals what the step answers,
+`ExecutionFailed ("the resolver answered rows the column layer refuses: " + reason, [])` (D267.5), written by the
+capture's `Record` (`QueryErrorWire.render`) as the reason of a `Refused` record. That is the document a dispatch
+journals when its resolver answers those rows at once, and the replay reads it back through `QueryErrorWire.ofReason`
+as `Refused (ExecutionFailed …)`.
+
+Probed at `09dcb56c`. The verb's body was composed from the public parts it would call: the key check,
+`Query.invokePageWithArgs` over the answer, and `KeyedCapture.settleEffectKeyed` with `QueryCodec.encodeQueryError`,
+which is `QueryErrorWire.render`. It was applied to the capture a `Pending` dispatch left open, and the resulting
+journal's JSONL (`KeyedCapture.toJsonl`) was compared with the JSONL of the journal a dispatch writes when its
+resolver answers the same thing at once:
+
+- equal, byte for byte, for each of the four row kinds through `dispatchCaptured`, and through
+  `dispatchPageCapturedWith` at token `t1` with a page carrying `t2`;
+- equal for four typed faults: `TimedOut`, `Failed ("busy", ["a"])`, `PredicateUnsupported` of a predicate the
+  declaration does not hold (journalled as `ExecutionFailed` naming it), and of its own predicate (journalled as
+  `PredicateNotHonoured`);
+- the replay over the settled journal answered `Refused (ExecutionFailed …)` with the column layer's reason, for
+  both refused row kinds.
+
+The falsifiers differ. The generic verb settling the same refused rows writes a `Completed` record, not equal to
+the live journal, for both refused kinds. A refusal settled as the plain sentence "the resolver answered rows the
+column layer refuses" is not equal to the live journal of ragged rows either. Rows the validation accepts are
+journalled `Completed` through the writer, equal to the live journal, out of schema order included (D266.9 point 2:
+the same rows).
+
+**D268.8 — unknown and already-settled tickets.**
+
+- **The ticket must belong to the invocation.** The verb first computes the invocation's key from the declaration,
+  the arguments and the page token. A ticket whose key is not that key is refused `NotAttempted ticket`: the journal
+  holds no attempt of this invocation under it. So does every ticket for a declaration labelled `deterministic`,
+  because such a dispatch journals nothing.
+- **Otherwise the journal's own faults stand.** The verb runs the step and calls `KeyedCapture.settleEffectKeyed`,
+  whose faults it answers unchanged: `NotAttempted (key, occurrence)` for an occurrence with no attempt under the
+  key, and `AlreadySettled (key, occurrence)` for one already settled. That includes an occurrence the dispatch
+  settled itself, because its resolver answered at once (D268.1).
+- **A refused ticket moves nothing.** No journal is answered, so the host's journal stays as it was, and the step's
+  answer is not reported.
+
+The step is pure, so running it before the journal's check changes nothing a caller can see. Alternatives that lose:
+
+- *A fault of its own for a ticket of another invocation.* That means a new case of `KeyedCaptureFault`, which is
+  breaking in the operation stream's package and outside this phase. `NotAttempted` says what is true of the journal.
+- *Taking only the occurrence, and settling whatever attempt sits there under the computed key.* A host that mixed
+  up two pending invocations would settle one with the other's answer, where the whole ticket lets the verb refuse
+  the mix-up.
+- *Answering the step's verdict alongside a ticket fault.* The settlement did not happen, so there is no outcome to
+  report.
+
+**D268.9 — the ticket's type: two shapes, for a ruling.** Today a ticket is `(string * int)`, the key and the
+occurrence. The generic verb takes the same pair, so nothing stops a host from settling a query capture with it.
+
+*(S) Leave the type as it is, and say so in the docs.* This is the shape D268.5 is written in.
+
+- *What it gives.* Additive. One member is added and no existing row moves, which is what the phase declares.
+- *What it costs a host.* It passes the declaration it dispatched with (from `tryFind`), the arguments and the page
+  token beside the ticket. A host that persists pending fetches across a restart persists those beside the pair, as
+  it would have to under any shape that holds a predicate to the declaration.
+- *What it leaves open.* The generic verb stays usable on a query's ticket and still runs no clause. Only the docs
+  steer a host away from it. A host that settles query captures through the generic verb today compiles unchanged
+  and keeps D268.1's behaviour until it moves.
+
+*(T) An opaque ticket only the seam's verb accepts.* `QueryTicket`, with private fields: the admitted declaration,
+the arguments, the page token, the key and the occurrence. The four captured verbs would return it in a query
+record of their own, `QueryCapture` (`Outcome`, `Ticket: QueryTicket option`, `Journal`), in place of
+`CapturedDispatch<QueryResult, QueryError>`, which is generic in `Fuaran.Core.Function` and is not changed. The verb
+would take the ticket alone, with no declaration, arguments or token: `settleCaptured hashFn encode ticket answer
+journal`.
+
+- *What it gives.* A ticket binds the declaration as dispatched, so a mismatch cannot be written. A host that hands
+  the generic verb what a captured query verb returns gets a compile error, not a silent bypass.
+- *What it costs.* It is breaking: the four captured verbs' return type changes their rows in
+  `api/Fuaran.Core.Query.txt`, and every host that reads `.Ticket` as a pair breaks. That includes Core's own tests
+  of D267.6, and the Rust port's mirror when it follows.
+- *It is not airtight.* A host that persists a pending fetch across a restart needs the ticket back. That takes
+  either accessors for the key and the occurrence plus a constructor from (declaration, arguments, token,
+  occurrence), which reopen the generic verb to anyone who reads them, or a ticket document, which is a new wire root
+  (an `api/wire/` row). And the generic verb, `Query.invocationKeyPage` and the occurrence count are all public, so a
+  host can always build the pair by hand.
+- *The draft.* `0.44.0` is already a breaking draft (Phase 685), so (T) would ride it with no new slot. But the phase
+  declares the additive class, and its acceptance says the managed baseline gains the new member and nothing else
+  moves. (T) would need that acceptance amended first.
+
+The proposal is (S): it meets the phase as declared, and (T)'s guarantee stops at the first restart. (T) is the
+stronger guard for a host that never persists a pending fetch. Choosing it is a ruling on the class, not a detail of
+the build.
+
+**D268.10 — the docs after the phase.**
+
+- *The four captured verbs.* A `Pending` answer leaves the capture open under the returned `Ticket`, which
+  `QueryRegistry.settleCaptured` settles. The settlement is held as the dispatch holds a resolver's answer, so it
+  journals what the dispatch journals when the same answer comes at once. Then the sentence about the generic verb:
+  *`KeyedCapture.settleEffectKeyed` used directly on a query's ticket runs no clause. What it journals is under the
+  result writers' contract, so rows `Table.validate` refuses may replay as other rows or be `Unanswered`. A reason it
+  journals replays as whatever query-error document the text spells, any other text as `ExecutionFailed`, so it can
+  record a refusal no dispatch of the invocation answers.*
+- *`dispatchReplayed` and `dispatchReplayedWith`.* "An entry a captured dispatch settled holds no rows that read
+  back as others (a pending capture the host settles later is not one)" becomes "an entry a captured dispatch or
+  `settleCaptured` settled holds no rows that read back as others, and a recorded refusal is one a dispatch of the
+  invocation answers; an entry settled through the generic verb is under the writers' contract."
+- *`QueryCodec.encodeResult` and `encodeDeferredResult`.* "one a host settles a pending capture with" becomes "one a
+  host settles a pending capture with through the generic verb, not `settleCaptured`".
+- *`STABILITY.md`, the Column and Query strand.* The parenthetical under Phase 692 ("a capture left pending and
+  settled later by the host is outside every dispatch …") gives way to a *Since `0.44.0` (Phase 695, D268,
+  additive)* sentence: every entry the seam's own verbs settle, at dispatch or through `settleCaptured`, reads back
+  as what was settled, to the column codec's normal form, or as the refusal a dispatch answers for it; an entry
+  settled through the generic verb is under the writers' contract. Moving it is breaking.
+- *`docs/releases/0.44.0.md`.* An Additive entry naming the verb a host settles a pending query capture with.
+- *`proofs.json`.* The `query-dispatch-holds-rows` row's boundary ("A page a host settles a pending capture with
+  later is not a dispatch, and is promised nothing here") is restated for the two paths (D268.11).
+- *D267.* At the build, D267's status becomes `Amended-by D268`, because D267.6's "the clause cannot reach that act"
+  and D267.13 describe the generic path only.
+- *`CapturedDispatch.Ticket`'s doc in `KeyedRegistry.fs`* is generic and stays true, so it is not changed: naming
+  the query seam there would put a seam's vocabulary into the generic module.
+
+**D268.11 — the proof model.** `proofs/Query.fst` gains `settle_pending q a vf ans`, the seam's answer to a settled
+answer `ans` that is not `Pending`. It is defined as `invoke q a vf (fun _ -> ans)` (the extracted oracle checks it
+against production, as for `invoke`), with these laws:
+
+- `settle_pending_is_at_once` — **settling a pending invocation answers what its dispatch answers when the resolver
+  gives that answer at once**, for every declaration, argument set, verdict and answer that is not `Pending`.
+- `settle_pending_never_pending` — the settlement is `Ok (Ready _)` or `Error _`, never `Ok Pending` and never
+  `Ok (Failed _)`.
+- `settled_ready_rows_ok` and `settled_result_roundtrip` — a settled `Ready` carries rows the verdict accepts, and
+  under the column codec's verdict it is written as text that reads back as that page, its rows in normal form.
+  These are D267's `dispatch_ready_rows_ok` and `dispatched_result_roundtrip`, extended to the settled entry.
+- `settled_predicate_own` — a settled `PredicateNotHonoured` names one of the declaration's own predicates (from
+  `unsupported_predicate_own`).
+
+`proofs.json` gains them under the `query-dispatch-holds-rows` row, or one beside it. The journal stays outside the
+model, as that row's boundary already says. That the settled journal equals the at-once journal byte for byte is
+pinned on production by `QueryTests`, over drawn rows, tokens and faults, with D268.7's falsifiers as its negative
+cases.
+
+**D268.12 — the class and the baselines.** Under (S), the baseline tool is expected to report `Fuaran.Core.Query`
+**additive** (managed): one row, `QueryRegistry.settleCaptured`, is added to `api/Fuaran.Core.Query.txt`, and nothing
+else moves. No `api/wire/` row moves, because no document is new: the journal's line, the result's document and the
+query-error document are as they were. No conformance family moves either, because the verb is pinned by
+`QueryTests` and the proof model, not by a law family (`src/Fuaran.Core.Conformance` is not in the declared list).
+It rides the `0.44.0` draft. Under (T) the class is **breaking** (managed): the four captured verbs' return type
+changes, and `QueryTicket` and `QueryCapture` are added. A ticket document, if (T) took one, would add an `api/wire/`
+row, and the phase would stop and report it.
+
+**D268.13 — what a port needs.** The Rust port does not yet follow Phase 692 (the `0.44.0` ledger), so it follows
+D267's clause first: its live dispatch puts a resolver's `Ready` rows through the table validation and refuses
+`ExecutionFailed` with the column layer's reason. Then, wherever its captured dispatch leaves a capture open, it adds
+the seam's settle verb, which:
+
+- takes the admitted declaration, the arguments, the page token, the ticket, and an answer that is a result or a
+  typed resolver fault, never pending;
+- computes the invocation's key as its capture does, and refuses a ticket with another key as not attempted;
+- puts the answer through the same post-resolver step its live dispatch runs, meaning the rows clause and the fault
+  mapping, including the hold of a `PredicateNotHonoured` to the declaration's own predicates;
+- journals a result through the caller's writer, and a refusal as the query-error document its capture records,
+  under the canonical stream config;
+- answers the journal's not-attempted and already-settled faults unchanged, and moves nothing on either.
+
+Its test is D268.7's: for each answer, the journal a pending capture ends with is the at-once journal byte for byte,
+and the falsifiers differ. A conformance law Core could emit for it would live in `src/Fuaran.Core.Conformance` and
+`conformance/`, outside this phase, so the port's follow-on is written from this decision and the tests.
+
 ## 2026-11-18 — D267: the dispatch holds a resolver's rows to the table's validation: rows `Table.validate` refuses are the resolver's fault, refused `ExecutionFailed` in the column layer's words, and the result's writers stay total
 
 **Status:** Live
