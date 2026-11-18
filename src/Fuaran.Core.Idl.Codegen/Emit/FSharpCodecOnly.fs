@@ -212,9 +212,16 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
     let private codecArgs (prefix: string) (ps: string list) : string =
         ps |> List.map (fun p -> " " + prefix + p) |> String.concat ""
 
-    /// The public entries of one root.
-    let private entries (decl: Decl) (name: string) : string =
+    /// The entries of one root: public, except `encode<Name>` for a root `internalWriters` names,
+    /// which is emitted `internal` (Phase 685) — its readers stay public.
+    let private entries (decl: Decl) (internalWriters: string list) (name: string) : string =
         let msg = decl.Msg
+
+        let writer =
+            if List.contains name internalWriters then
+                "let internal encode"
+            else
+                "let encode"
 
         match Decl.tryUnion decl name, Decl.tryRecord decl name with
         | Some u, _ ->
@@ -233,7 +240,7 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
             let noWalks = u.Params |> List.map (fun _ -> " sNone") |> String.concat ""
 
             [ sprintf "/// `%s` as a JSON value." name
-              sprintf "let encode%s%s (v: %s) : JVal = enc%s%s v" name encParams ty name (codecArgs "enc" u.Params)
+              sprintf "%s%s%s (v: %s) : JVal = enc%s%s v" writer name encParams ty name (codecArgs "enc" u.Params)
               sprintf "/// `%s` read back; a refusal is the typed `DecodeError`." name
               sprintf
                   "let decode%s%s (j: JVal) : Result<%s, DecodeError> = dec%s%s j"
@@ -259,7 +266,7 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
             let ty = r.Name + declParams msg r.Name []
 
             [ sprintf "/// `%s` as a JSON value." name
-              sprintf "let encode%s (v: %s) : JVal = enc%s v" name ty name
+              sprintf "%s%s (v: %s) : JVal = enc%s v" writer name ty name
               sprintf "/// `%s` read back; a refusal is the typed `DecodeError`." name
               sprintf "let decode%s (j: JVal) : Result<%s, DecodeError> = dec%s j" name ty name
               sprintf "/// `decode%s` under the strict-members reading." name
@@ -272,7 +279,7 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
             |> String.concat "\n"
         | _ ->
             [ sprintf "/// `%s` as a JSON value." name
-              sprintf "let encode%s (v: %s) : JVal = enc%s v" name name name
+              sprintf "%s%s (v: %s) : JVal = enc%s v" writer name name name
               sprintf "/// `%s` read back; a refusal is the typed `DecodeError`." name
               sprintf "let decode%s (j: JVal) : Result<%s, DecodeError> = dec%s j" name name name
               sprintf "/// `decode%s` under the strict-members reading (an enum has no members)." name
@@ -282,16 +289,29 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
     /// The module's own doc comment (Phase 551): a codec-only module is published, so its module type
     /// is documented like every public member: which host types it carries codecs for (its roots, in
     /// request order), where they come from, and that it is regenerated, not edited.
-    let private moduleDoc (request: CodecOnly) : string =
+    let private moduleDoc (request: CodecOnly) (internalWriters: string list) : string =
         let roots = request.Roots |> List.map (fun r -> "`" + r + "`") |> String.concat ", "
+
+        let writers =
+            internalWriters |> List.map (fun r -> "`encode" + r + "`") |> String.concat ", "
 
         "/// Generated codecs for "
         + roots
         + ", derived from their IDL declaration: per root\n"
         + "/// `encode<Name>`, `decode<Name>` and `decode<Name>Strict`. Regenerate it from its inputs; do not edit it."
+        + (if List.isEmpty internalWriters then
+               ""
+           else
+               "\n/// Internal, its readers public: " + writers + ".")
 
     /// The codec-only module, before end-of-line normalisation.
-    let private moduleText (sup: GenSupport) (request: CodecOnly) (moduleName: string) (idl: Idl) =
+    let private moduleText
+        (sup: GenSupport)
+        (request: CodecOnly)
+        (internalWriters: string list)
+        (moduleName: string)
+        (idl: Idl)
+        =
         let roots = request.Roots |> List.map (fun n -> n, rootType idl n)
 
         match roots |> List.tryFind (snd >> Option.isNone) with
@@ -300,6 +320,13 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                 (sprintf "a codec-only root '%s'" n)
                 "a root names a union, record or enum the vocabulary declares"
                 "name a declared union, record or enum"
+        | None when internalWriters |> List.exists (fun n -> not (List.contains n request.Roots)) ->
+            refuse
+                (sprintf
+                    "an internal writer for '%s', which is not a root"
+                    (internalWriters |> List.find (fun n -> not (List.contains n request.Roots))))
+                "only a root has a public writer to keep internal"
+                "name a root of the request"
         | None when not sup.KindProjections.IsEmpty || sup.TypeSplice.IsSome ->
             refuse
                 "a kind projection or a type splice in a codec-only module"
@@ -372,7 +399,7 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                         (decl.Unions |> List.map (unionWalker idl))
                         @ (decl.Records |> List.map (recordWalker idl))
 
-                    [ [ sprintf "%s\nmodule %s\n\nopen Fuaran.Core" (moduleDoc request) moduleName ]
+                    [ [ sprintf "%s\nmodule %s\n\nopen Fuaran.Core" (moduleDoc request internalWriters) moduleName ]
                       [ "// Phase 550 — the host declares every type; each is named here by abbreviation."
                         + "\n"
                         + ((decl.Enums |> List.map (fun e -> abbreviation e.Name []))
@@ -398,21 +425,32 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                       (if List.isEmpty decs then [] else [ recGroup decs ])
                       [ strictHelpers ]
                       (if List.isEmpty walkers then [] else [ recGroup walkers ])
-                      request.Roots |> List.map (entries decl) ]
+                      request.Roots |> List.map (entries decl internalWriters) ]
                     |> List.concat
                     |> String.concat "\n\n"
                     |> Ok
 
-    /// The codec-only module (see the module's header): LF-terminated and stamped, as the structural
+    /// The codec-only module (see the module's header) with each root `internalWriters` names
+    /// emitting its writer `internal` (Phase 685): LF-terminated and stamped, as the structural
     /// module is.
+    let fsharpCodecModuleWith
+        (sup: GenSupport)
+        (request: CodecOnly)
+        (internalWriters: string list)
+        (moduleName: string)
+        (idl: Idl)
+        : Result<string, CodegenError> =
+        moduleText sup request internalWriters moduleName idl
+        |> Result.map (
+            normalizeEol
+            >> Stamp.generated (CommentStyle.Line "//") "F# codec layer" [ idl ]
+        )
+
+    /// The codec-only module with every entry public.
     let fsharpCodecModule
         (sup: GenSupport)
         (request: CodecOnly)
         (moduleName: string)
         (idl: Idl)
         : Result<string, CodegenError> =
-        moduleText sup request moduleName idl
-        |> Result.map (
-            normalizeEol
-            >> Stamp.generated (CommentStyle.Line "//") "F# codec layer" [ idl ]
-        )
+        fsharpCodecModuleWith sup request [] moduleName idl

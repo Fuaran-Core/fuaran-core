@@ -63,6 +63,20 @@ module Gen =
         : Result<string, CodegenError> =
         FSharpCodecOnly.fsharpCodecModule sup request moduleName idl
 
+    /// Phase 685 — `fsharpCodecModule` with a per-root visibility option: each root `internalWriters`
+    /// names emits its `encode<Name>` `internal`, so a host type's writer stays inside its package
+    /// while its `decode<Name>` and `decode<Name>Strict` are published. Every other entry is public,
+    /// and an empty list emits exactly what `fsharpCodecModule` emits. Refused by name for a name that
+    /// is not a root.
+    let fsharpCodecModuleWith
+        (sup: GenSupport)
+        (request: CodecOnly)
+        (internalWriters: string list)
+        (moduleName: string)
+        (idl: Idl)
+        : Result<string, CodegenError> =
+        FSharpCodecOnly.fsharpCodecModuleWith sup request internalWriters moduleName idl
+
     /// The JSON Schema (draft 2020-12) of the vocabulary's wire.
     let jsonSchema (idl: Idl) : Result<string, CodegenError> =
         JsonSchema.jsonSchema (Decl.declared idl)

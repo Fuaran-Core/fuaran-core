@@ -82,11 +82,15 @@ let private vocabulary unions enums records discriminator : Idl =
 
 /// One generated module: its vocabulary, the request, the module name and the committed file.
 type SeamModule =
-    { Stem: string
-      Idl: Idl
-      Request: CodecOnly
-      ModuleName: string
-      File: string }
+    {
+        Stem: string
+        Idl: Idl
+        Request: CodecOnly
+        /// The roots whose writer is emitted `internal` (Phase 685), their readers public.
+        InternalWriters: string list
+        ModuleName: string
+        File: string
+    }
 
 // ---- the capability seam ---------------------------------------------------------------------
 
@@ -151,6 +155,7 @@ let capability: SeamModule =
                   "DeclarationFault", "Fuaran.Core.DeclarationFault"
                   "InvokeError", "Fuaran.Core.InvokeError"
                   "Deferred", "Fuaran.Core.Deferred" ] }
+      InternalWriters = []
       ModuleName = "Fuaran.Core.CapabilitySeamCodec"
       File = "src/Fuaran.Core.Function/CapabilitySeamCodec.fs" }
 
@@ -199,6 +204,7 @@ let pipeline: SeamModule =
                 [ "ArgSource", "Fuaran.Core.ArgSource"
                   "PipelineNode", "Fuaran.Core.PipelineNode"
                   "CapabilityPipeline", "Fuaran.Core.CapabilityPipeline" ] }
+      InternalWriters = []
       ModuleName = "Fuaran.Core.PipelineSeamCodec"
       File = "src/Fuaran.Core.Function/PipelineSeamCodec.fs" }
 
@@ -275,6 +281,7 @@ let query: SeamModule =
                   "ColumnPredicate", "Fuaran.Core.ColumnPredicate"
                   "SortKey", "Fuaran.Core.SortKey"
                   "SortDirection", "Fuaran.Core.SortDirection" ] }
+      InternalWriters = [ "ColumnPredicate" ]
       ModuleName = "Fuaran.Core.QuerySeamCodec"
       File = "src/Fuaran.Core.Query/QuerySeamCodec.fs" }
 
@@ -308,6 +315,7 @@ let fieldChange: SeamModule =
       Request =
         { Roots = [ "FieldChange" ]
           HostTypes = Map.ofList [ ("FieldChange", "Fuaran.Core.FieldChange") ] }
+      InternalWriters = []
       ModuleName = "Fuaran.Core.FieldChangeSeamCodec"
       File = "src/Fuaran.Core.Column/FieldChangeSeamCodec.fs" }
 
@@ -350,6 +358,7 @@ let rejection: SeamModule =
             Map.ofList
                 [ "Rejection", "Fuaran.Core.Rejection"
                   "NestRelation", "Fuaran.Core.NestRelation" ] }
+      InternalWriters = []
       ModuleName = "Fuaran.Core.RejectionSeamCodec"
       File = "src/Fuaran.Core.AiSurface/RejectionSeamCodec.fs" }
 
@@ -368,7 +377,7 @@ let private stemHandle (m: SeamModule) : string =
 
 /// The module text the generator emits for one seam.
 let generate (m: SeamModule) : Result<string, CodegenError> =
-    Gen.fsharpCodecModule GenSupport.Empty m.Request m.ModuleName m.Idl
+    Gen.fsharpCodecModuleWith GenSupport.Empty m.Request m.InternalWriters m.ModuleName m.Idl
 
 [<Tests>]
 let seamCodecTests =
@@ -405,6 +414,39 @@ let seamCodecTests =
               Expect.isTrue (isPublic "decodeColumnPredicate") "decodeColumnPredicate is public"
               Expect.isTrue (isPublic "decodeColumnPredicateStrict") "decodeColumnPredicateStrict is public"
               Expect.isTrue (isPublic "encodeQueryError") "encodeQueryError is public"
+
+          testCase
+              "the generator emits an internal writer for a root the option names, and refuses a name that is no root"
+          <| fun _ ->
+              let emitted (writers: string list) =
+                  match Gen.fsharpCodecModuleWith GenSupport.Empty query.Request writers query.ModuleName query.Idl with
+                  | Ok s -> s
+                  | Error e -> failtestf "codegen refused: %s" (CodegenError.describe e)
+
+              let internalOne = emitted [ "ColumnPredicate" ]
+              let allPublic = emitted []
+
+              Expect.stringContains internalOne "let internal encodeColumnPredicate " "the named root's writer"
+              Expect.stringContains internalOne "let decodeColumnPredicate " "its reader stays public"
+              Expect.stringContains internalOne "let encodeQueryError " "another root's writer stays public"
+              Expect.stringContains allPublic "let encodeColumnPredicate " "no option: public"
+
+              Expect.equal
+                  (Gen.fsharpCodecModuleWith GenSupport.Empty query.Request [] query.ModuleName query.Idl)
+                  (Gen.fsharpCodecModule GenSupport.Empty query.Request query.ModuleName query.Idl)
+                  "an empty option emits what the plain entry emits"
+
+              match
+                  Gen.fsharpCodecModuleWith
+                      GenSupport.Empty
+                      query.Request
+                      [ "SortDirection" ]
+                      query.ModuleName
+                      query.Idl
+              with
+              | Error(CodegenError.UnsupportedConstruct(construct, _, _)) ->
+                  Expect.stringContains construct "'SortDirection'" "the refusal names it"
+              | other -> failtestf "a name that is no root was not refused: %A" (Result.map ignore other)
 
           testCase "every seam vocabulary declares itself without a fault"
           <| fun _ ->

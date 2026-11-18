@@ -105,7 +105,6 @@ method Fuaran.Core.QuerySeamCodec.decodeQueryError(Fuaran.Core.JVal) : Microsoft
 method Fuaran.Core.QuerySeamCodec.decodeQueryErrorStrict(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.QueryError, Fuaran.Core.DecodeError>
 method Fuaran.Core.QuerySeamCodec.decodeSortKey(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.SortKey, Fuaran.Core.DecodeError>
 method Fuaran.Core.QuerySeamCodec.decodeSortKeyStrict(Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.SortKey, Fuaran.Core.DecodeError>
-method Fuaran.Core.QuerySeamCodec.encodeColumnPredicate(Fuaran.Core.ColumnPredicate) : Fuaran.Core.JVal
 method Fuaran.Core.QuerySeamCodec.encodeQueryError(Fuaran.Core.QueryError) : Fuaran.Core.JVal
 method Fuaran.Core.QuerySeamCodec.encodeSortKey(Fuaran.Core.SortKey) : Fuaran.Core.JVal
 record-field Fuaran.Core.Query.Effect #3 : Fuaran.Core.EffectClass

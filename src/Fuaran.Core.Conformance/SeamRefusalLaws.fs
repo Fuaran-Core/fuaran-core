@@ -35,6 +35,17 @@ module internal SeamRefusalLaws =
     let private reader (decode: JVal -> Result<'T, DecodeError>) (encode: 'T -> JVal) =
         fun (j: JVal) -> decode j |> Result.map encode
 
+    /// A predicate's document, re-encoded for an acceptance (Phase 685: the predicate's own writer is
+    /// internal to its package, DECISIONS.md D264.8 point 3). It is the `predicate` member of the
+    /// refusal that carries it, which the query-error writer writes through the same body.
+    let private predicateJson (p: ColumnPredicate) : JVal =
+        match QuerySeamCodec.encodeQueryError (PredicateNotHonoured p) with
+        | JObj ms ->
+            ms
+            |> List.tryPick (fun (k, v) -> if k = "predicate" then Some v else None)
+            |> Option.defaultValue (JObj ms)
+        | other -> other
+
     /// Every reader a vector may name. `/strict` is the derived strict-members reading.
     let readers: (string * (JVal -> Result<JVal, DecodeError>)) list =
         [ "invokeError", reader CapabilitySeamCodec.decodeInvokeError CapabilitySeamCodec.encodeInvokeError
@@ -62,9 +73,8 @@ module internal SeamRefusalLaws =
           reader (RejectionSeamCodec.decodeRejectionStrict str) (RejectionSeamCodec.encodeRejection JStr)
           "decodeError", reader DecodeError.decoder DecodeError.toJson
           "queryError", reader QuerySeamCodec.decodeQueryError QuerySeamCodec.encodeQueryError
-          "columnPredicate", reader QuerySeamCodec.decodeColumnPredicate QuerySeamCodec.encodeColumnPredicate
-          "columnPredicate/strict",
-          reader QuerySeamCodec.decodeColumnPredicateStrict QuerySeamCodec.encodeColumnPredicate
+          "columnPredicate", reader QuerySeamCodec.decodeColumnPredicate predicateJson
+          "columnPredicate/strict", reader QuerySeamCodec.decodeColumnPredicateStrict predicateJson
           "sortKey", reader QuerySeamCodec.decodeSortKey QuerySeamCodec.encodeSortKey
           "sortKey/strict", reader QuerySeamCodec.decodeSortKeyStrict QuerySeamCodec.encodeSortKey
           "fieldChange", reader FieldChangeSeamCodec.decodeFieldChange FieldChangeSeamCodec.encodeFieldChange
