@@ -146,7 +146,8 @@ module EffectCodec =
 
     let private hosts = [ Pure; ReadsHost; WritesHost ]
 
-    /// The host axis, read back; an unknown spelling is `UnknownTag` naming the three.
+    /// The host axis, read back; an unknown spelling is `UnknownTag` naming the three, its detail what
+    /// was found (`host effect '<s>'`, Phase 685), as every other unknown tag of a declaration reader.
     let hostDecoder: Decoder<HostEffect> =
         Decoder.str
         |> Decoder.andThen (fun s ->
@@ -157,16 +158,17 @@ module EffectCodec =
                     RootDecodeCode.UnknownTag,
                     "one of "
                     + (hosts |> List.map (fun h -> "'" + hostTag h + "'") |> String.concat ", "),
-                    "unknown host effect: " + s
+                    "host effect '" + s + "'"
                 ))
 
-    /// The determinism axis, read back from its canonical label only (`Effect.tryDeterminismOfTag`).
+    /// The determinism axis, read back from its canonical label only (`Effect.tryDeterminismOfTag`); an
+    /// unknown label is `UnknownTag`, its detail what was found (`determinism '<s>'`, Phase 685).
     let determinismDecoder: Decoder<DeterminismSource> =
         Decoder.str
         |> Decoder.andThen (fun tag ->
             match Effect.tryDeterminismOfTag tag with
             | Some set -> Ok set
-            | None -> Error(RootDecodeCode.UnknownTag, "a determinism tag", "unknown determinism: " + tag))
+            | None -> Error(RootDecodeCode.UnknownTag, "a determinism tag", "determinism '" + tag + "'"))
 
     /// The members an effect object carries — what a strict reader admits.
     let members: string list = [ "host"; "determinism" ]
