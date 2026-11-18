@@ -538,7 +538,7 @@ are **conformance-certified**, not asserted. Stable surfaces:
   `0000`..`9999`, a fraction vector of another length), because such a row renders ANOTHER instant's
   text; the public `Timestamps` case still checks nothing. Widening the refusal is **major**.
 - **`Query`** — the data-acquisition seam + its invocation key (also `canonicalFloat`-routed) are
-  certified by `Conformance.queryLaws`.
+  certified by `Conformance.queryLaws`. **Since `0.44.0` (Phase 685, DECISIONS.md D264, breaking):** the declaration's writer (`QueryCodec.encode`), the read's identity (`Query.invocationKey`, `invocationKeyPage`, `invocationPreimage`) and `Query.grant` take only an `AdmittedQuery`, which `QueryRegistry.admit` alone makes from a declaration and the declaration reader, `tryFind` and `enumerate` answer, so no declaration the gate refuses is written or keyed; an admitted declaration's text reads back as it where its embedded table is one the column codec reads (the gate does not read the source, a stated limit). `TimeoutMs` and `PageSize` are a `PositiveInt` (`PositiveInt.tryCreate`), and the reader refuses one that is not positive `OutOfRange` at its member. `QuerySeamCodec.encodeColumnPredicate` is internal, its readers public. A `PredicateNotHonoured` a dispatch raises names one of the declaration's own predicates, any other being the resolver's `ExecutionFailed`; the query-error writer stays total for an error built by hand, and what such a document reads back as is not promised. Moving any of these is breaking.
 
 A domain that ships a `Transform` evaluator / `Query` provider runs `transformLaws` / `queryLaws`
 alongside its base witness certification; a host in another language re-implements the codec + these
