@@ -73,6 +73,10 @@ module QueryCodec =
 
     // ---- query declaration ----
 
+    /// A budget (`timeoutMs`, `pageSize`): a positive integer (Phase 685, D264.7). A value that is not
+    /// positive is refused `OutOfRange` at the member; a fraction or a string is `WrongKind`.
+    let private budgetOf: Decoder<int> = Decoder.intRange 1 System.Int32.MaxValue
+
     let internal queryJson (q: Query) : JVal =
         JObj(
             [ "$type", JStr "query"
@@ -161,9 +165,9 @@ module QueryCodec =
                 |> Result.bind (fun sch ->
                     Decoder.field "effect" EffectCodec.decoder el
                     |> Result.bind (fun eff ->
-                        Decoder.optField "timeoutMs" Decoder.int el
+                        Decoder.optField "timeoutMs" budgetOf el
                         |> Result.bind (fun tmo ->
-                            Decoder.optField "pageSize" Decoder.int el
+                            Decoder.optField "pageSize" budgetOf el
                             |> Result.bind (fun pg ->
                                 Decoder.optField "where" (Decoder.list predicate) el
                                 |> Result.bind (fun wh ->
