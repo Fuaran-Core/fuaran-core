@@ -86,16 +86,16 @@ module SpineAdoption =
     let private rs651 =
         AdoptionSource.Host("0.43.0", "55c145f2852088c53760eb53bbae9afaac95d026")
 
-    /// The Rust spine's measurement at Core 0.44.0 (a draft): its Phase 690 (its D18) answered the admitted
-    /// query declaration with all 97 vectors of `queryDeclarationLaws` (46 declarationRefused, 24
-    /// admissionFault, 4 register, 14 validateParams, 9 dispatch) on both toolchains it gates, and read the
-    /// families below at their counts, unchanged, against Core commit `889c869d`, at this spine commit, the
-    /// head of its `main` (recorded here by Phase 691; it follows its Phase 683 measurement at `282ff93`,
-    /// recorded by Phase 684, and Phase 686's correction of `canonicalFormLaws` to its 20). The family has
-    /// since grown to 107 vectors (Phase 688), which the spine has not followed. `identity` stays proposed,
-    /// as at its Phase 665; the families above keep the measurements that stand.
-    let private rs690 =
-        AdoptionSource.Host("0.44.0", "a2f970df4479d5bbf502827efff4523246c72d6a")
+    /// The Rust spine's measurement at Core 0.44.0 (a draft): its Phase 693 (its D19.9) answered the admitted
+    /// query declaration with all 107 vectors of `queryDeclarationLaws` (46 declarationRefused, 34
+    /// admissionFault, 4 register, 14 validateParams, 9 dispatch) on both toolchains it gates, its seams leg
+    /// asserted the 143 cases of `seamRefusals`, and it read the families below at their counts, unchanged,
+    /// against Core commit `66ff009e`, at this spine commit, the head of its `main` (recorded here by
+    /// Phase 694; it follows its Phase 690 measurement at `a2f970d`, recorded by Phase 691). The spine does
+    /// not yet follow Phase 692. `identity` stays proposed, as at its Phase 665; the families above keep the
+    /// measurements that stand.
+    let private rs693 =
+        AdoptionSource.Host("0.44.0", "f70a2a2765e83615b766a5fbc1467fc354364675")
 
     /// The Rust spine (`Fuaran-Core/fuaran-core-rs`). A family whose leg did not change keeps the
     /// measurement that stands.
@@ -107,18 +107,18 @@ module SpineAdoption =
               "skeletonChain", 16, rs463
               "skeletonDag", 12, rs651
               "codecRefusals", 101, rs564
-              "seamRefusals", 142, rs651
-              "skeletonMerge", 13, rs690
-              "skeletonDiff", 14, rs690
-              "capabilityLaws", 144, rs690
-              "capabilityDocumentLaws", 18, rs690
-              "queryGrantLaws", 19, rs690
-              "queryDeclarationLaws", 97, rs690
-              "capabilityGateLaws", 41, rs690
-              "decimal", 75, rs690
-              "fieldLaws", 43, rs690
-              "propagationLaws", 73, rs690
-              "canonicalFormLaws", 20, rs690
+              "seamRefusals", 143, rs693
+              "skeletonMerge", 13, rs693
+              "skeletonDiff", 14, rs693
+              "capabilityLaws", 144, rs693
+              "capabilityDocumentLaws", 18, rs693
+              "queryGrantLaws", 19, rs693
+              "queryDeclarationLaws", 107, rs693
+              "capabilityGateLaws", 41, rs693
+              "decimal", 75, rs693
+              "fieldLaws", 43, rs693
+              "propagationLaws", 73, rs693
+              "canonicalFormLaws", 20, rs693
               "premiseStringModel", 29, rs564
               "premiseFloatDigits", 163, rs564
               "premiseInt53", 29, rs564
