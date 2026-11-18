@@ -519,3 +519,39 @@ let sentenceTests685 =
                       Expect.equal e.Code DecodeCode.UnknownTag (what + ": the code")
                       Expect.isFalse (e.Message.Contains "unknown unknown") (what + " doubles its lead: " + e.Message)
                       Expect.stringContains e.Message ("'" + found + "'") (what + " names what was found: " + e.Message) ]
+
+// ---------------------------------------------------------------------------
+//  Phase 685 (DECISIONS.md D264.7, point 3) — a budget is a positive integer: the reader refuses a
+//  `timeoutMs` or a `pageSize` that is not positive, `OutOfRange` at the member.
+// ---------------------------------------------------------------------------
+
+/// `plainDeclaration685` with `members` added.
+let private withMembers685 (members: string) =
+    plainDeclaration685.Substring(0, plainDeclaration685.Length - 1)
+    + ","
+    + members
+    + "}"
+
+[<Tests>]
+let budgetTests685 =
+    testList
+        "Phase 685 - the declaration reader refuses a budget that is not positive"
+        [ for budget in [ "timeoutMs"; "pageSize" ] do
+              for value in [ 0; -1 ] do
+                  testCase (sprintf "%s %d is refused OutOfRange at %s" budget value budget)
+                  <| fun _ ->
+                      match
+                          QueryCodec.decodeDetailedWith
+                              ReadPolicy.Lenient
+                              (withMembers685 (sprintf "\"%s\":%d" budget value))
+                      with
+                      | Ok _ -> failtestf "the reader admitted %s %d" budget value
+                      | Error e ->
+                          Expect.equal e.Code DecodeCode.OutOfRange "the code"
+                          Expect.equal e.Path [ PathSegment.Key budget ] "the path"
+
+          testCase "both budgets at 1 read, the boundary"
+          <| fun _ ->
+              Expect.isOk
+                  (QueryCodec.decodeDetailedWith ReadPolicy.Lenient (withMembers685 "\"pageSize\":1,\"timeoutMs\":1"))
+                  "a budget of 1 is positive" ]
