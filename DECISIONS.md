@@ -296,8 +296,12 @@ clause for a proposal; nothing this entry records is in force, and no code, base
 until a ruling is recorded beside it. D264.8 point 1 left one case open as a stated limit: the admission gate does not
 read a declaration's source, so an admitted declaration whose embedded table `Table.validate` refuses is written by
 the declaration's writer, and the limit was stated as a refusal, the reader refusing the text at `source`. This entry
-takes the census first (D266.1). The census finds that premises the phase was filed on are not so (D266.2), so the
-alternatives wait for a ruling on what it found (D266.3).
+takes the census first (D266.1). The census finds that premises the phase was filed on are not so (D266.2); the
+census was accepted on 2026-11-18 and the question widened with it: what must be true of a source for "admitted" to
+mean that the text reads back as what was written, and what "as what was written" means. D266.3 adds the facts the
+alternatives rest on, D266.4 sets out the two readings of "the same declaration", D266.5 the alternatives for the
+declaration's source and D266.6 those for the result's rows, each with what it moves; D266.7 proposes a choice and
+D266.8 puts the questions for the ruling.
 
 **D266.1 — the census.** Taken at `889c869d`; each behavioural claim was probed with the kit built from that commit:
 a declaration of one result column, no filter and no order, whose source is the table under test, built through
@@ -407,13 +411,195 @@ No vector in `query-declaration-laws.json`, `query-grant-laws.json` or `seam-ref
 3. D264.8 point 1 names `column_codec_laws` as the model's statement of the limit. The model states no limit: it
    assumes every source reads back as itself, which the column strand proves only to a normal form and only over valid
    tables, and which the differential samples only at `Ref`.
-4. The wire baseline holds ten sampled declarations the gate admits and the reader refuses, not six.
+4. The wire baseline holds ten sampled declarations the gate admits and the reader refuses, not six. This entry
+   records the correction against D264.8 points 1 and 6; D264 is not edited, and the `0.44.0` entry's "six" is
+   corrected by the change that builds what is ruled here.
 
-**D266.3 — held.** The alternatives Phase 688 was filed to weigh (the limit stays in the writer's contract; the gate
-reads the source and refuses through a new `QueryError` case; the gate refuses through a case it has; the table's own
-type makes an invalid table unrepresentable) were each framed over a refusal. Under D266.2 the first would keep a
-changed meaning documented in place, and the other three must also answer the valid table that reads back in normal
-form. They are set out, with what each moves and a recommendation, once the census is ruled on.
+**D266.3 — what the alternatives rest on.** Three more facts, probed at `889c869d` as D266.1 was.
+
+- *The result writer has the same gap, and a production path reaches it.* `QueryCodec.encodeResult` and
+  `encodeDeferredResult` write a page's rows through the same unguarded `encodeJson` (QueryCodec.fs:218) and no gate
+  runs on a result. A result whose rows name a column twice, carry a surplus column or hold `12.50` reads back as
+  other rows; ragged rows are refused; valid rows out of schema order read back in schema order (probed; a valid
+  result is the control, read back equal). A resolver is host code and answers any table: a dispatch whose resolver
+  answers ragged rows returns `Ok (Ready r)` with those rows (probed), and `dispatchCaptured` journals what a dispatch
+  returns `Ready` through the writer it is handed, `encodeResult` for the canonical form (QueryRegistry.fs:286-296),
+  so a replay (`dispatchReplayed`, 398-410) can answer other rows than the resolver gave.
+- *The normal form is one step.* An embedded table whose columns are not in schema order reads back with them in
+  schema order, and that declaration reads back as itself (probed: the second read-back equals the first, and the
+  first equals the declaration built in schema order; the control, built in schema order, reads back equal the first
+  time). It is the column codec's own proved round trip (`round_trip`, `decoded_round_trip_is_exact`,
+  `normal_table_is_idempotent`; row `column-codec-round-trip`). With typed storage (Phase 417) a valid table can
+  differ from its normal form only in the order of `Columns`: an `int` cell cannot sit in a `float` or `decimal`
+  column, and an all-true mask equals `AllValid` (Column.fs:138). The schema is the order authority
+  (Table.fs:8-13).
+- *Nothing keys on the source.* The read's identity is the id, the filter, the order and the arguments
+  (`grammarFields`, Query.fs:357-358): the two column orders of one table key alike (probed), so neither reading of
+  D266.4 moves a key, a grant or a journal entry.
+
+**D266.4 — what "reads back as the same declaration" means.** Classes are read against `STABILITY.md`'s tables:
+"Public-surface baselines" for `api/` (STABILITY.md:173-178) and "The wire surface" for `api/wire/` (244-245),
+where a document removed, or the same structure emitted as different bytes, is `breaking`; through the `0.x` line a
+breaking class advances the minor (15-17). The standing draft `0.44.0` is already that minor, class `breaking`, over
+`v0.43.0` (docs/releases/0.44.0.md:3-8), so a breaking change rides it and none advances it further.
+
+- **(E1) Structural equality.** The text reads back equal to the declaration written. A valid table out of schema
+  order then has to be kept from the writer, in one of two ways. (E1-r) The gate refuses it: a refusal of a table
+  `Table.validate` accepts and `tryEncode` writes, so the query seam would be stricter than the column layer it
+  carries, and a table built in any column order today, the order `Table`'s own doc allows (Table.fs:8-13), is refused
+  at registration. (E1-n) The gate normalises it: `admit` answers the declaration with its table in schema order, and
+  `register` and `replace` hold that form, so `admit q` no longer answers `q`, a resolver is handed another column
+  order than the host built, and `Fuaran.Core.Column`, which declares no `InternalsVisibleTo`, must expose a
+  normaliser (`additive`) or the query seam must copy one. Either moves the proof model: the premise the round trip
+  spends becomes "the source is in normal form", which admission discharges.
+- **(E2) Equality up to the column codec's normal form.** The text reads back as the declaration written with its
+  embedded table in schema order, and from then on exactly. That is the column layer's own contract (ColumnCodec.fs
+  417-420) and its proved round trip, and it changes no meaning: the same columns and rows, the schema the order
+  authority, the identity unmoved. Moves: the writer's contract in `AdmittedQuery`'s doc (QueryTypes.fs:188-191),
+  `QueryCodec.encode`'s and `encodeResult`'s docs; no `api/` or `api/wire/` row; no family; the premise restated as
+  below. Class: internal.
+
+Under every alternative below, the column codec's premise is restated truthfully. `column_codec_laws`
+(proofs/Query.fst:2458-2462) assumes `forall s. cc.source_of (cc.source_json s) == Some s`, which production does not
+meet at an embedded table. The restatement gives the parameter a validity predicate and a normaliser, as the column
+strand proves them: `forall s. cc.source_ok s ==> cc.source_of (cc.source_json s) == Some (cc.source_norm s)`, with
+`cc.source_ok (cc.source_norm s)` and `cc.source_norm (cc.source_norm s) == cc.source_norm s`; a `Ref` is `ok` and its
+own normal form (`ref_round_trip`). The rows' law is restated the same way. Under (E2) `query_roundtrip_identity`
+concludes the declaration with its source normalised; under (E1) it concludes the declaration itself, over the premise
+that the source is its own normal form. The row `query-codec-column-premises` is restated with it, and the
+differential's instantiation (tests/Fuaran.Core.Tests.Fixtures/VectorOracle.Query.fs:275-280) and drawn declarations
+reach embedded tables, valid and not, which they do not today (`query-codec-differential`).
+
+**D266.5 — the declaration's source: the alternatives.** The Rust port, alone of the eight hosts each family lists, has
+adopted `queryDeclarationLaws` (84 of 97, at `282ff93`) and `seamRefusals` (142, at `55c145f`); the Go and the Python
+ports hold no declaration and move under none of these. Whatever is ruled reaches the Rust port in a phase of its own.
+
+- **(a) The limit stays in the writer's contract, restated as it is.** The docs of `AdmittedQuery`, `QueryCodec.encode`
+  and `ColumnCodec.encodeJson` say that an admitted declaration whose embedded table `Table.validate` refuses is
+  written as text the reader may refuse, or may read as another declaration, and that a host validates the table
+  (`Table.validate` or `ColumnCodec.tryEncode`) before it writes one. Moves: no `api/` or `api/wire/` row; no family
+  (the ten sampled documents stand, counted ten); proofs: the restated premise, with `source_ok` a premise of
+  `query_roundtrip_identity` that admission does not discharge, and the boundaries of
+  `query-codec-declaration-roundtrip` and `query-codec-column-premises` restated; the extracted oracle regenerated. The
+  Rust port: its writer's doc. Class: internal, riding `0.44.0`. A consumer of `0.43.0` is told that a declaration
+  whose embedded table `validate` refuses has always been written so, and may have reached another host as another
+  declaration, and that it validates the table first. **What it leaves:** all 14 changed-meaning cases reachable, and
+  every invalid table written, documented in place, which is the outcome D264.5 gave as the reason the literal's
+  writer did not take its own (a) and D264.7 ruled against.
+- **(b) The gate reads the source and refuses through a new `QueryError` case.** Proposed as
+  `IllFormedSource of reason: string` (wire `illFormedSource`, member `reason`), raised at the path `source` with the
+  column layer's sentence (`ColumnCodec.errorString` of `Table.validate`'s refusal), as `IllFormedLiteral` carries the
+  column layer's reason for a literal (Query.fs:44-63). A `Ref` is not read. The gate checks the source FIRST, before
+  the parameters: the reader reads the source before it runs the gate (QueryCodec.fs:186-202), so a text carrying an
+  unreadable source and a parameter named twice is refused at `source` by both. The reader cannot reach the clause,
+  since a source it decodes ends in `validate` (ColumnCodec.fs:471); it is reached by `admit`, `register` and
+  `replace`. `QueryError.describe` gains its sentence. Moves: `api/Fuaran.Core.Query.txt` gains the case's three rows
+  (the `Tags` literal, the nested type and the `union-case` row, as `OrderNotHonoured`'s at 28, 154, 198), class
+  `union-widening` (STABILITY.md:176); the seam declaration gains the case (tests/Fuaran.Core.Tests/SeamIdl.fs:240-265)
+  and the generated codec with it; `api/wire/`: a `queryError / QueryError.IllFormedSource` document, `additive`, and
+  the ten sampled `query` documents of D266.1, which the sampler writes through the gate, re-stated with a table their
+  schema entry carries, `breaking`; `seamRefusals` gains one `queryError` vector (142 to 143), which the Rust port's
+  adopted reader refuses as an unknown tag until it adopts it; `queryDeclarationLaws` gains a `source` member in the
+  data form of its `admissionFault` and `register` inputs, a table as data whose columns are a list so that a name
+  can repeat, and ten vectors (97 to 107): eight refusals (a schema name twice, a column name twice, a schema name with
+  no column, a column absent from the schema, a column of another type, ragged columns, a float not finite, decimal
+  text not canonical) and two acceptances (a valid table in schema order, and one out of it, which under (E2) is
+  admitted and under (E1-r) is refused); the Rust port's record keeps 84 at its commit. The clause-(e) faults only
+  typed storage holds (a mask of another length, an instant its text cannot spell) are not stated as data, which
+  every host's builder can make; Core's own tests hold them. Proofs: `query_error` gains the case;
+  `admission_fault` and `admission_fault_at` (proofs/Query.fst:554, 2616) gain the source clause over the
+  parameter's `source_ok`, so `admitted_query` discharges it and `query_roundtrip_identity` holds over the restated
+  premise alone; `query_error_roundtrip` (3133) and the refusal codec's model gain the case; rows
+  `query-codec-declaration-roundtrip` (the limit leaves its boundary), `query-codec-column-premises`,
+  `query-register-refuses-shape` (the source clause), `query-codec-error-roundtrip` and `query-codec-differential`;
+  the oracle regenerated. The Rust port: the case, its gate's clause, its two legs (`seamRefusals` 143,
+  `queryDeclarationLaws` 107), its own version by its rule for a widened public enum. Class: `union-widening` and wire
+  `breaking`, riding `0.44.0`. A consumer of `0.43.0` is told: match the new case; `admit`, `register` and `replace`
+  refuse a declaration whose embedded table `Table.validate` refuses, at `source`, so a declaration registered under
+  `0.43.0` with such a table is refused; such a declaration written under `0.43.0` may have been read by another host
+  as another declaration, so a host that stored one re-validates it. **What it leaves:** none of the 24, so none of
+  the 14; the valid table out of schema order as D266.4's reading rules.
+- **(c) The gate refuses through a case it already has.** None names a source the column layer refuses. The nearest
+  is `SourceNotResolved of ref: string`, whose sentence is "Refused: the data source '<ref>' could not be resolved."
+  (Query.fs:195): a reader would be shown "Refused: the data source 'ragged table: column 'b' has 1 rows where the
+  first column has 2' could not be resolved.", and a host that certifies a refusal on its code (D188) could not tell a
+  registration refusal from a resolver's failure to fetch, which is all the case means today (D263.1: raised by no
+  declaration). `IllFormedLiteral` would show "the filter on column … compares with a value", false of a source, and
+  `ExecutionFailed` "the query ran and failed", false of a registration. Moves: no `api/` row; the ten sampled `query`
+  documents as in (b), wire `breaking`; no `seamRefusals` vector; `queryDeclarationLaws` as in (b), each refusal
+  `sourceNotResolved`; proofs as in (b) without the new case. The Rust port: its gate's clause and its declaration leg.
+  Class: wire `breaking` and a refusal of input that was accepted, riding `0.44.0`. A consumer of `0.43.0` is told
+  that `SourceNotResolved` also means a declaration's embedded table is refused, at registration. **What it leaves:**
+  none of the 24, at the price of a refusal that names the wrong cause.
+- **(d) The table's type makes an invalid table unrepresentable.** `Table`, `Column`, `ColumnData`'s cases and
+  `Validity.Mask` take `internal` representations behind constructors that run `Table.validate` (and, under (E1-n),
+  order the columns). It is the column layer's change, not this seam's. Moves: `api/Fuaran.Core.Column.txt` loses the
+  two constructors (lines 18, 20), the four record fields (241-242, 249-250) and the nine union cases (367-373,
+  409-410), `removal`, with every reader of a column's storage retyped; every site that builds a table (67 record
+  literals naming `Columns`, in 25 files under `src/` and `tests/` of this repository alone) and every consumer outside it,
+  the compute strand among them; no query family can state an invalid table, and no column family moves (their
+  vectors are texts); proofs: `source_ok` holds by the type, so the premise needs no validity half. The Rust port: its
+  `Table`'s public fields go private. Class: `removal` and `retype`, riding `0.44.0` in number and costing every
+  consumer of the column package. D241 chose a refusal over a carrier type for the same shape of question. **What it
+  leaves:** none, by construction; it is a phase of the column layer's, which the shard puts outside this one unless
+  the ruling names it.
+- **(b′) The writer refuses instead of the gate.** `QueryCodec.encode` answers a `Result` through `tryEncode`. Lost:
+  it retypes the writer `AdmittedQuery` was made to keep total, and "admitted" would still promise less than the
+  reader checks, which is the question.
+
+**D266.6 — the result's rows: the alternatives.** A result is not admitted by any gate: it is what a resolver answers,
+or a value built by hand.
+
+- **(R-i) The dispatch holds a resolver's rows to `Table.validate`.** A `Ready` result whose rows `validate` refuses is
+  the resolver's fault, `ExecutionFailed` naming the column layer's refusal, as D264.8 point 3 holds a resolver's
+  predicate to the declaration's own. `invokePageWithArgs` (Query.fs:584-618) gains the clause, and every dispatch
+  verb, `dispatchCaptured` and the replay with it, so no captured journal records rows that read back as others.
+  Moves: no `api/` or `api/wire/` row (a behaviour of a public function, STABILITY.md:204-205); no vector family (a
+  resolver is host code, which D263's `unreached` list names); proofs: the invoke model's clause, with the restated
+  rows premise discharged for a dispatched result. The Rust port: its `dispatch`. Class: internal. A consumer of
+  `0.43.0` is told that a resolver answering rows `validate` refuses is now refused `ExecutionFailed`.
+- **(R-ii) The result's writers refuse.** `encodeResult` and `encodeDeferredResult` (`api/Fuaran.Core.Query.txt`:63, 65)
+  answer a `Result`, at every caller and `dispatchCaptured`'s `encode` parameter; the twenty sampled result documents
+  of D266.1 re-stated or removed, wire `breaking`; class `retype`, riding `0.44.0`.
+- **(R-iv) The result's writers stay total, and their contract says so** for a result built by hand: rows `validate`
+  refuses may read back as other rows, and rows out of schema order read back in schema order. Docs only; internal.
+
+**D266.7 — the recommendation.** **(b) with (E2), and (R-i) with (R-iv)**, all riding `0.44.0`.
+
+- (b) closes all 24 at the one place a declaration becomes admitted, so "admitted" promises what the reader checks
+  and a registry holds nothing another host cannot be sent. It invents no check: the clause is `Table.validate`, and
+  its reason the column layer's sentence. A new case is the price, because no case names the cause: (c)'s nearest tells
+  a reader the source could not be resolved and makes a registration refusal indistinguishable from a fetch failure on
+  the code a host certifies. The widening is cheapest now: `0.44.0` is already a breaking minor, one host has adopted
+  the two families it moves, and the Go and the Python ports hold no declaration. (a) leaves the 14 changed meanings
+  documented in place, and (d) is the column layer's change, at a cost on every table builder.
+- (E2) because the normal form changes no meaning: the same columns and rows under the schema that orders them, the
+  identity unmoved, and the column layer's own proved contract. (E1-r) would refuse tables the column layer certifies;
+  (E1-n) would make `admit` answer another value than it was handed, for no reader-visible difference.
+- (R-i) because the production path that writes rows is the dispatch and its journal, and holding the resolver's rows
+  there closes it without a retype; (R-iv) states the hand-built remainder, as D264.8 point 3 ruled (B-i) with (B-iv)
+  for the query-error document. (R-ii) buys the same closure with a retype and twenty removed documents.
+
+Each choice reaches files beyond those Phase 688 declares, and the list is part of what is ruled. (a): `ColumnCodec.fs`
+(the doc), `proofs.json`, `proofs/oracle/`. (b): the seam declaration (`tests/Fuaran.Core.Tests/SeamIdl.fs`), the
+generated `QuerySeamCodec.fs`, `Conformance/SeamRefusalLaws.fs`, `conformance/refusals/seam-refusals.json` and its
+manifest, the wire sampler (`tests/Fuaran.Core.Tests/WireSurfaceTests.fs`), `proofs.json`, `proofs/oracle/`, and the
+tests that build a declaration over an invalid table; (c): the same less the seam declaration, the codec and the
+refusals family. (d): the column package, its baseline and every table builder. (R-i): `Query.fs` (declared) and
+`proofs.json`; (E1-n): `Fuaran.Core.Column`'s `Table.fs` and its baseline.
+
+**D266.8 — the questions for the ruling.**
+
+1. Which of (a), (b), (c) or (d) does the declaration's source take?
+2. Does "reads back as the same declaration" mean (E1) structural equality, by refusal or by normalising, or (E2)
+   equality up to the column codec's normal form?
+3. Which of (R-i), (R-ii) or (R-iv), or (R-i) with (R-iv), do the result's rows take, and is it built in Phase 688 or
+   in a phase of its own?
+4. Under (b): is the case `IllFormedSource of reason: string`, and does the gate check the source before the
+   parameters, as proposed?
+5. Under (b) or (c): do the declaration family's data inputs gain a table as data, with the ten vectors proposed, and
+   are the faults only typed storage holds left to Core's own tests?
+6. Does the change ride the `0.44.0` draft with Phase 685's, as proposed?
 
 ## 2026-11-17 — D265: `open-slot` advances a standing draft that a change of a higher class moves: over the newest tag, it heads the draft's ledger file never released, its entries shipping in the new version, and otherwise acts as it does over a release
 
