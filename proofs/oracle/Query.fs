@@ -1492,14 +1492,23 @@ let __proj__Failed__item___0 = (fun ( projectee  :  deferred<'a> ) -> (match (pr
      end))
 
 
-let invoke = (fun ( q  :  query ) ( a  :  arguments ) ( resolve  :  query  ->  deferred<'v> ) -> (match ((validate_params q a)) with
+let rows_refused : Prims.string  ->  Prims.string = (fun ( reason  :  Prims.string ) -> (Prims.strcat "the resolver answered rows the column layer refuses: " reason))
+
+
+let invoke = (fun ( q  :  query ) ( a  :  arguments ) ( vf  :  'v  ->  FStar_Pervasives_Native.option<Prims.string> ) ( resolve  :  query  ->  deferred<'v> ) -> (match ((validate_params q a)) with
 | Error (e) -> begin
      Error (e)
      end
 | Ok (()) -> begin
      (match ((resolve q)) with
 | Ready (r) -> begin
+     (match ((vf r)) with
+| FStar_Pervasives_Native.None -> begin
      Ok (Ready (r))
+     end
+| FStar_Pervasives_Native.Some (m) -> begin
+     Error (ExecutionFailed ((rows_refused m), []))
+     end)
      end
 | Pending -> begin
      Ok (Pending)
@@ -1761,12 +1770,12 @@ let try_find_query : Prims.string  ->  registry  ->  FStar_Pervasives_Native.opt
 let enumerate : registry  ->  Prims.list<query> = (fun ( r  :  registry ) -> r.queries)
 
 
-let dispatch = (fun ( r  :  registry ) ( id  :  Prims.string ) ( a  :  arguments ) ( resolve  :  query  ->  deferred<'v> ) -> (match ((find_query id r.queries)) with
+let dispatch = (fun ( r  :  registry ) ( id  :  Prims.string ) ( a  :  arguments ) ( vf  :  'v  ->  FStar_Pervasives_Native.option<Prims.string> ) ( resolve  :  query  ->  deferred<'v> ) -> (match ((find_query id r.queries)) with
 | FStar_Pervasives_Native.None -> begin
      Error (NoSuchQuery (id, (ids r.queries)))
      end
 | FStar_Pervasives_Native.Some (q) -> begin
-     (invoke q a resolve)
+     (invoke q a vf resolve)
      end))
 
 
@@ -1913,15 +1922,15 @@ let canonical_page : renderers  ->  FStar_Pervasives_Native.option<Prims.string>
 let invocation_key_page : renderers  ->  query  ->  arguments  ->  FStar_Pervasives_Native.option<Prims.string>  ->  Prims.string = (fun ( rn  :  renderers ) ( q  :  query ) ( a  :  arguments ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) -> (Prims.strcat q.q_id (Prims.strcat "#" (rn.hash (canonical_page rn tok q (sort_args rn a))))))
 
 
-let invoke_page = (fun ( q  :  query ) ( a  :  arguments ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) ( resolve  :  query  ->  FStar_Pervasives_Native.option<Prims.string>  ->  deferred<'v> ) -> (invoke q a (fun ( q1  :  query ) -> (resolve q1 tok))))
+let invoke_page = (fun ( q  :  query ) ( a  :  arguments ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) ( vf  :  'v  ->  FStar_Pervasives_Native.option<Prims.string> ) ( resolve  :  query  ->  FStar_Pervasives_Native.option<Prims.string>  ->  deferred<'v> ) -> (invoke q a vf (fun ( q1  :  query ) -> (resolve q1 tok))))
 
 
-let dispatch_page = (fun ( r  :  registry ) ( id  :  Prims.string ) ( a  :  arguments ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) ( resolve  :  query  ->  FStar_Pervasives_Native.option<Prims.string>  ->  deferred<'v> ) -> (match ((find_query id r.queries)) with
+let dispatch_page = (fun ( r  :  registry ) ( id  :  Prims.string ) ( a  :  arguments ) ( tok  :  FStar_Pervasives_Native.option<Prims.string> ) ( vf  :  'v  ->  FStar_Pervasives_Native.option<Prims.string> ) ( resolve  :  query  ->  FStar_Pervasives_Native.option<Prims.string>  ->  deferred<'v> ) -> (match ((find_query id r.queries)) with
 | FStar_Pervasives_Native.None -> begin
      Error (NoSuchQuery (id, (ids r.queries)))
      end
 | FStar_Pervasives_Native.Some (q) -> begin
-     (invoke_page q a tok resolve)
+     (invoke_page q a tok vf resolve)
      end))
 
 
@@ -2206,59 +2215,71 @@ let effect_json : effect_class  ->  Capability.jval = (fun ( e  :  effect_class 
 
 let effect_of_j : Capability.decoder<effect_class> = (Capability.both (Capability.field "host" (tagged_of host_of_tag)) (Capability.field "determinism" (tagged_of det_of_tag)) (fun ( h  :  host_effect ) ( d  :  determinism_source ) -> {host = h; determinism = d}))
 
-type column_codec<'r> = {field_json : (Prims.string * column_type)  ->  Capability.jval; field_of : Capability.jval  ->  FStar_Pervasives_Native.option<(Prims.string * column_type)>; source_json : data_source  ->  Capability.jval; source_of : Capability.jval  ->  FStar_Pervasives_Native.option<data_source>; source_norm : data_source  ->  data_source; rows_json : 'r  ->  Capability.jval; rows_of : Capability.jval  ->  FStar_Pervasives_Native.option<'r>; lit_json : column_type  ->  cell  ->  Capability.jval; lit_of : Prims.string  ->  column_type  ->  Capability.jval  ->  FStar_Pervasives_Native.option<cell>}
+type column_codec<'r> = {field_json : (Prims.string * column_type)  ->  Capability.jval; field_of : Capability.jval  ->  FStar_Pervasives_Native.option<(Prims.string * column_type)>; source_json : data_source  ->  Capability.jval; source_of : Capability.jval  ->  FStar_Pervasives_Native.option<data_source>; source_norm : data_source  ->  data_source; rows_json : 'r  ->  Capability.jval; rows_of : Capability.jval  ->  FStar_Pervasives_Native.option<'r>; rows_fault : 'r  ->  FStar_Pervasives_Native.option<Prims.string>; rows_norm : 'r  ->  'r; lit_json : column_type  ->  cell  ->  Capability.jval; lit_of : Prims.string  ->  column_type  ->  Capability.jval  ->  FStar_Pervasives_Native.option<cell>}
 
 
 let __proj__Mkcolumn_codec__item__field_json = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
-| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; rows_fault = rows_fault; rows_norm = rows_norm; lit_json = lit_json; lit_of = lit_of} -> begin
      field_json
      end))
 
 
 let __proj__Mkcolumn_codec__item__field_of = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
-| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; rows_fault = rows_fault; rows_norm = rows_norm; lit_json = lit_json; lit_of = lit_of} -> begin
      field_of
      end))
 
 
 let __proj__Mkcolumn_codec__item__source_json = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
-| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; rows_fault = rows_fault; rows_norm = rows_norm; lit_json = lit_json; lit_of = lit_of} -> begin
      source_json
      end))
 
 
 let __proj__Mkcolumn_codec__item__source_of = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
-| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; rows_fault = rows_fault; rows_norm = rows_norm; lit_json = lit_json; lit_of = lit_of} -> begin
      source_of
      end))
 
 
 let __proj__Mkcolumn_codec__item__source_norm = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
-| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; rows_fault = rows_fault; rows_norm = rows_norm; lit_json = lit_json; lit_of = lit_of} -> begin
      source_norm
      end))
 
 
 let __proj__Mkcolumn_codec__item__rows_json = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
-| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; rows_fault = rows_fault; rows_norm = rows_norm; lit_json = lit_json; lit_of = lit_of} -> begin
      rows_json
      end))
 
 
 let __proj__Mkcolumn_codec__item__rows_of = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
-| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; rows_fault = rows_fault; rows_norm = rows_norm; lit_json = lit_json; lit_of = lit_of} -> begin
      rows_of
      end))
 
 
+let __proj__Mkcolumn_codec__item__rows_fault = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; rows_fault = rows_fault; rows_norm = rows_norm; lit_json = lit_json; lit_of = lit_of} -> begin
+     rows_fault
+     end))
+
+
+let __proj__Mkcolumn_codec__item__rows_norm = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; rows_fault = rows_fault; rows_norm = rows_norm; lit_json = lit_json; lit_of = lit_of} -> begin
+     rows_norm
+     end))
+
+
 let __proj__Mkcolumn_codec__item__lit_json = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
-| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; rows_fault = rows_fault; rows_norm = rows_norm; lit_json = lit_json; lit_of = lit_of} -> begin
      lit_json
      end))
 
 
 let __proj__Mkcolumn_codec__item__lit_of = (fun ( projectee  :  column_codec<'r> ) -> (match (projectee) with
-| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; lit_json = lit_json; lit_of = lit_of} -> begin
+| {field_json = field_json; field_of = field_of; source_json = source_json; source_of = source_of; source_norm = source_norm; rows_json = rows_json; rows_of = rows_of; rows_fault = rows_fault; rows_norm = rows_norm; lit_json = lit_json; lit_of = lit_of} -> begin
      lit_of
      end))
 
@@ -2714,10 +2735,28 @@ let result_of_j = (fun ( cc  :  column_codec<'r> ) ( el  :  Capability.jval ) ->
      end))
 
 
+let result_norm = (fun ( cc  :  column_codec<'r> ) ( qr  :  query_result<'r> ) -> {qr_rows = (cc.rows_norm qr.qr_rows); qr_page_num = qr.qr_page_num; qr_total = qr.qr_total; qr_next = qr.qr_next})
+
+
 let deferred_result_json = (fun ( cc  :  column_codec<'r> ) ( d  :  Capability.deferred<query_result<'r>> ) -> (Capability.deferred_json (result_json cc) d))
 
 
 let deferred_result_of_j = (fun ( cc  :  column_codec<'r> ) -> (Capability.deferred_dec (result_of_j cc)))
+
+
+let deferred_result_norm = (fun ( cc  :  column_codec<'r> ) ( d  :  Capability.deferred<query_result<'r>> ) -> (match (d) with
+| Capability.Ready (v) -> begin
+     Capability.Ready ((result_norm cc v))
+     end
+| Capability.Pending -> begin
+     Capability.Pending
+     end
+| Capability.Failed (m) -> begin
+     Capability.Failed (m)
+     end))
+
+
+let rows_verdict = (fun ( cc  :  column_codec<'r> ) ( qr  :  query_result<'r> ) -> (cc.rows_fault qr.qr_rows))
 
 type wire_seg =
 | WKey of Prims.string

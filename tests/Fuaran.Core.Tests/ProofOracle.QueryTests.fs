@@ -243,6 +243,7 @@ let private queryTally =
           "Validated"
           "Refused"
           "ExecFailed"
+          "RowsRefused"
           "ResolverRan"
           "RefusedWithoutResolver"
           "Keys"
@@ -537,6 +538,22 @@ let private queryResultOf (page: int) : QueryResult =
       TotalRowCount = None
       NextPageToken = None }
 
+/// A page whose rows `Table.validate` refuses (Phase 692): the column `n` named twice.
+let private refusedResultOf (page: int) : QueryResult =
+    { queryResultOf page with
+        Rows =
+            { Schema = [ Field.create "n" IntType ]
+              Columns =
+                [ Column.ofInts "n" (Vector.ofList [ page ]) AllValid
+                  Column.ofInts "n" (Vector.ofList [ page ]) AllValid ] } }
+
+/// The column layer's verdict on a result's rows, as the model's `invoke` takes it (Phase 692,
+/// DECISIONS.md D267.7): `Table.validate`'s refusal as `ColumnCodec.errorString` spells it.
+let private rowsVerdict (r: QueryResult) : FStar_Pervasives_Native.option<string> =
+    match Table.validate r.Rows with
+    | Ok() -> FStar_Pervasives_Native.None
+    | Error e -> FStar_Pervasives_Native.Some(ColumnCodec.errorString e)
+
 let private queryProbe
     (bridge: Query -> ModelQuery.query)
     (rn: ModelQuery.renderers)
@@ -652,7 +669,7 @@ let private queryProbe
             | _ -> ModelQuery.Ready(queryResultOf answer)
 
         let p = QueryRegistry.dispatch preg () None id args pResolve
-        let m = ModelQuery.dispatch mreg id margs mResolve
+        let m = ModelQuery.dispatch mreg id margs rowsVerdict mResolve
 
         t <-
             match p, m with
@@ -713,6 +730,49 @@ let private queryProbe
                         id
                         (prodQueryErrRender pe))
                     t
+
+        // Phase 692: beside a settling answer, the same invocation over rows `Table.validate` refuses
+        // — both sides refuse it, `ExecutionFailed` naming the column layer's reason, the model reading
+        // the verdict `rowsVerdict` computes from the rows. It draws nothing from the stream.
+        if answer = 3 then
+            let p2 =
+                QueryRegistry.dispatch preg () None id args (fun _ -> Ready(refusedResultOf answer))
+
+            let m2 =
+                ModelQuery.dispatch mreg id margs rowsVerdict (fun _ -> ModelQuery.Ready(refusedResultOf answer))
+
+            t <-
+                match p2, m2 with
+                | Error pe, ModelQuery.Error me ->
+                    t
+                    |> Tally.bumpIf
+                        (match pe with
+                         | ExecutionFailed _ -> true
+                         | _ -> false)
+                        "RowsRefused"
+                    |> Differential.compareWith
+                        queryError
+                        (fun pr mr ->
+                            sprintf
+                                "seed %d: dispatch %s over refused rows refused differently\n  prod %s\n  model %s"
+                                seedTag
+                                id
+                                pr
+                                mr)
+                        pe
+                        me
+                | Ok pv, _ ->
+                    Tally.disagree
+                        (sprintf "seed %d: dispatch %s answered rows the validation refuses (%A)" seedTag id pv)
+                        t
+                | Error pe, ModelQuery.Ok _ ->
+                    Tally.disagree
+                        (sprintf
+                            "seed %d: dispatch %s over refused rows refused by production (%s), accepted by the model"
+                            seedTag
+                            id
+                            (prodQueryErrRender pe))
+                        t
 
         // the resolver ran on both sides or on neither — and never past a refusal that is not its own
         t <-
@@ -1263,6 +1323,13 @@ let tests =
                   10
                   (sprintf "resolvers failed and were named (execFailed=%d)" (Tally.count "ExecFailed" t))
 
+              Expect.isGreaterThan
+                  (Tally.count "RowsRefused" t)
+                  10
+                  (sprintf
+                      "resolvers answered rows the validation refuses, and both sides refused them (rowsRefused=%d)"
+                      (Tally.count "RowsRefused" t))
+
               Expect.equal
                   (Tally.count "ResolverRan" t)
                   ((Tally.count "Settled" t)
@@ -1542,7 +1609,8 @@ let tests =
                   | ModelQuery.Error _ -> failtest "the model refused the registration"
 
               Expect.equal
-                  (ModelQuery.dispatch mreg "q-u" (qArgsToModel accepted) (fun _ -> ModelQuery.Ready(queryResultOf 1)))
+                  (ModelQuery.dispatch mreg "q-u" (qArgsToModel accepted) rowsVerdict (fun _ ->
+                      ModelQuery.Ready(queryResultOf 1)))
                   (ModelQuery.Error(ModelQuery.NoSuchQuery("q-u", [ "q-t" ])))
                   "the model refuses the unregistered id the same way"
 
@@ -2065,4 +2133,73 @@ let tests =
                   |> List.ofArray
 
               Expect.contains fields "rows_fault" "the column codec states the rows' verdict"
-              Expect.contains fields "rows_norm" "the column codec states the rows' normal form" ]
+              Expect.contains fields "rows_norm" "the column codec states the rows' normal form"
+
+          testCase
+              "Phase 692 - the query model's dispatch agrees with QueryRegistry.dispatch on rows the validation refuses and accepts, and a page it answers reads back as its normal form"
+          <| fun _ ->
+              let ints (n: string) (xs: int list) =
+                  Column.ofInts n (Vector.ofList xs) AllValid
+
+              let ab = [ Field.create "a" IntType; Field.create "b" IntType ]
+
+              let q =
+                  { Id = "q"
+                    Params = []
+                    ResultSchema = ab
+                    Effect =
+                      { Host = ReadsHost
+                        Determinism = Effect.network }
+                    Source = Ref "r"
+                    TimeoutMs = None
+                    PageSize = None
+                    Where = []
+                    OrderBy = [] }
+
+              let preg =
+                  QueryRegistry.register q QueryRegistry.empty |> Result.toOption |> Option.get
+
+              let mreg =
+                  match ModelQuery.register (queryToModel q) ModelQuery.empty with
+                  | ModelQuery.Ok r -> r
+                  | ModelQuery.Error _ -> failtest "the model refused the registration"
+
+              for t in
+                  [ { Schema = ab
+                      Columns = [ ints "a" [ 1 ]; ints "b" [ 2 ] ] }
+                    { Schema = ab
+                      Columns = [ ints "b" [ 2 ]; ints "a" [ 1 ] ] }
+                    { Schema = ab
+                      Columns = [ ints "a" [ 1; 2 ]; ints "b" [ 1 ] ] }
+                    { Schema = ab
+                      Columns = [ ints "a" [ 1 ]; ints "b" [ 2 ]; ints "a" [ 3 ] ] }
+                    { Schema = ab
+                      Columns = [ ints "a" [ 1 ] ] } ] do
+                  let page =
+                      { queryResultOf 0 with
+                          Rows = t
+                          NextPageToken = Some "p2" }
+
+                  let production =
+                      match QueryRegistry.dispatch preg () None "q" [] (fun _ -> Ready page) with
+                      | Ok(Ready r) -> sprintf "Ready %b" (r = page)
+                      | Ok d -> sprintf "%A" d
+                      | Error e -> prodQueryErrRender e
+
+                  let model =
+                      match ModelQuery.dispatch mreg "q" [] rowsVerdict (fun _ -> ModelQuery.Ready page) with
+                      | ModelQuery.Ok(ModelQuery.Ready r) -> sprintf "Ready %b" (r = page)
+                      | ModelQuery.Ok d -> sprintf "%A" d
+                      | ModelQuery.Error e -> modelQueryErrRender e
+
+                  Expect.equal model production (sprintf "the model and the dispatch on %A" t)
+
+                  // A page the dispatch answers reads back, through the model's result codec over the
+                  // production column codec, as itself with its rows in normal form (`result_roundtrip`).
+                  if model = "Ready true" then
+                      let mr = resultToModel page
+
+                      Expect.equal
+                          (ModelQuery.result_of_j columnCodec (ModelQuery.result_json columnCodec mr))
+                          (ModelCap.Ok(ModelQuery.result_norm columnCodec mr))
+                          (sprintf "the dispatched page %A reads back as its normal form" t) ]

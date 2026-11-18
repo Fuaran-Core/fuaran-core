@@ -286,7 +286,7 @@ let literalOfJson (column: string) (ty: ColumnType) (v: JVal) : Cell option =
 
 /// The model's column-codec parameter, instantiated at production's column codec: the schema entry,
 /// a source (a `Ref`, or an embedded table as its text, Phase 688) with its normal form, an embedded
-/// table of rows, and a predicate literal.
+/// table of rows with its verdict and normal form (Phase 692), and a predicate literal.
 let columnCodec: ModelQuery.column_codec<Table> =
     { ModelQuery.column_codec.field_json =
         fun (n, t) -> jvalToModel (ColumnCodec.fieldJson (Field.create n (qColOfModel t)))
@@ -324,6 +324,19 @@ let columnCodec: ModelQuery.column_codec<Table> =
             match ColumnCodec.decodeJson (jvalOfModel j) with
             | Ok(Embedded t) -> FStar_Pervasives_Native.Some t
             | _ -> FStar_Pervasives_Native.None
+      // The rows' verdict and normal form (Phase 692, DECISIONS.md D267.7): `Table.validate`'s
+      // refusal as `ColumnCodec.errorString` spells it, and the rows read back through the column
+      // codec, their columns in schema order.
+      ModelQuery.column_codec.rows_fault =
+        fun t ->
+            match Table.validate t with
+            | Ok() -> FStar_Pervasives_Native.None
+            | Error e -> FStar_Pervasives_Native.Some(ColumnCodec.errorString e)
+      ModelQuery.column_codec.rows_norm =
+        fun t ->
+            match ColumnCodec.decodeJson (ColumnCodec.encodeJson (Embedded t)) with
+            | Ok(Embedded n) -> n
+            | _ -> t
       ModelQuery.column_codec.lit_json = fun _ c -> jvalToModel (literalValueJson (qCellOfModel c))
       ModelQuery.column_codec.lit_of =
         fun c t j ->

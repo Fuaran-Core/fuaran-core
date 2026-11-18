@@ -14,7 +14,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## Summary
 
-433 rows: 258 offered, 1 a host's own proof, 174 uncovered (proved 102, tested 31, assumed 39, policy 2).
+434 rows: 259 offered, 1 a host's own proof, 174 uncovered (proved 102, tested 31, assumed 39, policy 2).
 
 ## Offers, by model
 
@@ -29,7 +29,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 | `DecodeLayer` | 4 | `decodeRejects` (28) | — |
 | `JsonParse` | 17 | `decodeRejects` (8), `premiseInt53` (29), `premiseRecursionDepth` (13), `premiseStringModel` (10), `codecRefusals` (59) | `json.parse`, `wire.decode` |
 | `Propagation` | 15 | `propagationLaws` (73) | — |
-| `Query` | 32 | `queryDeclarationLaws` (91), `queryGrantLaws` (19), `seamRefusals` (46) | — |
+| `Query` | 33 | `queryDeclarationLaws` (91), `queryGrantLaws` (19), `seamRefusals` (46) | — |
 | `TreeOps` | 19 | `skeletonApply` (25) | `tree.apply`, `dag.fold` |
 | `WireCanon` | 16 | `stringEscape` (38) | `wire.render` |
 | `WireColumn` | 7 | `decimal` (7), `fieldLaws` (24), `codecRefusals` (13) | — |

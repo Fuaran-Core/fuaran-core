@@ -27,7 +27,9 @@
    are a `renderers` record, as Phase 177 made the three scalar readers one; a float cell
    crosses as an opaque carrier. And a declaration's `Source` is read for one thing only (Phase 688):
    whether the column layer refuses its embedded table, a verdict the source carries beside its
-   table (`data_source`), which the admission reads first.
+   table (`data_source`), which the admission reads first. Since Phase 692 `invoke` also takes the
+   column layer's VERDICT on what the resolver answered (`vf`, the oracle host's `Table.validate`
+   over a page's rows), and a `Ready` answer the verdict refuses is `ExecutionFailed` naming it.
 
    WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
    whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
@@ -468,15 +470,28 @@ type deferred (a:Type) =
   | Ready   : a -> deferred a
   | Failed  : string -> deferred a
 
+(* F#: the detail `Query`'s settle step gives a `Ready` answer whose rows the column layer refuses
+   (Phase 692, DECISIONS.md D267.5): the column layer's reason, `Table.validate`'s refusal as
+   `ColumnCodec.errorString` spells it, after production's own words. *)
+let rows_refused (reason:string) : Tot string =
+  "the resolver answered rows the column layer refuses: " ^ reason
+
 (* F#: `Query.invoke` — validate, THEN the host resolver; a resolver failure is named, never
-   thrown, and never rides out inside an `Ok`. *)
-let invoke (#v:Type) (q:query) (a:arguments) (resolve:query -> deferred v)
+   thrown, and never rides out inside an `Ok`. Since Phase 692 (DECISIONS.md D267.7) a `Ready`
+   answer is held to the column layer: `vf` is its verdict on the answered value (`None` where
+   `Table.validate` accepts the rows, the reason where it refuses them), which the model takes as
+   given and the oracle host computes from the rows at the edge, as it computes a source's; a
+   value the verdict refuses is the resolver's fault, `ExecutionFailed` naming the reason. *)
+let invoke (#v:Type) (q:query) (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
   : Tot (outcome (deferred v) query_error) =
   match validate_params q a with
   | Error e -> Error e
   | Ok () ->
     match resolve q with
-    | Ready r -> Ok (Ready r)
+    | Ready r ->
+      (match vf r with
+       | None -> Ok (Ready r)
+       | Some m -> Error (ExecutionFailed (rows_refused m) []))
     | Pending -> Ok Pending
     | Failed m -> Error (ExecutionFailed m [])
 
@@ -649,11 +664,11 @@ let try_find_query (id:string) (r:registry) : Tot (option query) = find_query id
 let enumerate (r:registry) : Tot (list query) = r.queries
 
 (* F#: `QueryRegistry.dispatch` — resolve the id (default-deny), then `Query.invoke`. *)
-let dispatch (#v:Type) (r:registry) (id:string) (a:arguments) (resolve:query -> deferred v)
+let dispatch (#v:Type) (r:registry) (id:string) (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
   : Tot (outcome (deferred v) query_error) =
   match find_query id r.queries with
   | None -> Error (NoSuchQuery id (ids r.queries))
-  | Some q -> invoke q a resolve
+  | Some q -> invoke q a vf resolve
 
 (* ======================================================================================
    5. THE FIRST THEOREM — an unregistered id is refused, and no resolver runs.
@@ -669,10 +684,10 @@ let rec find_query_mem (id:string) (qs:list query)
    refusal is the typed `NoSuchQuery`, naming the id and every id the registry does hold — and
    the result is the same under EVERY resolver, which is what "runs no resolver" means. *)
 let unregistered_refused (#v:Type) (r:registry) (id:string) (a:arguments)
-                         (resolve resolve':query -> deferred v)
+                         (vf:v -> option string) (resolve resolve':query -> deferred v)
   : Lemma (requires not (mem id (ids (enumerate r))))
-          (ensures dispatch r id a resolve == Error (NoSuchQuery id (ids r.queries)) /\
-                   dispatch r id a resolve == dispatch r id a resolve')
+          (ensures dispatch r id a vf resolve == Error (NoSuchQuery id (ids r.queries)) /\
+                   dispatch r id a vf resolve == dispatch r id a vf resolve')
   = find_query_mem id r.queries
 
 (* `validateParams` refuses in four classes and no other (the fourth, `RequiredParamsNull`, since
@@ -700,8 +715,8 @@ let validate_params_shape (q:query) (a:arguments)
   = check_args_shape q.q_params (param_names q.q_params) a
 
 (* `invoke` never produces the registry's two refusals: the classes are disjoint. *)
-let invoke_never_registry_refusal (#v:Type) (q:query) (a:arguments) (resolve:query -> deferred v)
-  : Lemma (ensures (match invoke q a resolve with
+let invoke_never_registry_refusal (#v:Type) (q:query) (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
+  : Lemma (ensures (match invoke q a vf resolve with
                     | Error (NoSuchQuery _ _) -> False
                     | Error (DuplicateQuery _) -> False
                     | _ -> True))
@@ -713,34 +728,34 @@ let invoke_never_registry_refusal (#v:Type) (q:query) (a:arguments) (resolve:que
 
 (* THE SECOND THEOREM. F#: `Query.invoke` is `validateParams |> Result.bind (resolve)`. When
    validation rejects, `invoke` IS that rejection — for every resolver alike, so none ran. *)
-let validate_before_resolve (#v:Type) (q:query) (a:arguments) (resolve resolve':query -> deferred v)
+let validate_before_resolve (#v:Type) (q:query) (a:arguments) (vf:v -> option string) (resolve resolve':query -> deferred v)
   : Lemma (requires Error? (validate_params q a))
           (ensures (match validate_params q a with
-                    | Error e -> invoke q a resolve == Error e
+                    | Error e -> invoke q a vf resolve == Error e
                     | Ok () -> True) /\
-                   invoke q a resolve == invoke q a resolve')
+                   invoke q a vf resolve == invoke q a vf resolve')
   = ()
 
 (* The registry-level restatement: a dispatch that resolved its id still runs nothing on a set
    validation rejects. *)
 let dispatch_validates_first (#v:Type) (r:registry) (id:string) (a:arguments)
-                             (resolve resolve':query -> deferred v)
+                             (vf:v -> option string) (resolve resolve':query -> deferred v)
   : Lemma (requires (match find_query id r.queries with
                      | Some q -> Error? (validate_params q a)
                      | None -> False))
           (ensures (match find_query id r.queries with
                     | Some q ->
                       (match validate_params q a with
-                       | Error e -> dispatch r id a resolve == Error e
+                       | Error e -> dispatch r id a vf resolve == Error e
                        | Ok () -> True)
                     | None -> True) /\
-                   dispatch r id a resolve == dispatch r id a resolve')
+                   dispatch r id a vf resolve == dispatch r id a vf resolve')
   = ()
 
 (* The converse: a resolver ran — an accepted result, or an `ExecutionFailed` — only past an
    accepted validation. *)
-let resolver_runs_only_validated (#v:Type) (q:query) (a:arguments) (resolve:query -> deferred v)
-  : Lemma (ensures (match invoke q a resolve with
+let resolver_runs_only_validated (#v:Type) (q:query) (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
+  : Lemma (ensures (match invoke q a vf resolve with
                     | Ok _ -> validate_params q a == Ok ()
                     | Error (ExecutionFailed _ _) -> validate_params q a == Ok ()
                     | _ -> True))
@@ -750,20 +765,46 @@ let resolver_runs_only_validated (#v:Type) (q:query) (a:arguments) (resolve:quer
    `ExecutionFailed`, so `Ok (Failed _)` is unreachable, for every resolver and every argument
    set alike — at the seam, and through the registry where a host reaches it. This is the claim
    `queryLaws` samples; here it is over all of them. *)
-let invoke_never_ok_failed (#v:Type) (q:query) (a:arguments) (resolve:query -> deferred v)
-  : Lemma (ensures (match invoke q a resolve with
+let invoke_never_ok_failed (#v:Type) (q:query) (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
+  : Lemma (ensures (match invoke q a vf resolve with
                     | Ok (Failed _) -> False
                     | _ -> True))
   = ()
 
 let dispatch_never_ok_failed (#v:Type) (r:registry) (id:string) (a:arguments)
-                             (resolve:query -> deferred v)
-  : Lemma (ensures (match dispatch r id a resolve with
+                             (vf:v -> option string) (resolve:query -> deferred v)
+  : Lemma (ensures (match dispatch r id a vf resolve with
                     | Ok (Failed _) -> False
                     | _ -> True))
   = match find_query id r.queries with
     | None -> ()
-    | Some q -> invoke_never_ok_failed q a resolve
+    | Some q -> invoke_never_ok_failed q a vf resolve
+
+(* THE ROWS ARE HELD (Phase 692, DECISIONS.md D267.7). A `Ready` answer of the seam carries a value
+   the column layer's verdict accepts, for every resolver and every argument set alike: a value it
+   refuses became `ExecutionFailed` with the reason, so it never reaches a caller, a writer or a
+   journal as a result. At the seam, and through the registry where a host reaches it. *)
+let invoke_ready_rows_ok (#v:Type) (q:query) (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
+  : Lemma (ensures (match invoke q a vf resolve with
+                    | Ok (Ready x) -> vf x == None
+                    | _ -> True))
+  = ()
+
+let dispatch_ready_rows_ok (#v:Type) (r:registry) (id:string) (a:arguments)
+                           (vf:v -> option string) (resolve:query -> deferred v)
+  : Lemma (ensures (match dispatch r id a vf resolve with
+                    | Ok (Ready x) -> vf x == None
+                    | _ -> True))
+  = match find_query id r.queries with
+    | None -> ()
+    | Some q -> invoke_ready_rows_ok q a vf resolve
+
+(* ... and the refusal is exactly the verdict's: a resolver whose `Ready` value the verdict refuses,
+   past an accepted validation, is answered `ExecutionFailed` naming that reason. *)
+let invoke_refuses_rows (#v:Type) (q:query) (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
+  : Lemma (requires validate_params q a == Ok () /\ Ready? (resolve q) /\ Some? (vf (Ready?._0 (resolve q))))
+          (ensures invoke q a vf resolve == Error (ExecutionFailed (rows_refused (Some?.v (vf (Ready?._0 (resolve q))))) []))
+  = ()
 
 (* What an accepted binding looks like: it addresses a declared param, and its cell is `Null`
    or of a type that widens to that param's type (Phase 295). *)
@@ -854,14 +895,14 @@ let enumerate_is_registry (r:registry) (id:string)
 
 (* And `dispatch` agrees: the `NoSuchQuery` refusal is raised exactly off the enumeration. *)
 let no_such_iff_unregistered (#v:Type) (r:registry) (id:string) (a:arguments)
-                             (resolve:query -> deferred v)
-  : Lemma ((match dispatch r id a resolve with
+                             (vf:v -> option string) (resolve:query -> deferred v)
+  : Lemma ((match dispatch r id a vf resolve with
             | Error (NoSuchQuery _ _) -> True
             | _ -> False) <==> not (mem id (ids (enumerate r))))
   = find_query_mem id r.queries;
     (match find_query id r.queries with
      | None -> ()
-     | Some q -> invoke_never_registry_refusal q a resolve)
+     | Some q -> invoke_never_registry_refusal q a vf resolve)
 
 let rec find_query_id (id:string) (qs:list query)
   : Lemma (ensures (match find_query id qs with
@@ -873,10 +914,10 @@ let rec find_query_id (id:string) (qs:list query)
 
 (* A resolved id dispatches to ITS declaration's `invoke` — the entry enumeration showed. *)
 let registered_dispatches (#v:Type) (r:registry) (id:string) (a:arguments)
-                          (resolve:query -> deferred v)
+                          (vf:v -> option string) (resolve:query -> deferred v)
   : Lemma (requires mem id (ids (enumerate r)))
           (ensures (match try_find_query id r with
-                    | Some q -> q.q_id == id /\ dispatch r id a resolve == invoke q a resolve
+                    | Some q -> q.q_id == id /\ dispatch r id a vf resolve == invoke q a vf resolve
                     | None -> False))
   = find_query_mem id r.queries; find_query_id id r.queries
 
@@ -1679,21 +1720,21 @@ let distinct_shapes_distinct_preimages (#sym:eqtype) (reveal:string -> list sym)
 
 (* F#: `Query.invokePage` — `invoke`, with the token handed to the resolver. *)
 let invoke_page (#v:Type) (q:query) (a:arguments) (tok:option string)
-  (resolve:query -> option string -> deferred v) : Tot (outcome (deferred v) query_error) =
-  invoke q a (fun q -> resolve q tok)
+  (vf:v -> option string) (resolve:query -> option string -> deferred v) : Tot (outcome (deferred v) query_error) =
+  invoke q a vf (fun q -> resolve q tok)
 
 (* F#: `QueryRegistry.dispatchPage`. *)
 let dispatch_page (#v:Type) (r:registry) (id:string) (a:arguments) (tok:option string)
-  (resolve:query -> option string -> deferred v) : Tot (outcome (deferred v) query_error) =
+  (vf:v -> option string) (resolve:query -> option string -> deferred v) : Tot (outcome (deferred v) query_error) =
   match find_query id r.queries with
   | None -> Error (NoSuchQuery id (ids r.queries))
-  | Some q -> invoke_page q a tok resolve
+  | Some q -> invoke_page q a tok vf resolve
 
 (* The paged dispatch IS a dispatch, under the resolver that reads the token: default-deny,
    validation first and the three outcomes all carry over unchanged. *)
 let dispatch_page_is_dispatch (#v:Type) (r:registry) (id:string) (a:arguments) (tok:option string)
-  (resolve:query -> option string -> deferred v)
-  : Lemma (dispatch_page r id a tok resolve == dispatch r id a (fun q -> resolve q tok))
+  (vf:v -> option string) (resolve:query -> option string -> deferred v)
+  : Lemma (dispatch_page r id a tok vf resolve == dispatch r id a vf (fun q -> resolve q tok))
   = ()
 
 (* F#: `QueryRegistry.unregister` — the declaration under `id` removed, or `NoSuchQuery`. *)
@@ -1939,7 +1980,7 @@ let lift_outcome (#v:Type) (o:outcome (deferred v) query_error) : Tot (outcome (
    accepts what was accepted. *)
 [@@ noextract_to "FSharp"]
 let dispatch_gated (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (qgate ctx)) (x:ctx)
-                   (g:option string) (id:string) (a:arguments) (resolve:query -> deferred v)
+                   (g:option string) (id:string) (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
   : Tot (outcome (deferred v) gated_query_error) =
   match find_query id r.queries with
   | None -> Error (QGRefused (NoSuchQuery id (ids r.queries)))
@@ -1948,8 +1989,8 @@ let dispatch_gated (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (
     | Error e -> Error (QGRefused e)
     | Ok () ->
       match qdecide_named gs x q a with
-      | (_, C.DAllow) -> lift_outcome (invoke q a resolve)
-      | (n, C.DNeedsApproval) -> if granted rn q a g then lift_outcome (invoke q a resolve) else Error (QGApprovalRequired n)
+      | (_, C.DAllow) -> lift_outcome (invoke q a vf resolve)
+      | (n, C.DNeedsApproval) -> if granted rn q a g then lift_outcome (invoke q a vf resolve) else Error (QGApprovalRequired n)
       | (n, C.DDeny m alts) -> Error (QGPolicyRefused n m alts)
 
 (* F#: `QueryRegistry.dispatchPage r ctx grant id args tok resolve` — the same path, with
@@ -1957,7 +1998,7 @@ let dispatch_gated (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (
 [@@ noextract_to "FSharp"]
 let dispatch_page_gated (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (qgate ctx)) (x:ctx)
                         (g:option string) (id:string) (a:arguments) (tok:option string)
-                        (resolve:query -> option string -> deferred v)
+                        (vf:v -> option string) (resolve:query -> option string -> deferred v)
   : Tot (outcome (deferred v) gated_query_error) =
   match find_query id r.queries with
   | None -> Error (QGRefused (NoSuchQuery id (ids r.queries)))
@@ -1966,9 +2007,9 @@ let dispatch_page_gated (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:l
     | Error e -> Error (QGRefused e)
     | Ok () ->
       match qdecide_named gs x q a with
-      | (_, C.DAllow) -> lift_outcome (invoke_page q a tok resolve)
+      | (_, C.DAllow) -> lift_outcome (invoke_page q a tok vf resolve)
       | (n, C.DNeedsApproval) ->
-        if granted rn q a g then lift_outcome (invoke_page q a tok resolve) else Error (QGApprovalRequired n)
+        if granted rn q a g then lift_outcome (invoke_page q a tok vf resolve) else Error (QGApprovalRequired n)
       | (n, C.DDeny m alts) -> Error (QGPolicyRefused n m alts)
 
 (* The wrapper loses nothing: two outcomes with one lift are one outcome. *)
@@ -1979,8 +2020,8 @@ let lift_outcome_injective (#v:Type) (o o':outcome (deferred v) query_error)
 (* THEOREM (Phase 651) — `no_gate_is_dispatch`. With no gate the gated dispatch IS the present
    `dispatch`, wrapped, under every context and whatever grant is presented. *)
 let no_gate_is_dispatch (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ctx) (g:option string)
-                        (id:string) (a:arguments) (resolve:query -> deferred v)
-  : Lemma (ensures dispatch_gated #v #ctx rn r [] x g id a resolve == lift_outcome (dispatch r id a resolve))
+                        (id:string) (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
+  : Lemma (ensures dispatch_gated #v #ctx rn r [] x g id a vf resolve == lift_outcome (dispatch r id a vf resolve))
   = match find_query id r.queries with
     | None -> ()
     | Some q -> ()
@@ -1992,131 +2033,131 @@ let no_gate_is_dispatch (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ct
    whatever is presented. *)
 let unregistered_refused_in_context (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (qgate ctx))
                                     (x:ctx) (g g':option string) (id:string) (a:arguments)
-                                    (resolve resolve':query -> deferred v)
+                                    (vf:v -> option string) (resolve resolve':query -> deferred v)
   : Lemma (requires not (mem id (ids (enumerate r))))
-          (ensures dispatch_gated rn r gs x g id a resolve == Error (QGRefused (NoSuchQuery id (ids r.queries))) /\
-                   dispatch_gated rn r gs x g id a resolve == dispatch_gated rn r gs x g' id a resolve')
+          (ensures dispatch_gated rn r gs x g id a vf resolve == Error (QGRefused (NoSuchQuery id (ids r.queries))) /\
+                   dispatch_gated rn r gs x g id a vf resolve == dispatch_gated rn r gs x g' id a vf resolve')
   = find_query_mem id r.queries
 
 (* With no grant and no gate, under every context, it is `unregistered_refused` verbatim. *)
 let unregistered_refused_no_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ctx) (id:string)
-                                  (a:arguments) (resolve resolve':query -> deferred v)
+                                  (a:arguments) (vf:v -> option string) (resolve resolve':query -> deferred v)
   : Lemma (requires not (mem id (ids (enumerate r))))
-          (ensures dispatch r id a resolve == Error (NoSuchQuery id (ids r.queries)) /\
-                   dispatch r id a resolve == dispatch r id a resolve')
-  = unregistered_refused_in_context #v #ctx rn r [] x None None id a resolve resolve';
-    no_gate_is_dispatch #v #ctx rn r x None id a resolve;
-    no_gate_is_dispatch #v #ctx rn r x None id a resolve';
-    lift_outcome_injective (dispatch r id a resolve) (Error (NoSuchQuery id (ids r.queries)));
-    lift_outcome_injective (dispatch r id a resolve) (dispatch r id a resolve')
+          (ensures dispatch r id a vf resolve == Error (NoSuchQuery id (ids r.queries)) /\
+                   dispatch r id a vf resolve == dispatch r id a vf resolve')
+  = unregistered_refused_in_context #v #ctx rn r [] x None None id a vf resolve resolve';
+    no_gate_is_dispatch #v #ctx rn r x None id a vf resolve;
+    no_gate_is_dispatch #v #ctx rn r x None id a vf resolve';
+    lift_outcome_injective (dispatch r id a vf resolve) (Error (NoSuchQuery id (ids r.queries)));
+    lift_outcome_injective (dispatch r id a vf resolve) (dispatch r id a vf resolve')
 
 (* THEOREM (Phase 187; restated by Phase 651) — validation precedes every gate and the grant: for a
    held id whose arguments validation rejects, the answer is that rejection, one value for every
    gate list, context, grant and resolver. *)
 let dispatch_validates_first_in_context (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry)
                                         (gs gs':list (qgate ctx)) (x x':ctx) (g g':option string)
-                                        (id:string) (a:arguments) (resolve resolve':query -> deferred v)
+                                        (id:string) (a:arguments) (vf:v -> option string) (resolve resolve':query -> deferred v)
   : Lemma (requires (match find_query id r.queries with
                      | Some q -> Error? (validate_params q a)
                      | None -> False))
           (ensures (match find_query id r.queries with
                     | Some q ->
                       (match validate_params q a with
-                       | Error e -> dispatch_gated rn r gs x g id a resolve == Error (QGRefused e)
+                       | Error e -> dispatch_gated rn r gs x g id a vf resolve == Error (QGRefused e)
                        | Ok () -> True)
                     | None -> True) /\
-                   dispatch_gated rn r gs x g id a resolve == dispatch_gated rn r gs' x' g' id a resolve')
+                   dispatch_gated rn r gs x g id a vf resolve == dispatch_gated rn r gs' x' g' id a vf resolve')
   = ()
 
 let dispatch_validates_first_no_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ctx) (id:string)
-                                      (a:arguments) (resolve resolve':query -> deferred v)
+                                      (a:arguments) (vf:v -> option string) (resolve resolve':query -> deferred v)
   : Lemma (requires (match find_query id r.queries with
                      | Some q -> Error? (validate_params q a)
                      | None -> False))
           (ensures (match find_query id r.queries with
                     | Some q ->
                       (match validate_params q a with
-                       | Error e -> dispatch r id a resolve == Error e
+                       | Error e -> dispatch r id a vf resolve == Error e
                        | Ok () -> True)
                     | None -> True) /\
-                   dispatch r id a resolve == dispatch r id a resolve')
-  = dispatch_validates_first_in_context #v #ctx rn r [] [] x x None None id a resolve resolve';
-    no_gate_is_dispatch #v #ctx rn r x None id a resolve;
-    no_gate_is_dispatch #v #ctx rn r x None id a resolve';
+                   dispatch r id a vf resolve == dispatch r id a vf resolve')
+  = dispatch_validates_first_in_context #v #ctx rn r [] [] x x None None id a vf resolve resolve';
+    no_gate_is_dispatch #v #ctx rn r x None id a vf resolve;
+    no_gate_is_dispatch #v #ctx rn r x None id a vf resolve';
     (match find_query id r.queries with
      | Some q ->
        (match validate_params q a with
-        | Error e -> lift_outcome_injective (dispatch r id a resolve) (Error e)
+        | Error e -> lift_outcome_injective (dispatch r id a vf resolve) (Error e)
         | Ok () -> ())
      | None -> ());
-    lift_outcome_injective (dispatch r id a resolve) (dispatch r id a resolve')
+    lift_outcome_injective (dispatch r id a vf resolve) (dispatch r id a vf resolve')
 
 (* THEOREM (Phase 187; restated by Phase 651) — the envelope has no fourth outcome through the gated
    registry either: `Ok (Failed _)` is unreachable for every gate list, context, grant and resolver. *)
 let dispatch_never_ok_failed_in_context (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry)
                                         (gs:list (qgate ctx)) (x:ctx) (g:option string) (id:string)
-                                        (a:arguments) (resolve:query -> deferred v)
-  : Lemma (ensures (match dispatch_gated rn r gs x g id a resolve with
+                                        (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
+  : Lemma (ensures (match dispatch_gated rn r gs x g id a vf resolve with
                     | Ok (Failed _) -> False
                     | _ -> True))
   = match find_query id r.queries with
     | None -> ()
-    | Some q -> invoke_never_ok_failed q a resolve
+    | Some q -> invoke_never_ok_failed q a vf resolve
 
 let dispatch_never_ok_failed_no_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ctx) (id:string)
-                                      (a:arguments) (resolve:query -> deferred v)
-  : Lemma (ensures (match dispatch r id a resolve with
+                                      (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
+  : Lemma (ensures (match dispatch r id a vf resolve with
                     | Ok (Failed _) -> False
                     | _ -> True))
-  = dispatch_never_ok_failed_in_context #v #ctx rn r [] x None id a resolve;
-    no_gate_is_dispatch #v #ctx rn r x None id a resolve
+  = dispatch_never_ok_failed_in_context #v #ctx rn r [] x None id a vf resolve;
+    no_gate_is_dispatch #v #ctx rn r x None id a vf resolve
 
 (* THEOREM (Phase 187; restated by Phase 651) — `NoSuchQuery` is answered exactly off the
    enumeration, under every gate list, context and grant: no gate, no validation and no resolver
    produces it. *)
 let no_such_iff_unregistered_in_context (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry)
                                         (gs:list (qgate ctx)) (x:ctx) (g:option string) (id:string)
-                                        (a:arguments) (resolve:query -> deferred v)
-  : Lemma ((match dispatch_gated rn r gs x g id a resolve with
+                                        (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
+  : Lemma ((match dispatch_gated rn r gs x g id a vf resolve with
             | Error (QGRefused (NoSuchQuery _ _)) -> True
             | _ -> False) <==> not (mem id (ids (enumerate r))))
   = find_query_mem id r.queries;
     (match find_query id r.queries with
      | None -> ()
-     | Some q -> validate_params_shape q a; invoke_never_registry_refusal q a resolve)
+     | Some q -> validate_params_shape q a; invoke_never_registry_refusal q a vf resolve)
 
 let no_such_iff_unregistered_no_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ctx) (id:string)
-                                      (a:arguments) (resolve:query -> deferred v)
-  : Lemma ((match dispatch r id a resolve with
+                                      (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
+  : Lemma ((match dispatch r id a vf resolve with
             | Error (NoSuchQuery _ _) -> True
             | _ -> False) <==> not (mem id (ids (enumerate r))))
-  = no_such_iff_unregistered_in_context #v #ctx rn r [] x None id a resolve;
-    no_gate_is_dispatch #v #ctx rn r x None id a resolve
+  = no_such_iff_unregistered_in_context #v #ctx rn r [] x None id a vf resolve;
+    no_gate_is_dispatch #v #ctx rn r x None id a vf resolve
 
 (* THEOREM (Phase 187; restated by Phase 651) — a resolved id dispatches to ITS declaration's
    `invoke` wherever validation refuses or the decision, with the grant read, is `Allow`. *)
 let registered_dispatches_in_context (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry)
                                      (gs:list (qgate ctx)) (x:ctx) (g:option string) (id:string)
-                                     (a:arguments) (resolve:query -> deferred v)
+                                     (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
   : Lemma (requires mem id (ids (enumerate r)))
           (ensures (match try_find_query id r with
                     | Some q ->
                       q.q_id == id /\
                       ((Error? (validate_params q a) \/ C.DAllow? (decide_granted rn gs x q a g)) ==>
-                       dispatch_gated rn r gs x g id a resolve == lift_outcome (invoke q a resolve))
+                       dispatch_gated rn r gs x g id a vf resolve == lift_outcome (invoke q a vf resolve))
                     | None -> False))
   = find_query_mem id r.queries; find_query_id id r.queries
 
 let registered_dispatches_no_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ctx) (id:string)
-                                   (a:arguments) (resolve:query -> deferred v)
+                                   (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
   : Lemma (requires mem id (ids (enumerate r)))
           (ensures (match try_find_query id r with
-                    | Some q -> q.q_id == id /\ dispatch r id a resolve == invoke q a resolve
+                    | Some q -> q.q_id == id /\ dispatch r id a vf resolve == invoke q a vf resolve
                     | None -> False))
-  = registered_dispatches_in_context #v #ctx rn r [] x None id a resolve;
-    no_gate_is_dispatch #v #ctx rn r x None id a resolve;
+  = registered_dispatches_in_context #v #ctx rn r [] x None id a vf resolve;
+    no_gate_is_dispatch #v #ctx rn r x None id a vf resolve;
     match try_find_query id r with
-    | Some q -> lift_outcome_injective (dispatch r id a resolve) (invoke q a resolve)
+    | Some q -> lift_outcome_injective (dispatch r id a vf resolve) (invoke q a vf resolve)
     | None -> ()
 
 (* THEOREM (Phase 316; restated by Phase 651) — the paged gated dispatch IS the gated dispatch under
@@ -2125,21 +2166,21 @@ let registered_dispatches_no_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:regi
 let dispatch_page_is_dispatch_in_context (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry)
                                          (gs:list (qgate ctx)) (x:ctx) (g:option string) (id:string)
                                          (a:arguments) (tok:option string)
-                                         (resolve:query -> option string -> deferred v)
-  : Lemma (dispatch_page_gated rn r gs x g id a tok resolve ==
-           dispatch_gated rn r gs x g id a (fun q -> resolve q tok))
+                                         (vf:v -> option string) (resolve:query -> option string -> deferred v)
+  : Lemma (dispatch_page_gated rn r gs x g id a tok vf resolve ==
+           dispatch_gated rn r gs x g id a vf (fun q -> resolve q tok))
   = ()
 
 let dispatch_page_is_dispatch_no_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (x:ctx) (id:string)
                                        (a:arguments) (tok:option string)
-                                       (resolve:query -> option string -> deferred v)
-  : Lemma (dispatch_page r id a tok resolve == dispatch r id a (fun q -> resolve q tok))
-  = dispatch_page_is_dispatch_in_context #v #ctx rn r [] x None id a tok resolve;
-    no_gate_is_dispatch #v #ctx rn r x None id a (fun q -> resolve q tok);
+                                       (vf:v -> option string) (resolve:query -> option string -> deferred v)
+  : Lemma (dispatch_page r id a tok vf resolve == dispatch r id a vf (fun q -> resolve q tok))
+  = dispatch_page_is_dispatch_in_context #v #ctx rn r [] x None id a tok vf resolve;
+    no_gate_is_dispatch #v #ctx rn r x None id a vf (fun q -> resolve q tok);
     (match find_query id r.queries with
      | None -> ()
      | Some q -> ());
-    lift_outcome_injective (dispatch_page r id a tok resolve) (dispatch r id a (fun q -> resolve q tok))
+    lift_outcome_injective (dispatch_page r id a tok vf resolve) (dispatch r id a vf (fun q -> resolve q tok))
 
 (* ---- the gate and the grant at the query seam ---- *)
 
@@ -2148,7 +2189,7 @@ let dispatch_page_is_dispatch_no_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:
    `QGPolicyRefused n m alts`, identically under every resolver, and `n` names a gate of the list
    whose own decision under this context is the one reported. *)
 let gate_before_resolver (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (qgate ctx)) (x:ctx)
-                         (g:option string) (id:string) (a:arguments) (resolve resolve':query -> deferred v)
+                         (g:option string) (id:string) (a:arguments) (vf:v -> option string) (resolve resolve':query -> deferred v)
   : Lemma (requires (match find_query id r.queries with
                      | Some q -> validate_params q a == Ok () /\ ~(C.DAllow? (decide_granted rn gs x q a g))
                      | None -> False))
@@ -2157,11 +2198,11 @@ let gate_before_resolver (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:
                       (let (n, d) = qdecide_named gs x q a in
                        qgate_named n d gs x q a /\
                        (match d with
-                        | C.DNeedsApproval -> dispatch_gated rn r gs x g id a resolve == Error (QGApprovalRequired n)
-                        | C.DDeny m alts -> dispatch_gated rn r gs x g id a resolve == Error (QGPolicyRefused n m alts)
+                        | C.DNeedsApproval -> dispatch_gated rn r gs x g id a vf resolve == Error (QGApprovalRequired n)
+                        | C.DDeny m alts -> dispatch_gated rn r gs x g id a vf resolve == Error (QGPolicyRefused n m alts)
                         | C.DAllow -> False))
                     | None -> True) /\
-                   dispatch_gated rn r gs x g id a resolve == dispatch_gated rn r gs x g id a resolve')
+                   dispatch_gated rn r gs x g id a vf resolve == dispatch_gated rn r gs x g id a vf resolve')
   = match find_query id r.queries with
     | Some q -> qdecide_named_names_a_gate gs x q a
     | None -> ()
@@ -2172,18 +2213,18 @@ let gate_before_resolver (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:
    `QGApprovalRequired` naming the gate, identically under every resolver. *)
 let approval_dispatches_iff_granted (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (qgate ctx))
                                     (x:ctx) (g:option string) (id:string) (a:arguments)
-                                    (resolve resolve':query -> deferred v)
+                                    (vf:v -> option string) (resolve resolve':query -> deferred v)
   : Lemma (requires (match find_query id r.queries with
                      | Some q -> validate_params q a == Ok () /\ C.DNeedsApproval? (snd (qdecide_named gs x q a))
                      | None -> False))
           (ensures (match find_query id r.queries with
                     | Some q ->
                       (g == Some (invocation_identity rn q a) ==>
-                         dispatch_gated rn r gs x g id a resolve == lift_outcome (invoke q a resolve)) /\
+                         dispatch_gated rn r gs x g id a vf resolve == lift_outcome (invoke q a vf resolve)) /\
                       (~(g == Some (invocation_identity rn q a)) ==>
-                         dispatch_gated rn r gs x g id a resolve ==
+                         dispatch_gated rn r gs x g id a vf resolve ==
                            Error (QGApprovalRequired (fst (qdecide_named gs x q a))) /\
-                         dispatch_gated rn r gs x g id a resolve == dispatch_gated rn r gs x g id a resolve')
+                         dispatch_gated rn r gs x g id a vf resolve == dispatch_gated rn r gs x g id a vf resolve')
                     | None -> True))
   = ()
 
@@ -2203,17 +2244,17 @@ let grant_for_another_invocation_refused (#sym:eqtype) (reveal:string -> list sy
    that answer `Deny` under the context refuse `QGPolicyRefused` naming the gate, one value for every
    grant and every resolver. *)
 let deny_reaches_no_resolver (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (qgate ctx)) (x:ctx)
-                             (g g':option string) (id:string) (a:arguments) (resolve resolve':query -> deferred v)
+                             (g g':option string) (id:string) (a:arguments) (vf:v -> option string) (resolve resolve':query -> deferred v)
   : Lemma (requires (match find_query id r.queries with
                      | Some q -> validate_params q a == Ok () /\ C.DDeny? (snd (qdecide_named gs x q a))
                      | None -> False))
           (ensures (match find_query id r.queries with
                     | Some q ->
                       (match qdecide_named gs x q a with
-                       | (n, C.DDeny m alts) -> dispatch_gated rn r gs x g id a resolve == Error (QGPolicyRefused n m alts)
+                       | (n, C.DDeny m alts) -> dispatch_gated rn r gs x g id a vf resolve == Error (QGPolicyRefused n m alts)
                        | _ -> False)
                     | None -> True) /\
-                   dispatch_gated rn r gs x g id a resolve == dispatch_gated rn r gs x g' id a resolve')
+                   dispatch_gated rn r gs x g id a vf resolve == dispatch_gated rn r gs x g' id a vf resolve')
   = ()
 
 (* THEOREM (Phase 651) — `grant_changes_only_its_own_decision`. The decision with a grant presented is
@@ -2232,11 +2273,11 @@ let grant_changes_only_its_own_decision (#ctx:Type0) (rn:renderers) (gs:list (qg
 
 (* THEOREM (Phase 651) — `allow_unchanged_by_any_grant`, at the dispatch. *)
 let allow_unchanged_by_any_grant (#v:Type) (#ctx:Type0) (rn:renderers) (r:registry) (gs:list (qgate ctx))
-                                 (x:ctx) (g:option string) (id:string) (a:arguments) (resolve:query -> deferred v)
+                                 (x:ctx) (g:option string) (id:string) (a:arguments) (vf:v -> option string) (resolve:query -> deferred v)
   : Lemma (requires (match find_query id r.queries with
                      | Some q -> validate_params q a == Ok () /\ C.DAllow? (snd (qdecide_named gs x q a))
                      | None -> False))
-          (ensures dispatch_gated rn r gs x g id a resolve == dispatch_gated rn r gs x None id a resolve)
+          (ensures dispatch_gated rn r gs x g id a vf resolve == dispatch_gated rn r gs x None id a vf resolve)
   = ()
 
 (* The context the one context-specific theorem is about: one fact, as `bool`. *)
@@ -2369,7 +2410,8 @@ let _ = assert_norm (twins_hold twins == true)
        runs, raised at the member at fault), the RESULT PAGE (`resultJson` / `resultOf`), the async
        RESULT (`deferredResultJson` / `deferredResultOf`, the capability seam's envelope) and the
        typed REFUSAL (all twenty-one `QueryError` cases as `wire_query_error`, a decode refusal and a
-       predicate inside them). For every pair: decode after encode, EXACTLY (`query_roundtrip`,
+       predicate inside them). For every pair: decode after encode, EXACTLY, a declaration's source
+       and a page's rows up to the column codec's normal form (Phases 688, 692) (`query_roundtrip`,
        `result_roundtrip`, `deferred_result_roundtrip`, `query_error_roundtrip`), and every refusal
        a reader answers RESOLVES in the document it read (`…_refusals_resolve`).
 
@@ -2492,6 +2534,8 @@ noeq type column_codec (r:Type) = {
   source_norm: data_source -> data_source;
   rows_json:   r -> C.jval;
   rows_of:     C.jval -> option r;
+  rows_fault:  r -> option string;
+  rows_norm:   r -> r;
   lit_json:    column_type -> cell -> C.jval;
   lit_of:      string -> column_type -> C.jval -> option cell
 }
@@ -2502,14 +2546,20 @@ noeq type column_codec (r:Type) = {
    strand proves it (Phase 688, DECISIONS.md D266.4): the round trip holds for a source the column
    layer accepts (`source_ok`) and answers its NORMAL FORM (`source_norm`: an embedded table's columns
    in schema order), which is accepted and is its own normal form; a `Ref` is its own normal form. A
-   source the column layer refuses is promised nothing, and the admission refuses it first. *)
+   source the column layer refuses is promised nothing, and the admission refuses it first. A page's
+   ROWS are stated the same way (Phase 692, DECISIONS.md D267.7): `rows_fault` is the column layer's
+   verdict on them (`Table.validate`'s reason, or `None`), and the round trip holds for rows it
+   accepts and answers their normal form (`rows_norm`), accepted and its own; rows it refuses are
+   promised nothing, and the dispatch refuses them first (`invoke`'s verdict). *)
 let column_codec_laws (#r:Type) (cc:column_codec r) : prop =
   (forall (f:(string & column_type)). cc.field_of (cc.field_json f) == Some f) /\
   (forall (s:data_source). source_ok s ==> cc.source_of (cc.source_json s) == Some (cc.source_norm s)) /\
   (forall (s:data_source). source_ok s ==>
      source_ok (cc.source_norm s) /\ cc.source_norm (cc.source_norm s) == cc.source_norm s) /\
   (forall (n:string). cc.source_norm (SRef n) == SRef n) /\
-  (forall (x:r). cc.rows_of (cc.rows_json x) == Some x) /\
+  (forall (x:r). None? (cc.rows_fault x) ==> cc.rows_of (cc.rows_json x) == Some (cc.rows_norm x)) /\
+  (forall (x:r). None? (cc.rows_fault x) ==>
+     None? (cc.rows_fault (cc.rows_norm x)) /\ cc.rows_norm (cc.rows_norm x) == cc.rows_norm x) /\
   (forall (c:string) (v:cell) (ty:column_type). cell_type v == Some ty ==> cc.lit_of c ty (cc.lit_json ty v) == Some v)
 
 (* A column-codec refusal, as the query codec raises it: `OutOfRange` at the value read. *)
@@ -2977,9 +3027,17 @@ let result_of_j (#r:Type) (cc:column_codec r) : C.decoder (query_result r) =
     | C.Error e -> C.Error e
     | C.Ok tok -> C.Ok ({ qr_rows = rows; qr_page_num = pn; qr_total = trc; qr_next = tok })
 
-(* THE RESULT ROUND TRIP (Phase 455), `result_roundtrip`: every result page reads back as itself. *)
+(* A page with its rows in the column codec's normal form (Phase 692): the same page number, total
+   and token. *)
+let result_norm (#r:Type) (cc:column_codec r) (qr:query_result r) : Tot (query_result r) =
+  { qr with qr_rows = cc.rows_norm qr.qr_rows }
+
+(* THE RESULT ROUND TRIP (Phase 455), `result_roundtrip`: every result page whose rows the column
+   layer accepts reads back as itself, its rows in their normal form (Phase 692, DECISIONS.md D267.7;
+   until then it was stated of every page, over a premise production does not meet). *)
 let result_roundtrip (#r:Type) (cc:column_codec r) (qr:query_result r)
-  : Lemma (requires column_codec_laws cc) (ensures result_of_j cc (result_json cc qr) == C.Ok qr)
+  : Lemma (requires column_codec_laws cc /\ None? (cc.rows_fault qr.qr_rows))
+          (ensures result_of_j cc (result_json cc qr) == C.Ok (result_norm cc qr))
   = let tl = (match qr.qr_next with Some t -> [("nextPageToken", C.JStr t)] | None -> []) in
     C.assoc_app "totalRowCount" (opt_int_json "totalRowCount" qr.qr_total) tl;
     C.assoc_app "nextPageToken" (opt_int_json "totalRowCount" qr.qr_total) tl
@@ -3005,10 +3063,45 @@ let deferred_result_json (#r:Type) (cc:column_codec r) (d:C.deferred (query_resu
 let deferred_result_of_j (#r:Type) (cc:column_codec r) : C.decoder (C.deferred (query_result r)) =
   C.deferred_dec (result_of_j cc)
 
+(* The envelope with its `ready` page in normal form; `pending` and `failed` carry no rows. *)
+let deferred_result_norm (#r:Type) (cc:column_codec r) (d:C.deferred (query_result r)) : Tot (C.deferred (query_result r)) =
+  match d with
+  | C.Ready v -> C.Ready (result_norm cc v)
+  | C.Pending -> C.Pending
+  | C.Failed m -> C.Failed m
+
+(* The envelope reads its `ready` payload through the payload reader, whatever that reader answers. *)
+let deferred_ready_reads (#a:Type) (enc:a -> C.jval) (p:C.decoder a) (v w:a)
+  : Lemma (requires p (enc v) == C.Ok w)
+          (ensures C.deferred_dec p (C.deferred_json enc (C.Ready v)) == C.Ok (C.Ready w))
+  = ()
+
+(* THE ASYNC RESULT ROUND TRIP (Phase 455): every envelope reads back as itself, a `ready` page whose
+   rows the column layer accepts with its rows in their normal form (Phase 692). *)
 let deferred_result_roundtrip (#r:Type) (cc:column_codec r) (d:C.deferred (query_result r))
-  : Lemma (requires column_codec_laws cc) (ensures deferred_result_of_j cc (deferred_result_json cc d) == C.Ok d)
-  = (match d with C.Ready v -> result_roundtrip cc v | _ -> ());
-    C.deferred_roundtrip (result_json cc) (result_of_j cc) d
+  : Lemma (requires column_codec_laws cc /\ (match d with C.Ready v -> None? (cc.rows_fault v.qr_rows) | _ -> True))
+          (ensures deferred_result_of_j cc (deferred_result_json cc d) == C.Ok (deferred_result_norm cc d))
+  = match d with
+    | C.Ready v -> result_roundtrip cc v; deferred_ready_reads (result_json cc) (result_of_j cc) v (result_norm cc v)
+    | _ -> C.deferred_roundtrip (result_json cc) (result_of_j cc) d
+
+(* THE PREMISE DISCHARGED FOR A DISPATCHED RESULT (Phase 692, DECISIONS.md D267.7). A page the seam
+   answers `Ready`, under the column codec's own verdict on its rows, is one the result's writer writes
+   as text that reads back as that page, its rows in normal form: the dispatch's clause is what
+   `result_roundtrip` needs, so no rows a dispatch answers read back as others. *)
+let rows_verdict (#r:Type) (cc:column_codec r) (qr:query_result r) : Tot (option string) =
+  cc.rows_fault qr.qr_rows
+
+let dispatched_result_roundtrip (#r:Type) (cc:column_codec r) (rg:registry) (id:string) (a:arguments)
+                                (resolve:query -> deferred (query_result r))
+  : Lemma (requires column_codec_laws cc)
+          (ensures (match dispatch rg id a (rows_verdict cc) resolve with
+                    | Ok (Ready qr) -> result_of_j cc (result_json cc qr) == C.Ok (result_norm cc qr)
+                    | _ -> True))
+  = dispatch_ready_rows_ok rg id a (rows_verdict cc) resolve;
+    match dispatch rg id a (rows_verdict cc) resolve with
+    | Ok (Ready qr) -> result_roundtrip cc qr
+    | _ -> ()
 
 let deferred_result_refusals_resolve (#r:Type) (cc:column_codec r) : Lemma (C.sound (deferred_result_of_j cc)) =
   result_refusals_resolve cc;
