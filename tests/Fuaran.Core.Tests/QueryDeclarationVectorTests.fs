@@ -478,3 +478,44 @@ let tests =
                        else
                            [ "reference"; "model:Query" ])
                       (id + "'s answeredBy") ]
+
+// ---------------------------------------------------------------------------
+//  Phase 685 (DECISIONS.md D264.4) — the declaration reader's `UnknownTag` sentences name what was
+//  found once: `unknown host effect 'everywhere'; expected …`, never `unknown unknown …`.
+// ---------------------------------------------------------------------------
+
+/// A declaration the reader admits, as text: no parameter, no column, a `ref` source.
+let private plainDeclaration685 =
+    """{"$type":"query","effect":{"determinism":"clock","host":"pure"},"id":"q","params":[],"resultSchema":[],"source":{"ref":"r","schema":[]}}"""
+
+/// Each `UnknownTag` the declaration reader reaches from one edit of `plainDeclaration685`, with the
+/// spelling the edit plants.
+let private unknownTags685 =
+    [ "host effect", "everywhere", plainDeclaration685.Replace("\"host\":\"pure\"", "\"host\":\"everywhere\"")
+      "determinism",
+      "sometimes",
+      plainDeclaration685.Replace("\"determinism\":\"clock\"", "\"determinism\":\"sometimes\"")
+      "parameter type",
+      "complex",
+      plainDeclaration685.Replace(
+          "\"params\":[]",
+          "\"params\":[{\"name\":\"p\",\"required\":true,\"type\":\"complex\"}]"
+      ) ]
+
+[<Tests>]
+let sentenceTests685 =
+    testList
+        "Phase 685 - the declaration reader's unknown-tag sentences"
+        [ testCase "the plain declaration reads"
+          <| fun _ ->
+              Expect.isOk (QueryCodec.decodeDetailedWith ReadPolicy.Lenient plainDeclaration685) "the base reads"
+
+          for what, found, text in unknownTags685 do
+              testCase (sprintf "an unknown %s names what was found, once" what)
+              <| fun _ ->
+                  match QueryCodec.decodeDetailedWith ReadPolicy.Lenient text with
+                  | Ok _ -> failtestf "the reader admitted an unknown %s" what
+                  | Error e ->
+                      Expect.equal e.Code DecodeCode.UnknownTag (what + ": the code")
+                      Expect.isFalse (e.Message.Contains "unknown unknown") (what + " doubles its lead: " + e.Message)
+                      Expect.stringContains e.Message ("'" + found + "'") (what + " names what was found: " + e.Message) ]
