@@ -221,17 +221,20 @@ let queryAnswer (expected: (string * CorpusCell) list) : Answer option =
 
 /// A declaration's text, for a declaration the gate may refuse (Phase 685: the declaration's writer
 /// takes only an admitted declaration). It is the text of the same declaration with no parameter,
-/// filter or order — which the gate admits — with those three members written over it as the writer
-/// writes them: a parameter as `{name, required, type}`, a predicate through the predicate writer's
-/// body (`QuerySeamLaws.predicateJson`) and an order key through the published sort-key writer. For
-/// an admitted declaration it is `QueryCodec.encode`'s text byte for byte.
+/// filter or order and a `Ref` source — which the gate admits — with those four members written over
+/// it as the writer writes them: a parameter as `{name, required, type}`, a predicate through the
+/// predicate writer's body (`QuerySeamLaws.predicateJson`), an order key through the published
+/// sort-key writer and the source through the column codec's writer (Phase 688: a table the column
+/// layer refuses is written as that writer writes it). For an admitted declaration it is
+/// `QueryCodec.encode`'s text byte for byte.
 let declarationText (q: Query) : string =
     let bare =
         QuerySeamLaws.admitted
             { q with
                 Params = []
                 Where = []
-                OrderBy = [] }
+                OrderBy = []
+                Source = Ref "" }
 
     let paramJson (p: QueryParam) =
         JObj
@@ -240,7 +243,8 @@ let declarationText (q: Query) : string =
               "type", JStr(ColumnType.tag p.Type) ]
 
     let written =
-        [ "params", JArr(q.Params |> List.map paramJson) ]
+        [ "params", JArr(q.Params |> List.map paramJson)
+          "source", ColumnCodec.encodeJson q.Source ]
         @ (if List.isEmpty q.Where then
                []
            else
@@ -252,7 +256,9 @@ let declarationText (q: Query) : string =
 
     match Json.parse (QueryCodec.encode bare) with
     | Ok(JObj ms) ->
-        Canonical.write Rendering.CrossHost (JObj((ms |> List.filter (fun (k, _) -> k <> "params")) @ written))
+        Canonical.write
+            Rendering.CrossHost
+            (JObj((ms |> List.filter (fun (k, _) -> k <> "params" && k <> "source")) @ written))
     | other -> failwithf "an admitted declaration's text did not read back as an object: %A" other
 
 /// A predicate literal's value as production writes it: the `value` member of a comparison with

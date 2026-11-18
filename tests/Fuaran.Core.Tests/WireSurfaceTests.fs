@@ -366,7 +366,8 @@ let private derived<'T> (package: string) (label: string) (encode: 'T -> string)
 /// declaration. A comparison's literal and its column are made to agree — an integer literal (the
 /// sampler's default) takes the column's type, any other literal is put in canonical form and its
 /// column takes the literal's type — and `contains` is made to read a string column. A `Null` literal
-/// has no type a column could take, so no admitted declaration carries one: `None`.
+/// has no type a column could take, so no admitted declaration carries one: `None`. Since Phase 688 an
+/// embedded table the column layer refuses is restated as one its schema entry carries (`carried`).
 let private admittedSample (q: Query) : AdmittedQuery option =
     let sampleOf (t: ColumnType) : Cell =
         match t with
@@ -416,6 +417,35 @@ let private admittedSample (q: Query) : AdmittedQuery option =
             | ColumnPredicate.IsNull _
             | ColumnPredicate.IsNotNull _ -> Some(schema, ps @ [ p ]))
 
+    // Phase 688 (DECISIONS.md D266.10 point 4) — the gate reads the source, so a sampled embedded table
+    // the column layer refuses is restated as one its schema entry carries: an entry of the sampler's
+    // default type, `int`, takes its column's type, so a `ColumnData` discriminator keeps its storage;
+    // and a column its entry still cannot carry is rebuilt at the entry's type, two present rows of a
+    // value that type carries, so a `ColumnType` or `TimeUnit` discriminator keeps its entry. A table
+    // the column layer accepts is not moved.
+    let carried (src: DataSource) : DataSource =
+        match src with
+        | Embedded t when Result.isError (Table.validate t) ->
+            let schema =
+                t.Schema
+                |> List.map (fun f ->
+                    match t.Columns |> List.tryFind (fun c -> c.Name = f.Name) with
+                    | Some c when f.Type = IntType -> Field.withType c.Type f
+                    | _ -> f)
+
+            let columns =
+                t.Columns
+                |> List.map (fun c ->
+                    match schema |> List.tryFind (fun f -> f.Name = c.Name) with
+                    | Some f when Result.isError (Table.validate { Schema = [ f ]; Columns = [ c ] }) ->
+                        match Column.ofCells c.Name f.Type [ sampleOf f.Type; sampleOf f.Type ] with
+                        | Ok rebuilt -> rebuilt
+                        | Error e -> failwithf "a sampled column could not be rebuilt at %A: %A" f.Type e
+                    | _ -> c)
+
+            Embedded { Schema = schema; Columns = columns }
+        | other -> other
+
     q.Where
     |> List.fold step (Some(q.ResultSchema, []))
     |> Option.map (fun (schema, where) ->
@@ -423,7 +453,8 @@ let private admittedSample (q: Query) : AdmittedQuery option =
             QueryRegistry.admit
                 { q with
                     ResultSchema = schema
-                    Where = where }
+                    Where = where
+                    Source = carried q.Source }
         with
         | Ok a -> a
         | Error e -> failwithf "a sampled declaration restated for the gate is still refused: %A" e)

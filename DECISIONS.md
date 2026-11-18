@@ -647,6 +647,16 @@ sampler writes through the gate, are re-stated by the sampler with a table their
 This corrects D264.8 points 1 and 6: the documents of that kind were ten, not six, and under this ruling the gate
 refuses each of their tables, so none of them stands as written. D264 is not edited.
 
+*As built, sixteen documents move, not ten.* D266.1 counted the sampled documents the READER refuses. The gate refuses
+what `Table.validate` refuses, and six more sampled tables are such although the reader admitted their text, as
+another declaration: an `int` column under a `decimal`, `float` or `timestamp` entry (`ColumnType.DecimalType`,
+`FloatType` and `TimestampType`) and under a `timestamp_us`, `timestamp_ms` or `timestamp_ns` entry
+(`TimeUnit.Microseconds`, `Milliseconds` and `Nanoseconds`), the changed-meaning case D266.2 point 1 names for a
+column of another type. The sampler re-states all sixteen by one rule: an entry of its default type, `int`, takes
+its column's type, so a `ColumnData` document keeps its storage, and a column its entry still cannot carry is rebuilt
+at the entry's type, so a `ColumnType` or `TimeUnit` document keeps its entry. The class is the ruled one, `breaking`,
+and no other document moves.
+
 *5. The families.* `seamRefusals` gains one `queryError` vector for the case (142 to 143). `queryDeclarationLaws`'
 `admissionFault` and `register` inputs gain an optional `source` member, a table as data whose columns are a list so
 that a name can repeat, and the family gains ten vectors (97 to 107): eight refusals, each `illFormedSource` at

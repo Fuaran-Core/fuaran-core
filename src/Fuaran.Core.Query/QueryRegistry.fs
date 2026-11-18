@@ -38,18 +38,33 @@ module QueryRegistry =
     /// `ResultSchema` (`QueryShape.whereFault` / `orderFault`): a predicate or an order key naming an
     /// undeclared column, `contains` on a column that is not a string, a literal of another type than
     /// its column's or one its column cannot carry, and an order naming a column twice are refused by
-    /// name. The parameters are checked first, then the filter, then the order. `admissionFaultAt`
-    /// answers the same refusal with the path to the member at fault, which the declaration reader
-    /// reports it at.
+    /// name. `admissionFaultAt` answers the same refusal with the path to the member at fault, which
+    /// the declaration reader reports it at.
+    ///
+    /// Since Phase 688 (DECISIONS.md D266.9) the gate reads the source FIRST: an embedded table
+    /// `Table.validate` refuses is refused `IllFormedSource` at `source`, with the column layer's
+    /// sentence, so an admitted declaration's table is one the column codec writes and reads back. A
+    /// `Ref` is not read. Then the parameters, then the filter, then the order.
     let internal admissionFaultAt (q: Query) : (PathSegment list * QueryError) option =
-        match Capability.repeatedAddrs (q.Params |> List.map (fun p -> p.Name, ())) with
-        | dup :: _ -> Some([ PathSegment.Key "params" ], DuplicateParam dup)
-        | [] ->
-            match QueryShape.whereFault q.ResultSchema q.Where with
-            | Some(i, e) -> Some([ PathSegment.Key "where"; PathSegment.Index i ], e)
-            | None ->
-                QueryShape.orderFault q.ResultSchema q.OrderBy
-                |> Option.map (fun (i, e) -> [ PathSegment.Key "orderBy"; PathSegment.Index i ], e)
+        let sourceFault =
+            match q.Source with
+            | Embedded t ->
+                match Table.validate t with
+                | Ok() -> None
+                | Error e -> Some([ PathSegment.Key "source" ], IllFormedSource(ColumnCodec.errorString e))
+            | Ref _ -> None
+
+        match sourceFault with
+        | Some fault -> Some fault
+        | None ->
+            match Capability.repeatedAddrs (q.Params |> List.map (fun p -> p.Name, ())) with
+            | dup :: _ -> Some([ PathSegment.Key "params" ], DuplicateParam dup)
+            | [] ->
+                match QueryShape.whereFault q.ResultSchema q.Where with
+                | Some(i, e) -> Some([ PathSegment.Key "where"; PathSegment.Index i ], e)
+                | None ->
+                    QueryShape.orderFault q.ResultSchema q.OrderBy
+                    |> Option.map (fun (i, e) -> [ PathSegment.Key "orderBy"; PathSegment.Index i ], e)
 
     /// The registration refusal a declaration earns, or `None` — `admissionFaultAt` without the path.
     let internal admissionFault (q: Query) : QueryError option = admissionFaultAt q |> Option.map snd
@@ -63,8 +78,8 @@ module QueryRegistry =
         | None -> Ok(Admitted q)
 
     /// The admission gate (Phase 685): the declaration as an `AdmittedQuery` when the gate admits it,
-    /// or the refusal `register` would answer for it (a parameter named twice, then the filter, then
-    /// the order). What a host runs before it writes a declaration (`QueryCodec.encode`) or keys a
+    /// or the refusal `register` would answer for it (an embedded table the column layer refuses,
+    /// Phase 688, then a parameter named twice, then the filter, then the order). What a host runs before it writes a declaration (`QueryCodec.encode`) or keys a
     /// read of it (`Query.invocationKey`, `invocationPreimage`, `grant`). It reads the declaration's
     /// own fields and nothing of a registry, so a declaration is admitted wherever it is admitted.
     let admit (q: Query) : Result<AdmittedQuery, QueryError> = admitAt q |> Result.mapError snd
@@ -95,7 +110,9 @@ module QueryRegistry =
 
     /// Register a query — additive, no silent overwrite (a duplicate id is a named error), and,
     /// since Phase 316, only a declaration whose parameter names are distinct (`DuplicateParam`
-    /// otherwise, naming the repeated name). The id is checked first.
+    /// otherwise, naming the repeated name). The id is checked first, then the admission gate
+    /// (`admit`), whose first clause since Phase 688 refuses an embedded table the column layer
+    /// refuses (`IllFormedSource`).
     let register (q: Query) (r: QueryRegistry<'Ctx>) : Result<QueryRegistry<'Ctx>, QueryError> =
         Seam.register q r.Seam |> lift
 
@@ -237,8 +254,8 @@ module QueryRegistry =
         Seam.unregister id r.Seam |> lift
 
     /// Swap the query registered under `q.Id` for `q` — the hot-reload verb. Refused `NoSuchQuery`
-    /// when the id is not registered, and held to the admission `register` runs (`DuplicateParam`);
-    /// on a refusal the registry is unchanged.
+    /// when the id is not registered, and held to the admission `register` runs (`IllFormedSource`,
+    /// `DuplicateParam`, the filter and the order); on a refusal the registry is unchanged.
     let replace (q: Query) (r: QueryRegistry<'Ctx>) : Result<QueryRegistry<'Ctx>, QueryError> =
         Seam.replace q r.Seam |> lift
 

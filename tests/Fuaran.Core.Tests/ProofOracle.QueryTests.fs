@@ -312,7 +312,8 @@ let private genCellOf (t: ColumnType) (r: ConfRng.T) : Cell * ConfRng.T =
         Cell.Decimal v, r1
 
 /// A declaration: up to three params, names drawn WITH replacement, any type, either
-/// requiredness; every determinism source reached.
+/// requiredness; every determinism source reached; its source a `Ref` or an embedded table,
+/// accepted or refused by the column layer (Phase 688).
 let private genQueryDecl (id: string) (r: ConfRng.T) : Query * ConfRng.T =
     let mutable rng = r
     let n, r1 = ConfRng.intBelow 4 rng
@@ -423,11 +424,51 @@ let private genQueryDecl (id: string) (r: ConfRng.T) : Query * ConfRng.T =
 
             schema, where, order
 
+    // Phase 688 — the source, drawn last so every earlier draw is the draw it was: seven declarations
+    // in twenty-four embed a table — two in schema order, two out of it (its columns reversed), and
+    // three `Table.validate` refuses (ragged, a schema name with no column, a column of another
+    // type) — and the rest name a `Ref`.
+    let sk, r12 = ConfRng.intBelow 24 rng
+    rng <- r12
+
+    let source =
+        let xy = [ Field.create "x" IntType; Field.create "y" StringType ]
+
+        let x (vs: int list) =
+            Column.ofInts "x" (Vector.ofList vs) AllValid
+
+        let y = Column.ofStrs "y" (Vector.ofList [ "a"; "b" ]) AllValid
+
+        match sk with
+        | 0
+        | 1 ->
+            Embedded
+                { Schema = xy
+                  Columns = [ x [ 1; 2 ]; y ] }
+        | 2
+        | 3 ->
+            Embedded
+                { Schema = xy
+                  Columns = [ y; x [ 1; 2 ] ] }
+        | 4 ->
+            Embedded
+                { Schema = xy
+                  Columns = [ x [ 1 ]; y ] }
+        | 5 ->
+            Embedded
+                { Schema = xy
+                  Columns = [ x [ 1; 2 ] ] }
+        | 6 ->
+            Embedded
+                { Schema = [ Field.create "x" FloatType ]
+                  Columns = [ x [ 1 ] ] }
+        | _ -> Ref("src-" + id)
+
     { Id = id
       Params = List.ofSeq ps
       ResultSchema = schema
       Effect = { Host = ReadsHost; Determinism = det }
-      Source = Ref("src-" + id)
+      Source = source
       TimeoutMs =
         (if page = 0 then
              None
@@ -540,7 +581,8 @@ let private queryProbe
             | PredicateTypeMismatch _
             | PredicateNotApplicable _
             | IllFormedLiteral _
-            | DuplicateSortColumn _ ->
+            | DuplicateSortColumn _
+            | IllFormedSource _ ->
                 t <-
                     t
                     |> Tally.bump "ShapeRefused"
@@ -1286,7 +1328,8 @@ let tests =
                     "PredicateTypeMismatch"
                     "PredicateNotApplicable"
                     "IllFormedLiteral"
-                    "DuplicateSortColumn" ] do
+                    "DuplicateSortColumn"
+                    "IllFormedSource" ] do
                   Expect.isTrue
                       (Set.contains cls (Tally.reached "RegisterClasses" t))
                       (sprintf
@@ -1363,10 +1406,20 @@ let tests =
                   | Ok _ ->
                       admitted <- admitted + 1
 
-                      Expect.equal
-                          (QueryCodec.decode (QueryCodec.encode (QuerySeamLaws.admitted q)))
-                          (Ok(QuerySeamLaws.admitted q))
-                          "an admitted declaration round-trips"
+                      // Equal up to the column codec's normal form (Phase 688): an embedded table
+                      // reads back with its columns in schema order, and its text does not move.
+                      let text = QueryCodec.encode (QuerySeamLaws.admitted q)
+
+                      match QueryCodec.decode text with
+                      | Ok back ->
+                          Expect.equal
+                              { back.Declaration with
+                                  Source = q.Source }
+                              q
+                              "an admitted declaration round-trips, its source up to its normal form"
+
+                          Expect.equal (QueryCodec.encode back) text "and its text does not move"
+                      | Error e -> failtestf "an admitted declaration's text was refused: %s" e
 
                       if not (List.isEmpty q.Where && List.isEmpty q.OrderBy) then
                           shaped <- shaped + 1
