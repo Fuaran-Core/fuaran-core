@@ -2215,3 +2215,95 @@ let capturedRowsTests692 =
                   | Error _ -> ()
 
                   Expect.isNonEmpty (QueryCodec.encodeDeferredResult (Ready(page692 t None))) label ]
+
+[<Tests>]
+let replayedRowsTests692 =
+    testList
+        "Phase 692 - a replay answers the rows' refusal the dispatch answered live"
+        [ testCase "a journal the captured dispatch wrote replays rows the validation refuses as the refusal"
+          <| fun _ ->
+              for label, t in refusedRows692 do
+                  for verb, c in capturedVerbs692 t do
+                      let replays =
+                          [ (QueryRegistry.dispatchReplayed
+                                QueryCodec.decodeResult
+                                registry692
+                                ()
+                                None
+                                "rows"
+                                []
+                                None
+                                (fun _ _ -> failtest "a network read replays from its journal")
+                                Map.empty
+                                c.Journal)
+                                .Outcome
+                            (QueryRegistry.dispatchReplayedWith
+                                QueryCodec.decodeResult
+                                registry692
+                                ()
+                                None
+                                "rows"
+                                []
+                                None
+                                (fun _ _ _ -> failtest "a network read replays from its journal")
+                                Map.empty
+                                c.Journal)
+                                .Outcome ]
+
+                      for replayed in replays do
+                          Expect.equal
+                              replayed
+                              (Result.mapError ReplayFailure.Refused c.Outcome)
+                              (sprintf "%s, %s: the replay answers what was answered live" verb label)
+
+                      Expect.equal
+                          (Result.mapError ReplayFailure.Refused c.Outcome)
+                          (Error(ReplayFailure.Refused(rowsRefusal692 t)))
+                          (sprintf "%s, %s: the refusal" verb label)
+
+          testCase "rows the validation accepts replay as their normal form"
+          <| fun _ ->
+              for t in [ inOrder692; outOfOrder692 ] do
+                  for verb, c in capturedVerbs692 t do
+                      let replayed =
+                          QueryRegistry.dispatchReplayed
+                              QueryCodec.decodeResult
+                              registry692
+                              ()
+                              None
+                              "rows"
+                              []
+                              None
+                              (fun _ _ -> failtest "a network read replays from its journal")
+                              Map.empty
+                              c.Journal
+
+                      Expect.equal replayed.Outcome (Ok(Ready(page692 inOrder692 None))) verb
+
+          testCase "a deterministic read replays live, through the same clause"
+          <| fun _ ->
+              let pure =
+                  { query692 with
+                      Id = "pure"
+                      Effect =
+                          { Host = Pure
+                            Determinism = Effect.deterministic } }
+
+              let reg =
+                  QueryRegistry.register pure QueryRegistry.empty |> Result.toOption |> Option.get
+
+              for label, t in refusedRows692 do
+                  let replayed =
+                      QueryRegistry.dispatchReplayed
+                          QueryCodec.decodeResult
+                          reg
+                          ()
+                          None
+                          "pure"
+                          []
+                          None
+                          (fun _ _ -> Ready(page692 t None))
+                          Map.empty
+                          []
+
+                  Expect.equal replayed.Outcome (Error(ReplayFailure.Refused(rowsRefusal692 t))) label ]
