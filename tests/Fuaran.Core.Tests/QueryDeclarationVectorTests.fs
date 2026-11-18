@@ -450,8 +450,40 @@ let tests =
                         "predicateNotApplicable"
                         "illFormedLiteral"
                         "predicateTypeMismatch"
-                        "duplicateSortColumn" ])
+                        "duplicateSortColumn"
+                        "illFormedSource" ])
                   "every refusal of the admission gate"
+
+          testCase
+              "Phase 688 - the family states a declaration's source as data: eight refusals at source, two acceptances"
+          <| fun _ ->
+              let vectors = items "vectors" (file ())
+
+              let expected (id: string) =
+                  match vectors |> List.tryFind (fun v -> text "id" v = id) with
+                  | Some v -> field "expected" v |> Option.get
+                  | None -> failtestf "the family has no vector %s" id
+
+              for id in
+                  [ "admission-a-source-naming-a-schema-entry-twice"
+                    "admission-a-source-naming-a-column-twice"
+                    "admission-a-source-schema-entry-with-no-column"
+                    "admission-a-source-column-absent-from-the-schema"
+                    "admission-a-source-column-of-another-type"
+                    "admission-a-ragged-source-before-a-parameter-declared-twice"
+                    "admission-a-source-float-not-finite"
+                    "admission-a-source-decimal-text-not-canonical" ] do
+                  let e = expected id
+                  Expect.equal (text "verdict" e) "refused" (id + ": refused")
+                  Expect.equal (strings "at" e) [ "source" ] (id + ": at source")
+                  Expect.equal (field "error" e |> Option.map (text "$type")) (Some "illFormedSource") id
+
+              for id in
+                  [ "admission-a-source-in-schema-order"
+                    "admission-a-source-out-of-schema-order" ] do
+                  Expect.equal (text "verdict" (expected id)) "admitted" (id + ": admitted")
+
+              Expect.equal (List.length vectors) 107 "107 vectors"
 
           testCase
               "a vector names the query model beside the reference exactly where the file does not name it reference-only"
