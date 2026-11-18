@@ -679,8 +679,11 @@ hash alike), so a decoded declaration compares with a registered one as it does 
   holding `Query` in its seam: the seam's policy is typed over the declaration it holds (`Seam`'s
   `Policy: RegistryPolicy<'Ctx, 'Decl, 'Args>`, KeyedRegistry.fs:424-428), and a host's gates (`withGate`,
   QueryRegistry.fs:99-100) and resolvers (`dispatch`, 159-167) are written over `Query`. A resolver is handed the
-  declaration the registry admitted. The vocabulary's identity and the capture keys (QueryRegistry.fs:69, 248-265)
-  call the identity's body over `Query`, made internal.
+  declaration the registry admitted. The vocabulary's identity and the two capture keys (QueryRegistry.fs:86, 281,
+  285) wrap the declaration the registry holds in the internal `Admitted` case and call the public identity. Every
+  declaration the registry holds was admitted by `register`'s gate, so these three sites are the assembly's
+  construction sites beside `admitAt`. No internal identity body over `Query` exists: `Hash.fs`'s roster names the
+  public identity functions as the ones that call the encoding, and a copy would have needed the roster edited.
 - **Admission reads only the declaration.** `admissionFaultAt` reads the parameters, the result schema, the filter
   and the order, and nothing of a registry, a context or a policy; `QueryShape.whereFault` and `orderFault`
   (Query.fs:70-118) reach only `Column.ofCells` and `Table.validate` over one literal. Any host can run the gate on a
@@ -721,7 +724,8 @@ hash alike), so a decoded declaration compares with a registered one as it does 
 - **Callers**, counted as code lines at `98aed011` (comments and the operation-name lists of
   `Conformance/Families.fs`, which name members and do not call them, excluded); a budget counts where it is built with
   a value or read, since `= None` does not move. In `Fuaran.Core.Query`: the vocabulary's identity and the two capture
-  keys (QueryRegistry.fs:69, 261, 265), which call the internal body; the gate's call in the reader (QueryCodec.fs:188);
+  keys (QueryRegistry.fs:86, 281, 285), which wrap the held declaration in `Admitted` and call the public identity;
+  the gate's call in the reader (QueryCodec.fs:188);
   the budgets' writer and reader (QueryCodec.fs:84-85, 164-166, 183-184). In the conformance kit: `QuerySeamLaws.fs`
   17 (encode 4, the reader 3, identity and grant 7, `tryFind`/`enumerate` 2, budgets 1), `PolicySeamLaws.fs` 5 (identity
   and grant), `ParityVectors.fs` 8 (identity and grant 7, budgets 1), `RegistrySeamLaws.fs` 2 (`tryFind`/`enumerate`).
