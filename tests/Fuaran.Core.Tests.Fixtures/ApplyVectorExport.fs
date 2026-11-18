@@ -86,15 +86,16 @@ module SpineAdoption =
     let private rs651 =
         AdoptionSource.Host("0.43.0", "55c145f2852088c53760eb53bbae9afaac95d026")
 
-    /// The Rust spine's measurement at Core 0.43.1 (a draft): its Phase 683 (its D17) answered the query
-    /// declaration family with a counted leg, 84 vectors (36 declarationRefused, 21 admissionFault, 4
-    /// register, 14 validateParams, 9 dispatch), and certified the families below again at their counts
-    /// against Core commit `bd1a339`, at this spine commit, the head of its `main` (recorded here by
-    /// Phase 684; Phase 686 corrected `canonicalFormLaws` to its 20, a count the record had held at 17 since
-    /// the family grew). `identity` stays proposed, as at its Phase 665; the families above keep the
-    /// measurements that stand.
-    let private rs683 =
-        AdoptionSource.Host("0.43.1", "282ff93fc5a83a162bdb479fbb1ab6dc841ab61b")
+    /// The Rust spine's measurement at Core 0.44.0 (a draft): its Phase 690 (its D18) answered the admitted
+    /// query declaration with all 97 vectors of `queryDeclarationLaws` (46 declarationRefused, 24
+    /// admissionFault, 4 register, 14 validateParams, 9 dispatch) on both toolchains it gates, and read the
+    /// families below at their counts, unchanged, against Core commit `889c869d`, at this spine commit, the
+    /// head of its `main` (recorded here by Phase 691; it follows its Phase 683 measurement at `282ff93`,
+    /// recorded by Phase 684, and Phase 686's correction of `canonicalFormLaws` to its 20). The family has
+    /// since grown to 107 vectors (Phase 688), which the spine has not followed. `identity` stays proposed,
+    /// as at its Phase 665; the families above keep the measurements that stand.
+    let private rs690 =
+        AdoptionSource.Host("0.44.0", "a2f970df4479d5bbf502827efff4523246c72d6a")
 
     /// The Rust spine (`Fuaran-Core/fuaran-core-rs`). A family whose leg did not change keeps the
     /// measurement that stands.
@@ -107,17 +108,17 @@ module SpineAdoption =
               "skeletonDag", 12, rs651
               "codecRefusals", 101, rs564
               "seamRefusals", 142, rs651
-              "skeletonMerge", 13, rs683
-              "skeletonDiff", 14, rs683
-              "capabilityLaws", 144, rs683
-              "capabilityDocumentLaws", 18, rs683
-              "queryGrantLaws", 19, rs683
-              "queryDeclarationLaws", 84, rs683
-              "capabilityGateLaws", 41, rs683
-              "decimal", 75, rs683
-              "fieldLaws", 43, rs683
-              "propagationLaws", 73, rs683
-              "canonicalFormLaws", 20, rs683
+              "skeletonMerge", 13, rs690
+              "skeletonDiff", 14, rs690
+              "capabilityLaws", 144, rs690
+              "capabilityDocumentLaws", 18, rs690
+              "queryGrantLaws", 19, rs690
+              "queryDeclarationLaws", 97, rs690
+              "capabilityGateLaws", 41, rs690
+              "decimal", 75, rs690
+              "fieldLaws", 43, rs690
+              "propagationLaws", 73, rs690
+              "canonicalFormLaws", 20, rs690
               "premiseStringModel", 29, rs564
               "premiseFloatDigits", 163, rs564
               "premiseInt53", 29, rs564
