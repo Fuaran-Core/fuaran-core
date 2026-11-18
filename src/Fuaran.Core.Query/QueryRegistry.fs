@@ -307,7 +307,9 @@ module QueryRegistry =
     /// (through `encode`, `QueryCodec.encodeResult` for the canonical form), a refusal from the
     /// resolver settles it `Refused` with the refusal's wire document (`QueryCodec.encodeQueryError`;
     /// `QueryError.describe`'s sentence before Phase 385), and `Pending` leaves it open with the
-    /// returned `Ticket`. A refusal before the resolver journals nothing; a deterministic query
+    /// returned `Ticket`. Rows `Table.validate` refuses are the resolver's fault, refused before
+    /// anything is settled (Phase 692), so they are journalled as that refusal and never as a
+    /// completion whose text reads back as other rows. A refusal before the resolver journals nothing; a deterministic query
     /// journals nothing. The `Outcome` is exactly `dispatch`'s; a `CapturedDispatch` since Phase 391
     /// (a positional triple before `0.37.0`).
     let dispatchCaptured
@@ -420,7 +422,9 @@ module QueryRegistry =
     /// `Ready` (through `decode`, `QueryCodec.decodeResult` for the canonical form), a recorded
     /// refusal as the `QueryError` it records (Phase 385; a reason that is no query-error document,
     /// from a journal written before 0.36.0, as `ExecutionFailed` with the recorded text), an
-    /// unsettled attempt as `Pending`. A deterministic query resolves live. A journal that cannot
+    /// unsettled attempt as `Pending`. A deterministic query resolves live, through the clause every
+    /// dispatch passes (Phase 692: rows `Table.validate` refuses are `ExecutionFailed`); a journal the
+    /// captured dispatch wrote holds no rows that read back as others. A journal that cannot
     /// answer is `ReplayFailure.Unanswered` with the `KeyedCaptureFault`, never a live fetch; every
     /// refusal of the seam, live or recorded, is `ReplayFailure.Refused`. A `ReplayedDispatch` since
     /// Phase 391 (a nested `Result` before `0.37.0`).

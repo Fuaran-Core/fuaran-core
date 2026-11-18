@@ -224,6 +224,14 @@ module QueryCodec =
 
     /// A result page as canonical JSON text (`"$type": "queryResult"`), the rows written by the
     /// column codec as an embedded table; `totalRowCount` / `nextPageToken` are omitted when `None`.
+    ///
+    /// Total, and what it promises (Phase 692, DECISIONS.md D267.8): a page a dispatch answered reads
+    /// back through `decodeResult` as that page, its rows in schema order, since every dispatch verb
+    /// refuses rows `Table.validate` refuses before it answers them. Rows out of schema order read
+    /// back in schema order. A result built by hand, or one a host settles a pending capture with,
+    /// whose rows `Table.validate` refuses is written as it is, and its text may read back as OTHER
+    /// rows (a column named twice keeps its first, a column absent from the schema is dropped,
+    /// decimal text is canonicalised) or be refused by the reader; validate such rows first.
     let encodeResult (qr: QueryResult) : string =
         Canonical.write Rendering.CrossHost (resultJson qr)
 
@@ -260,7 +268,10 @@ module QueryCodec =
         CapabilitySeamCodec.encodeDeferred resultJson d
 
     /// The seam's async envelope as canonical JSON text, in the `pending` / `ready` / `failed`
-    /// shape `CapabilityCodec` uses, a `ready` payload written as `encodeResult` writes it.
+    /// shape `CapabilityCodec` uses, a `ready` payload written as `encodeResult` writes it — total,
+    /// with `encodeResult`'s contract for the page it carries (Phase 692): a dispatched page reads
+    /// back as itself in schema order; a page built by hand whose rows `Table.validate` refuses may
+    /// read back as other rows or be refused.
     let encodeDeferredResult (d: Deferred<QueryResult>) : string =
         Canonical.write Rendering.CrossHost (deferredResultJson d)
 
