@@ -415,7 +415,29 @@ module QueryRegistry =
             (fun q -> Query.invokePageWithArgs q args pageToken resolve)
             journal
 
-    /// Settle a pending query capture (Phase 695). RED STUB: settles as the generic verb does.
+    /// SETTLE a pending query capture (Phase 695, DECISIONS.md D268): the capture a captured verb left
+    /// open under `ticket` when its resolver answered `Pending`, settled with the `answer` the fetch came
+    /// back with — a result, or a fault in the typed resolver's words (a plain resolver's `Failed m` is
+    /// `ResolveFault.Failed (m, [])`); `Pending` is not an answer it takes. `query`, `args` and
+    /// `pageToken` are the invocation the ticket was issued for, the declaration as it was dispatched.
+    ///
+    /// The answer passes the step a dispatch puts its resolver's answer through (`Query.invokePageWithArgs`):
+    /// rows `Table.validate` refuses are `ExecutionFailed` in the column layer's words (Phase 692), a
+    /// `PredicateUnsupported` names the declaration's own predicate or is `ExecutionFailed` (Phase 685),
+    /// and each other fault is the refusal it names. What that step answers is journalled as the captured
+    /// verbs journal it: a result `Completed` through `encode`, a refusal `Refused` with its query-error
+    /// document. So the settlement record carries the phase and the value a dispatch whose resolver gave
+    /// the same answer at once journals, and the replay of the invocation answers what it answers over that
+    /// journal; the whole journal is that journal, byte for byte, when nothing was journalled between the
+    /// attempt and the settlement. `Outcome` is what that dispatch answers (`Ok (Ready r)` or `Error e`),
+    /// `Ticket` the ticket settled, `Journal` the journal with the settlement.
+    ///
+    /// Refused, with the journal unmoved: `NotAttempted ticket` when the ticket's key is not this
+    /// invocation's (`Query.invocationKeyPage`), or the declaration is labelled `deterministic` (its
+    /// dispatch journals nothing); then `KeyedCapture.settleEffectKeyed`'s `NotAttempted` for an
+    /// occurrence with no attempt and `AlreadySettled` for one already settled. Everything that reads the
+    /// ticket is in this verb. `KeyedCapture.settleEffectKeyed` used directly on a query's ticket runs no
+    /// step: what it journals is under the result writers' contract (`QueryCodec.encodeResult`).
     let settleCaptured
         (hashFn: HashFn)
         (encode: QueryResult -> string)
@@ -426,21 +448,35 @@ module QueryRegistry =
         (answer: Result<QueryResult, ResolveFault>)
         (journal: KeyedCapture list)
         : Result<CapturedDispatch<QueryResult, QueryError>, KeyedCaptureFault> =
-        ignore query
-        ignore args
-        ignore pageToken
+        let c = paged pageToken
+        let q = query.Declaration
         let key, occurrence = ticket
 
-        let outcome, settlement =
-            match answer with
-            | Ok r -> Ok(Ready r), Ok r
-            | Error f -> Error(ExecutionFailed(sprintf "%A" f, [])), Error(sprintf "%A" f)
+        if c.Label q = EffectCapture.deterministicTag || key <> c.Key q args then
+            Error(KeyedCaptureFault.NotAttempted ticket)
+        else
+            let outcome =
+                Query.invokePageWithArgs q args pageToken (fun _ _ _ -> Result.map Ready answer)
 
-        KeyedCapture.settleEffectKeyed StreamConfig.canonical hashFn encode key occurrence settlement journal
-        |> Result.map (fun j ->
-            { Outcome = outcome
-              Ticket = Some ticket
-              Journal = j })
+            // The projection the captured dispatch journals an answer through (KeyedRegistry): the answer
+            // type holds no `Pending`, so the step always settles.
+            let settlement =
+                match outcome with
+                | Ok d -> Deferred.settled d
+                | Error e -> Some(Error(c.Record e))
+
+            match settlement with
+            | None ->
+                Ok
+                    { Outcome = outcome
+                      Ticket = Some ticket
+                      Journal = journal }
+            | Some s ->
+                KeyedCapture.settleEffectKeyed StreamConfig.canonical hashFn encode key occurrence s journal
+                |> Result.map (fun j ->
+                    { Outcome = outcome
+                      Ticket = Some ticket
+                      Journal = j })
 
     /// REPLAY a query invocation from the keyed journal instead of resolving it (Phase 318). The id,
     /// the parameters and the policy run exactly as `dispatchPage` (a refusal there is answered as
