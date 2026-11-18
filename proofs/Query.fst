@@ -175,8 +175,8 @@ type query = {
   q_schema: list (string & column_type);
   q_effect: effect_class;
   q_source: string;
-  q_timeout_ms: option int;
-  q_page_size: option int;
+  q_timeout_ms: option pos;
+  q_page_size: option pos;
   q_where: list predicate;
   q_order_by: list sort_key
 }
@@ -558,6 +558,44 @@ let admission_fault (q:query) : Tot (option query_error) =
     match where_fault q.q_schema q.q_where with
     | Some e -> Some e
     | None -> order_fault q.q_schema [] q.q_order_by
+
+(* A predicate the codec carries: its literal, if it has one, is not `Null` — the literal admission
+   admits (`IllFormedLiteral` refuses a `Null`). *)
+let literal_carried (p:predicate) : Tot bool =
+  match predicate_literal p with
+  | Some Null -> false
+  | _ -> true
+
+let rec all_carried (w:list predicate) : Tot bool =
+  match w with [] -> true | p :: t -> literal_carried p && all_carried t
+
+(* F#: `AdmittedQuery` (Phase 685, DECISIONS.md D264.7 point 1, D264.8 points 1 and 5) — a declaration
+   the admission gate admits: what the declaration's writer, the read's identity and the grant take.
+   Production makes one only through the gate (`QueryRegistry.admit`); here it is the refinement. *)
+type admitted_query = q:query{admission_fault q == None}
+
+(* A filter the gate admits carries every literal: `predicate_fault` refuses a `Null` literal, as
+   `IllFormedLiteral`, or earlier as an undeclared column. *)
+let rec where_admitted_carried (s:list (string & column_type)) (w:list predicate)
+  : Lemma (requires where_fault s w == None) (ensures all_carried w) (decreases w)
+  = match w with
+    | [] -> ()
+    | _ :: t -> where_admitted_carried s t
+
+(* So an admitted declaration's filter is carried: the premise the round trip and the identity
+   theorems spend is discharged by admission rather than assumed. *)
+let admitted_carried (q:query)
+  : Lemma (requires admission_fault q == None) (ensures all_carried q.q_where)
+  = match repeated [] (param_names q.q_params) with
+    | [] -> where_admitted_carried q.q_schema q.q_where
+    | _ :: _ -> ()
+
+(* A carried filter carries each of its predicates. *)
+let rec mem_carried (p:predicate) (w:list predicate)
+  : Lemma (requires all_carried w /\ mem p w) (ensures literal_carried p) (decreases w)
+  = match w with
+    | [] -> ()
+    | h :: t -> if h = p then () else mem_carried p t
 
 (* F#: `QueryRegistry.register` — additive, no silent overwrite, and only a declaration the
    admission gate admits: the id is checked first, then `admissionFault` (a repeated parameter,
@@ -1083,6 +1121,12 @@ let field_faithful (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (field:st
 [@@ noextract_to "FSharp"]
 let injective (#a:eqtype) (f:a -> string) : prop = forall (x y:a). f x == f y ==> x == y
 
+(* Phase 685 (D264.8 point 5) — the filter renderer's premise, over the filters an admitted
+   declaration carries: production writes a `Null` literal as the empty string, so its renderer is
+   not injective at the `Null` / empty-string pair, and no admitted declaration carries a `Null`. *)
+let injective_on_carried (f:list predicate -> string) : prop =
+  forall (w1 w2:list predicate). all_carried w1 /\ all_carried w2 /\ f w1 == f w2 ==> w1 == w2
+
 (* Every premise the injectivity theorem spends, named once. The two renderer clauses are the
    only claims about a numeral layout, and they are claims about the CARRIERS the model's cells
    hold (an int, a float's round-trip text), not about IEEE equality. *)
@@ -1090,7 +1134,7 @@ let injective (#a:eqtype) (f:a -> string) : prop = forall (x y:a). f x == f y ==
 let key_premises (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers) : prop =
   symbols_faithful reveal /\ reveal "" == [] /\ ~(e == t) /\ field_faithful reveal e t rn.field /\
   injective rn.render_int /\ injective rn.render_float /\
-  injective rn.render_where /\ injective rn.render_order
+  injective_on_carried rn.render_where /\ injective rn.render_order
 
 (* ---- the symbol level ---- *)
 
@@ -1230,7 +1274,7 @@ let canonical_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:
 [@@ noextract_to "FSharp"]
 let shape_premises (rn:renderers) : prop =
   injective rn.render_int /\ injective rn.render_float /\
-  injective rn.render_where /\ injective rn.render_order
+  injective_on_carried rn.render_where /\ injective rn.render_order
 
 (* No cell's tag is a shape tag or the page tag — what keeps a `w`, `o` or `p` triple from reading
    as a binding. *)
@@ -1267,6 +1311,7 @@ let order_fields_not_tag (rn:renderers) (o:list sort_key) (a:arguments) (x:strin
 let shape_fields_injective (rn:renderers) (uo:string -> time_unit) (w1 w2:list predicate) (o1 o2:list sort_key)
   (a1 a2:arguments)
   : Lemma (requires shape_premises rn /\ units_named uo a1 /\ units_named uo a2 /\
+                    all_carried w1 /\ all_carried w2 /\
                     shape_fields rn w1 o1 (arg_fields rn a1) == shape_fields rn w2 o2 (arg_fields rn a2))
           (ensures w1 == w2 /\ o1 == o2 /\ a1 == a2)
   = match w1, w2 with
@@ -1280,6 +1325,7 @@ let shape_fields_injective (rn:renderers) (uo:string -> time_unit) (w1 w2:list p
 (* The key fields determine the declaration's filter and order and the argument list. *)
 let key_fields_injective (rn:renderers) (uo:string -> time_unit) (q q':query) (a a':arguments)
   : Lemma (requires shape_premises rn /\ units_named uo a /\ units_named uo a' /\
+                    all_carried q.q_where /\ all_carried q'.q_where /\
                     key_fields rn q a == key_fields rn q' a')
           (ensures q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by /\ a == a')
   = shape_fields_injective rn uo q.q_where q'.q_where q.q_order_by q'.q_order_by a a'
@@ -1288,18 +1334,22 @@ let key_fields_injective (rn:renderers) (uo:string -> time_unit) (q q':query) (a
    filter and order since Phase 398). Two (declaration, argument list) pairs whose pre-images agree
    have the SAME `Where` and the SAME `OrderBy`, and their name-sorted argument lists are the same
    list, holding exactly the same bindings: declarations differing in filter or order, and distinct
-   argument sets, have distinct pre-images, for every declaration, accepted or not. It needs no
-   premise about the comparator — the sort is a function, and equal outputs are all the argument
+   argument sets, have distinct pre-images, for every declaration the gate admits — what
+   `Query.invocationKey` takes since Phase 685 (`admitted_query`), whose filter is carried
+   (`admitted_carried`), so the filter renderer is spent only over carried filters
+   (`injective_on_carried`). It needs no premise about the comparator — the sort is a function, and equal outputs are all the argument
    reads. (The id is the key's prefix, outside the pre-image; two keys with distinct ids differ
    there.) Whether two distinct pre-images HASH apart is a claim about FNV-1a and is not made
    (`query-renderers-abstract`). *)
 let invocation_key_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
-  (uo:string -> time_unit) (q q':query) (a a':arguments)
+  (uo:string -> time_unit) (q q':admitted_query) (a a':arguments)
   : Lemma (requires key_premises reveal e t rn /\ units_named uo a /\ units_named uo a' /\
                     canonical_key rn q (sort_args rn a) == canonical_key rn q' (sort_args rn a'))
           (ensures q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by /\
                    sort_args rn a == sort_args rn a' /\
                    (forall (x:(string & cell)). mem_arg x a = mem_arg x a')) =
+  admitted_carried q;
+  admitted_carried q';
   sort_units_named uo rn a;
   sort_units_named uo rn a';
   fields_injective reveal e t rn (key_fields rn q (sort_args rn a)) (key_fields rn q' (sort_args rn a'));
@@ -1531,6 +1581,7 @@ let key_fields_not_page (rn:renderers) (q:query) (a:arguments) (r:list string)
 (* The page fields determine the token, the declaration's filter and order, and the argument list. *)
 let page_fields_injective (rn:renderers) (uo:string -> time_unit) (t1 t2:option string) (q1 q2:query) (a1 a2:arguments)
   : Lemma (requires shape_premises rn /\ units_named uo a1 /\ units_named uo a2 /\
+                    all_carried q1.q_where /\ all_carried q2.q_where /\
                     page_fields rn t1 q1 a1 == page_fields rn t2 q2 a2)
           (ensures t1 == t2 /\ q1.q_where == q2.q_where /\ q1.q_order_by == q2.q_order_by /\ a1 == a2)
   = match t1, t2 with
@@ -1549,12 +1600,14 @@ let page_fields_injective (rn:renderers) (uo:string -> time_unit) (t1 t2:option 
    `invocation_key_injective` is, on `key_premises`; whether two distinct pre-images HASH apart is a
    claim about FNV-1a and is not made. *)
 let invocation_key_page_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
-  (uo:string -> time_unit) (q q':query) (a a':arguments) (tok tok':option string)
+  (uo:string -> time_unit) (q q':admitted_query) (a a':arguments) (tok tok':option string)
   : Lemma (requires key_premises reveal e t rn /\ units_named uo a /\ units_named uo a' /\
                     canonical_page rn tok q (sort_args rn a) == canonical_page rn tok' q' (sort_args rn a'))
           (ensures tok == tok' /\ q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by /\
                    sort_args rn a == sort_args rn a' /\
                    (forall (x:(string & cell)). mem_arg x a = mem_arg x a')) =
+  admitted_carried q;
+  admitted_carried q';
   sort_units_named uo rn a;
   sort_units_named uo rn a';
   fields_injective reveal e t rn (page_fields rn tok q (sort_args rn a)) (page_fields rn tok' q' (sort_args rn a'));
@@ -1567,7 +1620,7 @@ let invocation_key_page_injective (#sym:eqtype) (reveal:string -> list sym) (e t
 (* The law a host reads: distinct tokens give distinct pre-images, whatever the declarations and
    the arguments. *)
 let distinct_tokens_distinct_preimages (#sym:eqtype) (reveal:string -> list sym) (e t:sym)
-  (rn:renderers) (uo:string -> time_unit) (q q':query) (a a':arguments) (tok tok':option string)
+  (rn:renderers) (uo:string -> time_unit) (q q':admitted_query) (a a':arguments) (tok tok':option string)
   : Lemma (requires key_premises reveal e t rn /\ units_named uo a /\ units_named uo a' /\ ~(tok == tok'))
           (ensures ~(canonical_page rn tok q (sort_args rn a) == canonical_page rn tok' q' (sort_args rn a')))
   = FStar.Classical.move_requires (invocation_key_page_injective reveal e t rn uo q q' a a' tok) tok'
@@ -1575,7 +1628,7 @@ let distinct_tokens_distinct_preimages (#sym:eqtype) (reveal:string -> list sym)
 (* Phase 398 — and the same for the shape: a declaration filtered or ordered differently gives a
    distinct pre-image on every page, whatever the arguments and the tokens. *)
 let distinct_shapes_distinct_preimages (#sym:eqtype) (reveal:string -> list sym) (e t:sym)
-  (rn:renderers) (uo:string -> time_unit) (q q':query) (a a':arguments) (tok tok':option string)
+  (rn:renderers) (uo:string -> time_unit) (q q':admitted_query) (a a':arguments) (tok tok':option string)
   : Lemma (requires key_premises reveal e t rn /\ units_named uo a /\ units_named uo a' /\
                     ~(q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by))
           (ensures ~(canonical_page rn tok q (sort_args rn a) == canonical_page rn tok' q' (sort_args rn a')))
@@ -1793,12 +1846,14 @@ let invocation_identity (rn:renderers) (q:query) (a:arguments) : Tot string =
    id, one filter, one order and the same bindings. Under `invocation_key_injective`'s premises and
    nothing else: no hash, no comparator. *)
 let invocation_identity_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
-  (uo:string -> time_unit) (q q':query) (a a':arguments)
+  (uo:string -> time_unit) (q q':admitted_query) (a a':arguments)
   : Lemma (requires key_premises reveal e t rn /\ units_named uo a /\ units_named uo a' /\
                     invocation_identity rn q a == invocation_identity rn q' a')
           (ensures q.q_id == q'.q_id /\ q.q_where == q'.q_where /\ q.q_order_by == q'.q_order_by /\
                    sort_args rn a == sort_args rn a' /\
                    (forall (x:(string & cell)). mem_arg x a = mem_arg x a')) =
+  admitted_carried q;
+  admitted_carried q';
   sort_units_named uo rn a;
   sort_units_named uo rn a';
   fields_injective reveal e t rn (q.q_id :: key_fields rn q (sort_args rn a))
@@ -2092,7 +2147,7 @@ let approval_dispatches_iff_granted (#v:Type) (#ctx:Type0) (rn:renderers) (r:reg
 (* THEOREM (Phase 651) — `grant_for_another_invocation_refused`. A grant minted for a read of another
    query id, filter or order, or with other bindings, does not cover this read. *)
 let grant_for_another_invocation_refused (#sym:eqtype) (reveal:string -> list sym) (e t:sym) (rn:renderers)
-                                         (uo:string -> time_unit) (q q':query) (a a':arguments)
+                                         (uo:string -> time_unit) (q q':admitted_query) (a a':arguments)
   : Lemma (requires key_premises reveal e t rn /\ units_named uo a /\ units_named uo a' /\
                     (~(q.q_id == q'.q_id) \/ ~(q.q_where == q'.q_where) \/ ~(q.q_order_by == q'.q_order_by) \/
                      ~(sort_args rn a == sort_args rn a')))
@@ -2492,13 +2547,6 @@ let sort_key_of_j : C.decoder sort_key =
   C.both (C.field "column" C.d_str) (C.field "direction" (tagged_of direction_of_tag))
          (fun c d -> { k_column = c; k_direction = d })
 
-(* A predicate the codec carries: its literal, if it has one, is not `Null` — the literal admission
-   admits (`IllFormedLiteral` refuses a `Null`). *)
-let literal_carried (p:predicate) : Tot bool =
-  match predicate_literal p with
-  | Some Null -> false
-  | _ -> true
-
 #push-options "--fuel 9 --ifuel 1"
 let predicate_roundtrip (#r:Type) (cc:column_codec r) (p:predicate)
   : Lemma (requires column_codec_laws cc /\ literal_carried p)
@@ -2528,10 +2576,14 @@ let rec keys_json (o:list sort_key) : Tot (list C.jval) =
 let opt_int_json (name:string) (v:option int) : Tot (list (string & C.jval)) =
   match v with Some n -> [(name, C.JInt n)] | None -> []
 
+(* F#: `budgetJson` (Phase 685) — a budget written as its value. *)
+let opt_pos_json (name:string) (v:option pos) : Tot (list (string & C.jval)) =
+  match v with Some n -> [(name, C.JInt n)] | None -> []
+
 (* The members `queryJson` writes after the six it always writes. *)
 let query_tail (#r:Type) (cc:column_codec r) (q:query) : Tot (list (string & C.jval)) =
-  app (opt_int_json "timeoutMs" q.q_timeout_ms)
-      (app (opt_int_json "pageSize" q.q_page_size)
+  app (opt_pos_json "timeoutMs" q.q_timeout_ms)
+      (app (opt_pos_json "pageSize" q.q_page_size)
            (app (match q.q_where with [] -> [] | _ -> [("where", C.JArr (preds_json cc q.q_where))])
                 (match q.q_order_by with [] -> [] | _ -> [("orderBy", C.JArr (keys_json q.q_order_by))])))
 
@@ -2595,6 +2647,16 @@ let admission_fault_at_agrees (q:query)
 
 let query_tag_of : C.decoder unit = tagged_of (fun s -> if s = "query" then Some () else None)
 
+(* F#: `Decoder.intRange 1 Int32.MaxValue`, the budgets' reader (Phase 685, D264.8 point 4): a
+   positive integer, `OutOfRange` at the value for one that is not, and `WrongKind` for a value that
+   is not an integer. *)
+let d_pos (el:C.jval) : Tot (C.outcome pos C.decode_error) =
+  match el with
+  | C.JInt i -> if i > 0 then C.Ok i else C.Error (C.refuse C.OutOfRange)
+  | _ -> C.Error (C.refuse C.WrongKind)
+
+let pos_sound () : Lemma (C.sound d_pos) = C.sound_intro d_pos (fun x -> ())
+
 (* F#: `QueryCodec.queryOf`, member by member in production's order, the column codec's refusal of
    `source` at `source`, and THE admission gate the registry runs. *)
 let query_of_j (#r:Type) (cc:column_codec r) : C.decoder query =
@@ -2614,10 +2676,10 @@ let query_of_j (#r:Type) (cc:column_codec r) : C.decoder query =
     match C.field "effect" effect_of_j el with
     | C.Error e -> C.Error e
     | C.Ok eff ->
-    match C.opt_field "timeoutMs" C.d_int el with
+    match C.opt_field "timeoutMs" d_pos el with
     | C.Error e -> C.Error e
     | C.Ok tmo ->
-    match C.opt_field "pageSize" C.d_int el with
+    match C.opt_field "pageSize" d_pos el with
     | C.Error e -> C.Error e
     | C.Ok pg ->
     match C.opt_field "where" (C.d_list (predicate_of_j cc)) el with
@@ -2646,9 +2708,6 @@ let rec fields_roundtrip (#r:Type) (cc:column_codec r) (i:nat) (s:list (string &
           (ensures C.list_from (column_read cc.field_of) i (fields_json cc s) == C.Ok s) (decreases s)
   = match s with [] -> () | _ :: t -> fields_roundtrip cc (i + 1) t
 
-let rec all_carried (w:list predicate) : Tot bool =
-  match w with [] -> true | p :: t -> literal_carried p && all_carried t
-
 let rec preds_roundtrip (#r:Type) (cc:column_codec r) (i:nat) (w:list predicate)
   : Lemma (requires column_codec_laws cc /\ all_carried w)
           (ensures C.list_from (predicate_of_j cc) i (preds_json cc w) == C.Ok w) (decreases w)
@@ -2668,8 +2727,8 @@ let query_tail_members (#r:Type) (cc:column_codec r) (q:query)
              (match q.q_order_by with [] -> None | _ -> Some (C.JArr (keys_json q.q_order_by))))
   = let w = (match q.q_where with [] -> [] | _ -> [("where", C.JArr (preds_json cc q.q_where))]) in
     let o = (match q.q_order_by with [] -> [] | _ -> [("orderBy", C.JArr (keys_json q.q_order_by))]) in
-    let pg = opt_int_json "pageSize" q.q_page_size in
-    let tm = opt_int_json "timeoutMs" q.q_timeout_ms in
+    let pg = opt_pos_json "pageSize" q.q_page_size in
+    let tm = opt_pos_json "timeoutMs" q.q_timeout_ms in
     C.assoc_app "timeoutMs" tm (app pg (app w o)); C.assoc_app "timeoutMs" pg (app w o); C.assoc_app "timeoutMs" w o;
     C.assoc_app "pageSize" tm (app pg (app w o)); C.assoc_app "pageSize" pg (app w o); C.assoc_app "pageSize" w o;
     C.assoc_app "where" tm (app pg (app w o)); C.assoc_app "where" pg (app w o); C.assoc_app "where" w o;
@@ -2695,11 +2754,14 @@ let query_roundtrip (#r:Type) (cc:column_codec r) (q:query)
     query_tail_members cc q
 #pop-options
 
-(* ... the identity exactly on the declarations `register`'s admission admits. *)
-let query_roundtrip_identity (#r:Type) (cc:column_codec r) (q:query)
-  : Lemma (requires column_codec_laws cc /\ all_carried q.q_where /\ admission_fault q == None)
+(* ... the identity exactly on the declarations `register`'s admission admits: the writer's own
+   contract (Phase 685), over an admitted declaration and the column codec's laws alone — admission
+   discharges `all_carried` (`admitted_carried`). *)
+let query_roundtrip_identity (#r:Type) (cc:column_codec r) (q:admitted_query)
+  : Lemma (requires column_codec_laws cc)
           (ensures query_of_j cc (query_json cc q) == C.Ok q)
-  = admission_fault_at_agrees q;
+  = admitted_carried q;
+    admission_fault_at_agrees q;
     query_roundtrip cc q
 
 (* ---- the declaration reader's refusals resolve ---- *)
@@ -2786,7 +2848,7 @@ let query_good (#r:Type) (cc:column_codec r) (x:C.jval) : Lemma (C.good_res x (q
   column_read_sound cc.source_of;
   C.field_good "$type" query_tag_of x; C.field_good "id" C.d_str x; C.field_good "params" (C.d_list param_of_j) x;
   C.field_good "resultSchema" (C.d_list (column_read cc.field_of)) x; C.field_good "effect" effect_of_j x;
-  C.opt_field_good "timeoutMs" C.d_int x; C.opt_field_good "pageSize" C.d_int x;
+  pos_sound (); C.opt_field_good "timeoutMs" d_pos x; C.opt_field_good "pageSize" d_pos x;
   C.opt_field_good "where" (C.d_list (predicate_of_j cc)) x; C.opt_field_good "orderBy" (C.d_list sort_key_of_j) x;
   C.field_good "source" (column_read cc.source_of) x;
   match x with
@@ -3038,6 +3100,26 @@ let query_error_carried (e:wire_query_error) : Tot bool =
   | QRefused (PredicateNotApplicable p _ _) -> Some? (predicate_tag_of p)
   | QPredicateNotHonoured p -> literal_carried p
   | _ -> true
+
+(* F#: `Query.invokePageWithArgs`'s answer to a resolver's `ResolveFault.PredicateUnsupported p`
+   (Phase 685, DECISIONS.md D264.8 point 3 (B-i)): `PredicateNotHonoured p` only when `p` is one of
+   the declaration's own predicates; any other is the resolver's fault, `ExecutionFailed` naming it
+   (its sentence, `detail p`, is production's; the model takes it as given). *)
+let unsupported_predicate (detail:predicate -> string) (q:query) (p:predicate) : Tot wire_query_error =
+  if mem p q.q_where then QPredicateNotHonoured p else QRefused (ExecutionFailed (detail p) [])
+
+(* So every `PredicateNotHonoured` a dispatch raises names one of the declaration's predicates. *)
+let unsupported_predicate_own (detail:predicate -> string) (q:query) (p:predicate)
+  : Lemma (QPredicateNotHonoured? (unsupported_predicate detail q p) ==> mem p q.q_where)
+  = ()
+
+(* ... and, over an admitted declaration, the refusal is one the codec carries: its document reads
+   back as itself (`query_error_roundtrip`'s premise holds for every refusal a registry dispatch
+   raises, since the registry holds only admitted declarations). *)
+let unsupported_predicate_carried (detail:predicate -> string) (q:admitted_query) (p:predicate)
+  : Lemma (query_error_carried (unsupported_predicate detail q p))
+  = admitted_carried q;
+    if mem p q.q_where then mem_carried p q.q_where else ()
 
 let rec path_roundtrip (p:list wire_seg) : Lemma (path_items (path_json p) == Some p) =
   match p with [] -> () | _ :: t -> path_roundtrip t

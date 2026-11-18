@@ -616,7 +616,7 @@ let __proj__Mksort_key__item__k_direction : sort_key  ->  sort_direction = (fun 
      k_direction
      end))
 
-type query = {q_id : Prims.string; q_params : Prims.list<query_param>; q_schema : Prims.list<(Prims.string * column_type)>; q_effect : effect_class; q_source : Prims.string; q_timeout_ms : FStar_Pervasives_Native.option<Prims.int>; q_page_size : FStar_Pervasives_Native.option<Prims.int>; q_where : Prims.list<predicate>; q_order_by : Prims.list<sort_key>}
+type query = {q_id : Prims.string; q_params : Prims.list<query_param>; q_schema : Prims.list<(Prims.string * column_type)>; q_effect : effect_class; q_source : Prims.string; q_timeout_ms : FStar_Pervasives_Native.option<Prims.pos>; q_page_size : FStar_Pervasives_Native.option<Prims.pos>; q_where : Prims.list<predicate>; q_order_by : Prims.list<sort_key>}
 
 
 let __proj__Mkquery__item__q_id : query  ->  Prims.string = (fun ( projectee  :  query ) -> (match (projectee) with
@@ -649,13 +649,13 @@ let __proj__Mkquery__item__q_source : query  ->  Prims.string = (fun ( projectee
      end))
 
 
-let __proj__Mkquery__item__q_timeout_ms : query  ->  FStar_Pervasives_Native.option<Prims.int> = (fun ( projectee  :  query ) -> (match (projectee) with
+let __proj__Mkquery__item__q_timeout_ms : query  ->  FStar_Pervasives_Native.option<Prims.pos> = (fun ( projectee  :  query ) -> (match (projectee) with
 | {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size; q_where = q_where; q_order_by = q_order_by} -> begin
      q_timeout_ms
      end))
 
 
-let __proj__Mkquery__item__q_page_size : query  ->  FStar_Pervasives_Native.option<Prims.int> = (fun ( projectee  :  query ) -> (match (projectee) with
+let __proj__Mkquery__item__q_page_size : query  ->  FStar_Pervasives_Native.option<Prims.pos> = (fun ( projectee  :  query ) -> (match (projectee) with
 | {q_id = q_id; q_params = q_params; q_schema = q_schema; q_effect = q_effect; q_source = q_source; q_timeout_ms = q_timeout_ms; q_page_size = q_page_size; q_where = q_where; q_order_by = q_order_by} -> begin
      q_page_size
      end))
@@ -1639,6 +1639,27 @@ let admission_fault : query  ->  FStar_Pervasives_Native.option<query_error> = (
      end))
 
 
+let literal_carried : predicate  ->  Prims.bool = (fun ( p  :  predicate ) -> (match ((predicate_literal p)) with
+| FStar_Pervasives_Native.Some (Null) -> begin
+     false
+     end
+| uu___ -> begin
+     true
+     end))
+
+
+let rec all_carried : Prims.list<predicate>  ->  Prims.bool = (fun ( w  :  Prims.list<predicate> ) -> (match (w) with
+| [] -> begin
+     true
+     end
+| (p)::t -> begin
+     ((literal_carried p) && (all_carried t))
+     end))
+
+
+type admitted_query = query
+
+
 let register : query  ->  registry  ->  outcome<registry, query_error> = (fun ( q  :  query ) ( r  :  registry ) -> (match ((find_query q.q_id r.queries)) with
 | FStar_Pervasives_Native.Some (uu___) -> begin
      Error (DuplicateQuery (q.q_id))
@@ -2286,15 +2307,6 @@ let sort_key_json : sort_key  ->  Capability.jval = (fun ( k  :  sort_key ) -> C
 let sort_key_of_j : Capability.decoder<sort_key> = (Capability.both (Capability.field "column" Capability.d_str) (Capability.field "direction" (tagged_of direction_of_tag)) (fun ( c  :  Prims.string ) ( d  :  sort_direction ) -> {k_column = c; k_direction = d}))
 
 
-let literal_carried : predicate  ->  Prims.bool = (fun ( p  :  predicate ) -> (match ((predicate_literal p)) with
-| FStar_Pervasives_Native.Some (Null) -> begin
-     false
-     end
-| uu___ -> begin
-     true
-     end))
-
-
 let rec params_json : Prims.list<query_param>  ->  Prims.list<Capability.jval> = (fun ( ps  :  Prims.list<query_param> ) -> (match (ps) with
 | [] -> begin
      []
@@ -2340,7 +2352,16 @@ let opt_int_json : Prims.string  ->  FStar_Pervasives_Native.option<Prims.int>  
      end))
 
 
-let query_tail = (fun ( cc  :  column_codec<'r> ) ( q  :  query ) -> (ListAlgebra.app (opt_int_json "timeoutMs" q.q_timeout_ms) (ListAlgebra.app (opt_int_json "pageSize" q.q_page_size) (ListAlgebra.app (match (q.q_where) with
+let opt_pos_json : Prims.string  ->  FStar_Pervasives_Native.option<Prims.pos>  ->  Prims.list<(Prims.string * Capability.jval)> = (fun ( name  :  Prims.string ) ( v  :  FStar_Pervasives_Native.option<Prims.pos> ) -> (match (v) with
+| FStar_Pervasives_Native.Some (n) -> begin
+     (((name), (Capability.JInt (n))))::[]
+     end
+| FStar_Pervasives_Native.None -> begin
+     []
+     end))
+
+
+let query_tail = (fun ( cc  :  column_codec<'r> ) ( q  :  query ) -> (ListAlgebra.app (opt_pos_json "timeoutMs" q.q_timeout_ms) (ListAlgebra.app (opt_pos_json "pageSize" q.q_page_size) (ListAlgebra.app (match (q.q_where) with
 | [] -> begin
      []
      end
@@ -2421,6 +2442,20 @@ if (Prims.op_Equals s "query") then begin
      end))
 
 
+let d_pos : Capability.jval  ->  Capability.outcome<Prims.pos, Capability.decode_error> = (fun ( el  :  Capability.jval ) -> (match (el) with
+| Capability.JInt (i) -> begin
+      
+if (i > (Prims.parse_int "0")) then begin
+     Capability.Ok (i)
+     end else begin
+     Capability.Error ((Capability.refuse Capability.OutOfRange))
+     end
+     end
+| uu___ -> begin
+     Capability.Error ((Capability.refuse Capability.WrongKind))
+     end))
+
+
 let query_of_j = (fun ( cc  :  column_codec<'r> ) ( el  :  Capability.jval ) -> (match ((Capability.field "$type" query_tag_of el)) with
 | Capability.Error (e) -> begin
      Capability.Error (e)
@@ -2446,12 +2481,12 @@ let query_of_j = (fun ( cc  :  column_codec<'r> ) ( el  :  Capability.jval ) -> 
      Capability.Error (e)
      end
 | Capability.Ok (eff) -> begin
-     (match ((Capability.opt_field "timeoutMs" Capability.d_int el)) with
+     (match ((Capability.opt_field "timeoutMs" d_pos el)) with
 | Capability.Error (e) -> begin
      Capability.Error (e)
      end
 | Capability.Ok (tmo) -> begin
-     (match ((Capability.opt_field "pageSize" Capability.d_int el)) with
+     (match ((Capability.opt_field "pageSize" d_pos el)) with
 | Capability.Error (e) -> begin
      Capability.Error (e)
      end
@@ -2502,15 +2537,6 @@ in (match ((admission_fault_at q)) with
      end)
      end)
      end)
-     end))
-
-
-let rec all_carried : Prims.list<predicate>  ->  Prims.bool = (fun ( w  :  Prims.list<predicate> ) -> (match (w) with
-| [] -> begin
-     true
-     end
-| (p)::t -> begin
-     ((literal_carried p) && (all_carried t))
      end))
 
 type query_result<'r> = {qr_rows : 'r; qr_page_num : Prims.int; qr_total : FStar_Pervasives_Native.option<Prims.int>; qr_next : FStar_Pervasives_Native.option<Prims.string>}
@@ -3015,6 +3041,14 @@ let query_error_carried : wire_query_error  ->  Prims.bool = (fun ( e  :  wire_q
 | uu___ -> begin
      true
      end))
+
+
+let unsupported_predicate : (predicate  ->  Prims.string)  ->  query  ->  predicate  ->  wire_query_error = (fun ( detail  :  predicate  ->  Prims.string ) ( q  :  query ) ( p  :  predicate ) ->  
+if (ListAlgebra.mem p q.q_where) then begin
+     QPredicateNotHonoured (p)
+     end else begin
+     QRefused (ExecutionFailed ((detail p), []))
+     end)
 
 
 
