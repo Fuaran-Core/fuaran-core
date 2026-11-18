@@ -1896,3 +1896,132 @@ let illFormedSourceTests688 =
                   Expect.equal (QueryCodec.encodeQueryError e) illFormedSourceDoc688 "written back"
                   Expect.stringContains (QueryError.describe e) "ragged table" "its sentence carries the reason"
               | Error m -> failtestf "the refusal document was refused: %s" m ]
+
+/// A declaration of one `int` result column over the source `src`, with no filter and no order.
+let private declaring688 (src: DataSource) : Query =
+    { Id = "q"
+      Params = []
+      ResultSchema = [ Field.create "a" IntType ]
+      Effect =
+        { Host = ReadsHost
+          Determinism = Effect.network }
+      Source = src
+      TimeoutMs = None
+      PageSize = None
+      Where = []
+      OrderBy = [] }
+
+let private ints688 (name: string) (xs: int list) =
+    Column.ofInts name (Vector.ofList xs) AllValid
+
+let private strs688 (name: string) (xs: string list) =
+    Column.ofStrs name (Vector.ofList xs) AllValid
+
+/// Tables `Table.validate` refuses, each by a clause a hand-built table reaches (D266.1), the two
+/// faults only typed storage holds among them.
+let private refusedTables688: (string * Table) list =
+    [ "a schema name twice",
+      { Schema = [ Field.create "a" IntType; Field.create "a" IntType ]
+        Columns = [ ints688 "a" [ 1 ] ] }
+      "a column name twice",
+      { Schema = [ Field.create "a" IntType ]
+        Columns = [ ints688 "a" [ 1 ]; ints688 "a" [ 2 ] ] }
+      "a schema name with no column",
+      { Schema = [ Field.create "a" IntType; Field.create "b" IntType ]
+        Columns = [ ints688 "a" [ 1 ] ] }
+      "a column absent from the schema",
+      { Schema = [ Field.create "a" IntType ]
+        Columns = [ ints688 "a" [ 1 ]; ints688 "z" [ 9 ] ] }
+      "a column of another type",
+      { Schema = [ Field.create "a" FloatType ]
+        Columns = [ ints688 "a" [ 1; 2 ] ] }
+      "ragged columns",
+      { Schema = [ Field.create "a" IntType; Field.create "b" IntType ]
+        Columns = [ ints688 "a" [ 1; 2 ]; ints688 "b" [ 1 ] ] }
+      "a float that is not finite",
+      { Schema = [ Field.create "a" FloatType ]
+        Columns = [ Column.ofFloats "a" (Vector.ofList [ System.Double.NaN ]) AllValid ] }
+      "decimal text not canonical",
+      { Schema = [ Field.create "a" DecimalType ]
+        Columns = [ Column.ofDecimals "a" (Vector.ofList [ "12.50" ]) AllValid ] }
+      "a mask of another length",
+      { Schema = [ Field.create "a" IntType ]
+        Columns =
+          [ { Name = "a"
+              Data = Ints(Vector.ofList [ 1; 2 ], Mask(Vector.ofList [ false ])) } ] }
+      "an instant its text cannot spell",
+      { Schema = [ Field.create "a" (TimestampType TimeUnit.Seconds) ]
+        Columns =
+          [ { Name = "a"
+              Data = Timestamps(TimeUnit.Seconds, Vector.ofList [ 1.5 ], None, AllValid) } ] } ]
+
+[<Tests>]
+let sourceGateTests688 =
+    testList
+        "Phase 688 - the admission gate reads the source"
+        [ testCase "a table Table.validate refuses is refused IllFormedSource, with the column layer's sentence"
+          <| fun _ ->
+              for label, t in refusedTables688 do
+                  match Table.validate t, QueryRegistry.admit (declaring688 (Embedded t)) with
+                  | Error e, Error(IllFormedSource reason) ->
+                      Expect.equal reason (ColumnCodec.errorString e) (label + ": the column layer's sentence")
+                  | v, other -> failtestf "%s: validate %A, admit %A" label v other
+
+          testCase "register and replace refuse it, and the registry does not move"
+          <| fun _ ->
+              for label, t in refusedTables688 do
+                  match QueryRegistry.register (declaring688 (Embedded t)) QueryRegistry.empty<unit> with
+                  | Error(IllFormedSource _) -> ()
+                  | other -> failtestf "%s: register answered %A" label other
+
+                  let held =
+                      QueryRegistry.register (declaring688 (Ref "s")) QueryRegistry.empty<unit>
+                      |> Result.defaultWith (fun e -> failtestf "the ref declaration was refused: %A" e)
+
+                  match QueryRegistry.replace (declaring688 (Embedded t)) held with
+                  | Error(IllFormedSource _) -> ()
+                  | other -> failtestf "%s: replace answered %A" label other
+
+          testCase "the source is checked before the parameters"
+          <| fun _ ->
+              let p =
+                  { Name = "y"
+                    Type = IntType
+                    Required = false }
+
+              let ragged =
+                  refusedTables688 |> List.find (fun (l, _) -> l = "ragged columns") |> snd
+
+              let q =
+                  { declaring688 (Embedded ragged) with
+                      Params = [ p; p ] }
+
+              match QueryRegistry.admit q with
+              | Error(IllFormedSource _) -> ()
+              | other -> failtestf "a ragged table beside a parameter named twice answered %A" other
+
+          testCase "a valid table out of schema order is admitted, and reads back as its normal form"
+          <| fun _ ->
+              let schema = [ Field.create "a" IntType; Field.create "b" StringType ]
+
+              let outOfOrder =
+                  { Schema = schema
+                    Columns = [ strs688 "b" [ "x" ]; ints688 "a" [ 1 ] ] }
+
+              let normal =
+                  { Schema = schema
+                    Columns = [ ints688 "a" [ 1 ]; strs688 "b" [ "x" ] ] }
+
+              match QueryRegistry.admit (declaring688 (Embedded outOfOrder)) with
+              | Error e -> failtestf "refused: %A" e
+              | Ok aq ->
+                  let text = QueryCodec.encode aq
+
+                  match QueryCodec.decode text with
+                  | Error e -> failtestf "the text was refused: %s" e
+                  | Ok back ->
+                      Expect.equal back.Declaration (declaring688 (Embedded normal)) "the normal form"
+                      Expect.equal (QueryCodec.encode back) text "its text is the text written"
+
+          testCase "a ref is not read"
+          <| fun _ -> Expect.isOk (QueryRegistry.admit (declaring688 (Ref ""))) "an empty ref is admitted" ]

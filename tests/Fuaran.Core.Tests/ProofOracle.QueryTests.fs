@@ -1933,4 +1933,55 @@ let tests =
                   (FSharp.Reflection.FSharpType.IsUnion source)
                   (sprintf "the model's q_source is %s, an opaque string, not a source it reads" source.Name)
 
-              Expect.equal (caseNames source) [ "SRef"; "SEmbedded" ] "a source is a ref or an embedded table" ]
+              Expect.equal (caseNames source) [ "SRef"; "SEmbedded" ] "a source is a ref or an embedded table"
+
+          testCase
+              "Phase 688 - the query model's admission agrees with QueryRegistry.admit on embedded tables, accepted and refused, the source before the parameters"
+          <| fun _ ->
+              let ints (n: string) (xs: int list) =
+                  Column.ofInts n (Vector.ofList xs) AllValid
+
+              let ab = [ Field.create "a" IntType; Field.create "b" IntType ]
+
+              let p =
+                  { Name = "y"
+                    Type = IntType
+                    Required = false }
+
+              for t in
+                  [ { Schema = [ Field.create "a" IntType ]
+                      Columns = [ ints "a" [ 1 ] ] }
+                    { Schema = ab
+                      Columns = [ ints "b" [ 2 ]; ints "a" [ 1 ] ] }
+                    { Schema = ab
+                      Columns = [ ints "a" [ 1; 2 ]; ints "b" [ 1 ] ] }
+                    { Schema = [ Field.create "a" IntType ]
+                      Columns = [ ints "a" [ 1 ]; ints "a" [ 2 ] ] } ] do
+                  for ps in [ []; [ p; p ] ] do
+                      let q =
+                          { Id = "q"
+                            Params = ps
+                            ResultSchema = [ Field.create "a" IntType ]
+                            Effect =
+                              { Host = ReadsHost
+                                Determinism = Effect.network }
+                            Source = Embedded t
+                            TimeoutMs = None
+                            PageSize = None
+                            Where = []
+                            OrderBy = [] }
+
+                      let production =
+                          match QueryRegistry.admit q with
+                          | Ok _ -> "admitted"
+                          | Error e -> prodQueryErrRender e
+
+                      let model =
+                          match ModelQuery.admission_fault (queryToModel q) with
+                          | FStar_Pervasives_Native.None -> "admitted"
+                          | FStar_Pervasives_Native.Some e -> modelQueryErrRender e
+
+                      Expect.equal
+                          model
+                          production
+                          (sprintf "the model and the gate on %A with %d parameters" t ps.Length) ]
