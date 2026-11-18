@@ -387,7 +387,9 @@ module internal SeamRefusalLaws =
                 """{"$type":"predicateNotHonoured","predicate":{"$type":"isNull","column":"c"}}"""
                 "predicateNotHonoured-isNotNull",
                 """{"$type":"predicateNotHonoured","predicate":{"$type":"isNotNull","column":"c"}}"""
-                "orderNotHonoured", """{"$type":"orderNotHonoured","column":"c"}""" ] do
+                "orderNotHonoured", """{"$type":"orderNotHonoured","column":"c"}"""
+                // Phase 688 — the admission's refusal of an embedded table the column layer refuses.
+                "illFormedSource", """{"$type":"illFormedSource","reason":"why"}""" ] do
               yield reads "queryError" name doc
           yield refused "queryError" "not-an-object" "[]" DecodeCode.WrongKind []
           yield refused "queryError" "no-tag" "{}" DecodeCode.MissingField [ k "$type" ]

@@ -492,7 +492,6 @@ let seamCodecTests =
                   Expect.equal v.Document """{"$type":"illFormedSource","reason":"why"}""" "the document"
                   Expect.equal v.Expected Fuaran.Core.SeamRefusalLaws.Reads "it reads"
 
-                  for r in Fuaran.Core.SeamRefusalLaws.lawsOver [ v ] do
-                      Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample)
+                  Expect.equal (Fuaran.Core.SeamRefusalLaws.outcome v) (Ok v.Document) "it reads back to its own bytes"
 
               Expect.equal (List.length vectors) 143 "143 vectors" ]

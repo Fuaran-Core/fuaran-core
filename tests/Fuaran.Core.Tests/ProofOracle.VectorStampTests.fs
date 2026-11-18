@@ -95,7 +95,7 @@ let modelStamps: (string * (string * int)) list =
       "refusals/codec-refusals.json", ("JsonParse", 59)
       "refusals/codec-refusals.json", ("WireColumn", 13)
       "refusals/seam-refusals.json", ("Capability", 59)
-      "refusals/seam-refusals.json", ("Query", 45) ]
+      "refusals/seam-refusals.json", ("Query", 46) ]
 
 [<Tests>]
 let tests =
