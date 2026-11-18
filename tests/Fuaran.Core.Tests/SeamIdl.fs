@@ -262,7 +262,8 @@ let private queryIdl =
                 case "IllFormedLiteral" [ req "column" TStr; req "reason" TStr ]
                 case "DuplicateSortColumn" [ req "column" TStr ]
                 case "PredicateNotHonoured" [ req "predicate" (TUnion("ColumnPredicate", [])) ]
-                case "OrderNotHonoured" [ req "column" TStr ] ] ]
+                case "OrderNotHonoured" [ req "column" TStr ]
+                case "IllFormedSource" [ req "reason" TStr ] ] ]
         [ Declare.enumWith "SortDirection" [ "Ascending", "ascending"; "Descending", "descending" ] ]
         [ { Name = "SortKey"
             Fields = [ req "column" TStr; req "direction" (TEnum "SortDirection") ]

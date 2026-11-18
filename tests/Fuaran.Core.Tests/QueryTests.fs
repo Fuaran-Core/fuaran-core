@@ -1350,16 +1350,17 @@ let internal queryBaselines528: (QueryError * string) list =
       "{\"$type\":\"predicateNotHonoured\",\"predicate\":{\"$type\":\"isNull\",\"column\":\"c\"}}"
       PredicateNotHonoured(ColumnPredicate.IsNotNull "c"),
       "{\"$type\":\"predicateNotHonoured\",\"predicate\":{\"$type\":\"isNotNull\",\"column\":\"c\"}}"
-      OrderNotHonoured "c", "{\"$type\":\"orderNotHonoured\",\"column\":\"c\"}" ]
+      OrderNotHonoured "c", "{\"$type\":\"orderNotHonoured\",\"column\":\"c\"}"
+      IllFormedSource "why", "{\"$type\":\"illFormedSource\",\"reason\":\"why\"}" ]
 
 /// What `QueryCodec.decodeQueryError` answers for malformed documents, sentence for sentence.
 let private queryRefusals528: (string * string) list =
     [ "[]", "expected object, got array"
       "{}", "missing property: $type"
       "{\"$type\":\"nope\"}",
-      "unknown $type 'nope'; expected one of 'noSuchQuery', 'duplicateQuery', 'unknownParam', 'paramTypeMismatch', 'requiredParamsUnbound', 'sourceNotResolved', 'executionFailed', 'timeout', 'requiredParamsNull', 'duplicateParam', 'queryPolicyRefused', 'queryApprovalRequired', 'unreadableArgs', 'unknownColumn', 'predicateTypeMismatch', 'predicateNotApplicable', 'illFormedLiteral', 'duplicateSortColumn', 'predicateNotHonoured', 'orderNotHonoured'"
+      "unknown $type 'nope'; expected one of 'noSuchQuery', 'duplicateQuery', 'unknownParam', 'paramTypeMismatch', 'requiredParamsUnbound', 'sourceNotResolved', 'executionFailed', 'timeout', 'requiredParamsNull', 'duplicateParam', 'queryPolicyRefused', 'queryApprovalRequired', 'unreadableArgs', 'unknownColumn', 'predicateTypeMismatch', 'predicateNotApplicable', 'illFormedLiteral', 'duplicateSortColumn', 'predicateNotHonoured', 'orderNotHonoured', 'illFormedSource'"
       "{\"$type\":\"policyRefused\",\"allowed\":[],\"policy\":\"p\",\"reason\":\"r\"}",
-      "unknown $type 'policyRefused'; expected one of 'noSuchQuery', 'duplicateQuery', 'unknownParam', 'paramTypeMismatch', 'requiredParamsUnbound', 'sourceNotResolved', 'executionFailed', 'timeout', 'requiredParamsNull', 'duplicateParam', 'queryPolicyRefused', 'queryApprovalRequired', 'unreadableArgs', 'unknownColumn', 'predicateTypeMismatch', 'predicateNotApplicable', 'illFormedLiteral', 'duplicateSortColumn', 'predicateNotHonoured', 'orderNotHonoured'"
+      "unknown $type 'policyRefused'; expected one of 'noSuchQuery', 'duplicateQuery', 'unknownParam', 'paramTypeMismatch', 'requiredParamsUnbound', 'sourceNotResolved', 'executionFailed', 'timeout', 'requiredParamsNull', 'duplicateParam', 'queryPolicyRefused', 'queryApprovalRequired', 'unreadableArgs', 'unknownColumn', 'predicateTypeMismatch', 'predicateNotApplicable', 'illFormedLiteral', 'duplicateSortColumn', 'predicateNotHonoured', 'orderNotHonoured', 'illFormedSource'"
       "{\"$type\":\"paramTypeMismatch\",\"name\":\"p\",\"expected\":\"int\",\"got\":\"blob\"}",
       "unknown value 'blob'; expected one of 'int', 'float', 'bool', 'string', 'date', 'timestamp', 'decimal', 'timestamp_ms', 'timestamp_us', 'timestamp_ns'"
       "{\"$type\":\"predicateNotApplicable\",\"predicate\":\"like\",\"column\":\"c\",\"columnType\":\"string\"}",

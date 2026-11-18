@@ -273,6 +273,10 @@ module QueryError =
             + QueryShape.column predicate
             + "'."
         | OrderNotHonoured column -> "Refused: the data source cannot order the rows by column '" + column + "'."
+        | IllFormedSource reason ->
+            "Refused: the declaration's embedded table is not one the column layer accepts: "
+            + reason
+            + ". Validate the table (Table.validate) before declaring it."
 
     /// Every refusal, one sentence per line, in the order given — the reading of
     /// `Query.validateParamsAll`'s answer.

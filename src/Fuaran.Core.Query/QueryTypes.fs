@@ -290,6 +290,13 @@ type QueryError =
     /// The resolver cannot order the rows by this column (`ResolveFault.OrderUnsupported`, Phase
     /// 398): the fetch was refused rather than returned in another order.
     | OrderNotHonoured of column: string
+    /// The declaration's embedded table is one the column layer refuses (Phase 688, DECISIONS.md
+    /// D266.9): `Table.validate` refuses it, and `reason` is that layer's sentence
+    /// (`ColumnCodec.errorString`). A registration refusal, raised at `source` before anything else
+    /// the declaration carries is read; a `Ref` is never refused here. The declaration reader never
+    /// raises it: a source it reads is one the column codec accepted, and one it cannot read is
+    /// refused `OutOfRange` at `source`.
+    | IllFormedSource of reason: string
 
 /// A resolver's typed failure (Phase 295) — what `Query.invokeWithArgs`'s resolver answers when the
 /// fetch cannot complete, so the refusals the resolver alone can know of reach the caller as the

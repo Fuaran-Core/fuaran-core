@@ -234,7 +234,9 @@ let private queryErrors: QueryError list =
       IllFormedLiteral("day", "a date cell must carry a canonical ISO-8601 date")
       DuplicateSortColumn "station"
       PredicateNotHonoured(ColumnPredicate.Contains("station", "harb"))
-      OrderNotHonoured "celsius" ]
+      OrderNotHonoured "celsius"
+      // Phase 688 — the admission's refusal of an embedded table the column layer refuses.
+      IllFormedSource "column 'celsius' has 1 rows where the first column has 2" ]
     @ [ for expected in
             [ IntType
               FloatType
@@ -504,7 +506,7 @@ let tests =
                     // `$type`, naming every tag it knows. The error codecs answer the string form, so
                     // the code is pinned through its projected sentence (Phase 520).
                     let queryTags =
-                        "one of 'noSuchQuery', 'duplicateQuery', 'unknownParam', 'paramTypeMismatch', 'requiredParamsUnbound', 'sourceNotResolved', 'executionFailed', 'timeout', 'requiredParamsNull', 'duplicateParam', 'queryPolicyRefused', 'queryApprovalRequired', 'unreadableArgs', 'unknownColumn', 'predicateTypeMismatch', 'predicateNotApplicable', 'illFormedLiteral', 'duplicateSortColumn', 'predicateNotHonoured', 'orderNotHonoured'"
+                        "one of 'noSuchQuery', 'duplicateQuery', 'unknownParam', 'paramTypeMismatch', 'requiredParamsUnbound', 'sourceNotResolved', 'executionFailed', 'timeout', 'requiredParamsNull', 'duplicateParam', 'queryPolicyRefused', 'queryApprovalRequired', 'unreadableArgs', 'unknownColumn', 'predicateTypeMismatch', 'predicateNotApplicable', 'illFormedLiteral', 'duplicateSortColumn', 'predicateNotHonoured', 'orderNotHonoured', 'illFormedSource'"
 
                     let invokeTags =
                         "one of 'noSuchCapability', 'duplicateCapability', 'unknownArg', 'argOutOfSpace', 'requiredArgsUnbound', 'uninvocableArg', 'bodyFailed', 'nonTotalCapability', 'illFormedCapability', 'duplicateArg', 'policyRefused', 'approvalRequired'"

@@ -160,6 +160,8 @@ let private prodQueryErrRender (e: QueryError) : string =
     | DuplicateSortColumn c -> sprintf "DuplicateSortColumn(%s)" c
     | PredicateNotHonoured p -> sprintf "PredicateNotHonoured(%A)" p
     | OrderNotHonoured c -> sprintf "OrderNotHonoured(%s)" c
+    // Phase 688 — the admission's refusal of an embedded table the column layer refuses.
+    | IllFormedSource reason -> sprintf "IllFormedSource(%s)" reason
 
 let private modelQueryErrRender (e: ModelQuery.query_error) : string =
     match e with
@@ -207,6 +209,7 @@ let private queryErrClass (e: QueryError) : string =
     | DuplicateSortColumn _ -> "DuplicateSortColumn"
     | PredicateNotHonoured _ -> "PredicateNotHonoured"
     | OrderNotHonoured _ -> "OrderNotHonoured"
+    | IllFormedSource _ -> "IllFormedSource"
 
 let private prodQueryDeferredRender (d: Deferred<QueryResult>) : string =
     match d with
@@ -883,9 +886,10 @@ let private wireErrorToModel (e: QueryError) : ModelQuery.wire_query_error =
     | DuplicateSortColumn c -> ModelQuery.QRefused(ModelQuery.DuplicateSortColumn c)
     | PredicateNotHonoured p -> ModelQuery.QPredicateNotHonoured(qPredToModel p)
     | OrderNotHonoured c -> ModelQuery.QOrderNotHonoured c
+    | IllFormedSource r -> ModelQuery.QRefused(ModelQuery.IllFormedSource r)
 
 let private genWireError (r: ConfRng.T) : QueryError * ConfRng.T =
-    let k, r1 = ConfRng.intBelow 20 r
+    let k, r1 = ConfRng.intBelow 21 r
     let s, r2 = ConfRng.choose [ "a"; "b"; "when" ] r1
     let n, r3 = ConfRng.intBelow 3 r2
     let xs = List.init n (fun i -> sprintf "x%d" i)
@@ -917,7 +921,8 @@ let private genWireError (r: ConfRng.T) : QueryError * ConfRng.T =
         | 16 -> IllFormedLiteral(s, "why")
         | 17 -> DuplicateSortColumn s
         | 18 -> PredicateNotHonoured(ColumnPredicate.EqualTo(s, Cell.Int n))
-        | _ -> OrderNotHonoured s
+        | 19 -> OrderNotHonoured s
+        | _ -> IllFormedSource "why"
 
     e, r4
 
