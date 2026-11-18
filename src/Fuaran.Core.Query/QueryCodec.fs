@@ -112,8 +112,9 @@ module QueryCodec =
     ///
     /// Since Phase 685 it takes an `AdmittedQuery` (DECISIONS.md D264.7 point 1): a declaration is
     /// admitted (`QueryRegistry.admit`) before it is written, so no declaration the gate refuses is
-    /// written as one it admits. The text reads back as the same declaration where its embedded
-    /// table, if it has one, is one the column codec reads (D264.8 point 1).
+    /// written as one it admits. The text reads back as the same declaration, equal up to the column
+    /// codec's normal form: an embedded table, which the gate holds to `Table.validate` (Phase 688),
+    /// reads back with its columns in schema order (D266.9 point 2).
     let encode (q: AdmittedQuery) : string =
         Canonical.write Rendering.CrossHost (queryJson q.Declaration)
 

@@ -185,10 +185,11 @@ type Query =
 /// holds only declarations the gate admitted. Its fields are the
 /// declaration's, read through `Declaration`; two admissions of one declaration are equal.
 ///
-/// The writer's contract: an admitted declaration's text reads back as the same declaration where
-/// its embedded table, if it has one, is one the column codec reads. The gate does not read the
-/// source, so an embedded table the column codec refuses is written as text the reader refuses at
-/// `source` (D264.8 point 1).
+/// The writer's contract (Phase 688, D266.9 points 1 and 2): an admitted declaration's text reads back
+/// as the declaration written, equal up to the column codec's normal form: an embedded table reads
+/// back with its columns in schema order, and that declaration reads back as itself. The gate
+/// refuses an embedded table `Table.validate` refuses (`IllFormedSource`), so an admitted
+/// declaration's table is one the column codec writes and reads back.
 type AdmittedQuery =
     internal
     | Admitted of Query
