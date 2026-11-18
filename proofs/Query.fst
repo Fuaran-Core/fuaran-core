@@ -25,8 +25,9 @@
    capture key is written through — `string` on an int, `FloatLayout.canonical`, `Hash.fnv1a`,
    the ordinal string order `List.sortBy fst` sorts by, and (Phase 225) `Hash.canonicalField` —
    are a `renderers` record, as Phase 177 made the three scalar readers one; a float cell
-   crosses as an opaque carrier. And a declaration's `Source` is an opaque carrier too: the seam
-   never reads it.
+   crosses as an opaque carrier. And a declaration's `Source` is read for one thing only (Phase 688):
+   whether the column layer refuses its embedded table, a verdict the source carries beside its
+   table (`data_source`), which the admission reads first.
 
    WHAT IS PROVED, AND WHAT IS NOT. The ladder states both, once: the rows of `../proofs.json`
    whose `evidence.model` is this file, each with its `statement` and its `boundary`. `README.md`
@@ -167,14 +168,34 @@ type sort_direction =
 (* F#: `SortKey` (Phase 398). *)
 type sort_key = { k_column: string; k_direction: sort_direction }
 
-(* F#: `Query`. `Source` is an opaque carrier: the seam never reads it. `Where` and `OrderBy`
-   (Phase 398) are the closed types above, read by the admission and by the capture key. *)
+(* F#: `DataSource` (Phase 688, DECISIONS.md D266.10 point 6). The seam reads one thing of a source:
+   whether the column layer's `Table.validate` refuses an embedded table, and its sentence when it
+   does. A `Ref` is a name the host resolves. An embedded table is an opaque carrier with that
+   verdict beside it: the column layer is its own model (`WireColumn.fst`), and the oracle host
+   computes the verdict at the edge, from the table, as it computes a timestamp's unit from its
+   text. *)
+type data_source =
+  | SRef      : name:string -> data_source
+  | SEmbedded : table:string -> fault:option string -> data_source
+
+(* F#: `Table.validate`'s refusal of an embedded table, as `ColumnCodec.errorString` spells it; a
+   `Ref` carries no table and is never refused. *)
+let source_fault (s:data_source) : Tot (option string) =
+  match s with
+  | SRef _ -> None
+  | SEmbedded _ f -> f
+
+(* A source the column layer accepts: a `Ref`, or an embedded table `Table.validate` accepts. *)
+let source_ok (s:data_source) : Tot bool = None? (source_fault s)
+
+(* F#: `Query`. `Source` is read for its verdict alone (Phase 688). `Where` and `OrderBy` (Phase
+   398) are the closed types above, read by the admission and by the capture key. *)
 type query = {
   q_id: string;
   q_params: list query_param;
   q_schema: list (string & column_type);
   q_effect: effect_class;
-  q_source: string;
+  q_source: data_source;
   q_timeout_ms: option pos;
   q_page_size: option pos;
   q_where: list predicate;
@@ -199,6 +220,8 @@ type query_error =
   | PredicateNotApplicable : predicate:string -> column:string -> column_type:column_type -> query_error
   | IllFormedLiteral      : column:string -> reason:string -> query_error
   | DuplicateSortColumn   : column:string -> query_error
+  (* Phase 688 — the admission's refusal of an embedded table the column layer refuses. *)
+  | IllFormedSource       : reason:string -> query_error
 
 (* F#: `(string * Cell) list` — a typed invocation's args, name → bound cell. *)
 type arguments = list (string & cell)
@@ -549,9 +572,13 @@ let rec order_fault (s:list (string & column_type)) (seen:list string) (o:list s
     else if mem k.k_column seen then Some (DuplicateSortColumn k.k_column)
     else order_fault s (k.k_column :: seen) r
 
-(* F#: `QueryRegistry.admissionFault` — the repeated parameter first (Phase 316), then the filter,
-   then the order (Phase 398). *)
+(* F#: `QueryRegistry.admissionFault` — the source first (Phase 688: an embedded table the column
+   layer refuses), then the repeated parameter (Phase 316), then the filter, then the order (Phase
+   398). *)
 let admission_fault (q:query) : Tot (option query_error) =
+  match source_fault q.q_source with
+  | Some reason -> Some (IllFormedSource reason)
+  | None ->
   match repeated [] (param_names q.q_params) with
   | d :: _ -> Some (DuplicateParam d)
   | [] ->
@@ -586,9 +613,15 @@ let rec where_admitted_carried (s:list (string & column_type)) (w:list predicate
    theorems spend is discharged by admission rather than assumed. *)
 let admitted_carried (q:query)
   : Lemma (requires admission_fault q == None) (ensures all_carried q.q_where)
-  = match repeated [] (param_names q.q_params) with
-    | [] -> where_admitted_carried q.q_schema q.q_where
-    | _ :: _ -> ()
+  = match source_fault q.q_source, repeated [] (param_names q.q_params) with
+    | None, [] -> where_admitted_carried q.q_schema q.q_where
+    | _ -> ()
+
+(* And an admitted declaration's source is one the column layer accepts (Phase 688): the premise the
+   declaration's round trip spends is discharged by admission rather than assumed. *)
+let admitted_source_ok (q:query)
+  : Lemma (requires admission_fault q == None) (ensures source_ok q.q_source)
+  = ()
 
 (* A carried filter carries each of its predicates. *)
 let rec mem_carried (p:predicate) (w:list predicate)
@@ -1502,10 +1535,20 @@ let collision_two : arguments = [ ("a", Str "1"); ("b", Str "2") ]
        lifecycle. A registry is a lattice, not an append log.
    ====================================================================================== *)
 
-(* `register` refuses a fresh declaration that names a parameter twice, naming the first repeat. *)
+(* `register` refuses a fresh declaration that names a parameter twice, naming the first repeat —
+   where its source is one the column layer accepts, since the source is checked first (Phase 688). *)
 let register_refuses_duplicate_params (q:query) (r:registry)
-  : Lemma (requires not (mem q.q_id (ids (enumerate r))) /\ Cons? (repeated [] (param_names q.q_params)))
+  : Lemma (requires not (mem q.q_id (ids (enumerate r))) /\ source_ok q.q_source /\
+                    Cons? (repeated [] (param_names q.q_params)))
           (ensures register q r == Error (DuplicateParam (Cons?.hd (repeated [] (param_names q.q_params)))))
+  = find_query_mem q.q_id r.queries
+
+(* `register` refuses a fresh declaration whose embedded table the column layer refuses, as
+   `IllFormedSource` with the column layer's sentence, before it reads anything else (Phase 688,
+   DECISIONS.md D266.9 points 1 and 4). *)
+let register_refuses_ill_formed_source (q:query) (r:registry)
+  : Lemma (requires not (mem q.q_id (ids (enumerate r))) /\ Some? (source_fault q.q_source))
+          (ensures register q r == Error (IllFormedSource (Some?.v (source_fault q.q_source))))
   = find_query_mem q.q_id r.queries
 
 (* Every declaration the list holds names its parameters once. *)
@@ -2218,7 +2261,7 @@ let twin_query : query =
     q_params = [ { p_name = "region"; p_type = StringType; p_required = true } ];
     q_schema = [ ("n", StringType) ];
     q_effect = { host = Pure; determinism = { has_clock = false; has_random = false; has_network = false } };
-    q_source = "src";
+    q_source = SRef "src";
     q_timeout_ms = None;
     q_page_size = None;
     q_where = [];
@@ -2325,7 +2368,7 @@ let _ = assert_norm (twins_hold twins == true)
        its parameters, effect, filter predicates and order keys, and THE admission gate the registry
        runs, raised at the member at fault), the RESULT PAGE (`resultJson` / `resultOf`), the async
        RESULT (`deferredResultJson` / `deferredResultOf`, the capability seam's envelope) and the
-       typed REFUSAL (all twenty `QueryError` cases as `wire_query_error`, a decode refusal and a
+       typed REFUSAL (all twenty-one `QueryError` cases as `wire_query_error`, a decode refusal and a
        predicate inside them). For every pair: decode after encode, EXACTLY (`query_roundtrip`,
        `result_roundtrip`, `deferred_result_roundtrip`, `query_error_roundtrip`), and every refusal
        a reader answers RESOLVES in the document it read (`…_refusals_resolve`).
@@ -2444,8 +2487,9 @@ let effect_sound () : Lemma (C.sound effect_of_j) =
 noeq type column_codec (r:Type) = {
   field_json:  (string & column_type) -> C.jval;
   field_of:    C.jval -> option (string & column_type);
-  source_json: string -> C.jval;
-  source_of:   C.jval -> option string;
+  source_json: data_source -> C.jval;
+  source_of:   C.jval -> option data_source;
+  source_norm: data_source -> data_source;
   rows_json:   r -> C.jval;
   rows_of:     C.jval -> option r;
   lit_json:    column_type -> cell -> C.jval;
@@ -2454,10 +2498,17 @@ noeq type column_codec (r:Type) = {
 
 (* What the query codec owes the column codec: each reader takes back what its writer wrote, and a
    literal of a type reads back at that type — the column strand's round trips, which `WireColumn.fst`
-   proves and this model assumes (`query-codec-column-premises`). *)
+   proves and this model assumes (`query-codec-column-premises`). A SOURCE is stated as the column
+   strand proves it (Phase 688, DECISIONS.md D266.4): the round trip holds for a source the column
+   layer accepts (`source_ok`) and answers its NORMAL FORM (`source_norm`: an embedded table's columns
+   in schema order), which is accepted and is its own normal form; a `Ref` is its own normal form. A
+   source the column layer refuses is promised nothing, and the admission refuses it first. *)
 let column_codec_laws (#r:Type) (cc:column_codec r) : prop =
   (forall (f:(string & column_type)). cc.field_of (cc.field_json f) == Some f) /\
-  (forall (s:string). cc.source_of (cc.source_json s) == Some s) /\
+  (forall (s:data_source). source_ok s ==> cc.source_of (cc.source_json s) == Some (cc.source_norm s)) /\
+  (forall (s:data_source). source_ok s ==>
+     source_ok (cc.source_norm s) /\ cc.source_norm (cc.source_norm s) == cc.source_norm s) /\
+  (forall (n:string). cc.source_norm (SRef n) == SRef n) /\
   (forall (x:r). cc.rows_of (cc.rows_json x) == Some x) /\
   (forall (c:string) (v:cell) (ty:column_type). cell_type v == Some ty ==> cc.lit_of c ty (cc.lit_json ty v) == Some v)
 
@@ -2612,8 +2663,11 @@ let rec order_fault_at (s:list (string & column_type)) (seen:list string) (i:nat
     else order_fault_at s (k.k_column :: seen) (i + 1) t
 
 (* F#: `QueryRegistry.admissionFaultAt` — `admissionFault`'s refusal with the path to the member at
-   fault, which the declaration reader reports it at. *)
+   fault (`source` first, Phase 688), which the declaration reader reports it at. *)
 let admission_fault_at (q:query) : Tot (option (list C.path_seg & query_error)) =
+  match source_fault q.q_source with
+  | Some reason -> Some ([C.Key "source"], IllFormedSource reason)
+  | None ->
   match repeated [] (param_names q.q_params) with
   | d :: _ -> Some ([C.Key "params"], DuplicateParam d)
   | [] ->
@@ -2644,6 +2698,18 @@ let admission_fault_at_agrees (q:query)
            | None -> admission_fault q == None)
   = where_fault_at_agrees q.q_schema 0 q.q_where;
     order_fault_at_agrees q.q_schema [] 0 q.q_order_by
+
+(* The admission reads a source for its verdict alone: a declaration whose source is swapped for
+   another the column layer accepts is refused exactly as it was (Phase 688). *)
+let admission_fault_at_ok_source (q:query) (s:data_source)
+  : Lemma (requires source_ok q.q_source /\ source_ok s)
+          (ensures admission_fault_at ({ q with q_source = s }) == admission_fault_at q)
+  = ()
+
+(* F#: the declaration the reader answers for an admitted one's text, under (E2) (Phase 688,
+   DECISIONS.md D266.9 point 2): the declaration with its source in the column codec's normal form. *)
+let normalised (#r:Type) (cc:column_codec r) (q:query) : Tot query =
+  { q with q_source = cc.source_norm q.q_source }
 
 let query_tag_of : C.decoder unit = tagged_of (fun s -> if s = "query" then Some () else None)
 
@@ -2735,34 +2801,44 @@ let query_tail_members (#r:Type) (cc:column_codec r) (q:query)
     C.assoc_app "orderBy" tm (app pg (app w o)); C.assoc_app "orderBy" pg (app w o); C.assoc_app "orderBy" w o
 
 (* THE DECLARATION ROUND TRIP (Phase 455), `query_roundtrip`. F#: `QueryCodec.queryOf` after
-   `queryJson`, EXACTLY, for every declaration whose filter literals are carried, over any column
-   codec that reads back what it writes: the registry's admission refusal, `OutOfRange` at the member
-   at fault (`params`, `where[i]`, `orderBy[i]`), where `admissionFault` refuses the declaration; the
-   declaration itself otherwise. *)
+   `queryJson`, for every declaration whose filter literals are carried and whose source the column
+   layer accepts, over any column codec that reads back what it writes: the registry's admission
+   refusal, `OutOfRange` at the member at fault (`params`, `where[i]`, `orderBy[i]`), where
+   `admissionFault` refuses the declaration; the declaration with its source in normal form otherwise
+   (Phase 688: equal up to the column codec's normal form, DECISIONS.md D266.9 point 2). *)
 #push-options "--fuel 8 --ifuel 2 --z3rlimit 80"
 let query_roundtrip (#r:Type) (cc:column_codec r) (q:query)
-  : Lemma (requires column_codec_laws cc /\ all_carried q.q_where)
+  : Lemma (requires column_codec_laws cc /\ all_carried q.q_where /\ source_ok q.q_source)
           (ensures query_of_j cc (query_json cc q) ==
                    (match admission_fault_at q with
                     | Some (p, _) -> C.Error ({ C.d_code = C.OutOfRange; C.d_path = p })
-                    | None -> C.Ok q))
+                    | None -> C.Ok (normalised cc q)))
   = params_roundtrip 0 q.q_params;
     fields_roundtrip cc 0 q.q_schema;
     effect_roundtrip q.q_effect;
     preds_roundtrip cc 0 q.q_where;
     keys_roundtrip 0 q.q_order_by;
-    query_tail_members cc q
+    query_tail_members cc q;
+    admission_fault_at_ok_source q (cc.source_norm q.q_source)
 #pop-options
 
-(* ... the identity exactly on the declarations `register`'s admission admits: the writer's own
-   contract (Phase 685), over an admitted declaration and the column codec's laws alone — admission
-   discharges `all_carried` (`admitted_carried`). *)
+(* ... the declaration with its source in normal form, on the declarations `register`'s admission
+   admits: the writer's own contract (Phase 685; equal up to the column codec's normal form since
+   Phase 688), over an admitted declaration and the column codec's laws alone — admission discharges
+   `all_carried` (`admitted_carried`) and the source's acceptance (`admitted_source_ok`). *)
 let query_roundtrip_identity (#r:Type) (cc:column_codec r) (q:admitted_query)
   : Lemma (requires column_codec_laws cc)
-          (ensures query_of_j cc (query_json cc q) == C.Ok q)
+          (ensures query_of_j cc (query_json cc q) == C.Ok (normalised cc q))
   = admitted_carried q;
+    admitted_source_ok q;
     admission_fault_at_agrees q;
     query_roundtrip cc q
+
+(* ... and EXACTLY where the source is its own normal form: a `Ref` always (Phase 688). *)
+let query_roundtrip_identity_ref (#r:Type) (cc:column_codec r) (q:admitted_query)
+  : Lemma (requires column_codec_laws cc /\ SRef? q.q_source)
+          (ensures query_of_j cc (query_json cc q) == C.Ok q)
+  = query_roundtrip_identity cc q
 
 (* ---- the declaration reader's refusals resolve ---- *)
 
@@ -2948,7 +3024,7 @@ type wire_seg =
 (* F#: `DecodeError`, its prose kept — the refusal an `UnreadableArgs` carries crosses whole. *)
 type wire_decode_error = { we_code: C.decode_code; we_path: list wire_seg; we_expected: string; we_message: string }
 
-(* F#: `QueryError`, all twenty cases: the fifteen this model's `query_error` carries, under
+(* F#: `QueryError`, all twenty-one cases: the sixteen this model's `query_error` carries, under
    `QRefused`, and the five it leaves to the parts it does not model (the policy gate, the argument
    reader, the typed resolver). *)
 type wire_query_error =
@@ -3047,6 +3123,7 @@ let query_error_json (#r:Type) (cc:column_codec r) (e:wire_query_error) : Tot C.
   | QRefused (DuplicateSortColumn column) -> C.JObj [("$type", C.JStr "duplicateSortColumn"); ("column", C.JStr column)]
   | QPredicateNotHonoured p -> C.JObj [("$type", C.JStr "predicateNotHonoured"); ("predicate", predicate_json cc p)]
   | QOrderNotHonoured column -> C.JObj [("$type", C.JStr "orderNotHonoured"); ("column", C.JStr column)]
+  | QRefused (IllFormedSource reason) -> C.JObj [("$type", C.JStr "illFormedSource"); ("reason", C.JStr reason)]
 
 let s_f (name:string) : C.decoder string = C.field name C.d_str
 let sl_f (name:string) : C.decoder (list string) = C.field name (C.d_list C.d_str)
@@ -3087,7 +3164,8 @@ let query_error_cases (#r:Type) (cc:column_codec r) : list (string & C.decoder w
    ("illFormedLiteral", C.both (s_f "column") (s_f "reason") (fun c rs -> QRefused (IllFormedLiteral c rs)));
    ("duplicateSortColumn", C.d_map (qrefused DuplicateSortColumn) (s_f "column"));
    ("predicateNotHonoured", C.d_map QPredicateNotHonoured (C.field "predicate" (predicate_of_j cc)));
-   ("orderNotHonoured", C.d_map QOrderNotHonoured (s_f "column"))]
+   ("orderNotHonoured", C.d_map QOrderNotHonoured (s_f "column"));
+   ("illFormedSource", C.d_map (qrefused IllFormedSource) (s_f "reason"))]
 
 (* F#: `QueryErrorWire.decoder`. *)
 let query_error_of_j (#r:Type) (cc:column_codec r) : C.decoder wire_query_error = C.tag_dispatch (query_error_cases cc)
@@ -3128,8 +3206,8 @@ let decode_error_roundtrip (e:wire_decode_error) : Lemma (decode_error_of_j (dec
   path_roundtrip e.we_path
 
 (* THE REFUSAL ROUND TRIP (Phase 455), `query_error_roundtrip`: every `QueryError` the codec
-   carries — the twenty cases, a decode refusal and a predicate inside them — reads back as itself. *)
-#push-options "--fuel 21 --ifuel 1 --z3rlimit 80"
+   carries — the twenty-one cases, a decode refusal and a predicate inside them — reads back as itself. *)
+#push-options "--fuel 22 --ifuel 1 --z3rlimit 80"
 let query_error_roundtrip (#r:Type) (cc:column_codec r) (e:wire_query_error)
   : Lemma (requires column_codec_laws cc /\ query_error_carried e)
           (ensures query_error_of_j cc (query_error_json cc e) == C.Ok e)
@@ -3171,7 +3249,7 @@ let sl_f_sound (n:string) : Lemma (C.sound (sl_f n)) = C.str_sound (); C.list_so
 let ty_f_sound (n:string) : Lemma (C.sound (ty_f n)) = tagged_sound column_of_tag; C.field_sound n col_type_of_j
 
 (* Every refusal the query-error reader answers resolves in the document it read. *)
-#push-options "--fuel 21 --ifuel 1 --z3rlimit 80"
+#push-options "--fuel 22 --ifuel 1 --z3rlimit 80"
 let query_error_refusals_resolve (#r:Type) (cc:column_codec r) : Lemma (C.sound (query_error_of_j cc)) =
   s_f_sound "id"; s_f_sound "name"; s_f_sound "ref"; s_f_sound "detail"; s_f_sound "policy"; s_f_sound "reason";
   s_f_sound "column";
@@ -3207,5 +3285,6 @@ let query_error_refusals_resolve (#r:Type) (cc:column_codec r) : Lemma (C.sound 
   C.map_sound (qrefused DuplicateSortColumn) (s_f "column");
   C.map_sound QPredicateNotHonoured (C.field "predicate" (predicate_of_j cc));
   C.map_sound QOrderNotHonoured (s_f "column");
+  C.map_sound (qrefused IllFormedSource) (s_f "reason");
   C.tag_dispatch_sound (query_error_cases cc)
 #pop-options

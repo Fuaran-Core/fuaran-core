@@ -182,6 +182,8 @@ let private modelQueryErrRender (e: ModelQuery.query_error) : string =
     | ModelQuery.PredicateNotApplicable(p, c, t) -> sprintf "PredicateNotApplicable(%s;%s;%s)" p c (qModelColTag t)
     | ModelQuery.IllFormedLiteral(c, r) -> sprintf "IllFormedLiteral(%s;%s)" c r
     | ModelQuery.DuplicateSortColumn c -> sprintf "DuplicateSortColumn(%s)" c
+    // Phase 688 — the admission's refusal of an embedded table the column layer refuses.
+    | ModelQuery.IllFormedSource reason -> sprintf "IllFormedSource(%s)" reason
 
 let private queryErrClass (e: QueryError) : string =
     match e with
@@ -819,15 +821,6 @@ let private queryDifferential
 /// seams share `DecodeError`, and one render of it is the comparison both read.
 let private decodeError = CapabilityPipelineTests.decodeError
 
-/// A declaration as the codec model reads it: the bridge `queryToModel` is, its source the `Ref`
-/// the codec writes.
-let private codecQueryToModel (q: Query) : ModelQuery.query =
-    { queryToModel q with
-        q_source =
-            match q.Source with
-            | Ref s -> s
-            | other -> sprintf "%A" other }
-
 let private rowsText (t: Table) =
     Canonical.write Rendering.CrossHost (ColumnCodec.encodeJson (Embedded t))
 
@@ -1014,7 +1007,7 @@ let private queryCodecDifferential (queryJson: ModelQuery.query -> ModelCap.jval
                 if written then
                     t
                     |> Differential.check
-                        (Canonical.write Rendering.CrossHost (jvalOfModel (queryJson (codecQueryToModel q))) = text)
+                        (Canonical.write Rendering.CrossHost (jvalOfModel (queryJson (queryToModel q))) = text)
                         (fun () -> sprintf "seed %d: the declaration encodes differently: %s" i text)
                 else
                     Tally.bump "DeclarationsRefusedUnwritten" t
@@ -1026,7 +1019,7 @@ let private queryCodecDifferential (queryJson: ModelQuery.query -> ModelCap.jval
                         j
                         (QueryCodec.decodeDetailedWith ReadPolicy.Lenient (Canonical.write Rendering.CrossHost j))
                         (ModelQuery.query_of_j columnCodec (jvalToModel j))
-                        (fun a b -> codecQueryToModel a.Declaration = b)
+                        (fun a b -> queryToModel a.Declaration = b)
                         unmutated
                         t
 

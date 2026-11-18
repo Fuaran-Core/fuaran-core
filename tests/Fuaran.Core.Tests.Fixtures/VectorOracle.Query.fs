@@ -114,6 +114,22 @@ let qKeyToModel (k: SortKey) : ModelQuery.sort_key =
         | SortDirection.Ascending -> ModelQuery.Ascending
         | SortDirection.Descending -> ModelQuery.Descending }
 
+/// A source as the model reads it (Phase 688, DECISIONS.md D266.10 point 6): a `Ref` is its name;
+/// an embedded table is the text the column codec writes for it, with the column layer's verdict
+/// beside it, `Table.validate`'s refusal as `ColumnCodec.errorString` spells it.
+let sourceToModel (src: DataSource) : ModelQuery.data_source =
+    match src with
+    | Ref r -> ModelQuery.SRef r
+    | Embedded t ->
+        ModelQuery.SEmbedded(
+            Canonical.write Rendering.CrossHost (ColumnCodec.encodeJson src),
+            toMOpt (
+                match Table.validate t with
+                | Ok() -> None
+                | Error e -> Some(ColumnCodec.errorString e)
+            )
+        )
+
 /// A declaration as the model reads it. `keepRequired = false` is the FORGETFUL bridge the
 /// go-red uses: every param crosses as optional, so the model stops seeing step 2.
 let queryToModelWith (keepRequired: bool) (q: Query) : ModelQuery.query =
@@ -128,7 +144,7 @@ let queryToModelWith (keepRequired: bool) (q: Query) : ModelQuery.query =
       ModelQuery.query.q_effect =
         { ModelQuery.effect_class.host = qHostToModel q.Effect.Host
           ModelQuery.effect_class.determinism = qDetToModel q.Effect.Determinism }
-      ModelQuery.query.q_source = sprintf "%A" q.Source
+      ModelQuery.query.q_source = sourceToModel q.Source
       ModelQuery.query.q_timeout_ms = toMOpt (Option.map (fun (n: PositiveInt) -> bigint n.Value) q.TimeoutMs)
       ModelQuery.query.q_page_size = toMOpt (Option.map (fun (n: PositiveInt) -> bigint n.Value) q.PageSize)
       ModelQuery.query.q_where = q.Where |> List.map qPredToModel
@@ -263,7 +279,8 @@ let literalOfJson (column: string) (ty: ColumnType) (v: JVal) : Cell option =
     | _ -> None
 
 /// The model's column-codec parameter, instantiated at production's column codec: the schema entry,
-/// a `Ref` source, an embedded table of rows, and a predicate literal.
+/// a source (a `Ref`, or an embedded table as its text, Phase 688) with its normal form, an embedded
+/// table of rows, and a predicate literal.
 let columnCodec: ModelQuery.column_codec<Table> =
     { ModelQuery.column_codec.field_json =
         fun (n, t) -> jvalToModel (ColumnCodec.fieldJson (Field.create n (qColOfModel t)))
@@ -272,12 +289,29 @@ let columnCodec: ModelQuery.column_codec<Table> =
             match ColumnCodec.decodeField (jvalOfModel j) with
             | Ok f -> FStar_Pervasives_Native.Some(f.Name, qColToModel f.Type)
             | Error _ -> FStar_Pervasives_Native.None
-      ModelQuery.column_codec.source_json = fun s -> jvalToModel (ColumnCodec.encodeJson (Ref s))
+      ModelQuery.column_codec.source_json =
+        fun s ->
+            match s with
+            | ModelQuery.SRef r -> jvalToModel (ColumnCodec.encodeJson (Ref r))
+            | ModelQuery.SEmbedded(text, _) ->
+                match Json.parse text with
+                | Ok j -> jvalToModel j
+                | Error _ -> jvalToModel (JStr text)
       ModelQuery.column_codec.source_of =
         fun j ->
             match ColumnCodec.decodeJson (jvalOfModel j) with
-            | Ok(Ref s) -> FStar_Pervasives_Native.Some s
-            | _ -> FStar_Pervasives_Native.None
+            | Ok src -> FStar_Pervasives_Native.Some(sourceToModel src)
+            | Error _ -> FStar_Pervasives_Native.None
+      // The normal form: an embedded table read back through the column codec, its columns in schema
+      // order (its text does not move, the codec keying its columns by name); a `Ref` is its own.
+      ModelQuery.column_codec.source_norm =
+        fun s ->
+            match s with
+            | ModelQuery.SRef _ -> s
+            | ModelQuery.SEmbedded(text, _) ->
+                match ColumnCodec.decode text with
+                | Ok src -> sourceToModel src
+                | Error _ -> s
       ModelQuery.column_codec.rows_json = fun t -> jvalToModel (ColumnCodec.encodeJson (Embedded t))
       ModelQuery.column_codec.rows_of =
         fun j ->
