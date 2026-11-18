@@ -1784,3 +1784,69 @@ let admittedTests685 =
                   |> Set.ofArray
 
               Expect.equal sources (set [ "PositiveIntModule.tryCreate" ]) "tryCreate alone builds one" ]
+
+// ---------------------------------------------------------------------------
+//  Phase 685 (DECISIONS.md D264.8 point 3, (B-i)) — the dispatch holds a resolver's unsupported
+//  predicate to the declaration's own: `PredicateNotHonoured` names only a predicate of the
+//  declaration's `Where`; any other is the resolver's fault, `ExecutionFailed` naming it.
+// ---------------------------------------------------------------------------
+
+let private heldQuery685: Query =
+    { Id = "held"
+      Params = []
+      ResultSchema = [ Field.create "n" IntType; Field.create "s" StringType ]
+      Effect =
+        { Host = Pure
+          Determinism = Effect.network }
+      Source = Ref "rows"
+      TimeoutMs = None
+      PageSize = None
+      Where = [ ColumnPredicate.AtLeast("n", Int 3) ]
+      OrderBy = [] }
+
+let private heldRegistry685 =
+    QueryRegistry.register heldQuery685 QueryRegistry.empty
+    |> Result.toOption
+    |> Option.get
+
+let private refusing685 (p: ColumnPredicate) =
+    fun (_: Query) (_: (string * Cell) list) -> Error(ResolveFault.PredicateUnsupported p)
+
+[<Tests>]
+let dispatchHoldTests685 =
+    testList
+        "Phase 685 - the dispatch holds an unsupported predicate to the declaration's own"
+        [ testCase "a predicate the declaration holds is PredicateNotHonoured"
+          <| fun _ ->
+              let own = ColumnPredicate.AtLeast("n", Int 3)
+
+              Expect.equal
+                  (QueryRegistry.dispatchWithArgs heldRegistry685 () None "held" [] (refusing685 own))
+                  (Error(PredicateNotHonoured own))
+                  "the declaration's own predicate"
+
+          testCase "a predicate the declaration does not hold is the resolver's fault, naming it"
+          <| fun _ ->
+              for foreign, tag, column in
+                  [ ColumnPredicate.EqualTo("s", Null), "equalTo", "s"
+                    ColumnPredicate.AtLeast("n", Int 4), "atLeast", "n"
+                    ColumnPredicate.Contains("s", "x"), "contains", "s" ] do
+                  match QueryRegistry.dispatchWithArgs heldRegistry685 () None "held" [] (refusing685 foreign) with
+                  | Error(ExecutionFailed(detail, [])) ->
+                      Expect.stringContains detail ("'" + tag + "'") "names the predicate's tag"
+                      Expect.stringContains detail ("'" + column + "'") "names its column"
+                  | other -> failtestf "%A answered %A" foreign other
+
+          testCase "the paged dispatch holds it the same way"
+          <| fun _ ->
+              let foreign = ColumnPredicate.EqualTo("s", Null)
+
+              let paged =
+                  QueryRegistry.dispatchPageWith heldRegistry685 () None "held" [] None (fun q _ args ->
+                      refusing685 foreign q args)
+
+              Expect.isTrue
+                  (match paged with
+                   | Error(ExecutionFailed _) -> true
+                   | _ -> false)
+                  (sprintf "paged: %A" paged) ]
