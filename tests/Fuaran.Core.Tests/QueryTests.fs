@@ -2307,3 +2307,340 @@ let replayedRowsTests692 =
                           []
 
                   Expect.equal replayed.Outcome (Error(ReplayFailure.Refused(rowsRefusal692 t))) label ]
+
+// ---------------------------------------------------------------------------
+// Phase 695 (DECISIONS.md D268) — the query seam settles a pending capture and holds its rows.
+// ---------------------------------------------------------------------------
+
+/// A predicate the filtered declaration holds, and one it does not.
+let private held695 = ColumnPredicate.EqualTo("a", Int 1)
+
+let private notHeld695 = ColumnPredicate.EqualTo("b", Str "z")
+
+/// `query692` filtering `a = 1`, so a settled `PredicateUnsupported` can name a predicate it holds or one it does not.
+let private filtered695: Query =
+    { query692 with
+        Id = "filtered"
+        Where = [ held695 ] }
+
+let private registry695 =
+    QueryRegistry.register filtered695 registry692 |> Result.toOption |> Option.get
+
+let private admitted695 (id: string) =
+    QueryRegistry.tryFind id registry695 |> Option.get
+
+let private h695 = OpStream.defaultHash
+
+let private w695 = QueryCodec.encodeResult
+
+/// What a plain resolver answers for a typed resolver's answer: a result or a pending answer as itself, and a
+/// failure with no `recoverable` arguments as `Failed`. It cannot answer the other faults.
+let private plainOf695 (a: Result<Deferred<QueryResult>, ResolveFault>) : Deferred<QueryResult> =
+    match a with
+    | Ok d -> d
+    | Error(ResolveFault.Failed(m, [])) -> Failed m
+    | Error f -> failwithf "a plain resolver cannot answer %A" f
+
+type private Form695 =
+    { Name: string
+      Token: string option
+      Typed: bool
+      Run: Result<Deferred<QueryResult>, ResolveFault> -> KeyedCapture list -> CapturedDispatch<QueryResult, QueryError> }
+
+/// The four captured verbs, over the declaration `id`, each with a resolver answering `a`; the paged ones at page
+/// `p1`.
+let private forms695 (id: string) : Form695 list =
+    [ { Name = "dispatchCaptured"
+        Token = None
+        Typed = false
+        Run = fun a j -> QueryRegistry.dispatchCaptured h695 w695 registry695 () None id [] (fun _ -> plainOf695 a) j }
+      { Name = "dispatchPageCaptured"
+        Token = Some "p1"
+        Typed = false
+        Run =
+          fun a j ->
+              QueryRegistry.dispatchPageCaptured
+                  h695
+                  w695
+                  registry695
+                  ()
+                  None
+                  id
+                  []
+                  (Some "p1")
+                  (fun _ _ -> plainOf695 a)
+                  j }
+      { Name = "dispatchCapturedWith"
+        Token = None
+        Typed = true
+        Run = fun a j -> QueryRegistry.dispatchCapturedWith h695 w695 registry695 () None id [] (fun _ _ -> a) j }
+      { Name = "dispatchPageCapturedWith"
+        Token = Some "p1"
+        Typed = true
+        Run =
+          fun a j ->
+              QueryRegistry.dispatchPageCapturedWith h695 w695 registry695 () None id [] (Some "p1") (fun _ _ _ -> a) j } ]
+
+/// The capture a dispatch whose resolver answered `Pending` left open, from `journal`.
+let private pending695 (f: Form695) (journal: KeyedCapture list) = f.Run (Ok Pending) journal
+
+/// That capture, settled through the seam's verb with `answer`.
+let private settled695
+    (id: string)
+    (f: Form695)
+    (answer: Result<QueryResult, ResolveFault>)
+    (journal: KeyedCapture list)
+    =
+    let p = pending695 f journal
+    QueryRegistry.settleCaptured h695 w695 (admitted695 id) [] f.Token p.Ticket.Value answer p.Journal
+
+/// The dispatch whose resolver gives `answer` at once.
+let private atOnce695 (f: Form695) (answer: Result<QueryResult, ResolveFault>) (journal: KeyedCapture list) =
+    f.Run (Result.map Ready answer) journal
+
+/// The replays of the invocation `id` at page `token` over a journal, plain and typed.
+let private replays695 (id: string) (token: string option) (journal: KeyedCapture list) =
+    [ (QueryRegistry.dispatchReplayed
+          QueryCodec.decodeResult
+          registry695
+          ()
+          None
+          id
+          []
+          token
+          (fun _ _ -> failtest "a network read replays from its journal")
+          Map.empty
+          journal)
+          .Outcome
+      (QueryRegistry.dispatchReplayedWith
+          QueryCodec.decodeResult
+          registry695
+          ()
+          None
+          id
+          []
+          token
+          (fun _ _ _ -> failtest "a network read replays from its journal")
+          Map.empty
+          journal)
+          .Outcome ]
+
+let private settledOk695 (label: string) (r: Result<CapturedDispatch<QueryResult, QueryError>, KeyedCaptureFault>) =
+    match r with
+    | Ok s -> s
+    | Error f -> failtestf "%s: the settlement was refused %A" label f
+
+/// The faults a typed resolver answers: each refusal it can name, the declaration's own predicate and one it does
+/// not hold.
+let private faults695: ResolveFault list =
+    [ ResolveFault.SourceMissing "rows"
+      ResolveFault.TimedOut
+      ResolveFault.Failed("busy", [ "a" ])
+      ResolveFault.Failed("upstream fetch failed", [])
+      ResolveFault.PredicateUnsupported held695
+      ResolveFault.PredicateUnsupported notHeld695
+      ResolveFault.OrderUnsupported "a" ]
+
+[<Tests>]
+let settleCapturedTests695 =
+    testList
+        "Phase 695 - the query seam settles a pending capture and holds its rows"
+        [ testCase "a pending capture settled with rows the validation refuses is journalled as the refusal"
+          <| fun _ ->
+              for label, t in refusedRows692 do
+                  for f in forms695 "rows" do
+                      let at = sprintf "%s, %s" f.Name label
+                      let page = page692 t None
+                      let s = settled695 "rows" f (Ok page) [] |> settledOk695 at
+                      let live = atOnce695 f (Ok page) []
+                      Expect.equal s.Outcome (Error(rowsRefusal692 t)) (at + ": the outcome")
+                      Expect.isEmpty (completions692 s.Journal) (at + ": no completion")
+
+                      Expect.equal
+                          (KeyedCapture.toJsonl s.Journal)
+                          (KeyedCapture.toJsonl live.Journal)
+                          (at + ": the journal a dispatch answered at once writes, byte for byte")
+
+          testCase "its replay answers the refusal"
+          <| fun _ ->
+              for label, t in refusedRows692 do
+                  for f in forms695 "rows" do
+                      let at = sprintf "%s, %s" f.Name label
+                      let s = settled695 "rows" f (Ok(page692 t None)) [] |> settledOk695 at
+
+                      for replayed in replays695 "rows" f.Token s.Journal do
+                          Expect.equal replayed (Error(ReplayFailure.Refused(rowsRefusal692 t))) at
+
+          testCase "each typed fault is journalled as a dispatch answered at once journals it"
+          <| fun _ ->
+              for fault in faults695 do
+                  for f in forms695 "filtered" |> List.filter _.Typed do
+                      let at = sprintf "%s, %A" f.Name fault
+                      let s = settled695 "filtered" f (Error fault) [] |> settledOk695 at
+                      let live = atOnce695 f (Error fault) []
+                      Expect.equal s.Outcome live.Outcome (at + ": the outcome")
+
+                      Expect.equal
+                          (KeyedCapture.toJsonl s.Journal)
+                          (KeyedCapture.toJsonl live.Journal)
+                          (at + ": the journal, byte for byte")
+
+                      for replayed in replays695 "filtered" f.Token s.Journal do
+                          Expect.equal
+                              replayed
+                              (Result.mapError ReplayFailure.Refused live.Outcome)
+                              (at + ": the replay")
+
+          testCase "rows the validation accepts are journalled as a dispatch answered at once journals them (control)"
+          <| fun _ ->
+              for t in [ inOrder692; outOfOrder692 ] do
+                  for f in forms695 "rows" do
+                      let page = page692 t (Some "p2")
+                      let s = settled695 "rows" f (Ok page) [] |> settledOk695 f.Name
+                      let live = atOnce695 f (Ok page) []
+                      Expect.equal s.Outcome (Ok(Ready page)) f.Name
+                      Expect.equal (KeyedCapture.toJsonl s.Journal) (KeyedCapture.toJsonl live.Journal) f.Name
+
+                      for replayed in replays695 "rows" f.Token s.Journal do
+                          Expect.equal replayed (Ok(Ready(page692 inOrder692 (Some "p2")))) f.Name
+
+          testCase
+              "with another invocation journalled between, the settlement carries what an at-once settlement carries, and each invocation replays its own answer"
+          <| fun _ ->
+              let plain = forms695 "rows" |> List.head
+              let other = forms695 "filtered" |> List.head
+
+              for label, t in refusedRows692 @ [ "rows in order", inOrder692 ] do
+                  let page = page692 t None
+                  let p = pending695 plain []
+                  let between = atOnce695 other (Ok(page692 inOrder692 None)) p.Journal
+
+                  let s =
+                      QueryRegistry.settleCaptured
+                          h695
+                          w695
+                          (admitted695 "rows")
+                          []
+                          None
+                          p.Ticket.Value
+                          (Ok page)
+                          between.Journal
+                      |> settledOk695 label
+
+                  let live = atOnce695 plain (Ok page) []
+
+                  let last (j: KeyedCapture list) =
+                      let c = List.last j
+                      c.Phase, c.Value
+
+                  Expect.equal (last s.Journal) (last live.Journal) (label + ": the settlement record")
+                  Expect.equal (List.length s.Journal) 4 (label + ": two attempts, two settlements")
+
+                  Expect.equal
+                      (replays695 "rows" None s.Journal)
+                      (replays695 "rows" None live.Journal)
+                      (label + ": the settled invocation replays as over the at-once journal")
+
+                  Expect.equal
+                      (replays695 "filtered" None s.Journal)
+                      (replays695 "filtered" None between.Journal)
+                      (label + ": the invocation between replays its own answer")
+
+          testCase "two pending attempts of one invocation settled out of order each replay their own answer"
+          <| fun _ ->
+              let plain = forms695 "rows" |> List.head
+              let refused = snd refusedRows692.Head
+              let first = pending695 plain []
+              let second = pending695 plain first.Journal
+              Expect.equal (snd first.Ticket.Value, snd second.Ticket.Value) (0, 1) "two occurrences"
+
+              let settle ticket answer j =
+                  QueryRegistry.settleCaptured h695 w695 (admitted695 "rows") [] None ticket answer j
+                  |> settledOk695 (sprintf "%A" ticket)
+
+              let afterSecond =
+                  settle second.Ticket.Value (Ok(page692 inOrder692 None)) second.Journal
+
+              let afterBoth =
+                  settle first.Ticket.Value (Ok(page692 refused None)) afterSecond.Journal
+
+              let replay cursor =
+                  QueryRegistry.dispatchReplayed
+                      QueryCodec.decodeResult
+                      registry695
+                      ()
+                      None
+                      "rows"
+                      []
+                      None
+                      (fun _ _ -> failtest "a network read replays from its journal")
+                      cursor
+                      afterBoth.Journal
+
+              let one = replay Map.empty
+              let two = replay one.Cursor
+              Expect.equal one.Outcome (Error(ReplayFailure.Refused(rowsRefusal692 refused))) "the first attempt"
+              Expect.equal two.Outcome (Ok(Ready(page692 inOrder692 None))) "the second attempt"
+
+          testCase "an unknown ticket, a settled one and a ticket of another invocation settle nothing"
+          <| fun _ ->
+              let plain = forms695 "rows" |> List.head
+              let p = pending695 plain []
+              let key, occ = p.Ticket.Value
+
+              let settle q ticket j =
+                  QueryRegistry.settleCaptured h695 w695 (admitted695 q) [] None ticket (Ok(page692 inOrder692 None)) j
+
+              Expect.equal
+                  (settle "rows" (key, occ + 1) p.Journal)
+                  (Error(KeyedCaptureFault.NotAttempted(key, occ + 1)))
+                  "the next occurrence"
+
+              Expect.equal
+                  (settle "rows" ("no-such-key", 0) p.Journal)
+                  (Error(KeyedCaptureFault.NotAttempted("no-such-key", 0)))
+                  "a key never journalled"
+
+              let once = settle "rows" p.Ticket.Value p.Journal |> settledOk695 "once"
+
+              Expect.equal
+                  (settle "rows" p.Ticket.Value once.Journal)
+                  (Error(KeyedCaptureFault.AlreadySettled(key, occ)))
+                  "settled twice"
+
+              let live = atOnce695 plain (Ok(page692 inOrder692 None)) []
+
+              Expect.equal
+                  (settle "rows" live.Ticket.Value live.Journal)
+                  (Error(KeyedCaptureFault.AlreadySettled live.Ticket.Value))
+                  "a capture the dispatch settled"
+
+              let o = pending695 (forms695 "filtered" |> List.head) p.Journal
+
+              Expect.equal
+                  (settle "rows" o.Ticket.Value o.Journal)
+                  (Error(KeyedCaptureFault.NotAttempted o.Ticket.Value))
+                  "the ticket of another invocation"
+
+              let pure =
+                  { query692 with
+                      Id = "pure695"
+                      Effect =
+                          { Host = Pure
+                            Determinism = Effect.deterministic } }
+
+              let admittedPure = QueryRegistry.admit pure |> Result.toOption |> Option.get
+              let pureTicket = Query.invocationKey admittedPure [], 0
+
+              Expect.equal
+                  (QueryRegistry.settleCaptured
+                      h695
+                      w695
+                      admittedPure
+                      []
+                      None
+                      pureTicket
+                      (Ok(page692 inOrder692 None))
+                      p.Journal)
+                  (Error(KeyedCaptureFault.NotAttempted pureTicket))
+                  "a deterministic declaration journals nothing to settle" ]

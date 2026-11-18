@@ -415,6 +415,33 @@ module QueryRegistry =
             (fun q -> Query.invokePageWithArgs q args pageToken resolve)
             journal
 
+    /// Settle a pending query capture (Phase 695). RED STUB: settles as the generic verb does.
+    let settleCaptured
+        (hashFn: HashFn)
+        (encode: QueryResult -> string)
+        (query: AdmittedQuery)
+        (args: (string * Cell) list)
+        (pageToken: string option)
+        (ticket: string * int)
+        (answer: Result<QueryResult, ResolveFault>)
+        (journal: KeyedCapture list)
+        : Result<CapturedDispatch<QueryResult, QueryError>, KeyedCaptureFault> =
+        ignore query
+        ignore args
+        ignore pageToken
+        let key, occurrence = ticket
+
+        let outcome, settlement =
+            match answer with
+            | Ok r -> Ok(Ready r), Ok r
+            | Error f -> Error(ExecutionFailed(sprintf "%A" f, [])), Error(sprintf "%A" f)
+
+        KeyedCapture.settleEffectKeyed StreamConfig.canonical hashFn encode key occurrence settlement journal
+        |> Result.map (fun j ->
+            { Outcome = outcome
+              Ticket = Some ticket
+              Journal = j })
+
     /// REPLAY a query invocation from the keyed journal instead of resolving it (Phase 318). The id,
     /// the parameters and the policy run exactly as `dispatchPage` (a refusal there is answered as
     /// `dispatchPage` answers it, consulting no journal); then a non-deterministic query is answered by
