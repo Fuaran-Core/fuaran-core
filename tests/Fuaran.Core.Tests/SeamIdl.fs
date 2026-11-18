@@ -477,4 +477,22 @@ let seamCodecTests =
               Expect.exists
                   (Fuaran.Core.SeamRefusalLaws.lawsOver [ planted ])
                   (fun r -> not r.Passed)
-                  "a vector naming the wrong path reds the family" ]
+                  "a vector naming the wrong path reds the family"
+
+          testCase "Phase 688 - the seam-refusal family reads the illFormedSource document back to its own bytes"
+          <| fun _ ->
+              let vectors = Fuaran.Core.SeamRefusalLaws.vectors
+
+              match
+                  vectors
+                  |> List.tryFind (fun v -> v.Reader = "queryError" && v.Name = "illFormedSource")
+              with
+              | None -> failtest "the family carries no queryError vector for illFormedSource"
+              | Some v ->
+                  Expect.equal v.Document """{"$type":"illFormedSource","reason":"why"}""" "the document"
+                  Expect.equal v.Expected Fuaran.Core.SeamRefusalLaws.Reads "it reads"
+
+                  for r in Fuaran.Core.SeamRefusalLaws.lawsOver [ v ] do
+                      Expect.isTrue r.Passed (sprintf "%s: %A" r.Law r.Counterexample)
+
+              Expect.equal (List.length vectors) 143 "143 vectors" ]
