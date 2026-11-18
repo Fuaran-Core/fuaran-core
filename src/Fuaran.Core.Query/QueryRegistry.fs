@@ -423,8 +423,9 @@ module QueryRegistry =
     /// refusal as the `QueryError` it records (Phase 385; a reason that is no query-error document,
     /// from a journal written before 0.36.0, as `ExecutionFailed` with the recorded text), an
     /// unsettled attempt as `Pending`. A deterministic query resolves live, through the clause every
-    /// dispatch passes (Phase 692: rows `Table.validate` refuses are `ExecutionFailed`); a journal the
-    /// captured dispatch wrote holds no rows that read back as others. A journal that cannot
+    /// dispatch passes (Phase 692: rows `Table.validate` refuses are `ExecutionFailed`); an entry a
+    /// captured dispatch settled holds no rows that read back as others (a pending capture the host
+    /// settles later is not one). A journal that cannot
     /// answer is `ReplayFailure.Unanswered` with the `KeyedCaptureFault`, never a live fetch; every
     /// refusal of the seam, live or recorded, is `ReplayFailure.Refused`. A `ReplayedDispatch` since
     /// Phase 391 (a nested `Result` before `0.37.0`).

@@ -297,7 +297,7 @@ holds a resolver's rows to `Table.validate`, as it holds a resolver's unsupporte
 (D264.8 point 3); the result's writers stay total, and their contract says what they do with a result built by hand.
 The design is ruled. D267.1 measures what every verb answers today, and D267.2 what the pass costs, before anything is
 built; D267.3 to D267.11 record the build's shape, with the alternatives that lost, and one correction to D266;
-D267.12 records what the build found.
+D267.12 records what the build found, and D267.13 corrects a second sentence of D266.
 
 **D267.1 — what each verb answers today.** Probed at `1c79e0c7` with the kit built from that commit, over a network
 declaration (`Effect.network`, so the captured verbs journal) and a resolver answering one page of rows of each of four
@@ -464,6 +464,16 @@ is left as committed). The new proof row names `QueryRegistry.dispatch` and not 
 coverage exclusion (measured through the registry dispatchers) stays as it is. The model verified on its first run;
 the differential's draw was first widened by turning one settling answer into refused rows, which dropped the settled
 dispatches below the family's floor, and is built instead as a twin invocation beside the settling one.
+
+**D267.13 — a correction to D266.6 (R-i).** Its sentence "so no captured journal records rows that read back as
+others" claims more than (R-i) delivers. As built, it holds for every entry a dispatch settles: a captured dispatch
+journals rows `Table.validate` refuses as the refusal, never as a completion. It does not hold for a capture whose
+resolver answered `Pending` and which the host settles later through `KeyedCapture.settleEffectKeyed`: that act is
+outside every dispatch, so it is under the writers' contract (D267.8), as a page built by hand is. Probed with the kit
+built at this phase's head, the entry the host settles with rows naming a column twice replays as other rows (as
+D267.6 found at `1c79e0c7`), and with ragged rows as `Unanswered (Undecodable …)`; the control replays as written.
+Phase 695 gives the query seam a verb that settles one and holds its rows. D266 is not edited; this entry carries the
+correction.
 
 ## 2026-11-18 — D266: the admission gate reads a query declaration's embedded table and refuses one `Table.validate` refuses, as `IllFormedSource`, checked before the parameters; an admitted declaration's text reads back as the declaration written up to the column codec's normal form
 
