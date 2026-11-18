@@ -1304,6 +1304,14 @@ module LawVectorExport =
                       | SortDirection.Descending -> "descending"
                   ) ]
 
+        /// An embedded table a vector states as data (Phase 688, DECISIONS.md D266.10 point 5): its schema
+        /// entries and its columns, each a list so that a name can repeat; a column carries its own type
+        /// and its cells, every one present. The faults only typed storage holds (a mask of another
+        /// length, an instant its text cannot spell) are not stated: Core's own tests hold them.
+        type SourceTable =
+            { Schema: (string * ColumnType) list
+              Columns: (string * ColumnType * Cell list) list }
+
         /// A declaration a vector states: a declaration of the registry, with the members given replacing
         /// its own.
         type Stated =
@@ -1311,14 +1319,61 @@ module LawVectorExport =
               Id: string option
               Params: QueryParam list option
               Where: ColumnPredicate list option
-              OrderBy: SortKey list option }
+              OrderBy: SortKey list option
+              Source: SourceTable option }
 
         let private on (baseId: string) : Stated =
             { Base = baseId
               Id = None
               Params = None
               Where = None
-              OrderBy = None }
+              OrderBy = None
+              Source = None }
+
+        /// A stated column, built by the typed builder of its type, which checks nothing, so a cell the
+        /// column layer refuses is held as stated.
+        let private columnOf (name: string, ty: ColumnType, cells: Cell list) : Column =
+            let values (pick: Cell -> 'T option) =
+                cells
+                |> List.map (fun c ->
+                    pick c
+                    |> Option.defaultWith (fun () -> failwithf "a %A column states the cell %A" ty c))
+                |> Vector.ofList
+
+            match ty with
+            | IntType ->
+                Column.ofInts
+                    name
+                    (values (function
+                        | Int n -> Some n
+                        | _ -> None))
+                    AllValid
+            | FloatType ->
+                Column.ofFloats
+                    name
+                    (values (function
+                        | Float x -> Some x
+                        | _ -> None))
+                    AllValid
+            | StringType ->
+                Column.ofStrs
+                    name
+                    (values (function
+                        | Str x -> Some x
+                        | _ -> None))
+                    AllValid
+            | DecimalType ->
+                Column.ofDecimals
+                    name
+                    (values (function
+                        | Decimal x -> Some x
+                        | _ -> None))
+                    AllValid
+            | other -> failwithf "the family states no %A column" other
+
+        let private tableOf (t: SourceTable) : Table =
+            { Schema = t.Schema |> List.map (fun (n, ty) -> Field.create n ty)
+              Columns = t.Columns |> List.map columnOf }
 
         let private build (s: Stated) : Query =
             let b = queryOf s.Base
@@ -1327,7 +1382,25 @@ module LawVectorExport =
                 Id = Option.defaultValue b.Id s.Id
                 Params = Option.defaultValue b.Params s.Params
                 Where = Option.defaultValue b.Where s.Where
-                OrderBy = Option.defaultValue b.OrderBy s.OrderBy }
+                OrderBy = Option.defaultValue b.OrderBy s.OrderBy
+                Source = s.Source |> Option.map (tableOf >> Embedded) |> Option.defaultValue b.Source }
+
+        let private sourceData (t: SourceTable) : CorpusCell =
+            jobj
+                [ "schema",
+                  jarr (
+                      t.Schema
+                      |> List.map (fun (n, ty) -> jobj [ "name", jstr n; "type", jstr (ColumnType.tag ty) ])
+                  )
+                  "columns",
+                  jarr (
+                      t.Columns
+                      |> List.map (fun (n, ty, cells) ->
+                          jobj
+                              [ "name", jstr n
+                                "type", jstr (ColumnType.tag ty)
+                                "cells", jarr (cells |> List.map QueryGrants.cellJson) ])
+                  ) ]
 
         let private statedInput (s: Stated) : (string * CorpusCell) list =
             [ "query", jstr s.Base ]
@@ -1341,12 +1414,56 @@ module LawVectorExport =
             @ (s.OrderBy
                |> Option.map (fun o -> "orderBy", jarr (o |> List.map keyData))
                |> Option.toList)
+            @ (s.Source |> Option.map (fun t -> "source", sourceData t) |> Option.toList)
 
         let private salesParams = (queryOf "sales").Params
 
         let private eq (c: string) (v: Cell) = ColumnPredicate.EqualTo(c, v)
 
         let private key (c: string) (d: SortDirection) : SortKey = { Column = c; Direction = d }
+
+        /// The admission vectors over a source stated as data (Phase 688, DECISIONS.md D266.10 point 5): eight
+        /// tables `Table.validate` refuses, each refused `illFormedSource` at `[source]` before anything else
+        /// (the ragged one beside a parameter declared twice), and a valid table in schema order and out of
+        /// it, each admitted.
+        let private sourceAdmissions: (string * Stated) list =
+            let sales = on "sales"
+            let ab = [ "a", IntType; "b", StringType ]
+
+            let stated (schema: (string * ColumnType) list) (columns: (string * ColumnType * Cell list) list) =
+                Some { Schema = schema; Columns = columns }
+
+            [ "admission-a-source-naming-a-schema-entry-twice",
+              { sales with
+                  Source = stated [ "a", IntType; "a", IntType ] [ "a", IntType, [ Int 1 ] ] }
+              "admission-a-source-naming-a-column-twice",
+              { sales with
+                  Source = stated [ "a", IntType ] [ "a", IntType, [ Int 1 ]; "a", IntType, [ Int 2 ] ] }
+              "admission-a-source-schema-entry-with-no-column",
+              { sales with
+                  Source = stated ab [ "a", IntType, [ Int 1 ] ] }
+              "admission-a-source-column-absent-from-the-schema",
+              { sales with
+                  Source = stated [ "a", IntType ] [ "a", IntType, [ Int 1 ]; "z", IntType, [ Int 9 ] ] }
+              "admission-a-source-column-of-another-type",
+              { sales with
+                  Source = stated [ "a", FloatType ] [ "a", IntType, [ Int 1; Int 2 ] ] }
+              "admission-a-ragged-source-before-a-parameter-declared-twice",
+              { sales with
+                  Params = Some(salesParams @ [ QueryGrants.param "rate" StringType false ])
+                  Source = stated ab [ "a", IntType, [ Int 1; Int 2 ]; "b", StringType, [ Str "x" ] ] }
+              "admission-a-source-float-not-finite",
+              { sales with
+                  Source = stated [ "a", FloatType ] [ "a", FloatType, [ Float nan ] ] }
+              "admission-a-source-decimal-text-not-canonical",
+              { sales with
+                  Source = stated [ "a", DecimalType ] [ "a", DecimalType, [ Decimal "12.50" ] ] }
+              "admission-a-source-in-schema-order",
+              { sales with
+                  Source = stated ab [ "a", IntType, [ Int 1 ]; "b", StringType, [ Str "x" ] ] }
+              "admission-a-source-out-of-schema-order",
+              { sales with
+                  Source = stated ab [ "b", StringType, [ Str "x" ]; "a", IntType, [ Int 1 ] ] } ]
 
         /// The admission vectors' declarations, each with its id. The ones whose literal its column cannot
         /// carry are `uncarried`: no text reaches them, and the model does not restate the clause.
@@ -1440,6 +1557,7 @@ module LawVectorExport =
                             ColumnPredicate.LessThan("day", Date "2026-11-15")
                             ColumnPredicate.IsNotNull "score" ]
                   OrderBy = Some [ key "at" SortDirection.Descending; key "n" SortDirection.Ascending ] } ]
+            @ sourceAdmissions
 
         /// The admission vectors whose literal its column cannot carry: the model's `predicate_fault`
         /// does not restate `whereFault`'s carriability clause (proofs/Query.fst), so these are the
@@ -1796,11 +1914,14 @@ module LawVectorExport =
             + "the parser refuses every null and every number past the finite double range, InvalidJson at the root. `admissionFault` and "
             + "`register` vectors state a declaration as DATA, because two of the gate's refusals no text can carry: `query` names a declaration "
             + "of `registry`, and `id` (a string), `params` (a list of {name, type, required}), `where` (a list of {predicate, column}, with "
-            + "`cell` for a comparison and `text` for contains) and `orderBy` (a list of {column, direction}), when present, replace its own. A "
+            + "`cell` for a comparison and `text` for contains), `orderBy` (a list of {column, direction}) and `source` (Phase 688: an "
+            + "embedded table, `schema` a list of {name, type} and `columns` a list of {name, type, cells}, every cell present, a name free to "
+            + "repeat in either list, each column held as stated by its type's builder), when present, replace its own. A "
             + "cell is {kind, text}, no text for a null, its text as it stands and never canonicalised (a float's is its shortest round-trip "
             + "form, a non-finite float's the token in quotes, as the canonical float layout writes it). `admissionFault` vectors hold the "
             + "declaration to the admission gate and expect `admitted`, or `refused` with `at`, the path to the member at fault, and `error`: a "
-            + "parameter declared twice at [params]; then each predicate in turn at [where, i] (an undeclared column, then contains off a string "
+            + "source table the column layer refuses at [source], illFormedSource with that layer's reason (a valid table in any column order "
+            + "is admitted); then a parameter declared twice at [params]; then each predicate in turn at [where, i] (an undeclared column, then contains off a string "
             + "column, then a null literal, then a literal of another type, with no widening and a timestamp fitting a column at least as fine "
             + "as its own unit, then a literal its column cannot carry, with the column layer's reason); then each order key at [orderBy, i] (an "
             + "undeclared column, then a column named before). `register` vectors register the declaration into the registry and expect "

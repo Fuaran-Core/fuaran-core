@@ -200,6 +200,54 @@ let private predicateOf (el: JVal) : ColumnPredicate =
     | "isNotNull" -> ColumnPredicate.IsNotNull c
     | other -> failwithf "unknown predicate %s" other
 
+/// A source table as the file states it (Phase 688): its schema entries and its columns, each column
+/// held as stated by its type's builder, which checks nothing.
+let private tableOf (el: JVal) : Table =
+    let column (c: JVal) : Column =
+        let name = text "name" c
+        let cells = items "cells" c |> List.map cellOf
+
+        let values (pick: Cell -> 'T option) =
+            cells
+            |> List.map (fun x -> pick x |> Option.defaultWith (fun () -> failwithf "%s: the cell %A" name x))
+            |> Vector.ofList
+
+        match columnType (text "type" c) with
+        | IntType ->
+            Column.ofInts
+                name
+                (values (function
+                    | Int n -> Some n
+                    | _ -> None))
+                AllValid
+        | FloatType ->
+            Column.ofFloats
+                name
+                (values (function
+                    | Float x -> Some x
+                    | _ -> None))
+                AllValid
+        | StringType ->
+            Column.ofStrs
+                name
+                (values (function
+                    | Str x -> Some x
+                    | _ -> None))
+                AllValid
+        | DecimalType ->
+            Column.ofDecimals
+                name
+                (values (function
+                    | Decimal x -> Some x
+                    | _ -> None))
+                AllValid
+        | other -> failwithf "the file states no %A column" other
+
+    { Schema =
+        items "schema" el
+        |> List.map (fun f -> Field.create (text "name" f) (columnType (text "type" f)))
+      Columns = items "columns" el |> List.map column }
+
 /// The declaration a vector states: a declaration of the head, with the members the input gives
 /// replacing its own.
 let private statedOf (registry: Query list) (input: JVal) : Query =
@@ -235,7 +283,11 @@ let private statedOf (registry: Query list) (input: JVal) : Query =
                             | "ascending" -> SortDirection.Ascending
                             | "descending" -> SortDirection.Descending
                             | other -> failwithf "unknown direction %s" other }))
-                b.OrderBy }
+                b.OrderBy
+        Source =
+            match field "source" input with
+            | Some t -> Embedded(tableOf t)
+            | None -> b.Source }
 
 let private canonical (v: JVal) = Canonical.write Rendering.CrossHost v
 
@@ -372,7 +424,15 @@ let private readerAgainstGate (j: JVal) : (string * string) list =
                       | ColumnPredicate.AtMost(_, Null) -> true
                       | _ -> false)
 
-              if not carriesNull then
+              // Phase 688: a source the column layer refuses never reaches the gate as text — the column
+              // codec reads the source first, and refuses it at `source` or reads another table — so the
+              // gate's `illFormedSource` is a refusal of the value alone (DECISIONS.md D266.10 point 2).
+              let sourceRefused =
+                  match q.Source with
+                  | Embedded t -> Result.isError (Table.validate t)
+                  | Ref _ -> false
+
+              if not carriesNull && not sourceRefused then
                   let expected = field "expected" v |> Option.get
 
                   match
