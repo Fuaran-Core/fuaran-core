@@ -290,13 +290,13 @@ it equal to them. [`CONTRIBUTING.md`](CONTRIBUTING.md) says how an entry is adde
 
 ## 2026-11-18 — D267: the dispatch holds a resolver's rows to the table's validation: rows `Table.validate` refuses are the resolver's fault, refused `ExecutionFailed` in the column layer's words, and the result's writers stay total
 
-**Status:** Live — t1 measured; building
+**Status:** Live — t1 measured, t2 recorded; building
 
 **Recorded by Phase 692**, the phase D266.9 point 3 gave the result's rows: (R-i) with (R-iv) of D266.6. The dispatch
 holds a resolver's rows to `Table.validate`, as it holds a resolver's unsupported predicate to the declaration's own
 (D264.8 point 3); the result's writers stay total, and their contract says what they do with a result built by hand.
 The design is ruled. D267.1 measures what every verb answers today, and D267.2 what the pass costs, before anything is
-built.
+built; D267.3 to D267.11 record the build's shape, with the alternatives that lost, and one correction to D266.
 
 **D267.1 — what each verb answers today.** Probed at `1c79e0c7` with the kit built from that commit, over a network
 declaration (`Effect.network`, so the captured verbs journal) and a resolver answering one page of rows of each of four
@@ -356,6 +356,100 @@ range over two full runs.
   at 100,000 rows it came out +8.1% in one run and -8.2% in the other, which is that spread.
 - **Over the plain dispatch the ratio says little**, as expected: the plain dispatch does not touch the rows, so it
   costs about a tenth of a microsecond at any size, and the pass is all of the "with" figure.
+
+**D267.3 — the stop the measurement was taken for, not reached.** The build was to stop for review if, at the largest
+page, the pass added more than a quarter to the captured dispatch, or if its cost grew faster than the rows. At
+3,000,000 rows it adds 5.7 to 5.9% (the pass alone over the captured dispatch without it), and 4.1 to 4.9% by the
+difference of the two medians; its time per row is flat over the largest thirtyfold (D267.2). The design is built as
+ruled.
+
+**D267.4 — where the clause sits.** In one private function of `Query`, which settles a resolver's `Deferred` answer
+into the seam's: a `Ready` result whose rows `Table.validate` accepts is `Ok (Ready r)`, the result as the resolver gave
+it; one whose rows it refuses is the resolver's fault, `Error (ExecutionFailed …)` (D267.5); `Pending` is `Ok Pending`;
+a resolver's `Failed m` is `ExecutionFailed (m, [])`, as before. `Query.invoke` and `Query.invokePageWithArgs` each
+settled the resolver's answer with a copy of the same three arms; both now call the one function, and the copies go.
+So every dispatch verb passes the clause exactly once (D267.1): the four plain registry verbs and the four captured
+ones run one of the two as their body, the captured verbs journal what the body answered (so rows the clause refuses
+are journalled `Refused` with the refusal's document, never `Completed`), and the replay runs the same body for a
+deterministic declaration. A replay of a recorded entry runs no body: it answers what the capture recorded, a
+completion the clause had accepted, read through the `decode` the caller hands (`QueryCodec.decodeResult`, which ends
+in `Table.validate`), or the recorded refusal. The clause runs after the resolver, on a `Ready` answer only, so the
+order the seam checks in before the resolver runs (the id, the parameters, the policy) does not move, and nothing
+keys on the rows. Alternatives that lost:
+
+- *The clause in each registry verb.* Ten places for one rule, and `Query.invoke` and its three siblings, which are
+  public and which the registry verbs are built from, would answer the rows unheld.
+- *The clause at the journal* (in the `encode` the captured verbs pass to `Seam.dispatchCaptured`). It reaches the four
+  captured verbs only, so the plain dispatch would answer rows its captured twin refuses; and the generic seam
+  (`KeyedRegistry`) knows no table.
+- *The clause in the replay's `decode` as well.* A recorded completion was held at capture, and the canonical reader
+  already ends in `Table.validate`; it would pass the same rows through the clause twice, and over a `decode` a host
+  wrote for its own form it would refuse what that host's form carries.
+- *Normalising the rows to schema order in the dispatch.* Under D266.9 point 2 rows out of schema order are the same
+  rows; the result's reader answers them in schema order. A dispatch that reordered would answer another value than
+  the resolver gave, for no difference a reader can see, which is what (E1-n) lost for `admit` (D266.7).
+
+**D267.5 — the refusal's sentence.** `ExecutionFailed ("the resolver answered rows the column layer refuses: " +
+ColumnCodec.errorString e, [])`, where `e` is `Table.validate`'s refusal: the reason is the column layer's sentence, as
+it is for a declaration's embedded table (`IllFormedSource`, D266.10 point 1) and a literal (`IllFormedLiteral`). The
+class is `ExecutionFailed`, the resolver's fault, as D264.8 point 3 made a predicate the declaration does not hold; no
+case is added, so no `api/` or `api/wire/` row moves. `recoverable` is empty: no argument a retry may change makes a
+resolver's rows valid. `QueryError.describe` reads, for ragged rows: "Refused: the query ran and failed: the resolver
+answered rows the column layer refuses: ragged table: column 'b' has 1 rows where the first column has 2."
+
+**D267.6 — a paged or deferred result.** A page is held as any result: the clause reads its rows, never its token,
+page number or total, so a page whose rows the validation refuses is refused whatever token it carries, and its
+capture under `invocationKeyPage` records that refusal for that page alone. `Pending` carries no rows, stays `Ok
+Pending`, and leaves its capture open. A capture left open is settled later by the host, through
+`KeyedCapture.settleEffectKeyed` with the result and the writer it chooses, outside any dispatch: probed at
+`1c79e0c7`, a host settling a pending capture with rows naming a column twice is replayed as the schema-ordered rows,
+and the control as written. The clause cannot reach that act (the journal is the operation stream's, generic over
+the value), so it is a result built by hand, and the writers' contract (D267.8) is what it is told. The async
+envelope's writer, `encodeDeferredResult`, writes its `ready` payload as `encodeResult` does.
+
+**D267.7 — the proof model.** The invoke clause: `invoke` gains the column layer's verdict on an answered value,
+`vf : v -> option string` (`None` where `Table.validate` accepts the rows; the reason where it refuses them, computed by
+the oracle host as it computes a source's verdict, D266.10 point 6), and a `Ready r` whose verdict is `Some m` is
+`Error (ExecutionFailed (rows_refused m) [])`, the sentence of D267.5. Every verb built on it (`dispatch`, `invoke_page`,
+`dispatch_page`, the gated `dispatch_gated` and `dispatch_page_gated`) carries the verdict to it, and the theorems
+stated over them are stated for every verdict. `invoke_ready_rows_ok` and `dispatch_ready_rows_ok` are new: a `Ready`
+answer of the seam is one the verdict accepts. The rows' premise: the column-codec parameter gains the rows' verdict and
+their normal form, `rows_fault` and `rows_norm`, and `column_codec_laws` assumes the rows' round trip as the column
+strand proves it, as D266.4 restated the source's: `forall x. None? (rows_fault x) ==> rows_of (rows_json x) == Some
+(rows_norm x)`, the normal form accepted and its own normal form. `result_roundtrip` and `deferred_result_roundtrip`
+then conclude the result with its rows normalised, for rows the column layer accepts, and `dispatched_result_roundtrip`
+is new: a result the seam answers `Ready`, under the codec's own verdict, reads back as itself with its rows normalised,
+which is the premise discharged for a dispatched result. The rows that move: `query-envelope-three-outcomes` (the new
+refusal is one more way a `Ready` answer becomes `ExecutionFailed`), `query-codec-result-roundtrip` and
+`query-codec-deferred-result-roundtrip` (normalised, for accepted rows), `query-codec-column-premises` (the rows' half
+restated; "no gate holds a result's rows" leaves its boundary), and `query-differential` (the drawn resolvers answer
+rows the validation refuses beside accepted ones); a new proved row states `dispatch_ready_rows_ok`. The extracted
+oracle is regenerated by the proof kit, never edited.
+
+**D267.8 — the writers' contract.** `QueryCodec.encodeResult` and `encodeDeferredResult` stay total (D266.6's (R-ii) is
+not ruled). Their docs say: a result the dispatch answered reads back as itself with its rows in schema order; a result
+built by hand, or one a host settles a pending capture with, whose rows `Table.validate` refuses is written as it is,
+and its text may read back as other rows or be refused; and rows out of schema order read back in schema order.
+
+**D267.9 — a correction to D266.10 point 8.** Its sentence "`breaking` (the ten re-stated documents)" should say
+sixteen: point 4, as built, re-states sixteen sampled `query` documents, ten the reader refused and six it read as
+another declaration, and the `0.44.0` entry says sixteen. Found at the review of Phase 688's held build on 2026-11-18.
+D266 is not edited; this entry carries the correction.
+
+**D267.10 — the class and the slot.** Internal: a behaviour of public functions whose signatures do not move (STABILITY.md's
+"Not semantics" boundary), no `api/` or `api/wire/` row, no vector family (a resolver is host code, which D263's `unreached` list names). It rides the
+`0.44.0` draft, already a breaking minor over `v0.43.0`; the slot does not move. The `0.44.0` entry tells a consumer
+that a resolver answering rows `Table.validate` refuses is now refused, `ExecutionFailed` naming the column layer's
+reason, by every dispatch verb, and journalled as that refusal; that a journal written before `0.44.0` may hold such
+rows as a completion, which replays as the rows its text reads back as; and what the writers do with a result built by
+hand.
+
+**D267.11 — the files.** `Query.fs` (the clause), `QueryRegistry.fs` and `QueryCodec.fs` (their docs),
+`QueryTests.fs`, `proofs/Query.fst`, `proofs.json`, this record and the `0.44.0` entry; and, because the model's
+`invoke` and its column-codec parameter move, the oracle host's instantiation of the parameter
+(`tests/Fuaran.Core.Tests.Fixtures/VectorOracle.Query.fs`), the query differential
+(`tests/Fuaran.Core.Tests/ProofOracle.QueryTests.fs`), the regenerated `proofs/oracle/Query.fs` and the rendered
+`proofs/README.md`.
 
 ## 2026-11-18 — D266: the admission gate reads a query declaration's embedded table and refuses one `Table.validate` refuses, as `IllFormedSource`, checked before the parameters; an admitted declaration's text reads back as the declaration written up to the column codec's normal form
 
