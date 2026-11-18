@@ -1674,3 +1674,113 @@ let seamBaselineTests528 =
                   [ "policyRefused", "InvokeError", "PlantedSeamError"
                     "approvalRequired", "InvokeError", "PlantedSeamError" ]
                   "a planted seam re-using the capability seam's case names collides" ]
+
+// ---------------------------------------------------------------------------
+//  Phase 685 (DECISIONS.md D264.7 point 1, D264.8 points 1, 2 and 4) — the admitted declaration.
+//  The writer, the read's identity and the grant take only `AdmittedQuery`, which the gate alone
+//  produces from a declaration; the readers and the registry's two readers answer it; the budgets
+//  are a positive integer, built only by `PositiveInt.tryCreate`. Read by reflection, so the
+//  assertions name members by their published names.
+// ---------------------------------------------------------------------------
+
+let private queryAssembly685 = typeof<Query>.Assembly
+
+let private typeNamed685 (name: string) : System.Type =
+    match queryAssembly685.GetType name with
+    | null -> failtestf "the package declares no %s" name
+    | t -> t
+
+let private publicStatic685 =
+    System.Reflection.BindingFlags.Public ||| System.Reflection.BindingFlags.Static
+
+let private method685 (moduleName: string) (name: string) : System.Reflection.MethodInfo =
+    match (typeNamed685 moduleName).GetMethod(name, publicStatic685) with
+    | null -> failtestf "%s.%s is not public" moduleName name
+    | m -> m
+
+/// Does `t` name `target`, or carry it as a generic argument at any depth?
+let rec private mentions685 (target: System.Type) (t: System.Type) : bool =
+    t = target
+    || (t.IsGenericType
+        && (t.GetGenericArguments() |> Array.exists (mentions685 target)))
+
+[<Tests>]
+let admittedTests685 =
+    testList
+        "Phase 685 - the admitted declaration"
+        [ testCase "the writer, the identity and the grant take an admitted declaration"
+          <| fun _ ->
+              let admitted = typeNamed685 "Fuaran.Core.AdmittedQuery"
+
+              for moduleName, name in
+                  [ "Fuaran.Core.QueryCodec", "encode"
+                    "Fuaran.Core.QueryModule", "invocationKey"
+                    "Fuaran.Core.QueryModule", "invocationKeyPage"
+                    "Fuaran.Core.QueryModule", "invocationPreimage"
+                    "Fuaran.Core.QueryModule", "grant" ] do
+                  let first = (method685 moduleName name).GetParameters().[0].ParameterType
+                  Expect.equal first admitted (sprintf "%s.%s's declaration" moduleName name)
+
+          testCase "the readers and the registry's two readers answer an admitted declaration"
+          <| fun _ ->
+              let admitted = typeNamed685 "Fuaran.Core.AdmittedQuery"
+
+              for moduleName, name in
+                  [ "Fuaran.Core.QueryCodec", "decode"
+                    "Fuaran.Core.QueryCodec", "decodeWith"
+                    "Fuaran.Core.QueryCodec", "decodeDetailedWith"
+                    "Fuaran.Core.QueryRegistryModule", "tryFind"
+                    "Fuaran.Core.QueryRegistryModule", "enumerate" ] do
+                  let answer = (method685 moduleName name).ReturnType
+                  Expect.isTrue (mentions685 admitted answer) (sprintf "%s.%s answers %O" moduleName name answer)
+
+          testCase "the gate is the only public way from a declaration to an admitted one"
+          <| fun _ ->
+              let admitted = typeNamed685 "Fuaran.Core.AdmittedQuery"
+
+              Expect.isEmpty (admitted.GetConstructors()) "no public constructor"
+
+              Expect.isFalse
+                  (Microsoft.FSharp.Reflection.FSharpType.IsUnion(admitted, System.Reflection.BindingFlags.Public)
+                   && (try
+                           Microsoft.FSharp.Reflection.FSharpType
+                               .GetUnionCases(admitted, System.Reflection.BindingFlags.Public)
+                               .Length > 0
+                       with _ ->
+                           false))
+                  "its case is not public"
+
+              let sources =
+                  queryAssembly685.GetExportedTypes()
+                  |> Array.collect (fun t -> t.GetMethods publicStatic685)
+                  |> Array.filter (fun m ->
+                      mentions685 admitted m.ReturnType
+                      && m.GetParameters() |> Array.exists (fun p -> p.ParameterType = typeof<Query>))
+                  |> Array.map (fun m -> m.DeclaringType.Name + "." + m.Name)
+                  |> Set.ofArray
+
+              Expect.equal
+                  sources
+                  (set [ "QueryRegistryModule.admit" ])
+                  "the gate alone takes a declaration to an admitted one"
+
+          testCase "the budgets are a positive integer, built only by tryCreate"
+          <| fun _ ->
+              let positive = typeNamed685 "Fuaran.Core.PositiveInt"
+
+              for name in [ "TimeoutMs"; "PageSize" ] do
+                  Expect.equal
+                      (typeof<Query>.GetProperty(name).PropertyType)
+                      (typedefof<option<_>>.MakeGenericType positive)
+                      (name + " is an optional positive integer")
+
+              Expect.isEmpty (positive.GetConstructors()) "no public constructor"
+
+              let sources =
+                  queryAssembly685.GetExportedTypes()
+                  |> Array.collect (fun t -> t.GetMethods publicStatic685)
+                  |> Array.filter (fun m -> mentions685 positive m.ReturnType)
+                  |> Array.map (fun m -> m.DeclaringType.Name + "." + m.Name)
+                  |> Set.ofArray
+
+              Expect.equal sources (set [ "PositiveIntModule.tryCreate" ]) "tryCreate alone builds one" ]
