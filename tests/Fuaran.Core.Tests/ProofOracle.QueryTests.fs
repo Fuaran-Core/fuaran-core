@@ -1912,4 +1912,27 @@ let tests =
 
               Expect.isTrue
                   (Tally.disagreements t |> List.exists (fun d -> d.Contains "encodes differently"))
-                  "and the disagreement is about the encoding, which is what the writer dropped" ]
+                  "and the disagreement is about the encoding, which is what the writer dropped"
+
+          // ---- Phase 688 (DECISIONS.md D266.10 point 6) — the model reads the source ----
+
+          testCase
+              "Phase 688 - the query model reads a declaration's source: a ref, or an embedded table with the column layer's verdict, refused IllFormedSource"
+          <| fun _ ->
+              let caseNames (t: System.Type) =
+                  FSharp.Reflection.FSharpType.GetUnionCases t
+                  |> Array.map (fun c -> c.Name)
+                  |> List.ofArray
+
+              Expect.contains
+                  (caseNames typeof<ModelQuery.query_error>)
+                  "IllFormedSource"
+                  "the model's query_error carries IllFormedSource"
+
+              let source = typeof<ModelQuery.query>.GetProperty("q_source").PropertyType
+
+              Expect.isTrue
+                  (FSharp.Reflection.FSharpType.IsUnion source)
+                  (sprintf "the model's q_source is %s, an opaque string, not a source it reads" source.Name)
+
+              Expect.equal (caseNames source) [ "SRef"; "SEmbedded" ] "a source is a ref or an embedded table" ]
