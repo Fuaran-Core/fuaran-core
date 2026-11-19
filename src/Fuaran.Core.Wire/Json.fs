@@ -915,6 +915,78 @@ module Json =
     let private depthSentence (cap: int) : string =
         "max nesting depth " + string cap + " exceeded"
 
+    // The member names one object has accumulated, for the repeated-name refusal (Phase 462): the first
+    // held alone, and the set built only when a second member arrives, so a one-member object builds none.
+    // `Reset` empties it for the next object, keeping the set it built (Phase 663: the parse reuses one per
+    // nesting level).
+    [<Sealed>]
+    type private MemberNames() =
+        let mutable first: string = null
+        let mutable seen: System.Collections.Generic.HashSet<string> = null
+        let mutable setInUse = false
+
+        member _.Reset() =
+            first <- null
+
+            if setInUse then
+                seen.Clear()
+                setInUse <- false
+
+        /// Accumulates `key`; true when the object already holds a member of that name.
+        member _.Repeats(key: string) : bool =
+            if isNull first then
+                first <- key
+                false
+            elif not setInUse then
+                if first = key then
+                    true
+                else
+                    if isNull seen then
+                        seen <- System.Collections.Generic.HashSet<string>(HashIdentity.Structural)
+
+                    seen.Add first |> ignore
+                    seen.Add key |> ignore
+                    setInUse <- true
+                    false
+            else
+                not (seen.Add key)
+
+    // One open container of a `JVal` parse (Phase 663): the parse holds these in a list it indexes by
+    // nesting level, in the heap, so a level costs memory and never stack. A level's record is reused by
+    // every container opened at that level; its lists are cleared when a container opens there.
+    [<Sealed>]
+    type private OpenContainer() =
+        let mutable items: ResizeArray<JVal> = null
+        let mutable fields: ResizeArray<string * JVal> = null
+        let mutable names: MemberNames = Unchecked.defaultof<MemberNames>
+
+        member val IsObject = false with get, set
+        /// The container's slot in the scanner's path frames.
+        member val Top = 0 with get, set
+        /// The items or members accumulated so far.
+        member val Count = 0 with get, set
+        /// The member being read: its name, and where its opening quote stands.
+        member val Key: string = null with get, set
+        member val KeyAt = 0 with get, set
+
+        member _.Items =
+            if isNull items then
+                items <- ResizeArray<JVal>()
+
+            items
+
+        member _.Fields =
+            if isNull fields then
+                fields <- ResizeArray<string * JVal>()
+
+            fields
+
+        member _.Names =
+            if isNull (box names) then
+                names <- MemberNames()
+
+            names
+
     /// The ONE grammar (Phase 368): the scanner `read` reads a document with, and the only one
     /// `Reader` reads with. Every routine below is the parser's own: the whitespace and
     /// value-start rule, the string reader (by runs, Phase 366), the number reader (the JSON number
@@ -1119,147 +1191,157 @@ module Json =
             let v = scanNumber ()
             if numIsInt then JInt numInt else JFloat v
 
-        // The array loop: the depth cap, `[`, then `item` once per element (it reads one value from
-        // the next value position), each followed by `,` or `]`. The items bound (Phase 465) is
-        // tested at the loop's head, before `item` is called: an item that would be the `max + 1`-th
-        // is refused where it would start, before a character of it is read, with the frame's slot
-        // unfilled so the breach's path is the array's own.
-        let arrayLoop (depth: int) (item: unit -> unit) : unit =
+        // The container grammar, in steps (Phase 663). The array and object loops below run them for a
+        // `Reader` (one item or member per callback), and `parseValue` runs the SAME steps from its own
+        // explicit stack, so there is one copy of each rule for the two to drift apart on.
+        //
+        // A container opens: the depth cap, then the opening bracket. True when an item or member is due;
+        // false when the container closed at once, empty, with no frame pushed.
+        let openContainer (depth: int) (opening: char) (closing: char) : bool =
             if depth >= maxDepth then
                 fail MaxDepthExceeded (depthSentence maxDepth)
 
-            expect '['
+            expect opening
             skipWs ()
 
-            if peek () = ']' then
+            if peek () = closing then
                 i <- i + 1
+                false
             else
+                true
+
+        // An array item is due. The items bound (Phase 465) is tested here, before the item is read: an
+        // item that would be the `max + 1`-th is refused where it would start, before a character of it is
+        // read, with the frame's slot unfilled so the breach's path is the array's own.
+        let itemDue (top: int) (count: int) : unit =
+            if count >= limits.MaxArrayLength then
+                breach JsonLimit.ArrayLength
+
+            frameIdx[top] <- count
+
+        // After an item: `,` (true: another is due) or `]` (false: the array closed).
+        let itemDone (top: int) : bool =
+            frameIdx[top] <- -1
+            skipWs ()
+
+            match peek () with
+            | ',' ->
+                i <- i + 1
+                true
+            | ']' ->
+                i <- i + 1
+                false
+            | _ -> fail ExpectedToken "expected ',' or ']'"
+
+        // An object member is due: its key and `:` read, and the member's value position reached. Answers
+        // the key, where its opening quote stands, and whether the member was an erased `null`.
+        //
+        // The one behavioural fork of `EraseMemberNull`, and the only place in the parser that can erase
+        // anything: a member whose value is exactly the `null` token is consumed here and no value is read
+        // for it, so the object reads as though the member had been omitted. Nothing malformed is absorbed:
+        // a truncated near-miss (`nul`) fails this test and falls through to the value reader, which names
+        // it exactly as the strict policy does, and a trailing-garbage one (`nullish`) is caught by the
+        // ',' / '}' expectation in `memberDone`. Under `RejectNull` the test is never taken.
+        //
+        // The members bound (Phase 465) is tested after the `skipWs` and before the key is read, at the
+        // key's opening quote: the members ACCUMULATED so far are the count — an erased member null was
+        // never accumulated and is not one, which is what keeps the tolerant read the strict read of the
+        // erased document (Phase 190) under a bound too — and a member that would be the `max + 1`-th is
+        // refused before a character of it is read. While the key is being read the frame's slot is
+        // unfilled, so a breach inside the key (its own length) is the object's.
+        let memberDue (top: int) (count: int) : struct (string * int * bool) =
+            skipWs ()
+            frameKeys[top] <- null
+
+            if count >= limits.MaxObjectMembers then
+                breach JsonLimit.ObjectMembers
+
+            let keyAt = i
+            let key = parseString ()
+            frameKeys[top] <- key
+            skipWs ()
+            expect ':'
+            skipWs ()
+
+            if tolerateMemberNull && literalAt "null" then
+                i <- i + 4
+                struct (key, keyAt, true)
+            else
+                struct (key, keyAt, false)
+
+        // A member's value has been read and the member is ACCUMULATED. A repeated name is refused here,
+        // after its value is read, at the name's opening quote. So a refusal inside the value still wins,
+        // and under the strict policy a repeated member whose value is `null` is the null's refusal. An
+        // erased member null is NOT an occurrence: the tolerant read IS the strict read of the document
+        // with its member nulls deleted (Phase 190), and that holds only if the erased member leaves no
+        // trace here either (DECISIONS.md D157).
+        let memberAccumulated (names: MemberNames) (key: string) (keyAt: int) : unit =
+            if names.Repeats key then
+                i <- keyAt
+                fail DuplicateMember "repeated member name in one object"
+
+        // After a member: `,` (true: another is due) or `}` (false: the object closed).
+        let memberDone () : bool =
+            skipWs ()
+
+            match peek () with
+            | ',' ->
+                i <- i + 1
+                true
+            | '}' ->
+                i <- i + 1
+                false
+            | _ -> fail ExpectedToken "expected ',' or '}'"
+
+        // The array loop a `Reader` reads with: the depth cap, `[`, then `item` once per element (it reads
+        // one value from the next value position), each followed by `,` or `]`.
+        let arrayLoop (depth: int) (item: unit -> unit) : unit =
+            if openContainer depth '[' ']' then
                 let top = pushFrame ()
                 let mutable count = 0
                 let mutable go = true
 
                 while go do
-                    if count >= limits.MaxArrayLength then
-                        breach JsonLimit.ArrayLength
-
-                    frameIdx[top] <- count
+                    itemDue top count
                     item ()
                     count <- count + 1
-                    frameIdx[top] <- -1
-                    skipWs ()
-
-                    match peek () with
-                    | ',' -> i <- i + 1
-                    | ']' ->
-                        i <- i + 1
-                        go <- false
-                    | _ -> fail ExpectedToken "expected ',' or ']'"
+                    go <- itemDone top
 
                 popFrame top
 
-        // The object loop: the depth cap, `{`, then per member its key, `:`, and `onMember key` (it
-        // reads the member's value), each followed by `,` or `}`.
-        //
-        // The one behavioural fork of `EraseMemberNull`, and the only place in the parser that can
-        // erase anything: a member whose value is exactly the `null` token is consumed and
-        // `onMember` is NOT called, so the object reads as though the member had been omitted.
-        // Nothing malformed is absorbed: a truncated near-miss (`nul`) fails this test and falls
-        // through to the value reader, which names it exactly as the strict policy does, and a
-        // trailing-garbage one (`nullish`) is caught by the ',' / '}' expectation below. Under
-        // `RejectNull` the test is never taken and the member path is the pre-existing one.
-        //
-        // The members bound (Phase 465) is tested after the loop's `skipWs` and before the key is
-        // read, at the key's opening quote: the members ACCUMULATED so far are the count — an erased
-        // member null was never accumulated and is not one, which is what keeps the tolerant read
-        // the strict read of the erased document (Phase 190) under a bound too — and a member that
-        // would be the `max + 1`-th is refused before a character of it is read. While the key is
-        // being read the frame's slot is unfilled, so a breach inside the key (its own length) is
-        // the object's.
+        // The object loop a `Reader` reads with: the depth cap, `{`, then per member its key, `:`, and
+        // `onMember key` (it reads the member's value), each followed by `,` or `}`. An erased member
+        // `null` calls no `onMember`.
         let objectLoop (depth: int) (onMember: string -> unit) : unit =
-            if depth >= maxDepth then
-                fail MaxDepthExceeded (depthSentence maxDepth)
-
-            expect '{'
-            skipWs ()
-
-            if peek () = '}' then
-                i <- i + 1
-            else
+            if openContainer depth '{' '}' then
                 let top = pushFrame ()
+                let names = MemberNames()
                 let mutable count = 0
                 let mutable go = true
-                // Phase 462: the names read so far. The first is held alone, and the set is built
-                // only when a second member arrives, so a one-member object allocates nothing.
-                let mutable first: string option = None
-                let mutable seen: System.Collections.Generic.HashSet<string> option = None
 
                 while go do
-                    skipWs ()
-                    // The slot is unfilled from here until the key is read: a breach of the members
-                    // bound, or of the string bound inside the key, is the object's own.
-                    frameKeys[top] <- null
+                    let struct (key, keyAt, erased) = memberDue top count
 
-                    if count >= limits.MaxObjectMembers then
-                        breach JsonLimit.ObjectMembers
-
-                    let keyAt = i
-                    let key = parseString ()
-                    frameKeys[top] <- key
-                    skipWs ()
-                    expect ':'
-                    skipWs ()
-
-                    let erased = tolerateMemberNull && literalAt "null"
-
-                    if erased then
-                        i <- i + 4
-                    else
+                    if not erased then
                         onMember key
                         count <- count + 1
+                        memberAccumulated names key keyAt
 
-                        // A repeated name is refused when the member is ACCUMULATED, after its value
-                        // is read, at the name's opening quote. So a refusal inside the value still
-                        // wins, and under the strict policy a repeated member whose value is `null`
-                        // is the null's refusal. An erased member null is NOT an occurrence: the
-                        // tolerant read IS the strict read of the document with its member nulls
-                        // deleted (Phase 190), and that holds only if the erased member leaves no
-                        // trace here either (DECISIONS.md D157).
-                        let repeated =
-                            match first, seen with
-                            | None, _ ->
-                                first <- Some key
-                                false
-                            | Some f, None ->
-                                if f = key then
-                                    true
-                                else
-                                    let set = System.Collections.Generic.HashSet<string>(HashIdentity.Structural)
-                                    set.Add f |> ignore
-                                    set.Add key |> ignore
-                                    seen <- Some set
-                                    false
-                            | Some _, Some set -> not (set.Add key)
-
-                        if repeated then
-                            i <- keyAt
-                            fail DuplicateMember "repeated member name in one object"
-
-                    skipWs ()
-
-                    match peek () with
-                    | ',' -> i <- i + 1
-                    | '}' ->
-                        i <- i + 1
-                        go <- false
-                    | _ -> fail ExpectedToken "expected ',' or '}'"
+                    go <- memberDone ()
 
                 popFrame top
 
-        let rec parseValue (depth: int) : JVal =
-            match valueStart () with
+        let parseLiteral (lit: string) (v: JVal) : JVal =
+            if literalAt lit then
+                i <- i + lit.Length
+                v
+            else
+                fail ExpectedToken ("expected '" + lit + "'")
+
+        // A value that is not a container, from its first significant character `c` (unconsumed).
+        let parseScalar (c: char) : JVal =
+            match c with
             | '"' -> JStr(parseString ())
-            | '{' -> parseObject depth
-            | '[' -> parseArray depth
             | 't' -> parseLiteral "true" (JBool true)
             | 'f' -> parseLiteral "false" (JBool false)
             | 'n' when Array.contains i admitted ->
@@ -1283,8 +1365,8 @@ module Json =
                 scanNumberToken () |> ignore
                 JBool true
             | 'n' ->
-                // Under `EraseMemberNull` a member-position null never reaches here — `parseObject`
-                // absorbs it before calling `parseValue` — so a null arriving at this arm under the
+                // Under `EraseMemberNull` a member-position null never reaches here — `memberDue`
+                // absorbs it before a value is read — so a null arriving at this arm under the
                 // tolerant policy is at a position with NO absence to erase it to (bare root, or an
                 // array element). Say so: a consumer reading the tolerant path's rejection must not
                 // mistake it for the strict policy's blanket refusal, since the remedy is different
@@ -1298,22 +1380,110 @@ module Json =
             | c when c = '-' || (c >= '0' && c <= '9') -> parseNumber ()
             | c -> fail UnexpectedChar ("unexpected character '" + string c + "'")
 
-        and parseLiteral (lit: string) (v: JVal) : JVal =
-            if literalAt lit then
-                i <- i + lit.Length
-                v
-            else
-                fail ExpectedToken ("expected '" + lit + "'")
+        // The open containers of a `JVal` parse, by nesting level below the value `parseValue` started at.
+        let containers = ResizeArray<OpenContainer>()
 
-        and parseObject (depth: int) : JVal =
-            let fields = ResizeArray<string * JVal>()
-            objectLoop depth (fun key -> fields.Add((key, parseValue (depth + 1))))
-            JObj(List.ofSeq fields)
+        // One `JVal` from the value position, its containers nested at `depth` and below (Phase 663). The
+        // parse keeps its open containers in `containers`, in the heap, and NOT on the call stack: a nesting
+        // level costs one reused record, never a frame, so the depth cap is reached on any thread stack,
+        // however small, and refuses by name where a recursion would have ended the process (a stack
+        // overflow cannot be caught on .NET). It runs the container steps above in the order the loops
+        // run them, so every refusal is raised at the same position, with the same kind and message.
+        //
+        // Four states: a value is DUE at the cursor; an item or member is due in the innermost open
+        // container; a value is DONE and goes to the container it belongs to (or is the answer, when none
+        // is open); the container's separator is due after its item or member.
+        let parseValue (depth: int) : JVal =
+            let mutable level = 0
+            let mutable value = Unchecked.defaultof<JVal>
+            let mutable state = 0 // 0 value due, 1 item or member due, 2 value done, 3 separator due
 
-        and parseArray (depth: int) : JVal =
-            let items = ResizeArray<JVal>()
-            arrayLoop depth (fun () -> items.Add(parseValue (depth + 1)))
-            JArr(List.ofSeq items)
+            let enter (isObject: bool) =
+                if level = containers.Count then
+                    containers.Add(OpenContainer())
+
+                let c = containers[level]
+                c.IsObject <- isObject
+                c.Top <- pushFrame ()
+                c.Count <- 0
+
+                if isObject then
+                    c.Fields.Clear()
+                    c.Names.Reset()
+                else
+                    c.Items.Clear()
+
+                level <- level + 1
+
+            while state <> 4 do
+                match state with
+                | 0 ->
+                    match valueStart () with
+                    | '{' ->
+                        if openContainer (depth + level) '{' '}' then
+                            enter true
+                            state <- 1
+                        else
+                            value <- JObj []
+                            state <- 2
+                    | '[' ->
+                        if openContainer (depth + level) '[' ']' then
+                            enter false
+                            state <- 1
+                        else
+                            value <- JArr []
+                            state <- 2
+                    | c ->
+                        value <- parseScalar c
+                        state <- 2
+                | 1 ->
+                    let c = containers[level - 1]
+
+                    if c.IsObject then
+                        let struct (key, keyAt, erased) = memberDue c.Top c.Count
+
+                        if erased then
+                            state <- 3
+                        else
+                            c.Key <- key
+                            c.KeyAt <- keyAt
+                            state <- 0
+                    else
+                        itemDue c.Top c.Count
+                        state <- 0
+                | 2 ->
+                    if level = 0 then
+                        state <- 4
+                    else
+                        let c = containers[level - 1]
+
+                        if c.IsObject then
+                            c.Fields.Add((c.Key, value))
+                            c.Count <- c.Count + 1
+                            memberAccumulated c.Names c.Key c.KeyAt
+                        else
+                            c.Items.Add value
+                            c.Count <- c.Count + 1
+
+                        state <- 3
+                | _ ->
+                    let c = containers[level - 1]
+                    let more = if c.IsObject then memberDone () else itemDone c.Top
+
+                    if more then
+                        state <- 1
+                    else
+                        value <-
+                            if c.IsObject then
+                                JObj(List.ofSeq c.Fields)
+                            else
+                                JArr(List.ofSeq c.Items)
+
+                        popFrame c.Top
+                        level <- level - 1
+                        state <- 2
+
+            value
 
         // The kind of the value due, from its first significant character, unconsumed (Phase 467):
         // the dispatch `parseValue` makes, answered instead of taken. The two positions no value
