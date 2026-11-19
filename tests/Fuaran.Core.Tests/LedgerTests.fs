@@ -100,7 +100,7 @@ let private faultsOf tags standing slots =
 let private editing (v: string) (f: string -> string) =
     sample |> List.map (fun s -> if s.Version = v then slot v (f s.Text) else s)
 
-// ---- scratch ledgers (Phase 702, D272) ----------------------------------------------------------
+// ---- scratch ledgers (Phase 702, D273) ----------------------------------------------------------
 
 /// `git <arguments>` in `dir`: its exit code and what it wrote. The merge clause reads the code itself.
 let private gitIn (dir: string) (arguments: string list) : int * string =
@@ -177,7 +177,7 @@ let tests =
               let path = Path.Combine(root, IndexPath)
               Approval.validate Approval.Docs
 
-              // D272.3: the release gesture's switch also closes each slot the gesture closed, rendering its
+              // D273.3: the release gesture's switch also closes each slot the gesture closed, rendering its
               // entries into its file and removing their files; the shape clause reds one it has not.
               let slots =
                   match slots |> List.filter (fun s -> s.State <> Draft && s.Text <> s.Own) with
@@ -608,7 +608,7 @@ let tests =
                   "an index with no entries renders them under its preamble"
           }
 
-          // Phase 702 (D272): the measurement it starts from, as a test. Two changes cut from one commit
+          // Phase 702 (D273): the measurement it starts from, as a test. Two changes cut from one commit
           // each add one entry, the one way an entry is added; git must merge them in either order.
           test "two changes that each add an entry merge clean in either order, and the merged ledger reads both" {
               scratch (fun root ->

@@ -639,6 +639,13 @@ Every self-enumerated manifest this repository emits (`apply/`, `refusals/`, `de
 | `cases` | `adopted` and `vacuous` only | how many vectors the host's leg asserted: at least one and at most the row's `vectors` for `adopted`, exactly `0` for `vacuous` |
 | `kitVersion`, `sha` | together, on a measurement made in ANOTHER repository | the Core version the host's leg certified against, and the host commit (7 to 40 lower-case hex digits) that landed it |
 
+**When a record moves** (DECISIONS.md D272). A host's record moves at its first adoption of the family, when
+the family's vectors change and the host measures them, and when what the host's leg answers for a vector
+changes. It does not move when the host's pin moves to a Core version over vectors that did not change, or when
+a leg changes how it reports what it answered. So a `kitVersion` older than the host's pin is the reading that
+the family has not changed since that version, not that the record is stale; the host's current count is read in
+its own log (for `fuaran-core-rs`, each leg's `<family>: <answered> of <stated> vectors` line in its CI run).
+
 **The status is derived, never asserted.** The writer (`CorpusFile.adoptionCell`) takes a measurement
 and writes `vacuous` at zero cases and `adopted` above it, so it cannot state an adoption with no case
 behind it — the failure Phase 196 named for Core's own law families, where a family that asserted
@@ -700,7 +707,8 @@ reason, naming the spines that give it.
 **A family that grows keeps the measurements that stand.** When a vector is added to a family a host has
 adopted, the host's record keeps the cases its leg asserted at the commit it names (D231.3): `adopted` below
 the row's `vectors` is the reading that says the host has not run the new vector, and the evidence map's
-parity for that host reads the shortfall by name. The record moves only when the host measures again.
+parity for that host reads the shortfall by name. The record moves only when the host measures again: when
+the family's vectors or the host's answers change, never at a pin move over unchanged vectors (D272).
 
 ## Who answered a vector (Phase 478) {#answered-by}
 
