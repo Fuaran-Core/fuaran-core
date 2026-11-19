@@ -930,21 +930,37 @@ module Jsonl =
     /// numbered from 1 over ALL lines (blank lines counted, then skipped), `\r\n` read as `\n`;
     /// each non-blank line is scanned and handed to `decode`, and the first refusal — the
     /// scanner's or the decoder's — is the result.
+    ///
+    /// Phase 610: lines are found in place by `IndexOf '\n'`, a `\r` immediately before the `\n` taken
+    /// as part of the terminator, and each line is copied once, by one `Substring`; an empty line is
+    /// never copied. Until then the text was rewritten with `\r\n` read as `\n` and split, a second full
+    /// copy of a CRLF text. The lines, their numbers and every refusal are the split's.
     let scanRecords (decode: JsonlLine -> Result<'T, JsonlFault>) (text: string) : Result<'T list, JsonlFault> =
-        let lines = text.Replace("\r\n", "\n").Split('\n')
         let acc = ResizeArray<'T>()
         let mutable fault = None
-        let mutable k = 0
+        let mutable start = 0
+        let mutable number = 1
 
-        while fault.IsNone && k < lines.Length do
-            let text = lines[k]
+        while fault.IsNone && start <= text.Length do
+            let nl = text.IndexOf('\n', start)
+            let stop = if nl < 0 then text.Length else nl
 
-            if text.Trim() <> "" then
-                match parseLine (k + 1) text |> Result.bind decode with
-                | Ok v -> acc.Add v
-                | Error f -> fault <- Some f
+            let stop =
+                if nl >= 0 && stop > start && text[stop - 1] = '\r' then
+                    stop - 1
+                else
+                    stop
 
-            k <- k + 1
+            if stop > start then
+                let line = text.Substring(start, stop - start)
+
+                if line.Trim() <> "" then
+                    match parseLine number line |> Result.bind decode with
+                    | Ok v -> acc.Add v
+                    | Error f -> fault <- Some f
+
+            number <- number + 1
+            start <- if nl < 0 then text.Length + 1 else nl + 1
 
         match fault with
         | Some f -> Error f
