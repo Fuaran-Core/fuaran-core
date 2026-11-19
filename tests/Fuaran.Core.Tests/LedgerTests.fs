@@ -176,6 +176,19 @@ let tests =
               let root, slots, _, _ = live ()
               let path = Path.Combine(root, IndexPath)
               Approval.validate Approval.Docs
+
+              // D272.3: the release gesture's switch also closes each slot the gesture closed, rendering its
+              // entries into its file and removing their files; the shape clause reds one it has not.
+              let slots =
+                  match slots |> List.filter (fun s -> s.State <> Draft && s.Text <> s.Own) with
+                  | closing when not closing.IsEmpty && Approval.admits Approval.Docs Approval.Files.LedgerIndex ->
+                      for s in closing do
+                          for p in closeSlot root s do
+                              printfn "%s: closed %s (%s)" Approval.Docs s.Version p
+
+                      fst (read root)
+                  | _ -> slots
+
               let current = File.ReadAllText(path).Replace("\r\n", "\n")
               let rendered = renderIndex current slots
 

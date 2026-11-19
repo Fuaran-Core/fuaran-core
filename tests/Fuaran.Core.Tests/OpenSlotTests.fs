@@ -884,4 +884,29 @@ let tests =
                   try
                       Directory.Delete(root, true)
                   with _ ->
-                      () ]
+                      ()
+
+          // A guard over the live ledger: every entry of the standing draft rides it (D272). It cannot be red
+          // first, since no entry in this tree has ever sat in a class that advances its slot.
+          testCase "the standing draft holds no entry of a class that advances it"
+          <| fun _ ->
+              let root = Repo.root ()
+
+              match
+                  ChildProcess.Tags.released root |> Result.map ChildProcess.Tags.newest,
+                  OpenSlot.standingVersion (File.ReadAllText(Path.Combine(root, "Directory.Build.props")))
+              with
+              | Ok(Some newestTag), Ok standing ->
+                  match
+                      fst (Ledger.read root)
+                      |> List.tryFind (fun s -> s.Version = standing && s.State = Ledger.Draft)
+                  with
+                  | None -> ()
+                  | Some draft ->
+                      Expect.equal
+                          (OpenSlot.entryClassFaults (newestTag.Substring 1) draft)
+                          []
+                          "an entry whose class advances the draft does not ride it"
+              | Ok None, _ -> skiptest "no release tag in this tree's history: no draft rides one"
+              | Error why, _ -> skiptestf "the release tags could not be read: %s" why
+              | _, Error why -> failtest why ]
