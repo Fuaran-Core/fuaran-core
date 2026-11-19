@@ -57,7 +57,15 @@ let internal phaseForm = Regex(@"^fuaran-core#[1-9][0-9]*$", RegexOptions.Compil
 /// the runtime they run on — a string model, float digits, integer width, a hash, a stack — which this
 /// implementation's runtime gives it and another host's may not: each names a `probe`, the vector family
 /// under `conformance/premises/` whose every vector a HOST reproduces to discharge it on its own runtime.
-let classOrder = [ "domain-obligation"; "model-bridge"; "premise"; "host-premise" ]
+/// `witness-obligation` (Phase 601) is a property every implementation of a domain's own WITNESS must
+/// answer, discharged by that witness's own tests rather than by a law of this kit: it names the witness
+/// member that answers it in `dischargedBy`, `<Witness>.<member>`.
+let classOrder =
+    [ "domain-obligation"
+      "model-bridge"
+      "premise"
+      "host-premise"
+      "witness-obligation" ]
 
 let internal classes = Set.ofList classOrder
 
@@ -66,6 +74,12 @@ let internal classes = Set.ofList classOrder
 /// contract's whole content is WHICH kit's green run discharges the row.
 let internal lawForm =
     Regex(@"^Conformance\.([A-Za-z][A-Za-z0-9_']*)$", RegexOptions.Compiled)
+
+/// `<Witness>.<member>` — the witness member whose own tests discharge a `witness-obligation` (Phase 601):
+/// a type name and one member of it, as `Witness.Undo`. Only the FORM is held here: the witness lives
+/// in the domain's tree, which this family cannot read.
+let witnessMemberForm =
+    Regex(@"^([A-Z][A-Za-z0-9_']*)\.([A-Za-z][A-Za-z0-9_']*)$", RegexOptions.Compiled)
 
 /// `Suite:<Module>.<list>` — a test list this assembly declares, named by its module and its value
 /// (Phase 522). The third closed form a `tested` row's family takes, beside `Proofs.Oracle` and
@@ -514,7 +528,7 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                             "assumed-class"
                             "dischargedBy"
                             dischargedBy
-                            "only a `domain-obligation` names a discharging law"
+                            "only a `domain-obligation` or a `witness-obligation` names what discharges it"
                         @ misplaced "assumed-class" "closes" closes "only a `model-bridge` names a closing phase"
                         @ misplaced "assumed-class" "probe" probe "only a `host-premise` names a probe"
                     else
@@ -627,6 +641,41 @@ let checkLadder (inputs: LadderInputs) (ladderText: string) : string list =
                                 "closes"
                                 closes
                                 "a host premise is answered per host, not closed"
+                        | Some "witness-obligation" ->
+                            // Phase 601: discharged by the tests of the witness member it names, which
+                            // are the domain's, so neither a law of this kit, a `closes` nor a probe.
+                            let memberFindings =
+                                match dischargedBy with
+                                | None ->
+                                    [ finding
+                                          id
+                                          "witness-discharge"
+                                          "a `witness-obligation` carries no `dischargedBy` — an obligation on a witness that names no member answering it is one no witness can show it met" ]
+                                | Some d when lawForm.IsMatch d ->
+                                    [ finding
+                                          id
+                                          "witness-discharge"
+                                          (sprintf
+                                              "`dischargedBy` '%s' is a law of the kit — a row a conformance law discharges is a `domain-obligation`"
+                                              d) ]
+                                | Some d when not (witnessMemberForm.IsMatch d) ->
+                                    [ finding
+                                          id
+                                          "witness-discharge"
+                                          (sprintf "`dischargedBy` '%s' is not the `<Witness>.<member>` form" d) ]
+                                | Some _ -> []
+
+                            memberFindings
+                            @ misplaced
+                                "witness-discharge"
+                                "closes"
+                                closes
+                                "a witness obligation is discharged by the witness's tests, not closed"
+                            @ misplaced
+                                "witness-discharge"
+                                "probe"
+                                probe
+                                "a witness obligation is answered by a domain's witness, not by a host's runtime"
                         | Some _ ->
                             // `premise`: nothing discharges it and no phase closes it, so either
                             // field on such a row is a citation to something that does not exist.
@@ -902,7 +951,7 @@ let renderLadderSummary (ladderText: string) : string =
         |> List.length
 
     sprintf
-        "**The ladder, counted:** %d claims — %d proved (%d across %d models, %d a host's own proof), %d tested, %d assumed (%d `domain-obligation`, %d `model-bridge`, %d `premise`, %d `host-premise`), %d policy."
+        "**The ladder, counted:** %d claims — %d proved (%d across %d models, %d a host's own proof), %d tested, %d assumed (%d `domain-obligation`, %d `model-bridge`, %d `premise`, %d `host-premise`, %d `witness-obligation`), %d policy."
         (List.length rows)
         (List.length (at "proved"))
         (List.length ownProved)
@@ -914,6 +963,7 @@ let renderLadderSummary (ladderText: string) : string =
         (assumedIn "model-bridge")
         (assumedIn "premise")
         (assumedIn "host-premise")
+        (assumedIn "witness-obligation")
         (List.length (at "policy"))
 
 /// The README as the ladder says it must read: the summary block, the contract table's rows and the

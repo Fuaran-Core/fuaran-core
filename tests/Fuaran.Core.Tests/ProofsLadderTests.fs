@@ -24,7 +24,7 @@ module Fuaran.Core.Tests.ProofsLadderTests
 //   phase-form              every row's `phase` is the `fuaran-core#NNN` form.
 //   closed-level-set        every row's `level` is one of the closed four.
 //
-//   assumed-class           (174) every `assumed` row carries a `class` from the closed three, and
+//   assumed-class           (174) every `assumed` row carries a `class` from the closed set, and
 //                           no other row carries one — `level` says how strong a claim is, `class`
 //                           says which KIND of assumed an assumed row is.
 //   obligation-law          (174) a `domain-obligation` names `dischargedBy: Conformance.<law>`,
@@ -58,6 +58,10 @@ module Fuaran.Core.Tests.ProofsLadderTests
 //                           registry reads the two fields now, so a third copy could only drift.
 //   formula-form            (583) a row's optional `formula` is a non-blank string — LaTeX, authored —
 //                           or absent; any other member shape is refused. It is permitted at every level.
+//
+//   witness-discharge       (601) a `witness-obligation` names `dischargedBy: <Witness>.<member>`, the
+//                           witness member whose own tests discharge it — never a `Conformance.<law>`,
+//                           which makes the row a `domain-obligation` — and carries no `closes` or `probe`.
 //
 // WHAT IT DELIBERATELY IS NOT: a README parser — with ONE exception, taken at `contract-agrees`
 // and nowhere else, for the reason stated at that clause: the contract table is the same question
@@ -585,14 +589,17 @@ let proofsLadderTests =
                   0
                   "the ladder carries assumed rows, so assumed-class is not vacuous"
 
-              // and all three classes are used — a ladder that had quietly become one class would
-              // leave two clauses measuring nothing while reporting clean.
+              // and every class it can carry is used — a ladder that had quietly become one class
+              // would leave clauses measuring nothing while reporting clean. `witness-obligation`
+              // (Phase 601) is the one class this repository's ladder does not carry: it is an
+              // obligation on a DOMAIN's witness, which a domain's own ladder states, and the fixture
+              // baseline is what holds its clause non-vacuous.
               let classesUsed = rows |> List.choose (fun r -> strMember r "class") |> Set.ofList
 
               Expect.equal
                   classesUsed
-                  (Set.ofList classOrder)
-                  "every class in the closed set is carried by at least one row, so obligation-law and bridge-closes both bite"
+                  (Set.ofList classOrder |> Set.remove "witness-obligation")
+                  "every class but witness-obligation is carried by at least one row, so obligation-law, bridge-closes and premise-probe bite"
 
           testCase "proofs/README.md is the render of the ladder, the roster and the model headers"
           <| fun _ ->
@@ -906,11 +913,12 @@ let proofsLadderTests =
                       "contract-ok.md is the unmutated baseline for ladder-ok.json:\n%s"
                       (String.concat "\n" findings))
 
-              // and it is measuring something: the baseline ladder carries all three classes.
+              // and it is measuring something: the baseline ladder carries four of the classes (the
+              // host-premise rows are appended in the tests that supply their probes).
               Expect.equal
                   (List.length (contractFromLadder (fixture "ladder-ok.json")))
-                  3
-                  "the fixture ladder's three assumed rows are what the fixture table is compared against"
+                  4
+                  "the fixture ladder's four assumed rows are what the fixture table is compared against"
 
           testCase "go-red: contract-agrees — the table drops a row the ladder classifies"
           <| fun _ ->
@@ -1068,7 +1076,79 @@ let proofsLadderTests =
                   "fixture-premise"
                   (fun r -> r["probe"] <- Nodes.JsonValue.Create fixtureProbe)
                   "assumed-class"
-                  "probe" ]
+                  "probe"
+
+          // ---- Phase 601: the `witness-obligation` class ----
+
+          testCase "a witness-obligation row naming its witness member is clean, counted, and in the contract table"
+          <| fun _ ->
+              let ladder = fixture "ladder-ok.json"
+              let findings = checkLadder (fixtureInputs [ "Model" ]) ladder
+
+              Expect.isEmpty
+                  findings
+                  (sprintf "the baseline's witness obligation yields nothing:\n%s" (String.concat "\n" findings))
+
+              Expect.contains
+                  (contractFromLadder ladder)
+                  ("fixture-witness-obligation", "witness-obligation", "`FixtureWitness.Undo`")
+                  "the contract table's third column is the witness member"
+
+              Expect.stringContains (renderLadderSummary ladder) "1 `witness-obligation`" "the summary counts the class"
+
+          testCase "go-red: witness-discharge — a witness-obligation row with no dischargedBy"
+          <| fun _ ->
+              expectMutationFinding
+                  "a witness obligation naming no member"
+                  "fixture-witness-obligation"
+                  (fun r -> r.Remove "dischargedBy" |> ignore)
+                  "witness-discharge"
+                  "fixture-witness-obligation"
+
+          testCase "go-red: witness-discharge — a witness-obligation discharged by a law of the kit"
+          <| fun _ ->
+              expectMutationFinding
+                  "a witness obligation citing a conformance law"
+                  "fixture-witness-obligation"
+                  (fun r -> r["dischargedBy"] <- Nodes.JsonValue.Create "Conformance.fixtureLaws")
+                  "witness-discharge"
+                  "Conformance.fixtureLaws"
+
+          testCase "go-red: witness-discharge — a dischargedBy outside the <Witness>.<member> form"
+          <| fun _ ->
+              expectMutationFinding
+                  "a witness obligation naming a bare member"
+                  "fixture-witness-obligation"
+                  (fun r -> r["dischargedBy"] <- Nodes.JsonValue.Create "undo")
+                  "witness-discharge"
+                  "'undo'"
+
+          testCase "go-red: witness-discharge — a witness obligation carrying closes"
+          <| fun _ ->
+              expectMutationFinding
+                  "a witness obligation closed by a value"
+                  "fixture-witness-obligation"
+                  (fun r -> r["closes"] <- Nodes.JsonValue.Create "permanent")
+                  "witness-discharge"
+                  "closes"
+
+          testCase "go-red: witness-discharge — a witness obligation carrying a probe"
+          <| fun _ ->
+              expectMutationFinding
+                  "a witness obligation naming a probe"
+                  "fixture-witness-obligation"
+                  (fun r -> r["probe"] <- Nodes.JsonValue.Create fixtureProbe)
+                  "witness-discharge"
+                  "probe"
+
+          testCase "go-red: assumed-class — a witness member on a premise nothing discharges"
+          <| fun _ ->
+              expectMutationFinding
+                  "a premise row naming a witness member"
+                  "fixture-premise"
+                  (fun r -> r["dischargedBy"] <- Nodes.JsonValue.Create "FixtureWitness.Undo")
+                  "assumed-class"
+                  "dischargedBy" ]
 
 // ---------------------------------------------------------------------------
 //  Phase 175 — the kit's instantiation template, and `Skeleton.fst` as its first instance
