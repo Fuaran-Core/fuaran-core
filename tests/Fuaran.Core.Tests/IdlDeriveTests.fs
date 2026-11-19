@@ -3353,7 +3353,7 @@ module private KindTables =
     let tables: Map<string, KindTable> =
         Map.ofList
             [ "kindClass", KindTable.Text [ "Gate", "fuaran-kind-gate"; "Leaf", "fuaran-kind-leaf" ]
-              "isFlow", KindTable.Flag [ "Gate", true; "Leaf", false ]
+              "isFlow", KindTable.Bool [ "Gate", true; "Leaf", false ]
               "childField", KindTable.OptionalField [ "Gate", Some "body"; "Leaf", None ]
               "updatable", KindTable.Texts [ "Gate", [ "Body"; "Steps" ]; "Leaf", [] ]
               "tone", KindTable.Enum("Tone", [ "Gate", "Info"; "Leaf", "Warn" ]) ]
@@ -3453,10 +3453,10 @@ let kindTableTests =
                     KindTables.withTable "kindClass" (KindTable.Text [ "Gate", "g" ]),
                     "the kind `Leaf` in the kind table `kindClass`"
                     "an unknown kind",
-                    KindTables.withTable "isFlow" (KindTable.Flag [ "Gate", true; "Leaf", false; "Ghost", true ]),
+                    KindTables.withTable "isFlow" (KindTable.Bool [ "Gate", true; "Leaf", false; "Ghost", true ]),
                     "the kind `Ghost` in the kind table `isFlow`"
                     "a duplicate row",
-                    KindTables.withTable "isFlow" (KindTable.Flag [ "Gate", true; "Leaf", false; "Gate", false ]),
+                    KindTables.withTable "isFlow" (KindTable.Bool [ "Gate", true; "Leaf", false; "Gate", false ]),
                     "the kind `Gate` in the kind table `isFlow`"
                     "a field the kind does not declare",
                     KindTables.withTable
@@ -3567,13 +3567,13 @@ let kindTableTests =
               refused "an unknown column" "{ \"name\": \"t\", \"column\": \"number\", \"rows\": [] }" "UnknownTag"
 
               refused
-                  "a flag row holding a string"
-                  "{ \"name\": \"t\", \"column\": \"flag\", \"rows\": [ { \"kind\": \"Gate\", \"value\": \"yes\" } ] }"
+                  "a bool row holding a string"
+                  "{ \"name\": \"t\", \"column\": \"bool\", \"rows\": [ { \"kind\": \"Gate\", \"value\": \"yes\" } ] }"
                   "WrongKind"
 
               refused
                   "two tables of one name"
-                  "{ \"name\": \"t\", \"column\": \"text\", \"rows\": [] }, { \"name\": \"t\", \"column\": \"flag\", \"rows\": [] }"
+                  "{ \"name\": \"t\", \"column\": \"text\", \"rows\": [] }, { \"name\": \"t\", \"column\": \"bool\", \"rows\": [] }"
                   "a second table named t"
 
               match

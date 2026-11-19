@@ -994,7 +994,7 @@ module internal FSharpDerive =
                     "a per-kind table is a match over the module's kinds, and this selection emits none"
                     "select at least one kind"
             | Some(KindTable.Text rows) -> Ok("string", rows |> List.map (fun (k, v) -> k, Ok(SourceLit.fsString v)))
-            | Some(KindTable.Flag rows) ->
+            | Some(KindTable.Bool rows) ->
                 Ok("bool", rows |> List.map (fun (k, v) -> k, Ok(if v then "true" else "false")))
             | Some(KindTable.Texts rows) -> Ok("string list", rows |> List.map (fun (k, v) -> k, Ok(strings v)))
             | Some(KindTable.OptionalField rows) ->

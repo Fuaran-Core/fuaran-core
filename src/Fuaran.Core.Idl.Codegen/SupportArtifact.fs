@@ -107,7 +107,7 @@ module SupportArtifact =
         | Some s -> [ name, JStr s ]
         | None -> []
 
-    /// Phase 689 — one per-kind table: its name, its column (`text`, `flag`, `optionalField`, `texts`, or
+    /// Phase 689 — one per-kind table: its name, its column (`text`, `bool`, `optionalField`, `texts`, or
     /// `enum` with the enum's name beside it) and its rows in authored order, each `{ "kind", "value" }`. An
     /// optional-field row that names no field carries no `value`, the `optKey` posture.
     let private kindTableJson (name: string) (table: KindTable) : JVal =
@@ -120,7 +120,7 @@ module SupportArtifact =
         let column, enumKey, rows =
             match table with
             | KindTable.Text rs -> "text", [], rs |> List.map (fun (k, v) -> row k (Some(JStr v)))
-            | KindTable.Flag rs -> "flag", [], rs |> List.map (fun (k, v) -> row k (Some(JBool v)))
+            | KindTable.Bool rs -> "bool", [], rs |> List.map (fun (k, v) -> row k (Some(JBool v)))
             | KindTable.OptionalField rs ->
                 "optionalField", [], rs |> List.map (fun (k, v) -> row k (Option.map JStr v))
             | KindTable.Texts rs -> "texts", [], rs |> List.map (fun (k, v) -> row k (Some(lines v)))
@@ -293,7 +293,7 @@ module SupportArtifact =
             Decoder.tagDispatch
                 "column"
                 [ "text", rows (Decoder.field "value" Decoder.str) |> Decoder.map KindTable.Text
-                  "flag", rows (Decoder.field "value" Decoder.bool) |> Decoder.map KindTable.Flag
+                  "bool", rows (Decoder.field "value" Decoder.bool) |> Decoder.map KindTable.Bool
                   "optionalField", rows (optStr "value") |> Decoder.map KindTable.OptionalField
                   "texts", rows (Decoder.field "value" Decoder.strings) |> Decoder.map KindTable.Texts
                   "enum",

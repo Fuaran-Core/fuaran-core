@@ -309,7 +309,7 @@ and `Doc`, the support record carried docs and source splices, and no derivation
    it is total is a property of the whole vocabulary rather than of one declaration. The support record is already
    the channel for what a host declares beside the wire, and a table is data rather than source, so the IDL's
    wire-facing content and its hash do not move.
-2. **The column is a closed set of data forms, never an expression:** `text` (a string), `flag` (a bool),
+2. **The column is a closed set of data forms, never an expression:** `text` (a string), `bool`,
    `optionalField` (the wire name of one of the row's kind's own fields, or none), `texts` (a list of strings) and
    `enum` (a case of a declared enum, by its host name). The column is the `KindTable` case, so a row of another
    type cannot be written. `texts` is beyond the four forms the phase named: one family waiting on the table, the

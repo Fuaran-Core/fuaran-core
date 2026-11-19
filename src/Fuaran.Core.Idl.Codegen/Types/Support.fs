@@ -59,7 +59,7 @@ type KindTable =
     /// A string per kind; the lookup answers `string`.
     | Text of rows: (string * string) list
     /// A bool per kind; the lookup answers `bool`.
-    | Flag of rows: (string * bool) list
+    | Bool of rows: (string * bool) list
     /// The wire name of one of the row's kind's own fields, or none; the lookup answers `string option`.
     | OptionalField of rows: (string * string option) list
     /// A list of strings per kind; the lookup answers `string list`.
