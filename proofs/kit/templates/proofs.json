@@ -48,6 +48,19 @@
       }
     },
     {
+      "id": "<witness>-<member>-obligation",
+      "level": "assumed",
+      "$note": "EXAMPLE of the `witness-obligation` class: keep it only if a theorem here takes a property of your domain's own witness as a hypothesis, else delete the row. `dischargedBy` names the witness member whose own tests discharge it, `<Witness>.<member>`, and is required on this class; a row a `Conformance.<law>` discharges is a `domain-obligation` instead.",
+      "statement": "Every implementation of the witness answers the property the theorem takes as a hypothesis about the member named below.",
+      "boundary": "No theorem here proves it of any witness: each implementation's own tests discharge it, over the cases they draw.",
+      "phase": "<repo>#<phase>",
+      "class": "witness-obligation",
+      "dischargedBy": "<Witness>.<member>",
+      "evidence": {
+        "assumption": "<Witness>.<member> answers <the property>, for every implementation of <Witness>"
+      }
+    },
+    {
       "id": "proof-leg",
       "level": "policy",
       "statement": "Which prover is pinned, how many cold-cache runs a check is, and that a model edited without re-extracting fails the leg: the reproducibility posture the proved rows above are only as good as. Each module's cold-run budget is declared in proofs/modules.json and measured on every run.",
