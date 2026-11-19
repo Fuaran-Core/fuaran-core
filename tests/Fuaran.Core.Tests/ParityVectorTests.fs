@@ -535,6 +535,80 @@ let private uncovered (labels: string list) : (string * string) list =
               if not (labels |> List.exists (fun l -> l.StartsWith prefix)) then
                   yield family, prefix ]
 
+/// Phase 699 — the census of the query declaration family (`laws/query-declaration-laws.json`): each of the
+/// family's case groups maps to the row prefix that runs it, and every refusal code its vectors expect (a decode
+/// code of the declaration reader, or a query error's `$type`) is the code some `queryDecl/` row answers. The
+/// groups and the codes are read from the committed family, so a group or a code it gains with no row is red here,
+/// named. Until Phase 699 no row reached any of them, so the family was compiled under Fable and never run there.
+let private queryDeclarationGroups: (string * string) list =
+    [ "declarationRefused", "queryDecl/read/"
+      "admissionFault", "queryDecl/admit/"
+      "register", "queryDecl/register/"
+      "validateParams", "queryDecl/validate/"
+      "dispatch", "queryDecl/dispatch/" ]
+
+/// The committed family's case groups and refusal codes, each in first-seen order.
+let private queryDeclarationFamily () : string list * string list =
+    let path =
+        System.IO.Path.Combine(OwnedConformance.root (), "laws", "query-declaration-laws.json")
+
+    let member' name el =
+        match el with
+        | JObj ms -> ms |> List.tryPick (fun (k, v) -> if k = name then Some v else None)
+        | _ -> None
+
+    let vectors =
+        match Json.parse (System.IO.File.ReadAllText path) |> Result.map (member' "vectors") with
+        | Ok(Some(JArr vs)) -> vs
+        | other -> failwithf "%s holds no vectors: %A" path other
+
+    let str name el =
+        match member' name el with
+        | Some(JStr s) -> Some s
+        | _ -> None
+
+    let groups = vectors |> List.choose (str "case") |> List.distinct
+
+    let codes =
+        vectors
+        |> List.choose (fun v ->
+            member' "expected" v
+            |> Option.bind (fun e -> str "code" e |> Option.orElse (member' "error" e |> Option.bind (str "$type"))))
+        |> List.distinct
+
+    groups, codes
+
+/// The code a `queryDecl/` row answers: a query error's `$type` where the row carries an error document, else the
+/// decode code before a refusal's `@<path>`.
+let private rowCode (value: string) : string option =
+    let marker = "\"$type\":\""
+    let i = value.IndexOf marker
+
+    if i >= 0 then
+        let start = i + marker.Length
+        Some(value.Substring(start, value.IndexOf('"', start) - start))
+    else
+        let at = value.IndexOf '@'
+        if at > 0 then Some(value.Substring(0, at)) else None
+
+/// The census's gaps over `rows`: each case group with no prefix or no row under it, and each refusal code no
+/// `queryDecl/` row answers.
+let private queryDeclarationGaps (groups: string list, codes: string list) (rows: (string * string) list) =
+    [ for group in groups do
+          match queryDeclarationGroups |> List.tryFind (fst >> (=) group) with
+          | None -> yield sprintf "case group %s has no row prefix" group
+          | Some(_, prefix) ->
+              if not (rows |> List.exists (fun (l, _) -> l.StartsWith prefix)) then
+                  yield sprintf "case group %s has no row under %s" group prefix
+      for code in codes do
+          if
+              not (
+                  rows
+                  |> List.exists (fun (l, v) -> l.StartsWith "queryDecl/" && rowCode v = Some code)
+              )
+          then
+              yield sprintf "refusal code %s is answered by no queryDecl/ row" code ]
+
 /// The hash SWEEP (Phase 217 — the retired `tests/hash-parity-probe` corpus, absorbed): 124 rows,
 /// each four digests wide. Pinned as a COUNT and a DIGEST over the rows rather than row by row — the
 /// named table above carries the hand-checkable known answers, and 496 hex strings committed here
@@ -598,6 +672,24 @@ let tests =
                   (uncovered (ParityVectors.vectors |> List.map fst))
                   []
                   "a 0.43 runtime family with no row is compiled under Fable and never run there"
+
+          // Phase 699 — the query declaration family's census. The first assertions are the probe's control:
+          // the family is read (five groups, codes present), and over no rows every group and every code is named.
+          testCase "every case group and refusal code of the query declaration family keeps a row"
+          <| fun _ ->
+              let groups, codes = queryDeclarationFamily ()
+              Expect.equal (List.length groups) (List.length queryDeclarationGroups) "the family's case groups"
+              Expect.isNonEmpty codes "the family's refusal codes"
+
+              Expect.equal
+                  (queryDeclarationGaps (groups, codes) [] |> List.length)
+                  (List.length groups + List.length codes)
+                  "the census names every group and every code over a table with no rows"
+
+              Expect.equal
+                  (queryDeclarationGaps (groups, codes) ParityVectors.vectors)
+                  []
+                  "a query declaration refusal with no row is compiled under Fable and never run there"
 
           // The runner compares the two pipelines' STDOUT line by line. .NET and node do not agree
           // about how to write a lone surrogate or a control byte to a terminal, so a table whose
