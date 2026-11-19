@@ -309,7 +309,7 @@ let internal check (floor: Floor) (entries: Entry list) : string list =
           | Released(newest, tag) ->
               yield
                   sprintf
-                      "D%d is missing, and %s carried every number up to D%d: a released number is never missing, so restore its entry from that release's record, or record D%d `Never-minted` if no decision carries it (DECISIONS.md D275)"
+                      "D%d is missing, and %s carries numbers up to D%d: record D%d `Never-minted`, restore its entry if it was lost, or land the change that holds it before the release (DECISIONS.md D275)"
                       id
                       tag
                       newest
@@ -577,8 +577,9 @@ let tests =
               Expect.exists
                   (check (Released(2, "v9.9.9")) entries)
                   (fun e ->
-                      e.Contains "D2 is missing, and v9.9.9 carried every number up to D2"
-                      && e.Contains "record D2 `Never-minted`")
+                      e.Contains "D2 is missing, and v9.9.9 carries numbers up to D2"
+                      && e.Contains "record D2 `Never-minted`"
+                      && e.Contains "land the change that holds it")
                   "a number the release carried"
 
               Expect.exists

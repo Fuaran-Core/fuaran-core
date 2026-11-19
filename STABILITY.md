@@ -87,7 +87,7 @@ this order, because each step reads the one before it:
    `CORE_APPROVE_DOCS=ledger-index`, which removes the entry files it prints; DECISIONS.md D274), and regenerate the README's version stamps
    (`dotnet run --project tests/Fuaran.Core.Tests -- --filter ReadmeClaims` with `CORE_APPROVE_README=1` set in the environment). The
    stamps are derived from the tags, so the regeneration runs under a provisional LOCAL tag on the
-   candidate commit (its `api/` is the release's); delete that tag after the commit.
+   candidate commit (its `api/` is the release's); delete that tag after the commit. By this commit `DECISIONS.md` holds no missing number, each one given up recorded `Never-minted` (DECISIONS.md D275).
 5. Tag THAT commit `v<v>` and push the commit and the tag together
    (`git push --atomic origin main v<v>`), so no CI run sees the turned heading without its tag. A
    push of the commit alone runs `main`'s CI red on the second clause until the tag exists, and a tag

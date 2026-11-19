@@ -93,11 +93,18 @@ A ruling that changes what the code promises, or declines a change someone will 
 entry in [`DECISIONS.md`](DECISIONS.md). An entry is a heading, `## <yyyy-mm-dd> — D<n>: <title>`,
 placed newest first; directly under it, after one blank line, a status line, which is mandatory:
 `**Status:** Live` for a new ruling. The clauses (`Live`, `Amended-by D<n>`, `Superseded-by D<n>`,
-`Moved-to-compute`, `Never-minted`) and how they combine are stated at the head of the file. The number
-is the next one after the newest; a number that was skipped is recorded as `Never-minted`, never
-reused. An entry that changes an earlier one also changes that entry's status line, in the same commit:
-the earlier ruling reads `Amended-by D<n>` or `Superseded-by D<n>` at its own heading, so nobody reads
-it as current. Then regenerate the index and stage the file:
+`Moved-to-compute`, `Never-minted`) and how they combine are stated at the head of the file. An entry that
+changes an earlier one also changes that entry's status line, in the same commit: the earlier ruling reads
+`Amended-by D<n>` or `Superseded-by D<n>` at its own heading, so nobody reads it as current.
+
+The number is the one held for the change before its work started, or else the next one after the newest. A held
+number may land above a number that is still missing, while the standing release slot is the draft and the
+missing number is above the newest the last release carried (DECISIONS.md D275). A held number below an entry the
+change would amend or supersede cannot be used for that: the change takes a number above that entry, and the held
+one is recorded `Never-minted`. A number that is skipped, or held for a change that is given up, is recorded
+`Never-minted`, never reused: an entry `## <date> — D<n>: never minted` with `**Status:** Never-minted` and one
+sentence saying why, dated the day it is recorded, as D6 is. Record it before the release: the commit that closes
+the slot refuses every missing number. Then regenerate the index and stage the file:
 
 ```powershell
 $env:CORE_APPROVE_DOCS = 'DECISIONS'
@@ -106,8 +113,10 @@ Remove-Item Env:CORE_APPROVE_DOCS
 ```
 
 `DecisionsTests` fails by name on a heading with no status line, a clause outside the grammar, a status
-naming an entry that is not newer, a missing or repeated number, and an index that is not the render
-of the headings.
+naming an entry that is not newer, a repeated number, a missing number at or below the newest the last
+release carried, and an index that is not the render of the headings. The `Release ledger` family fails
+by name on every missing number once the standing slot is not the draft. Each refusal names the number
+and what to do: record it `Never-minted`, or land the change that holds it.
 
 ## Coding standards
 
