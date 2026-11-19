@@ -1551,12 +1551,57 @@ module Column =
                     // Halved first: each half is exact, and their sum is within the range.
                     finiteOr col "median" (a / 2.0 + b / 2.0)
 
+    /// Is the day of every present row one the canonical form spells (Phase 612)? Over such days the
+    /// day count orders and identifies the rows exactly as their fixed-width texts do. Past that range
+    /// it does not (`10000-01-01` sorts before `2026-01-01` as text), and `aggregate` does not
+    /// validate, so a column holding such a day is read as the cells it renders.
+    let private daysInRange (rows: ColumnStorage.PresentRows) (xs: Vector<int>) : bool =
+        let mutable inRange = true
+        let mutable i = 0
+
+        while inRange && i < rows.Count do
+            if ColumnStorage.isSet rows i && not (TemporalText.isDayInRange xs[i]) then
+                inRange <- false
+
+            i <- i + 1
+
+        inRange
+
+    /// Is the instant of every present row one the canonical form spells, a whole second in range and a
+    /// fraction below the unit's scale (Phase 612)? Over such instants (second, then fraction) orders
+    /// and identifies the rows exactly as `TemporalText.compareInstants` and their texts do. Outside it
+    /// two instants can render one text (a half second renders as its whole second, a fraction of the
+    /// unit's scale as a tenth), so a column holding one is read as the cells it renders.
+    let private instantsInRange
+        (unit: TimeUnit)
+        (rows: ColumnStorage.PresentRows)
+        (xs: Vector<float>)
+        (fraction: Vector<int> option)
+        : bool =
+        let mutable inRange = true
+        let mutable i = 0
+
+        while inRange && i < rows.Count do
+            if
+                ColumnStorage.isSet rows i
+                && not (TemporalText.isInstantInRange unit xs[i] (ColumnStorage.fractionAt fraction i))
+            then
+                inRange <- false
+
+            i <- i + 1
+
+        inRange
+
     /// `Min` / `Max` (Phase 299): the least / greatest present value by `Cell.compare`'s order — an
     /// incomparable pair keeping the incumbent, `Min` keeping the FIRST of equals and `Max` taking the
-    /// LAST, which is what tells `-0` from `0` — and `Null` over no present row. An int, float or
-    /// string column is compared as its values. A bool, date, timestamp or decimal column is compared
-    /// as the cells it renders, whose order (chronological for an instant, Phase 422; exact for a
-    /// decimal, whatever its text) is `Cell.compare`'s own, and a decimal answer is canonicalised.
+    /// LAST, which is what tells `-0` from `0` — and `Null` over no present row. An int, float, bool
+    /// or string column is compared as its values (a bool false before true). A date or timestamp
+    /// column whose every present value is in the canonical range is compared as its day counts, or
+    /// its seconds and then fractions (Phase 612), which is `Cell.compare`'s order over the texts they
+    /// render, and only the answer is rendered. Any other date or timestamp column, and a decimal
+    /// column, is compared as the cells it renders, whose order (chronological for an instant, Phase
+    /// 422; exact for a decimal, whatever its text) is `Cell.compare`'s own, and a decimal answer is
+    /// canonicalised.
     let private extreme (isMin: bool) (col: Column) : Cell =
         let rows = ColumnStorage.presentRows (length col) (validity col)
         let mutable best = -1
@@ -1602,7 +1647,53 @@ module Column =
                     best <- i
 
             if best < 0 then Null else Str items[offset + best]
-        | Bools _
+        | Bools(xs, _) ->
+            let items = xs.Items
+            let offset = xs.Offset
+
+            for i in 0 .. rows.Count - 1 do
+                if
+                    ColumnStorage.isSet rows i
+                    && (best < 0 || replaces (compare items[offset + best] items[offset + i]))
+                then
+                    best <- i
+
+            if best < 0 then Null else Bool items[offset + best]
+        | Dates(xs, _) when daysInRange rows xs ->
+            let items = xs.Items
+            let offset = xs.Offset
+
+            for i in 0 .. rows.Count - 1 do
+                if
+                    ColumnStorage.isSet rows i
+                    && (best < 0 || replaces (compare items[offset + best] items[offset + i]))
+                then
+                    best <- i
+
+            if best < 0 then
+                Null
+            else
+                Date(TemporalText.dateText items[offset + best])
+        | Timestamps(unit, xs, fraction, _) when instantsInRange unit rows xs fraction ->
+            let order (a: int) (b: int) =
+                let sa = xs[a]
+                let sb = xs[b]
+
+                if sa < sb then
+                    -1
+                elif sa > sb then
+                    1
+                else
+                    compare (ColumnStorage.fractionAt fraction a) (ColumnStorage.fractionAt fraction b)
+
+            for i in 0 .. rows.Count - 1 do
+                if ColumnStorage.isSet rows i && (best < 0 || replaces (order best i)) then
+                    best <- i
+
+            if best < 0 then
+                Null
+            else
+                Timestamp(TemporalText.instantText unit xs[best] (ColumnStorage.fractionAt fraction best))
         | Dates _
         | Timestamps _
         | Decimals _ ->
@@ -1626,8 +1717,10 @@ module Column =
 
     /// `CountDistinct` (Phase 101): the distinct present values under `Cell.token`'s identity — an
     /// int and a string as themselves; a float with every NaN one value and `-0` one with `0` (the
-    /// two floats `token` merges, and the only two); a bool, date, timestamp or decimal column by the
-    /// token of the cell it renders, which reads a decimal canonically.
+    /// two floats `token` merges, and the only two); a bool as itself; a date or timestamp column whose
+    /// every present value is in the canonical range by its day count, or its second and fraction
+    /// (Phase 612), each of which names one text there; and any other date or timestamp column, and a
+    /// decimal column, by the token of the cell it renders, which reads a decimal canonically.
     let private distinctCount (col: Column) : int =
         let rows = ColumnStorage.presentRows (length col) (validity col)
 
@@ -1670,7 +1763,36 @@ module Column =
                     seen.Add(if isNull s then (Cell.token (Str s)).Substring 2 else s) |> ignore
 
             seen.Count
-        | Bools _
+        | Bools(xs, _) ->
+            let mutable falses = 0
+            let mutable trues = 0
+            let items = xs.Items
+            let offset = xs.Offset
+
+            for i in 0 .. rows.Count - 1 do
+                if ColumnStorage.isSet rows i then
+                    if items[offset + i] then trues <- 1 else falses <- 1
+
+            falses + trues
+        | Dates(xs, _) when daysInRange rows xs ->
+            let seen = System.Collections.Generic.HashSet<int>()
+            let items = xs.Items
+            let offset = xs.Offset
+
+            for i in 0 .. rows.Count - 1 do
+                if ColumnStorage.isSet rows i then
+                    seen.Add items[offset + i] |> ignore
+
+            seen.Count
+        | Timestamps(unit, xs, fraction, _) when instantsInRange unit rows xs fraction ->
+            // `+ 0.0` makes a `-0.0` second the `0.0` it renders as.
+            let seen = System.Collections.Generic.HashSet<struct (float * int)>()
+
+            for i in 0 .. rows.Count - 1 do
+                if ColumnStorage.isSet rows i then
+                    seen.Add(struct (xs[i] + 0.0, ColumnStorage.fractionAt fraction i)) |> ignore
+
+            seen.Count
         | Dates _
         | Timestamps _
         | Decimals _ ->

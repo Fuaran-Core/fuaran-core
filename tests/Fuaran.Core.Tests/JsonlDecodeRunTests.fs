@@ -528,3 +528,113 @@ let strictTests =
                   | None, Error f -> failtestf "%s: refused (%s)" label (JsonlFault.toString f)
                   | Some _, Ok _ -> failtestf "%s: read" label
                   | Some(pos, reason), Error f -> Expect.equal (f.Position, f.Reason) (pos, reason) label ]
+
+// ---- Phase 610 — the record scan finds its lines in place ----
+
+/// The line scan as it stood before Phase 610, kept verbatim: the text rewritten with `\r\n` read as
+/// `\n`, split on `\n`, every line numbered, the blank ones skipped.
+module private LineOracle =
+
+    /// `crlf = false` is a broken scan for the go-red: it keeps the `\r` of a CRLF in the line.
+    let scanWith (crlf: bool) (decode: JsonlLine -> Result<'T, JsonlFault>) (text: string) =
+        let lines = (if crlf then text.Replace("\r\n", "\n") else text).Split('\n')
+        let acc = ResizeArray<'T>()
+        let mutable fault = None
+        let mutable k = 0
+
+        while fault.IsNone && k < lines.Length do
+            let text = lines[k]
+
+            if text.Trim() <> "" then
+                match Jsonl.parseLine (k + 1) text |> Result.bind decode with
+                | Ok v -> acc.Add v
+                | Error f -> fault <- Some f
+
+            k <- k + 1
+
+        match fault with
+        | Some f -> Error f
+        | None -> Ok(List.ofSeq acc)
+
+    let scan decode text = scanWith true decode text
+
+    /// Every line's number and text, and a reader's own refusal of any line whose `a` is 2.
+    let decode (line: JsonlLine) =
+        if Jsonl.tryRawField "a" line = Some "2" then
+            Error(Jsonl.refuse line "two")
+        else
+            Ok(Jsonl.lineNumber line, Jsonl.lineText line)
+
+    /// The fragments a text is built from: terminators of both kinds and a lone `\r`, blank and
+    /// whitespace lines, a good line, a line the reader refuses, and a line the scanner refuses.
+    let fragments =
+        [ "\n"; "\r\n"; "\r"; " "; "\t"; "{\"a\":1}"; "{\"a\":2}"; "{\"a\":"; "x" ]
+
+    /// Every sequence of up to `n` fragments.
+    let texts (n: int) : string list =
+        let rec exactly k =
+            if k = 0 then
+                [ "" ]
+            else
+                [ for t in exactly (k - 1) do
+                      for f in fragments -> t + f ]
+
+        [ for k in 0..n do
+              yield! exactly k ]
+
+[<Tests>]
+let lineScanTests =
+    testList
+        "JsonlLineScan (Phase 610)"
+        [ testCase "every text of up to five fragments scans as the split did: lines, numbers and refusals"
+          <| fun _ ->
+              let inputs = LineOracle.texts 5 |> List.distinct
+              Expect.isGreaterThan inputs.Length 50000 "the sweep is the one written"
+
+              let differing =
+                  inputs
+                  |> List.filter (fun t -> Jsonl.scanRecords LineOracle.decode t <> LineOracle.scan LineOracle.decode t)
+
+              Expect.equal (differing |> List.truncate 10) [] "no text differs"
+
+              let refused =
+                  inputs
+                  |> List.filter (fun t -> Result.isError (Jsonl.scanRecords LineOracle.decode t))
+
+              Expect.isGreaterThan refused.Length 10000 "refusals of both kinds are in the sweep"
+
+          testCase "the terminators, the blank lines and a refusal's line, pinned"
+          <| fun _ ->
+              let read t = Jsonl.scanRecords LineOracle.decode t
+
+              Expect.equal
+                  (read "{\"a\":1}\r\n\r\n{\"a\":3}")
+                  (Ok [ 1, "{\"a\":1}"; 3, "{\"a\":3}" ])
+                  "CRLF, a blank line counted"
+
+              Expect.equal (read "{\"a\":1}\n") (Ok [ 1, "{\"a\":1}" ]) "a final terminator opens no line"
+              Expect.equal (read "") (Ok []) "an empty text holds no line"
+
+              Expect.equal
+                  (read "{\"a\":1}\r\r\n")
+                  (Ok [ 1, "{\"a\":1}\r" ])
+                  "a lone \\r before the CRLF stays in the line"
+
+              match read "\n \r\n{\"a\":\r\n" with
+              | Error f ->
+                  Expect.equal
+                      (f.Line, f.Position, f.Reason)
+                      (3, 5, JsonlFaultReason.Truncated)
+                      "a truncated third line"
+              | Ok _ -> failtest "a truncated line read"
+
+          testCase "the sweep can fail: a scan that keeps the \\r of a CRLF is caught"
+          <| fun _ ->
+              let inputs = LineOracle.texts 3 |> List.distinct
+
+              Expect.exists
+                  inputs
+                  (fun t ->
+                      LineOracle.scanWith false LineOracle.decode t
+                      <> Jsonl.scanRecords LineOracle.decode t)
+                  "a broken terminator is a difference" ]

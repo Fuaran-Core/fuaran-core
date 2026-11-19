@@ -313,16 +313,19 @@ module Dag =
         : string =
         nodeHashAs Actor.encode hashFn encode parents actor op
 
-    /// The heads — nodes that are no node's parent.
+    /// The heads — nodes that are no node's parent — in ordinal id order. One pass gathers every parent
+    /// into a `HashSet` and a right fold reads the node map, whose keys are already in ordinal order
+    /// (Phase 614; three whole-DAG lists, a `Set` and a sort before). Both walk the map with its own
+    /// iterators, which allocate nothing per node, where its enumerator allocates per step.
     let heads (dag: T<'Op>) : string list =
-        let parents =
-            dag.Nodes |> Map.toList |> List.collect (fun (_, n) -> n.Parents) |> Set.ofList
+        let parents = System.Collections.Generic.HashSet<string>(dag.Nodes.Count)
 
         dag.Nodes
-        |> Map.toList
-        |> List.map fst
-        |> List.filter (fun id -> not (parents.Contains id))
-        |> List.sort
+        |> Map.iter (fun _ n ->
+            for p in n.Parents do
+                parents.Add p |> ignore)
+
+        Map.foldBack (fun id _ acc -> if parents.Contains id then acc else id :: acc) dag.Nodes []
 
     /// The splice premise on one parent id (Phase 300): not a comma-bearing id. `""` is judged by the
     /// caller, because it means genesis to `append` and nothing at all to `merge`.
@@ -686,25 +689,37 @@ module Dag =
     /// per-head drain restricted (DagFold section 13).
     /// Over a DOWN-CLOSED set (an ancestor closure) a held parent is a parent in the set, so the drain
     /// of the set is the drain of the sub-DAG it names (`drainClosure`).
+    /// The in-degrees and children are mutable `Dictionary`s (Phase 614; immutable maps rebuilt per
+    /// edge before); the frontier stays the ordered `Set`, which is what defines the order. The node map
+    /// is walked with its own iterators, which allocate nothing per node.
     let private drainNodes (key: DagNode<'Op> -> 'K) (nodes: Map<string, DagNode<'Op>>) : string list * string list =
-        let mutable indeg: Map<string, int> = Map.empty
-        let mutable children: Map<string, string list> = Map.empty
+        let indeg = System.Collections.Generic.Dictionary<string, int>(nodes.Count)
 
-        for KeyValue(id, n) in nodes do
-            let held = n.Parents |> List.filter nodes.ContainsKey
-            indeg <- Map.add id (List.length held) indeg
-
-            for p in held do
-                children <- Map.add p (id :: (Map.tryFind p children |> Option.defaultValue [])) children
+        let children =
+            System.Collections.Generic.Dictionary<string, ResizeArray<string>>(nodes.Count)
 
         let mutable ready: Set<'K * string> =
-            indeg
-            |> Map.toSeq
-            |> Seq.filter (fun (_, d) -> d = 0)
-            |> Seq.map (fun (id, _) -> key nodes[id], id)
-            |> Set.ofSeq
+            nodes
+            |> Map.fold
+                (fun ready id n ->
+                    let mutable held = 0
 
-        let placed = ResizeArray<string>()
+                    for p in n.Parents do
+                        if nodes.ContainsKey p then
+                            held <- held + 1
+
+                            match children.TryGetValue p with
+                            | true, kids -> kids.Add id
+                            | _ ->
+                                let kids = ResizeArray<string>()
+                                kids.Add id
+                                children[p] <- kids
+
+                    indeg[id] <- held
+                    if held = 0 then Set.add (key n, id) ready else ready)
+                Set.empty
+
+        let placed = ResizeArray<string>(nodes.Count)
 
         while not (Set.isEmpty ready) do
             let top = Set.minElement ready
@@ -712,23 +727,19 @@ module Dag =
             let id = snd top
             placed.Add id
 
-            match Map.tryFind id children with
-            | Some kids ->
-                for k in kids do
+            match children.TryGetValue id with
+            | true, kids ->
+                for i in 0 .. kids.Count - 1 do
+                    let k = kids[i]
                     let d = indeg[k] - 1
-                    indeg <- Map.add k d indeg
+                    indeg[k] <- d
 
                     if d = 0 then
                         ready <- Set.add (key nodes[k], k) ready
-            | None -> ()
+            | _ -> ()
 
-        let placedSet = Set.ofSeq placed
-
-        List.ofSeq placed,
-        nodes
-        |> Map.toList
-        |> List.map fst
-        |> List.filter (fun id -> not (Set.contains id placedSet))
+        // every node is placed at most once, so the unplaced are exactly the nodes left above zero
+        List.ofSeq placed, Map.foldBack (fun id _ acc -> if indeg[id] > 0 then id :: acc else acc) nodes []
 
     /// `drainNodes` over the whole DAG.
     let private drainBy (key: DagNode<'Op> -> 'K) (dag: T<'Op>) : string list * string list = drainNodes key dag.Nodes
