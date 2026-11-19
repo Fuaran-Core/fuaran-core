@@ -790,31 +790,53 @@ let tests =
 
                   Expect.isFalse (Directory.Exists(Path.Combine(root, Dir, "0.9.1"))) "and the entry directory is gone")
           }
-          // Phase 702 (D274): the open slot's entries moved into their own files, word for word, by one commit made
-          // on `movedFrom`. A guard written after the move, so it cannot be red first; it holds the move against the
-          // tree it was made from for as long as the slot stands, and its entries' words once the slot closes.
+          // Phase 702 (D274): the open slot's entries moved into their own files, word for word, by two commits, each
+          // made on the commit named here: the first moved the twelve entries the slot held, the second the three a
+          // merge of main brought in the old shape (Phase 703's among them, as main had come to word it, replacing the
+          // text the first move had taken). A guard written after the moves, so it cannot be red first; it holds each
+          // move against the tree it was made from (a phase moved twice by the later move) for as long as the slot
+          // stands, and its entries' words once the slot closes.
           test "the 0.44.1 slot's entries moved into their own files word for word" {
               let root = Repo.root ()
-              let movedFrom = "50bc140e9a02a7d9cd8145e8948e7a01b9232d7f"
 
-              match ChildProcess.git root (sprintf "show %s:%s/0.44.1.md" movedFrom Dir) with
-              | Error why -> skiptestf "the commit the move was made on is not in this clone: %s" why
-              | Ok before ->
-                  let bullets = bulletsOf before
-                  Expect.isNonEmpty bullets "the slot held entries when they moved"
+              let movedFrom =
+                  [ "50bc140e9a02a7d9cd8145e8948e7a01b9232d7f"
+                    "223e4813b808080b420120ed0d56c486a41398e8" ]
+
+              let phaseOf (b: string) =
+                  Regex.Match(b, @"\(Phases? (\d+)").Groups[1].Value
+
+              let befores =
+                  movedFrom
+                  |> List.map (fun sha -> sha, ChildProcess.git root (sprintf "show %s:%s/0.44.1.md" sha Dir))
+
+              match
+                  befores
+                  |> List.tryPick (fun (sha, r) ->
+                      match r with
+                      | Error why -> Some(sha, why)
+                      | Ok _ -> None)
+              with
+              | Some(sha, why) -> skiptestf "the commit %s a move was made on is not in this clone: %s" sha why
+              | None ->
+                  // each phase's entry as the last move took it
+                  let bullets =
+                      befores
+                      |> List.collect (fun (_, r) ->
+                          match r with
+                          | Ok before -> bulletsOf before
+                          | Error _ -> [])
+                      |> List.fold (fun (m: Map<string, string>) b -> m.Add(phaseOf b, b)) Map.empty
+
+                  Expect.equal bullets.Count 14 "the two moves took fourteen phases' entries, Phase 703's twice"
                   let slot = fst (read root) |> List.find (fun s -> s.Version = "0.44.1")
 
-                  for b in bullets do
+                  for KeyValue(phase, b) in bullets do
                       Expect.stringContains slot.Text b "the slot reads every moved entry, word for word"
 
                       if slot.State = Draft then
-                          let phase = Regex.Match(b, @"\(Phases? (\d+)").Groups[1].Value
-
                           match slot.Entries |> List.filter (fun e -> e.Text = b) with
                           | [ e ] ->
-                              Expect.equal
-                                  (e.Class, e.Name.StartsWith("phase-" + phase))
-                                  ("internal", true)
-                                  (sprintf "%s holds the bullet it came from" e.Path)
+                              Expect.equal e.Name ("phase-" + phase) (sprintf "%s holds the bullet it came from" e.Path)
                           | es -> failtestf "%d entry files hold the bullet '%s'" es.Length (b.Substring(0, 60))
           } ]
