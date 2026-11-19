@@ -59,7 +59,7 @@ module Fuaran.Core.Tests.WireSurfaceTests
 //
 // Approval.fs reads the value (Phase 396). For each admitted package it rewrites the baseline whose
 // rows moved, or whose header fails the stated-class check, and writes into that header the class of
-// its move since the newest release the tree's own release ledger records (Phase 700, D269); a
+// its move since the newest release the tree's own release ledger records (Phase 700, D270); a
 // baseline whose rows did not move and whose header holds is left as it is. A clone that does not hold
 // that release's tag refuses, naming `git fetch --tags`, so one tree approves to the same bytes in
 // every clone. A separate test holds every stated class to a recomputation against the tag it names,
@@ -815,7 +815,7 @@ let internal headline (moves: WireMove list) : WireClass option =
 let internal describe (m: WireMove) =
     sprintf "%-9s %s — %s" (wireClassName m.Class) m.Doc m.What
 
-// ---- the release a header states its class since (Phase 700, D269) ------------------------
+// ---- the release a header states its class since (Phase 700, D270) ------------------------
 //
 // A header names a release and the class of the baseline's move since it. The release is read from
 // the TREE, the newest slot its own release ledger heads `released <date> as v<v>`, never from the
@@ -1139,7 +1139,7 @@ let tests =
                           (String.concat "\n  " problems)
           }
 
-          // ---- Phase 700 (D269): one tree approves to one header, and an approval writes only what moved ----
+          // ---- Phase 700 (D270): one tree approves to one header, and an approval writes only what moved ----
 
           test
               "the approval writes the same header whether or not the clone holds the newest release tag, or refuses naming `git fetch --tags`" {
