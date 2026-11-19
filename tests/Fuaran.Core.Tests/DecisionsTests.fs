@@ -386,6 +386,32 @@ let tests =
                       rendered.Length
                       differing
 
+          testCase
+              "a number that lands above a missing one is admitted while the missing one is above the last release's newest (D275)"
+          <| fun _ ->
+              let text = File.ReadAllText(path ())
+              let entries = Result.defaultWith (fun es -> failtestf "%A" es) (parse text)
+              let newest = entries |> List.map (fun e -> e.Id) |> List.max
+
+              // D275.1's out-of-order entry: two past the newest, so the number between is missing.
+              let landed =
+                  text.Replace(
+                      EndMarker + "\n\n",
+                      EndMarker
+                      + "\n\n"
+                      + sprintf "## 2026-11-19 — D%d: a number that landed above a missing one\n\n" (newest + 2)
+                      + StatusPrefix
+                      + "Live\n\nBody.\n\n"
+                  )
+
+              Expect.notEqual landed text "the entry was added under the index"
+              let entries = Result.defaultWith (fun es -> failtestf "%A" es) (parse landed)
+              let errs = check entries
+
+              Expect.isFalse
+                  (errs |> List.exists (fun e -> e.Contains(sprintf "D%d is missing" (newest + 1))))
+                  (sprintf "D%d is held by a change still in flight: %A" (newest + 1) errs)
+
           testCase "go-red: a heading with no status line is named"
           <| fun _ ->
               let text = (sample okStatus).Replace(StatusPrefix + "Live\n", "")
