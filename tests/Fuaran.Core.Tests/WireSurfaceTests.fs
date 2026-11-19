@@ -1194,14 +1194,15 @@ let tests =
           test
               "an approval writes nothing for a baseline whose rows did not move and whose header holds, whatever release is newest" {
               // On this tree first: every committed header holds, so an approval admitting every package writes
-              // nothing (the reproduction's run A wrote nine header lines and moved no row).
+              // nothing (the reproduction's run A wrote nine header lines and moved no row). An approval run
+              // is rewriting the packages it admits, so only the others are read here, as the check reads them.
               let written =
                   match basis () with
                   | Error why ->
                       printfn "WireSurface no-op approval check on this tree SKIPPED: %s" why
                       []
                   | Ok b ->
-                      [ for p in wirePackages () do
+                      [ for p in checkedUnder (Approval.admits Approval.Wire) (wirePackages ()) do
                             let path = wirePath p
 
                             if File.Exists path then
