@@ -77,6 +77,7 @@
          COMPUTE the vectors and sees this repository only as packages. It reads `ConfRng` from
          Conformance.fs and carries no law, so it sits before the roster and depends on nothing
          after it. -->
+    <Compile Include="ParityQueryDeclarationRows.fs" />
     <Compile Include="ParityVectors.fs" />
     <!-- Phase 287 — the string-escape vector family: pins the D2 copy of `Wire.Json.escape` in
          OpStream (the one OpStream.Dag spells through since Phase 388) byte-identical to the original. A vector family with a runner

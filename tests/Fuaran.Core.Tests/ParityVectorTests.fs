@@ -459,7 +459,149 @@ let private expected: (string * string) list =
       // statement, verdict and evidence.
       "laws/capabilityLaws", "11/11:dc161c6ccaef3dcdda46c3c0ce31ae4b71d1f80acf31714af7a571e3779c712f"
       "laws/queryLaws", "13/13:2b1e93a2c0732a3c1d729bf9ea518a2590d1377d21828c297557818fd059cf52"
-      "laws/policyLaws", "15/15:89aa33f6237458904fec75d36f59c079faa58ec393207d60abcb2c5bb669eb8c" ]
+      "laws/policyLaws", "15/15:89aa33f6237458904fec75d36f59c079faa58ec393207d60abcb2c5bb669eb8c"
+      // Phase 699 — the query declaration family (laws/query-declaration-laws.json), one row per vector: the
+      // reader's code at its path, the gate's, registration's, validation's and dispatch's error document without
+      // its sentence, and an accepted declaration's written text as a digest. Every answer agrees with the family's.
+      "queryDecl/read/not-json", "InvalidJson@$"
+      "queryDecl/read/a-null", "InvalidJson@$"
+      "queryDecl/read/a-number-past-the-float-range", "InvalidJson@$"
+      "queryDecl/read/not-an-object", "WrongKind@$"
+      "queryDecl/read/no-type", @"MissingField@$[""$type""]"
+      "queryDecl/read/another-type", @"UnknownTag@$[""$type""]"
+      "queryDecl/read/an-id-not-a-string", @"WrongKind@$[""id""]"
+      "queryDecl/read/the-id-before-the-params", @"MissingField@$[""id""]"
+      "queryDecl/read/params-not-a-list", @"WrongKind@$[""params""]"
+      "queryDecl/read/a-parameter-without-a-name", @"MissingField@$[""params""][0][""name""]"
+      "queryDecl/read/a-parameter-type-unknown", @"UnknownTag@$[""params""][0][""type""]"
+      "queryDecl/read/a-parameter-required-not-a-boolean", @"WrongKind@$[""params""][0][""required""]"
+      "queryDecl/read/no-result-schema", @"MissingField@$[""resultSchema""]"
+      "queryDecl/read/a-result-column-unread", @"OutOfRange@$[""resultSchema""][0]"
+      "queryDecl/read/an-effect-host-unknown", @"UnknownTag@$[""effect""][""host""]"
+      "queryDecl/read/a-timeout-with-a-fraction", @"WrongKind@$[""timeoutMs""]"
+      "queryDecl/read/a-page-size-as-a-string", @"WrongKind@$[""pageSize""]"
+      "queryDecl/read/a-filter-not-a-list", @"WrongKind@$[""where""]"
+      "queryDecl/read/a-predicate-tag-unknown", @"UnknownTag@$[""where""][0][""$type""]"
+      "queryDecl/read/a-literal-its-column-cannot-carry", @"OutOfRange@$[""where""][0][""value""]"
+      "queryDecl/read/a-literal-not-of-its-stated-type", @"OutOfRange@$[""where""][0][""value""]"
+      "queryDecl/read/an-order-direction-unknown", @"UnknownTag@$[""orderBy""][0][""direction""]"
+      "queryDecl/read/the-filter-before-the-source", @"WrongKind@$[""where""]"
+      "queryDecl/read/no-source", @"MissingField@$[""source""]"
+      "queryDecl/read/a-source-unread", @"OutOfRange@$[""source""]"
+      "queryDecl/read/the-source-before-the-gate", @"OutOfRange@$[""source""]"
+      "queryDecl/read/gate-a-parameter-declared-twice", @"OutOfRange@$[""params""]"
+      "queryDecl/read/gate-an-undeclared-column", @"OutOfRange@$[""where""][0]"
+      "queryDecl/read/gate-contains-off-a-string-column", @"OutOfRange@$[""where""][0]"
+      "queryDecl/read/gate-a-literal-of-another-type", @"OutOfRange@$[""where""][0]"
+      "queryDecl/read/gate-the-second-predicate", @"OutOfRange@$[""where""][1]"
+      "queryDecl/read/gate-an-order-on-an-undeclared-column", @"OutOfRange@$[""orderBy""][0]"
+      "queryDecl/read/gate-an-order-naming-a-column-twice", @"OutOfRange@$[""orderBy""][2]"
+      "queryDecl/read/gate-the-filter-before-the-order", @"OutOfRange@$[""where""][0]"
+      "queryDecl/read/decimal-text-read-canonical",
+      "accepted:7e754dc0a03423af9dcd0f42a82b56739a91a28b95a98f2fb52cc63c0165150d"
+      "queryDecl/read/admitted", "accepted:be8418b21301e49fb685200a0f85c570bb87101f9ca965d3c298637dccaffc3b"
+      "queryDecl/read/a-timeout-of-zero", @"OutOfRange@$[""timeoutMs""]"
+      "queryDecl/read/a-timeout-below-zero", @"OutOfRange@$[""timeoutMs""]"
+      "queryDecl/read/a-page-size-of-zero", @"OutOfRange@$[""pageSize""]"
+      "queryDecl/read/a-page-size-below-zero", @"OutOfRange@$[""pageSize""]"
+      "queryDecl/read/budgets-of-one", "accepted:e6d0d65f6505a216ffe0ee81002628b3915fd5e379da7e8a15ada54c7aa69498"
+      "queryDecl/read/no-params", @"MissingField@$[""params""]"
+      "queryDecl/read/a-result-schema-not-a-list", @"WrongKind@$[""resultSchema""]"
+      "queryDecl/read/no-effect", @"MissingField@$[""effect""]"
+      "queryDecl/read/a-date-not-in-canonical-form", @"OutOfRange@$[""where""][0][""value""]"
+      "queryDecl/read/decimal-text-with-a-trailing-zero-read-canonical",
+      "accepted:d3642d8a0b79b83560ab720103681b893921a2df7294ab497f1817af36776a99"
+      "queryDecl/admit/a-parameter-declared-twice", @"refused:{""$type"":""duplicateParam"",""name"":""rate""}"
+      "queryDecl/admit/an-undeclared-column",
+      @"refused:{""$type"":""unknownColumn"",""declared"":[""n"",""region"",""at"",""amount"",""day"",""score""],""name"":""nope""}"
+      "queryDecl/admit/an-undeclared-column-of-no-columns",
+      @"refused:{""$type"":""unknownColumn"",""declared"":[],""name"":""n""}"
+      "queryDecl/admit/contains-on-an-undeclared-column",
+      @"refused:{""$type"":""unknownColumn"",""declared"":[""n"",""region"",""at"",""amount"",""day"",""score""],""name"":""nope""}"
+      "queryDecl/admit/contains-off-a-string-column",
+      @"refused:{""$type"":""predicateNotApplicable"",""column"":""n"",""columnType"":""int"",""predicate"":""contains""}"
+      "queryDecl/admit/contains-on-a-string-column",
+      "admitted:7a02cdc26113937e9b81462adda6c2d97358316f5b8587917739e676520635ab"
+      "queryDecl/admit/a-null-literal", @"refused:{""$type"":""illFormedLiteral"",""column"":""n""}"
+      "queryDecl/admit/a-literal-of-another-type",
+      @"refused:{""$type"":""predicateTypeMismatch"",""column"":""region"",""expected"":""string"",""got"":""int""}"
+      "queryDecl/admit/an-integer-on-a-decimal-column",
+      @"refused:{""$type"":""predicateTypeMismatch"",""column"":""amount"",""expected"":""decimal"",""got"":""int""}"
+      "queryDecl/admit/an-integer-on-a-float-column",
+      @"refused:{""$type"":""predicateTypeMismatch"",""column"":""score"",""expected"":""float"",""got"":""int""}"
+      "queryDecl/admit/a-timestamp-coarser-than-its-column",
+      "admitted:33ed633bc4f7bf2758adffe466806499a36457732826497d5fd7cc8fd67c7ee2"
+      "queryDecl/admit/a-timestamp-finer-than-its-column",
+      @"refused:{""$type"":""predicateTypeMismatch"",""column"":""at"",""expected"":""timestamp_ms"",""got"":""timestamp_us""}"
+      "queryDecl/admit/a-date-that-names-no-day", @"refused:{""$type"":""illFormedLiteral"",""column"":""day""}"
+      "queryDecl/admit/a-timestamp-not-canonical", @"refused:{""$type"":""illFormedLiteral"",""column"":""at""}"
+      "queryDecl/admit/decimal-text-not-canonical", @"refused:{""$type"":""illFormedLiteral"",""column"":""amount""}"
+      "queryDecl/admit/a-float-not-finite", @"refused:{""$type"":""illFormedLiteral"",""column"":""score""}"
+      "queryDecl/admit/a-float-negative-infinity", @"refused:{""$type"":""illFormedLiteral"",""column"":""score""}"
+      "queryDecl/admit/a-date-not-in-canonical-form", @"refused:{""$type"":""illFormedLiteral"",""column"":""day""}"
+      "queryDecl/admit/decimal-text-with-a-trailing-zero",
+      @"refused:{""$type"":""illFormedLiteral"",""column"":""amount""}"
+      "queryDecl/admit/the-second-predicate",
+      @"refused:{""$type"":""predicateNotApplicable"",""column"":""n"",""columnType"":""int"",""predicate"":""contains""}"
+      "queryDecl/admit/an-order-on-an-undeclared-column",
+      @"refused:{""$type"":""unknownColumn"",""declared"":[""n"",""region"",""at"",""amount"",""day"",""score""],""name"":""nope""}"
+      "queryDecl/admit/an-order-naming-a-column-twice", @"refused:{""$type"":""duplicateSortColumn"",""column"":""n""}"
+      "queryDecl/admit/the-filter-before-the-order",
+      @"refused:{""$type"":""unknownColumn"",""declared"":[""n"",""region"",""at"",""amount"",""day"",""score""],""name"":""nope""}"
+      "queryDecl/admit/admitted", "admitted:be8418b21301e49fb685200a0f85c570bb87101f9ca965d3c298637dccaffc3b"
+      "queryDecl/admit/a-source-naming-a-schema-entry-twice", @"refused:{""$type"":""illFormedSource""}"
+      "queryDecl/admit/a-source-naming-a-column-twice", @"refused:{""$type"":""illFormedSource""}"
+      "queryDecl/admit/a-source-schema-entry-with-no-column", @"refused:{""$type"":""illFormedSource""}"
+      "queryDecl/admit/a-source-column-absent-from-the-schema", @"refused:{""$type"":""illFormedSource""}"
+      "queryDecl/admit/a-source-column-of-another-type", @"refused:{""$type"":""illFormedSource""}"
+      "queryDecl/admit/a-ragged-source-before-a-parameter-declared-twice", @"refused:{""$type"":""illFormedSource""}"
+      "queryDecl/admit/a-source-float-not-finite", @"refused:{""$type"":""illFormedSource""}"
+      "queryDecl/admit/a-source-decimal-text-not-canonical", @"refused:{""$type"":""illFormedSource""}"
+      "queryDecl/admit/a-source-in-schema-order",
+      "admitted:e4afcec4a1898cad94a861ea1835d31ebb56547ec5973c05bd144f773dbc0436"
+      "queryDecl/admit/a-source-out-of-schema-order",
+      "admitted:e4afcec4a1898cad94a861ea1835d31ebb56547ec5973c05bd144f773dbc0436"
+      "queryDecl/register/a-held-id", @"refused:{""$type"":""duplicateQuery"",""id"":""ledger""}"
+      "queryDecl/register/a-held-id-before-the-gate", @"refused:{""$type"":""duplicateQuery"",""id"":""sales""}"
+      "queryDecl/register/a-new-id-held-to-the-gate",
+      @"refused:{""$type"":""unknownColumn"",""declared"":[""n"",""region"",""at"",""amount"",""day"",""score""],""name"":""nope""}"
+      "queryDecl/register/a-new-id", "registered"
+      "queryDecl/validate/accepted", "accepted"
+      "queryDecl/validate/an-integer-fills-a-float", "accepted"
+      "queryDecl/validate/an-integer-fills-a-decimal", "accepted"
+      "queryDecl/validate/a-null-binds-an-optional", "accepted"
+      "queryDecl/validate/a-name-bound-twice", @"refused:{""$type"":""duplicateParam"",""name"":""n""}"
+      "queryDecl/validate/a-null-then-a-value-is-twice", @"refused:{""$type"":""duplicateParam"",""name"":""n""}"
+      "queryDecl/validate/an-unknown-name-before-a-later-type",
+      @"refused:{""$type"":""unknownParam"",""declared"":[""n"",""rate"",""tag"",""cap""],""name"":""nope""}"
+      "queryDecl/validate/a-type-before-a-later-unknown-name",
+      @"refused:{""$type"":""paramTypeMismatch"",""expected"":""int"",""got"":""string"",""name"":""n""}"
+      "queryDecl/validate/a-float-for-an-integer",
+      @"refused:{""$type"":""paramTypeMismatch"",""expected"":""int"",""got"":""float"",""name"":""n""}"
+      "queryDecl/validate/a-decimal-for-a-float",
+      @"refused:{""$type"":""paramTypeMismatch"",""expected"":""float"",""got"":""decimal"",""name"":""rate""}"
+      "queryDecl/validate/a-required-name-left-out", @"refused:{""$type"":""requiredParamsUnbound"",""names"":[""n""]}"
+      "queryDecl/validate/a-type-before-a-name-left-out",
+      @"refused:{""$type"":""paramTypeMismatch"",""expected"":""float"",""got"":""string"",""name"":""rate""}"
+      "queryDecl/validate/a-required-name-bound-to-null",
+      @"refused:{""$type"":""requiredParamsNull"",""names"":[""n""]}"
+      "queryDecl/validate/a-query-with-no-parameters",
+      @"refused:{""$type"":""unknownParam"",""declared"":[],""name"":""x""}"
+      "queryDecl/dispatch/unregistered",
+      @"refused:0:{""$type"":""noSuchQuery"",""id"":""nope"",""known"":[""bare"",""ledger"",""payroll"",""sales""]}"
+      "queryDecl/dispatch/unregistered-with-a-grant",
+      @"refused:0:{""$type"":""noSuchQuery"",""id"":""nope"",""known"":[""bare"",""ledger"",""payroll"",""sales""]}"
+      "queryDecl/dispatch/validated-before-the-gate",
+      @"refused:0:{""$type"":""paramTypeMismatch"",""expected"":""int"",""got"":""string"",""name"":""n""}"
+      "queryDecl/dispatch/denied",
+      @"refused:0:{""$type"":""queryPolicyRefused"",""allowed"":[""ledger""],""policy"":""ceiling""}"
+      "queryDecl/dispatch/denied-with-its-own-grant",
+      @"refused:0:{""$type"":""queryPolicyRefused"",""allowed"":[""ledger""],""policy"":""ceiling""}"
+      "queryDecl/dispatch/parked", @"refused:0:{""$type"":""queryApprovalRequired"",""policy"":""ceiling""}"
+      "queryDecl/dispatch/parked-with-another-reads-grant",
+      @"refused:0:{""$type"":""queryApprovalRequired"",""policy"":""ceiling""}"
+      "queryDecl/dispatch/granted", "performed:1"
+      "queryDecl/dispatch/allowed", "performed:1" ]
 
 /// The families the table must keep covering. A vector set is only as good as what it reaches, and
 /// nothing about a green comparison says the list was not quietly emptied of the hard cases — the
@@ -535,6 +677,80 @@ let private uncovered (labels: string list) : (string * string) list =
               if not (labels |> List.exists (fun l -> l.StartsWith prefix)) then
                   yield family, prefix ]
 
+/// Phase 699 — the census of the query declaration family (`laws/query-declaration-laws.json`): each of the
+/// family's case groups maps to the row prefix that runs it, and every refusal code its vectors expect (a decode
+/// code of the declaration reader, or a query error's `$type`) is the code some `queryDecl/` row answers. The
+/// groups and the codes are read from the committed family, so a group or a code it gains with no row is red here,
+/// named. Until Phase 699 no row reached any of them, so the family was compiled under Fable and never run there.
+let private queryDeclarationGroups: (string * string) list =
+    [ "declarationRefused", "queryDecl/read/"
+      "admissionFault", "queryDecl/admit/"
+      "register", "queryDecl/register/"
+      "validateParams", "queryDecl/validate/"
+      "dispatch", "queryDecl/dispatch/" ]
+
+/// The committed family's case groups and refusal codes, each in first-seen order.
+let private queryDeclarationFamily () : string list * string list =
+    let path =
+        System.IO.Path.Combine(OwnedConformance.root (), "laws", "query-declaration-laws.json")
+
+    let member' name el =
+        match el with
+        | JObj ms -> ms |> List.tryPick (fun (k, v) -> if k = name then Some v else None)
+        | _ -> None
+
+    let vectors =
+        match Json.parse (System.IO.File.ReadAllText path) |> Result.map (member' "vectors") with
+        | Ok(Some(JArr vs)) -> vs
+        | other -> failwithf "%s holds no vectors: %A" path other
+
+    let str name el =
+        match member' name el with
+        | Some(JStr s) -> Some s
+        | _ -> None
+
+    let groups = vectors |> List.choose (str "case") |> List.distinct
+
+    let codes =
+        vectors
+        |> List.choose (fun v ->
+            member' "expected" v
+            |> Option.bind (fun e -> str "code" e |> Option.orElse (member' "error" e |> Option.bind (str "$type"))))
+        |> List.distinct
+
+    groups, codes
+
+/// The code a `queryDecl/` row answers: a query error's `$type` where the row carries an error document, else the
+/// decode code before a refusal's `@<path>`.
+let private rowCode (value: string) : string option =
+    let marker = "\"$type\":\""
+    let i = value.IndexOf marker
+
+    if i >= 0 then
+        let start = i + marker.Length
+        Some(value.Substring(start, value.IndexOf('"', start) - start))
+    else
+        let at = value.IndexOf '@'
+        if at > 0 then Some(value.Substring(0, at)) else None
+
+/// The census's gaps over `rows`: each case group with no prefix or no row under it, and each refusal code no
+/// `queryDecl/` row answers.
+let private queryDeclarationGaps (groups: string list, codes: string list) (rows: (string * string) list) =
+    [ for group in groups do
+          match queryDeclarationGroups |> List.tryFind (fst >> (=) group) with
+          | None -> yield sprintf "case group %s has no row prefix" group
+          | Some(_, prefix) ->
+              if not (rows |> List.exists (fun (l, _) -> l.StartsWith prefix)) then
+                  yield sprintf "case group %s has no row under %s" group prefix
+      for code in codes do
+          if
+              not (
+                  rows
+                  |> List.exists (fun (l, v) -> l.StartsWith "queryDecl/" && rowCode v = Some code)
+              )
+          then
+              yield sprintf "refusal code %s is answered by no queryDecl/ row" code ]
+
 /// The hash SWEEP (Phase 217 — the retired `tests/hash-parity-probe` corpus, absorbed): 124 rows,
 /// each four digests wide. Pinned as a COUNT and a DIGEST over the rows rather than row by row — the
 /// named table above carries the hand-checkable known answers, and 496 hex strings committed here
@@ -598,6 +814,24 @@ let tests =
                   (uncovered (ParityVectors.vectors |> List.map fst))
                   []
                   "a 0.43 runtime family with no row is compiled under Fable and never run there"
+
+          // Phase 699 — the query declaration family's census. The first assertions are the probe's control:
+          // the family is read (five groups, codes present), and over no rows every group and every code is named.
+          testCase "every case group and refusal code of the query declaration family keeps a row"
+          <| fun _ ->
+              let groups, codes = queryDeclarationFamily ()
+              Expect.equal (List.length groups) (List.length queryDeclarationGroups) "the family's case groups"
+              Expect.isNonEmpty codes "the family's refusal codes"
+
+              Expect.equal
+                  (queryDeclarationGaps (groups, codes) [] |> List.length)
+                  (List.length groups + List.length codes)
+                  "the census names every group and every code over a table with no rows"
+
+              Expect.equal
+                  (queryDeclarationGaps (groups, codes) ParityVectors.vectors)
+                  []
+                  "a query declaration refusal with no row is compiled under Fable and never run there"
 
           // The runner compares the two pipelines' STDOUT line by line. .NET and node do not agree
           // about how to write a lone surrogate or a control byte to a terminal, so a table whose

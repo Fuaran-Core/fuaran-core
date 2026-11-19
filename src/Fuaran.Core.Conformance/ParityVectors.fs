@@ -29,6 +29,7 @@
 module Fuaran.Core.ParityVectors
 
 open Fuaran.Core
+open Fuaran.Core.ParityQueryDeclarationRows
 
 /// A non-ASCII input spanning the UTF-8 length classes: 2-byte (e-acute), 3-byte (CJK), and a
 /// surrogate pair (U+1F600). Written as escapes rather than literal characters so the vectors do
@@ -559,20 +560,6 @@ let private unitDrawn (seed: int) : string =
 // what each family answers — a decision, a grant, an identity, a rendered document, an ordering —
 // as ASCII, from inputs that exercise what the two pipelines carry differently: 64-bit integers past
 // 2^53, float and decimal spellings, non-ASCII order, and map- or set-ordered output.
-
-/// Printable ASCII — the module's own promise: a console-encoding difference must never read as a
-/// value divergence.
-let private printable (s: string) =
-    s |> Seq.forall (fun ch -> ch >= ' ' && ch <= '~')
-
-/// `s` itself when it is printable ASCII, else `sha:` and its SHA-256: a message or a document that
-/// may carry non-ASCII text is compared by digest, never echoed.
-let private asciiOr (s: string) : string =
-    if printable s then s else "sha:" + Hash.sha256Hex s
-
-/// A decode refusal as `<code>@<path>`.
-let private refusalOf (e: DecodeError) : string =
-    DecodeError.codeName e.Code + "@" + asciiOr (DecodePath.render e.Path)
 
 /// A policy decision as text: `allow`, `needsApproval`, or `deny:<message>/<alternatives>`.
 let private decisionText (d: PolicyDecision) : string =
@@ -1548,6 +1535,7 @@ let vectors: (string * string) list =
       "laws/capabilityLaws", lawSummary (Conformance.capabilityLaws 4242 200)
       "laws/queryLaws", lawSummary (Conformance.queryLaws 4242 200)
       "laws/policyLaws", lawSummary (Conformance.policyLaws 4242 200) ]
+    @ queryDeclarationRows
 
 /// The hash SWEEP's inputs — absorbed from the retired `tests/hash-parity-probe` (Phase 217), so the
 /// arithmetic cases that separate the two pipelines are run on every cross-pipeline check rather
