@@ -48,6 +48,26 @@ type KindProjection =
         RecordFields: IdlField list option
     }
 
+/// Phase 689 (DECISIONS.md D272) — a PER-KIND TABLE: one fact the vocabulary declares about every node kind,
+/// one row per kind, keyed by the kind's tag. The case is the column's value type, a closed set of data forms
+/// and never an expression, so a row of the wrong type cannot be written. Rows keep their authored order, so a
+/// duplicate row survives to the generation that refuses it. `Derivation.KindTable` emits a table as a total
+/// lookup over the module's kinds; a row for a kind the vocabulary declares and the selection does not emit
+/// is not read.
+[<RequireQualifiedAccess>]
+type KindTable =
+    /// A string per kind; the lookup answers `string`.
+    | Text of rows: (string * string) list
+    /// A bool per kind; the lookup answers `bool`.
+    | Flag of rows: (string * bool) list
+    /// The wire name of one of the row's kind's own fields, or none; the lookup answers `string option`.
+    | OptionalField of rows: (string * string option) list
+    /// A list of strings per kind; the lookup answers `string list`.
+    | Texts of rows: (string * string list) list
+    /// A case of the named enum, by its host case name; the lookup answers that enum, which the module
+    /// must emit.
+    | Enum of enumName: string * rows: (string * string) list
+
 /// Phase 945 — the declared-support channel for `fsharpModuleWith`: doc comments,
 /// verbatim splices and host projections that were previously HAND-EDITS to the
 /// generated artefact (the "hand-added ahead of the IDL backfill" regions). Everything
@@ -79,9 +99,12 @@ type GenSupport =
         /// Kind tag → the host projection that replaces that kind's derived record, encoder
         /// and decoder; a kind with no entry is emitted from its IDL fields.
         KindProjections: Map<string, KindProjection>
+        /// Phase 689 — table name → a per-kind table, emitted only when a `Derivation.KindTable` requests it
+        /// by that name.
+        KindTables: Map<string, KindTable>
     }
 
-    /// No docs, no splices, no refines, no projections: `fsharpModuleWith` under this record
+    /// No docs, no splices, no refines, no projections, no tables: `fsharpModuleWith` under this record
     /// emits byte-identically to the generator before the support channel existed.
     static member Empty =
         { Docs = Map.empty
@@ -90,7 +113,8 @@ type GenSupport =
           DecodeSplice = None
           AccessorSplice = None
           CaseRefines = Map.empty
-          KindProjections = Map.empty }
+          KindProjections = Map.empty
+          KindTables = Map.empty }
 
 /// Phase 550 (DECISIONS.md D198) — the request for a CODEC-ONLY F# module: encoders and decoders for
 /// declarations whose types the HOST declares, with no type declaration of the module's own.

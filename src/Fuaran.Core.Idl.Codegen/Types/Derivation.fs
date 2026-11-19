@@ -52,3 +52,9 @@ type Derivation =
     /// `decodeNodeJsonAllWith` and `decodeNodeAllWith` take a host's copy, so a host decoder
     /// at a type applies at every depth (DECISIONS.md D175).
     | SpecDecoders
+    /// Phase 689 (DECISIONS.md D272) — `KindTables.<name> : NodeKind -> T`, the support's per-kind table of that
+    /// name as one exhaustive match over the module's kinds, with no wildcard arm, so the compiler holds the
+    /// lookup total in the consumer too. Refused by name, naming the table and the kind, for a table the
+    /// support does not declare, a kind the module emits with no row, a row for a kind the vocabulary does not
+    /// declare, and a kind with two rows. The F# backend emits it; the TypeScript backend refuses it.
+    | KindTable of tableName: string

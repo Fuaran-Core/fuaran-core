@@ -1808,7 +1808,9 @@ let private encFloat (f: float) : JVal =
             Decl.projectionsDeclared decl
             |> Result.bind (fun () -> hostedCaseDerivations decl requests)
             |> Result.bind (fun () -> FSharpWitness.witnessDecl publicAccess decl.Projections msg kinds)
-            |> Result.bind (fun w -> FSharpDerive.derivedDecl decl requests |> Result.map (fun ds -> w, ds))
+            |> Result.bind (fun w ->
+                FSharpDerive.derivedDecl decl sup.KindTables requests
+                |> Result.map (fun ds -> w, ds))
             // Phase 377 — the collecting decoders and the public per-spec entries, on request, after
             // every other member (they compose with the decoder group and nothing reads them).
             |> Result.bind (fun (w, ds) ->
@@ -1988,4 +1990,4 @@ let private encFloat (f: float) : JVal =
                 |> Result.map ignore
             else
                 Ok())
-        |> Result.bind (fun () -> FSharpDerive.derivedDecl decl requests |> Result.map ignore)
+        |> Result.bind (fun () -> FSharpDerive.derivedDecl decl Map.empty requests |> Result.map ignore)

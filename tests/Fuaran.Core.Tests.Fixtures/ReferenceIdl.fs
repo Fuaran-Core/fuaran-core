@@ -342,7 +342,8 @@ let support: SupportDocument =
         jprop "note" j |> Result.bind jstr |> Result.map (fun n -> { Note = n })"""
           AccessorSplice = Some "let referenceMarkerName = \"reference\""
           CaseRefines = Map.ofList [ "Text.Lookup", "Ok(Text.Lookup(args, key))" ]
-          KindProjections = Map.ofList [ "Note", noteProjection ] }
+          KindProjections = Map.ofList [ "Note", noteProjection ]
+          KindTables = Map.empty }
       HostPrelude =
         Some
             { Module = "Fuaran.Core.Tests.ReferencePrelude"
