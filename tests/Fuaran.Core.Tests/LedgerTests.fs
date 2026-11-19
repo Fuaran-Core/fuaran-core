@@ -145,6 +145,21 @@ let private entryA =
 let private entryB =
     "- **A second sample entry** (Phase 902, `B.fs`) — class **internal**: no `api/` row, wire byte or\n  refusal moves.\n"
 
+/// The entries a slot file's own text holds, each as an entry file holds it: a `- ` line and the wrapped lines
+/// after it (two spaces in), ending in one line break.
+let private bulletsOf (text: string) : string list =
+    let rec go (acc: string list) (lines: string list) =
+        match lines with
+        | [] -> List.rev acc
+        | l :: rest when l.StartsWith("- ", StringComparison.Ordinal) ->
+            let wrapped =
+                rest |> List.takeWhile (fun x -> x.StartsWith("  ", StringComparison.Ordinal))
+
+            go ((String.concat "\n" (l :: wrapped) + "\n") :: acc) (List.skip wrapped.Length rest)
+        | _ :: rest -> go acc rest
+
+    go [] (text.Replace("\r\n", "\n").Split('\n') |> Array.toList)
+
 [<Tests>]
 let tests =
     testList
@@ -774,4 +789,32 @@ let tests =
                   Expect.equal closed before.Text "the draft read before the close is the closed file after it"
 
                   Expect.isFalse (Directory.Exists(Path.Combine(root, Dir, "0.9.1"))) "and the entry directory is gone")
+          }
+          // Phase 702 (D273): the open slot's entries moved into their own files, word for word, by one commit made
+          // on `movedFrom`. A guard written after the move, so it cannot be red first; it holds the move against the
+          // tree it was made from for as long as the slot stands, and its entries' words once the slot closes.
+          test "the 0.44.1 slot's entries moved into their own files word for word" {
+              let root = Repo.root ()
+              let movedFrom = "50bc140e9a02a7d9cd8145e8948e7a01b9232d7f"
+
+              match ChildProcess.git root (sprintf "show %s:%s/0.44.1.md" movedFrom Dir) with
+              | Error why -> skiptestf "the commit the move was made on is not in this clone: %s" why
+              | Ok before ->
+                  let bullets = bulletsOf before
+                  Expect.isNonEmpty bullets "the slot held entries when they moved"
+                  let slot = fst (read root) |> List.find (fun s -> s.Version = "0.44.1")
+
+                  for b in bullets do
+                      Expect.stringContains slot.Text b "the slot reads every moved entry, word for word"
+
+                      if slot.State = Draft then
+                          let phase = Regex.Match(b, @"\(Phases? (\d+)").Groups[1].Value
+
+                          match slot.Entries |> List.filter (fun e -> e.Text = b) with
+                          | [ e ] ->
+                              Expect.equal
+                                  (e.Class, e.Name.StartsWith("phase-" + phase))
+                                  ("internal", true)
+                                  (sprintf "%s holds the bullet it came from" e.Path)
+                          | es -> failtestf "%d entry files hold the bullet '%s'" es.Length (b.Substring(0, 60))
           } ]
