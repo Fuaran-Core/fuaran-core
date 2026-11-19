@@ -265,4 +265,69 @@ let tests =
                       Expect.isTrue (DecimalText.isCanonical sum) (sprintf "the sum is canonical at %A %A" a b)
                       Expect.equal (DecimalText.add b a) (Some sum) (sprintf "commutative at %A %A" a b)
                   | None, None -> ()
-                  | _ -> failtestf "compare and add refuse the same pairs, at %A %A" a b ]
+                  | _ -> failtestf "compare and add refuse the same pairs, at %A %A" a b
+
+          // ---- Phase 613: the in-place reading of canonical text, beside the model ----
+
+          testCase
+              "isCanonical is the model's fixed point, a canonical text is answered as itself, and Sum over canonical cells is the model's fold"
+          <| fun _ ->
+              // `isCanonical` is a scan with no parse behind it: it must accept exactly the texts
+              // the model's canonicaliser gives back unchanged — the pool's refused forms, zeros to
+              // trim and `-0` among them.
+              let texts =
+                  decTexts 6130 600 @ [ "-0"; "0"; "-0.5"; "0.0"; "00"; "10"; "1.10"; "-01" ]
+
+              for s in texts do
+                  let fixedPoint =
+                      match ModelDecimal.try_canonical (decToSyms s) with
+                      | FStar_Pervasives_Native.Some c -> decFromSyms c = s
+                      | FStar_Pervasives_Native.None -> false
+
+                  Expect.equal (DecimalText.isCanonical s) fixedPoint (sprintf "isCanonical %A" s)
+
+                  if fixedPoint then
+                      match DecimalText.tryCanonical s with
+                      | Some c -> Expect.isTrue (obj.ReferenceEquals(c, s)) (sprintf "no copy of %A" s)
+                      | None -> failtestf "tryCanonical refused the canonical %A" s
+
+              // The aggregate adds the admitted texts with no re-reading; its answer is the model's
+              // sum folded left over the same canonical texts, signs, scales and cancellations mixed.
+              let canonicals = decTexts 6131 3000 |> List.choose DecimalText.tryCanonical
+
+              let modelSum =
+                  canonicals
+                  |> List.fold
+                      (fun acc c ->
+                          match ModelDecimal.add (decToSyms acc) (decToSyms c) with
+                          | FStar_Pervasives_Native.Some r -> decFromSyms r
+                          | FStar_Pervasives_Native.None -> failtestf "the model refused %A + %A" acc c)
+                      "0"
+
+              let column =
+                  Column.ofDecimals "d" (Vector.ofArray (Array.ofList canonicals)) AllValid
+
+              Expect.equal (Column.aggregate Sum column) (Ok(Decimal modelSum)) "Sum is the model's fold"
+
+          testCase "Sum over a canonical decimal column allocates the running total and little else"
+          <| fun _ ->
+              // Before Phase 613 each row cost some 1,250 bytes: the row's text re-read, the total
+              // padded and split, and a string per digit. What a row must allocate now is the new
+              // total's text. The bound is generous; the old path is six times over it.
+              let rows = 10000
+
+              let texts =
+                  Array.init rows (fun i ->
+                      let k = ((int64 i * 7919L) % 2000003L) - 1000001L
+                      let units = abs k
+                      let text = sprintf "%d.%03d" (units / 1000L) (units % 1000L)
+
+                      DecimalText.tryCanonical ((if k < 0L then "-" else "") + text)
+                      |> Option.defaultValue "0")
+
+              let column = Column.ofDecimals "d" (Vector.ofArray texts) AllValid
+              Column.aggregate Sum column |> ignore
+              let before = System.GC.GetAllocatedBytesForCurrentThread()
+              Column.aggregate Sum column |> ignore
+              let bytes = System.GC.GetAllocatedBytesForCurrentThread() - before
+              Expect.isLessThan (bytes / int64 rows) 200L (sprintf "bytes a row (%d in all)" bytes) ]

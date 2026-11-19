@@ -1312,10 +1312,15 @@ module Column =
             if ColumnStorage.isSet rows i then
                 let text = items[offset + i]
 
-                match DecimalText.tryCanonical text with
-                | Some c -> step i c
-                | None ->
-                    outside <- Some(CellOutsideType(col.Name, col.Type, "decimal text '" + text + "' (not decimal)"))
+                // a stored text already canonical is handed on as itself, with no option around it
+                if DecimalText.isCanonical text then
+                    step i text
+                else
+                    match DecimalText.tryCanonical text with
+                    | Some c -> step i c
+                    | None ->
+                        outside <-
+                            Some(CellOutsideType(col.Name, col.Type, "decimal text '" + text + "' (not decimal)"))
 
             i <- i + 1
 
@@ -1902,16 +1907,19 @@ module Column =
         | CountDistinct -> answer (walk (fun _ _ -> ())) (fun () -> Ok(Int(distinctCount col)))
         | Sum ->
             // EXACT (`0.33.0`) — never through `float`, so nothing is rounded and nothing overflows —
-            // and a `Decimal`; `Null` over no present row.
-            let total: string option ref = ref None
+            // and a `Decimal`; `Null` over no present row. The walk hands each row's canonical text
+            // and the running total, `null` until the first present row, is a sum: both are canonical,
+            // so nothing is read twice.
+            let total: string ref = ref null
 
             let add _ text =
                 total.Value <-
-                    match total.Value with
-                    | None -> Some text
-                    | Some t -> Some(DecimalText.add t text |> Option.defaultValue t)
+                    if isNull total.Value then
+                        text
+                    else
+                        DecimalText.addCanonical total.Value text
 
-            answer (walk add) (fun () -> Ok(total.Value |> Option.map Decimal |> Option.defaultValue Null))
+            answer (walk add) (fun () -> Ok(if isNull total.Value then Null else Decimal total.Value))
         | Mean
         | StdDev
         | Median ->

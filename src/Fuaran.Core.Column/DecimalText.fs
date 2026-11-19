@@ -19,8 +19,40 @@ namespace Fuaran.Core
 [<RequireQualifiedAccess>]
 module DecimalText =
 
-    let private isDigits (s: string) : bool =
-        s.Length > 0 && s |> Seq.forall (fun c -> c >= '0' && c <= '9')
+    let private isDigit (c: char) : bool = c >= '0' && c <= '9'
+
+    let private isDigits (s: string) : bool = s.Length > 0 && s |> Seq.forall isDigit
+
+    /// True where `s` is canonical, read in place with nothing allocated: an optional minus, an
+    /// integer part that is a lone `0` or starts with a non-zero digit, and, where a point is
+    /// written, a fraction of at least one digit that does not end in `0` — and no minus on a
+    /// lone `0`. Exactly the texts `render (parts s)` gives back unchanged.
+    let private canonicalShape (s: string) : bool =
+        if isNull (box s) || s.Length = 0 then
+            false
+        else
+            let negative = s[0] = '-'
+            let start = if negative then 1 else 0
+            let mutable i = start
+
+            while i < s.Length && isDigit s[i] do
+                i <- i + 1
+
+            let intLen = i - start
+
+            if intLen = 0 || (intLen > 1 && s[start] = '0') then
+                false
+            elif i = s.Length then
+                not (negative && intLen = 1 && s[start] = '0')
+            elif s[i] <> '.' then
+                false
+            else
+                let mutable j = i + 1
+
+                while j < s.Length && isDigit s[j] do
+                    j <- j + 1
+
+                j = s.Length && j > i + 1 && s[j - 1] <> '0'
 
     /// `(negative, integer digits, fraction digits)` with the zeros stripped — an empty digit
     /// string is zero — or `None` for text outside the grammar.
@@ -56,95 +88,143 @@ module DecimalText =
     /// Zero, in canonical form.
     let zero: string = "0"
 
-    /// The canonical form of `s`, or `None` where `s` is not decimal text.
-    let tryCanonical (s: string) : string option = parts s |> Option.map render
+    /// The canonical form of `s`, or `None` where `s` is not decimal text. A text already canonical
+    /// is answered as itself, with no copy.
+    let tryCanonical (s: string) : string option =
+        if canonicalShape s then
+            Some s
+        else
+            parts s |> Option.map render
 
     /// True where `s` is decimal text already in canonical form.
-    let isCanonical (s: string) : bool = tryCanonical s = Some s
+    let isCanonical (s: string) : bool = canonicalShape s
 
-    // Magnitudes are compared and combined as digit strings aligned at the point: the fractions
-    // padded to one scale on the right, the whole padded to one width on the left.
-    let private aligned (ia: string, fa: string) (ib: string, fb: string) : string * string * int =
-        let scale = max fa.Length fb.Length
-        let a = ia + fa.PadRight(scale, '0')
-        let b = ib + fb.PadRight(scale, '0')
-        let width = max a.Length b.Length
-        a.PadLeft(width, '0'), b.PadLeft(width, '0'), scale
+    // Canonical texts are read in place, one digit at a PLACE: `0` the units, `1` the tens, `-1`
+    // the tenths. A place outside a text's digits reads `0`, which aligns two texts at the point
+    // with no padded copy of either.
+    let private intStart (s: string) : int = if s[0] = '-' then 1 else 0
+
+    let private pointAt (s: string) : int =
+        let dot = s.IndexOf '.'
+        if dot < 0 then s.Length else dot
+
+    let private fractionLength (s: string) (point: int) : int =
+        if point < s.Length then s.Length - point - 1 else 0
+
+    let private digitAt (s: string) (start: int) (point: int) (place: int) : int =
+        let i = if place >= 0 then point - 1 - place else point - place
+
+        if i >= start && i < s.Length then int s[i] - int '0' else 0
 
     let private sign (n: int) : int =
         if n < 0 then -1
         elif n > 0 then 1
         else 0
 
-    let private digit (c: char) : int = int c - int '0'
+    /// The order of two canonical magnitudes, read from the highest place either holds down to
+    /// the lowest, as `-1` / `0` / `1`.
+    let private compareMagnitudes (a: string) (b: string) : int =
+        let sa, pa = intStart a, pointAt a
+        let sb, pb = intStart b, pointAt b
+        let lowest = -(max (fractionLength a pa) (fractionLength b pb))
+        let mutable place = max (pa - sa) (pb - sb) - 1
+        let mutable order = 0
 
-    // Digits are held as ints and rendered through `string`, the one conversion every host agrees on.
-    let private digitsText (digits: int[]) : string =
-        digits |> Array.map string |> String.concat ""
+        while order = 0 && place >= lowest do
+            order <- sign (digitAt a sa pa place - digitAt b sb pb place)
+            place <- place - 1
 
-    let private addMagnitudes (a: string) (b: string) : string =
-        let out = Array.zeroCreate<int> (a.Length + 1)
-        let mutable carry = 0
+        order
 
-        for i in a.Length - 1 .. -1 .. 0 do
-            let d = digit a[i] + digit b[i] + carry
-            out[i + 1] <- d % 10
-            carry <- d / 10
+    /// The order of two canonical texts as `-1` / `0` / `1`. Zero is unsigned in canonical form,
+    /// so a minus marks a value below every unsigned one.
+    let private compareCanonical (a: string) (b: string) : int =
+        let na, nb = a[0] = '-', b[0] = '-'
 
-        out[0] <- carry
-        digitsText out
+        if na <> nb then
+            if na then -1 else 1
+        else
+            let magnitude = compareMagnitudes a b
+            if na then -magnitude else magnitude
 
-    /// `a - b` over aligned magnitudes with `a >= b`.
-    let private subMagnitudes (a: string) (b: string) : string =
-        let out = Array.zeroCreate<int> a.Length
-        let mutable borrow = 0
+    /// The exact sum of two CANONICAL texts, in canonical form — the admission an aggregate has
+    /// already made, or `tryCanonical`'s answer; nothing here checks it. The sum is written into one
+    /// `char[]` laid out as its text — a slot for the sign, the integer places with one more for a
+    /// carry, the point, the fraction places — from the lowest place up, and the one string is the
+    /// span that survives the trim. Nothing is parsed, padded or split.
+    let internal addCanonical (a: string) (b: string) : string =
+        let na, nb = a[0] = '-', b[0] = '-'
+        let sa, pa = intStart a, pointAt a
+        let sb, pb = intStart b, pointAt b
+        let scale = max (fractionLength a pa) (fractionLength b pb)
+        let width = max (pa - sa) (pb - sb) + 1
+        // where the signs differ, the larger magnitude less the smaller, with the larger's sign
+        let order = if na = nb then 1 else compareMagnitudes a b
 
-        for i in a.Length - 1 .. -1 .. 0 do
-            let d = digit a[i] - digit b[i] - borrow
+        if order = 0 then
+            zero
+        else
+            let negative = if order > 0 then na else nb
+            // the sign at 0, the units place at `width`, the point at `width + 1`
+            let point = width + 1
+            let text = Array.zeroCreate<char> (point + 1 + scale)
+            text[point] <- '.'
+            let mutable carry = 0
 
-            if d < 0 then
-                out[i] <- d + 10
-                borrow <- 1
-            else
-                out[i] <- d
-                borrow <- 0
+            for k in 0 .. width + scale - 1 do
+                let place = k - scale
+                let x = digitAt a sa pa place
+                let y = digitAt b sb pb place
 
-        digitsText out
+                let d =
+                    if na = nb then x + y + carry
+                    elif order > 0 then x - y - carry
+                    else y - x - carry
+
+                carry <- if d < 0 || d > 9 then 1 else 0
+
+                let d =
+                    if d < 0 then d + 10
+                    elif d > 9 then d - 10
+                    else d
+
+                text[if place < 0 then point - place else width - place] <- char (d + int '0')
+
+            // the first integer digit shown: the highest non-zero one, else the units' `0`
+            let mutable first = 1
+
+            while first < width && text[first] = '0' do
+                first <- first + 1
+
+            // the last character shown: the lowest non-zero fraction digit, else the units
+            let mutable last = point + scale
+
+            while last > point && text[last] = '0' do
+                last <- last - 1
+
+            let last = if last = point then width else last
+
+            let start =
+                if negative then
+                    text[first - 1] <- '-'
+                    first - 1
+                else
+                    first
+
+            System.String(text, start, last - start + 1)
 
     /// The numeric order of two decimal texts as `-1` / `0` / `1`, or `None` where either is not
     /// decimal text. Canonical or not: `1.50` and `1.5` compare equal.
     let compare (a: string) (b: string) : int option =
-        match parts a, parts b with
-        | Some(na, ia, fa), Some(nb, ib, fb) ->
-            if na <> nb then
-                Some(if na then -1 else 1)
-            else
-                let ma, mb, _ = aligned (ia, fa) (ib, fb)
-                let magnitude = sign (System.String.CompareOrdinal(ma, mb))
-                Some(if na then -magnitude else magnitude)
+        match tryCanonical a, tryCanonical b with
+        | Some ca, Some cb -> Some(compareCanonical ca cb)
         | _ -> None
 
     /// The exact sum of two decimal texts, in canonical form, or `None` where either is not decimal
     /// text. Nothing is rounded and nothing overflows.
     let add (a: string) (b: string) : string option =
-        match parts a, parts b with
-        | Some(na, ia, fa), Some(nb, ib, fb) ->
-            let ma, mb, scale = aligned (ia, fa) (ib, fb)
-
-            let negative, magnitude =
-                if na = nb then
-                    na, addMagnitudes ma mb
-                else
-                    match sign (System.String.CompareOrdinal(ma, mb)) with
-                    | 0 -> false, ""
-                    | c when c > 0 -> na, subMagnitudes ma mb
-                    | _ -> nb, subMagnitudes mb ma
-
-            let magnitude = magnitude.PadLeft(scale + 1, '0')
-            let ip = magnitude.Substring(0, magnitude.Length - scale)
-            let fp = magnitude.Substring(magnitude.Length - scale)
-            let isZero = (ip.TrimStart '0').Length = 0 && (fp.TrimEnd '0').Length = 0
-            Some(render (negative && not isZero, ip.TrimStart '0', fp.TrimEnd '0'))
+        match tryCanonical a, tryCanonical b with
+        | Some ca, Some cb -> Some(addCanonical ca cb)
         | _ -> None
 
     /// The nearest `float` to a decimal text, or `None` where it is not decimal text OR its
