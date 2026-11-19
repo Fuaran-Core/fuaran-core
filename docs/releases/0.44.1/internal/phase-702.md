@@ -8,4 +8,4 @@
   an entry in the draft's own file, an entry beside a closed slot, a stray in an entry directory, and an entry whose
   class would advance the draft, each refusal naming the file the entry goes to. This slot's entries moved into
   `0.44.1/internal/`, word for word. The limit: a merge of `main` still conflicts in `DECISIONS.md` when both sides
-  add a decision; 3 of this slot's 11 earlier entries came from phases that also added one.
+  add a decision; 5 of this slot's 13 entries, this one among them, come from phases that also added one.

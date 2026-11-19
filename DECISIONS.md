@@ -445,7 +445,8 @@ entries, needs from the record as it stands:
 
 **The limit this phase leaves.** After this change a merge of `main` still conflicts, in `DECISIONS.md`, when both
 sides add a decision, exactly as measured above; the release notes no longer do. Measured on the `0.44.1` slot as
-it stands at this landing, 3 of its 11 entries come from phases that also added a decision (Phases 698, 699 and 700). Counted by reading each entry's phase from its bullet (`(Phase <n>`) and
+it stands at this landing, 5 of its 13 entries come from phases that also added a decision (Phases 698, 699, 700, 702
+and 703). Counted by reading each entry's phase from its bullet (`(Phase <n>`) and
 counting a phase as having added a decision when an entry of this record says `Recorded by Phase <n>`.
 
 This entry's own number was taken by reading the record's head at the merge of `main`, and changes if `main` has
