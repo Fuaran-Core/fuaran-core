@@ -22,7 +22,9 @@ module Fuaran.Core.Tests.ProofCoverageTests
 //      each class carries its own account of what would close it: a `premise` is closed by nothing
 //      and that IS its class; a `domain-obligation` is discharged at a domain's own witness by the
 //      law it names; a `model-bridge` names `closes` — `permanent` or `unscheduled`. No
-//      schedule is kept here (Phase 537), so a phase in `closes` fails.
+//      schedule is kept here (Phase 537), so a phase in `closes` fails. A `host-premise` names its
+//      `probe` (Phase 483), and a `witness-obligation` the witness member whose own tests discharge
+//      it, `dischargedBy` (Phase 601).
 //
 //   3. EVERY DIFFERENTIAL IS PAIRED TO A THEOREM. A `tested` row on the `Proofs.Oracle` family
 //      names the model it runs beside (`evidence.model`, Phase 203), and that model must carry at
@@ -146,19 +148,21 @@ let private fixtureLadder =
     { "id": "t3", "level": "assumed", "class": "premise", "phase": "fuaran-core#1" },
     { "id": "t4", "level": "assumed", "class": "domain-obligation", "dischargedBy": "Conformance.fixtureLaws", "phase": "fuaran-core#1" },
     { "id": "t5", "level": "assumed", "class": "model-bridge", "closes": "permanent", "phase": "fuaran-core#1" },
-    { "id": "t6", "level": "assumed", "class": "host-premise", "probe": "premiseFixture", "phase": "fuaran-core#1" }
+    { "id": "t6", "level": "assumed", "class": "host-premise", "probe": "premiseFixture", "phase": "fuaran-core#1" },
+    { "id": "t7", "level": "assumed", "class": "witness-obligation", "dischargedBy": "FixtureWitness.Undo", "phase": "fuaran-core#1" }
   ]
 }
 """
 
 let private fixtureContract =
     """
-Every ladder ends at level 3, and the 4 assumed rows across these ladders are four kinds of thing.
+Every ladder ends at level 3, and the 5 assumed rows across these ladders are five kinds of thing.
 
 - **`domain-obligation`** — what you owe. 1 rows.
 - **`model-bridge`** — what this repository has not bridged. 1 rows.
 - **`premise`** — what nobody discharges. 1 rows.
 - **`host-premise`** — what each host answers on its own runtime. 1 rows.
+- **`witness-obligation`** — what a domain's witness answers by its own tests. 1 rows.
 """
 
 let private fixtureBase =
@@ -338,8 +342,14 @@ let proofCoverageTests =
               Expect.isEmpty findings (sprintf "the baseline must be clean — got:\n%s" (String.concat "\n" findings))
               Expect.equal tally.Modelled 1 "one package modelled"
               Expect.equal tally.Excluded 1 "one package excluded"
-              Expect.equal tally.Assumed 4 "four assumed rows"
+              Expect.equal tally.Assumed 5 "five assumed rows"
               Expect.equal tally.HostProbed 1 "one host premise, probed"
+              Expect.equal tally.WitnessDischarged 1 "one witness obligation, discharged by its member"
+
+              Expect.stringContains
+                  (renderPredicate true tally)
+                  "1 witness-discharged)"
+                  "the predicate line counts the class like the other assumed classes"
 
           // ---- THE PREDICATE, on this tree ----
 
@@ -500,6 +510,15 @@ let proofCoverageTests =
                   "assumed-accounted"
                   "t6"
 
+          testCase "go-red: assumed-accounted — a witness obligation with no dischargedBy"
+          <| fun _ ->
+              expectOneFinding
+                  "a witness obligation no member answers"
+                  fixtureBase
+                  (fixtureLadder.Replace("\"dischargedBy\": \"FixtureWitness.Undo\", ", ""))
+                  "assumed-accounted"
+                  "t7"
+
           testCase "go-red: assumed-accounted — a model bridge with no closes"
           <| fun _ ->
               expectOneFinding
@@ -578,7 +597,7 @@ let proofCoverageTests =
               expectOneFinding
                   "a stale total"
                   { fixtureBase with
-                      ContractText = fixtureContract.Replace("the 4 assumed rows", "the 5 assumed rows") }
+                      ContractText = fixtureContract.Replace("the 5 assumed rows", "the 6 assumed rows") }
                   fixtureLadder
                   "contract-counts"
                   "assumed rows"
@@ -598,7 +617,7 @@ let proofCoverageTests =
               expectOneFinding
                   "a count nothing can find"
                   { fixtureBase with
-                      ContractText = fixtureContract.Replace("the 4 assumed rows", "the assumed rows") }
+                      ContractText = fixtureContract.Replace("the 5 assumed rows", "the assumed rows") }
                   fixtureLadder
                   "contract-counts"
                   "assumed rows"

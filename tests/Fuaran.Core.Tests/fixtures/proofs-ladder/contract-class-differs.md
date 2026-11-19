@@ -1,6 +1,6 @@
 <!-- A FIXTURE README for the Phase 174 `contract-agrees` clause of the Proofs.Ladder
      family, NOT this repository's proofs/README.md. It is the contract table that
-     `ladder-ok.json`'s three assumed rows must agree with, row for row. -->
+     `ladder-ok.json`'s four assumed rows must agree with, row for row. -->
 
 # a fixture README
 
@@ -15,6 +15,7 @@ Prose the clause must not read as a table row.
 | `fixture-premise` | `model-bridge` | — |
 | `fixture-obligation` | `domain-obligation` | `Conformance.fixtureLaws` |
 | `fixture-bridge` | `model-bridge` | `permanent` |
+| `fixture-witness-obligation` | `witness-obligation` | `FixtureWitness.Undo` |
 
 ## Something after it
 
