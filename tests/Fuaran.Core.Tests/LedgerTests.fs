@@ -100,6 +100,51 @@ let private faultsOf tags standing slots =
 let private editing (v: string) (f: string -> string) =
     sample |> List.map (fun s -> if s.Version = v then slot v (f s.Text) else s)
 
+// ---- scratch ledgers (Phase 702, D272) ----------------------------------------------------------
+
+/// `git <arguments>` in `dir`: its exit code and what it wrote. The merge clause reads the code itself.
+let private gitIn (dir: string) (arguments: string list) : int * string =
+    match ChildProcess.argv "git" arguments |> ChildProcess.inDir dir |> ChildProcess.run with
+    | Ok o -> o.Exit, (o.Stdout + o.Stderr).Trim()
+    | Error why -> failtestf "git could not run: %s" why
+
+let private gitOk (dir: string) (arguments: string list) =
+    match gitIn dir arguments with
+    | 0, _ -> ()
+    | code, out -> failtestf "git %s exited %d: %s" (String.concat " " arguments) code out
+
+let private writeFile (path: string) (text: string) =
+    Directory.CreateDirectory(Path.GetDirectoryName path) |> ignore
+    File.WriteAllText(path, text)
+
+/// `body` over a fresh scratch directory, removed after (git's read-only object files cleared first).
+let private scratch (body: string -> unit) =
+    let root =
+        Path.Combine(Path.GetTempPath(), "fuaran-core-702-" + Guid.NewGuid().ToString("N"))
+
+    Directory.CreateDirectory root |> ignore
+
+    try
+        body root
+    finally
+        try
+            for p in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories) do
+                File.SetAttributes(p, FileAttributes.Normal)
+
+            Directory.Delete(root, true)
+        with _ ->
+            ()
+
+/// The standing draft every scratch ledger opens with.
+let private scratchDraft =
+    "## 0.9.1 — DRAFT\n\n**Slot class: additive.** A scratch slot over the released `0.9.0`.\n"
+
+let private entryA =
+    "- **A first sample entry** (Phase 901, `A.fs`) — class **internal**: no `api/` row, wire byte or\n  refusal moves.\n"
+
+let private entryB =
+    "- **A second sample entry** (Phase 902, `B.fs`) — class **internal**: no `api/` row, wire byte or\n  refusal moves.\n"
+
 [<Tests>]
 let tests =
     testList
@@ -548,4 +593,50 @@ let tests =
                   (renderIndex "# Ledger\n\nPreamble.\n" slots)
                   index
                   "an index with no entries renders them under its preamble"
+          }
+
+          // Phase 702 (D272): the measurement it starts from, as a test. Two changes cut from one commit
+          // each add one entry, the one way an entry is added; git must merge them in either order.
+          test "two changes that each add an entry merge clean in either order, and the merged ledger reads both" {
+              scratch (fun root ->
+                  gitOk root [ "init"; "-q"; "-b"; "main" ]
+
+                  for k, v in
+                      [ "user.name", "ledger test"
+                        "user.email", "ledger@example.invalid"
+                        "commit.gpgsign", "false"
+                        "core.autocrlf", "false" ] do
+                      gitOk root [ "config"; k; v ]
+
+                  writeFile (Path.Combine(root, Dir, "0.9.1.md")) scratchDraft
+                  gitOk root [ "add"; "-A" ]
+                  gitOk root [ "commit"; "-q"; "-m"; "the draft" ]
+
+                  for branch, name, entry in [ "a", "phase-901", entryA; "b", "phase-902", entryB ] do
+                      gitOk root [ "checkout"; "-q"; "-b"; branch; "main" ]
+                      addEntry root "0.9.1" "internal" name entry |> ignore
+                      gitOk root [ "add"; "-A" ]
+                      gitOk root [ "commit"; "-q"; "-m"; "an entry" ]
+
+                  for ours, theirs in [ "a", "b"; "b", "a" ] do
+                      gitOk root [ "checkout"; "-q"; ours ]
+
+                      match gitIn root [ "merge"; "--no-edit"; theirs ] with
+                      | 0, _ ->
+                          let draft = fst (read root) |> List.find (fun s -> s.Version = "0.9.1")
+
+                          Expect.stringContains
+                              draft.Text
+                              entryA
+                              (sprintf "on %s, the merged ledger reads entry A" ours)
+
+                          Expect.stringContains
+                              draft.Text
+                              entryB
+                              (sprintf "on %s, the merged ledger reads entry B" ours)
+
+                          gitOk root [ "reset"; "-q"; "--hard"; "ORIG_HEAD" ]
+                      | code, out ->
+                          gitIn root [ "merge"; "--abort" ] |> ignore
+                          failtestf "on %s, `git merge %s` exited %d:\n%s" ours theirs code out)
           } ]

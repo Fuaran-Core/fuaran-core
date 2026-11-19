@@ -215,6 +215,46 @@ let read (root: string) : Slot list * string list =
 
         slots, names |> List.filter (fun n -> not (isSlot n) && n <> "README.md") |> List.sort
 
+// ---- adding an entry ------------------------------------------------------------------------
+
+/// Add `text`, one entry (its bullet and its wrapped lines), to the standing draft `version` under `root`,
+/// as class `cls` (`breaking`, `additive` or `internal`) named `name` (`phase-<n>`): the one way an entry is
+/// added, the way the guide (CONTRIBUTING.md) states it. Answers the file written, repo-relative.
+let addEntry (root: string) (version: string) (cls: string) (name: string) (text: string) : string =
+    ignore name
+    let rel = sprintf "%s/%s.md" Dir version
+    let path = Path.Combine(root, rel)
+
+    let lines =
+        File.ReadAllText(path).Replace("\r\n", "\n").TrimEnd('\n').Split('\n')
+        |> Array.toList
+
+    let section = "### " + string (Char.ToUpperInvariant cls[0]) + cls.Substring 1
+    let entry = text.Replace("\r\n", "\n").TrimEnd('\n').Split('\n') |> Array.toList
+
+    let updated =
+        match List.tryFindIndex ((=) section) lines with
+        | None -> lines @ [ ""; section; "" ] @ entry
+        | Some i ->
+            let next =
+                lines
+                |> List.indexed
+                |> List.tryFind (fun (j, l) -> j > i && l.StartsWith "#")
+                |> Option.map fst
+                |> Option.defaultValue lines.Length
+
+            let at =
+                [ i + 1 .. next - 1 ]
+                |> List.filter (fun j -> lines[j].Trim() <> "")
+                |> List.tryLast
+                |> Option.map ((+) 1)
+                |> Option.defaultValue (i + 1)
+
+            lines[.. at - 1] @ entry @ lines[at..]
+
+    File.WriteAllText(path, String.concat "\n" updated + "\n")
+    rel
+
 /// The ledger read as one text, newest slot first: the view the README's version stamps are read
 /// against (`ReadmeClaimsTests`).
 let text (slots: Slot list) : string =
