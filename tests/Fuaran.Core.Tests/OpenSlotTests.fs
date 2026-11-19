@@ -343,7 +343,7 @@ let tests =
               "one act advances a standing draft of a lower class: the draft's file is headed never released and its entries are rendered into it"
           <| fun _ ->
               using None (fun f ->
-                  // an internal draft opened by the act, committed, and ridden by one entry, a file of its own (D273)
+                  // an internal draft opened by the act, committed, and ridden by one entry, a file of its own (D274)
                   openDraft f opening OpenSlot.Internal
                   let draftPath = Path.Combine(f.Core, Ledger.Dir, opening + ".md")
                   let entryRel = sprintf "%s/%s/internal/phase-998.md" Ledger.Dir opening
@@ -886,7 +886,7 @@ let tests =
                   with _ ->
                       ()
 
-          // A guard over the live ledger: every entry of the standing draft rides it (D273). It cannot be red
+          // A guard over the live ledger: every entry of the standing draft rides it (D274). It cannot be red
           // first, since no entry in this tree has ever sat in a class that advances its slot.
           testCase "the standing draft holds no entry of a class that advances it"
           <| fun _ ->

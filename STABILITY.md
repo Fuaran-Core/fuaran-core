@@ -51,7 +51,7 @@ is held to at most 1,500 lines, so a release's entry cannot drift back into it.
 **A version's entries go in its ledger file.** Opening a draft slot creates `docs/releases/<v>.md`
 headed `## <v> — DRAFT` and its re-rendered index in the same commit as the `<Version>` move, its stamps and
 the corpus pin; the tool's `open-slot` does all of it in one act ([`RELEASING.md`](RELEASING.md), D218). Every change that rides the slot
-adds its entry as a file of its own, `docs/releases/<v>/<class>/<name>.md` (`<class>` one of `breaking`, `additive` or `internal`), holding its bullet exactly as it will print, so two changes in flight never edit one file; the act that closes the slot, the release gesture below or `open-slot`'s advance, prints the entries into the slot's file, a section per class, and removes their files (DECISIONS.md D273).
+adds its entry as a file of its own, `docs/releases/<v>/<class>/<name>.md` (`<class>` one of `breaking`, `additive` or `internal`), holding its bullet exactly as it will print, so two changes in flight never edit one file; the act that closes the slot, the release gesture below or `open-slot`'s advance, prints the entries into the slot's file, a section per class, and removes their files (DECISIONS.md D274).
 A change to the contract itself — a new surface class, a new stability-critical surface, a moved posture — is edited here, and its slot's entry says so.
 
 **"Released" is a gate output, not a heading's claim (Phase 392, DECISIONS.md D123).** The `Release
@@ -84,7 +84,7 @@ this order, because each step reads the one before it:
 3. Pack again from the clean tree for publication, so the packed surface is the one the gate measured.
 4. In ONE commit: write the `**Release record` and `**Receiving gate run:**` paragraphs in the slot's
    ledger file, turn its heading to `released <date> as `v<v>``, print its entries into it and re-render the index (both with
-   `CORE_APPROVE_DOCS=ledger-index`, which removes the entry files it prints; DECISIONS.md D273), and regenerate the README's version stamps
+   `CORE_APPROVE_DOCS=ledger-index`, which removes the entry files it prints; DECISIONS.md D274), and regenerate the README's version stamps
    (`dotnet run --project tests/Fuaran.Core.Tests -- --filter ReadmeClaims` with `CORE_APPROVE_README=1` set in the environment). The
    stamps are derived from the tags, so the regeneration runs under a provisional LOCAL tag on the
    candidate commit (its `api/` is the release's); delete that tag after the commit.

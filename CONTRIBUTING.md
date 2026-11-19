@@ -137,7 +137,7 @@ A change that adds a public surface should add or extend a `Conformance` law tha
 update `STABILITY.md` when it touches a stability-critical surface. What each version changed is
 recorded in the release ledger, `docs/releases/<version>.md` (`STABILITY.md`, "Versioning policy"). A change
 that ships adds its entry as a file of its own beside the standing draft's file, never inside it, so two changes in
-flight never edit one file (DECISIONS.md D273):
+flight never edit one file (DECISIONS.md D274):
 
 - the path is `docs/releases/<version>/<class>/<name>.md`, where `<version>` is the standing `<Version>`;
 - `<class>` is `breaking`, `additive` or `internal`, the change's class;

@@ -1,4 +1,4 @@
-- **Two changes that each add a release note do not conflict** (Phase 702, the release ledger, DECISIONS.md D273) —
+- **Two changes that each add a release note do not conflict** (Phase 702, the release ledger, DECISIONS.md D274) —
   class **internal**: tests, the ledger's files and documents only; no `api/` or `api/wire/` row, no package, wire
   or conformance byte moves. While a slot is the standing draft each of its entries is a file of its own,
   `docs/releases/<v>/<class>/<name>.md`, holding its bullet exactly as it will print, so two changes add two files

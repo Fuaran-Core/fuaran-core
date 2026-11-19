@@ -1236,3 +1236,177 @@ let inPlace =
 
                   Expect.isError (Json.read ReadOptions.strict (prefix + "-9007199254740993" + close)) "-(2^53 + 1)"
           } ]
+
+// Phase 663: the nesting cap holds on a small thread stack. A stack overflow ends the process on
+// .NET, so a parse that recursed once per container died on a 256 KB thread short of the default
+// cap (measured in `benchmarks/results/2026-11-19-ultra9-386h-phase-663.md`); before the change these
+// tests ended the test process, and that was their red.
+
+/// `f ()` on a thread with 256 KB of stack, its answer or its exception handed back.
+let private onSmallStack (f: unit -> 'a) : 'a =
+    let mutable answer = Unchecked.defaultof<'a>
+    let mutable fault: exn = null
+
+    let t =
+        System.Threading.Thread(
+            (fun () ->
+                try
+                    answer <- f ()
+                with e ->
+                    fault <- e),
+            256 * 1024
+        )
+
+    t.Start()
+    t.Join()
+
+    if not (isNull fault) then
+        raise (System.AggregateException(fault))
+
+    answer
+
+/// A document of `depth` nested arrays (`[[…]]`) or objects (`{"a":{"a":…{}}}`).
+let private nested (objects: bool) (depth: int) : string =
+    if objects then
+        String.replicate (depth - 1) "{\"a\":" + "{}" + String.replicate (depth - 1) "}"
+    else
+        String.replicate depth "[" + String.replicate depth "]"
+
+/// The nesting of a parsed `[[…]]` or `{"a":{"a":…}}`, counted without recursion.
+let private nesting (v: JVal) : int =
+    let mutable d = 0
+    let mutable cur = ValueSome v
+
+    while cur.IsSome do
+        match cur.Value with
+        | JArr [ x ]
+        | JObj [ (_, x) ] ->
+            d <- d + 1
+            cur <- ValueSome x
+        | JArr []
+        | JObj [] ->
+            d <- d + 1
+            cur <- ValueNone
+        | other -> failtestf "unexpected value %A" other
+
+    d
+
+[<Tests>]
+let smallStack =
+    testList
+        "Json nesting on a small stack"
+        [ test "on a 256 KB thread the default cap admits a document at it and refuses one past it by name" {
+              let cap = Json.defaultMaxDepth
+
+              for objects in [ false; true ] do
+                  let shape = if objects then "objects" else "arrays"
+
+                  let path =
+                      List.replicate cap (if objects then PathSegment.Key "a" else PathSegment.Index 0)
+
+                  // The bracket that passes the cap: each level is one character for arrays, five for objects.
+                  let position = if objects then cap * 5 else cap
+
+                  for policy in [ ReadOptions.strict; ReadOptions.tolerantOfNull ] do
+                      let atCap, pastCap =
+                          onSmallStack (fun () ->
+                              Json.read policy (nested objects cap), Json.read policy (nested objects (cap + 1)))
+
+                      match atCap with
+                      | Ok v -> Expect.equal (nesting v) cap (shape + ": the document at the cap decodes")
+                      | Error e -> failtestf "%s: the document at the cap was refused: %A" shape e
+
+                      Expect.equal
+                          pastCap
+                          (Error(
+                              JsonRefusal.LimitExceeded
+                                  { Limit = JsonLimit.Depth
+                                    Declared = cap
+                                    Path = path
+                                    Position = position }
+                          ))
+                          (shape
+                           + ": the document past the cap is the Depth breach at the bracket that passed it")
+
+                  // `parse`'s sentence, and the typed reader's JVal reading, on the same thread.
+                  let parsed, viaReader =
+                      onSmallStack (fun () ->
+                          Json.parse (nested objects (cap + 1)),
+                          Reader.read ReadOptions.strict Reader.value (nested objects (cap + 1)))
+
+                  Expect.equal
+                      parsed
+                      (Error(sprintf "not valid JSON: max nesting depth %d exceeded at position %d" cap position))
+                      (shape + ": parse names the cap")
+
+                  Expect.equal
+                      viaReader
+                      (Decoder.parse ReadOptions.strict (nested objects (cap + 1)))
+                      (shape + ": the reader's JVal reading is refused as the parse is")
+          }
+
+          test "on a 256 KB thread a document far past the cap is refused, and a lifted cap decodes far past it" {
+              match onSmallStack (fun () -> Json.read ReadOptions.strict (nested false 100000)) with
+              | Error(JsonRefusal.LimitExceeded b) ->
+                  Expect.equal (b.Limit, b.Position) (JsonLimit.Depth, Json.defaultMaxDepth) "the cap's breach"
+              | other -> failtestf "expected the Depth breach, got %A" other
+
+              // The cap is the caller's to set: a depth no recursion reached on a default thread
+              // decodes on this one when the cap admits it.
+              let lifted =
+                  { ReadOptions.strict with
+                      Limits = JsonLimits.depthOnly 200000 }
+
+              for objects in [ false; true ] do
+                  match onSmallStack (fun () -> Json.read lifted (nested objects 100000)) with
+                  | Ok v -> Expect.equal (nesting v) 100000 "100,000 levels decode"
+                  | Error e -> failtestf "refused: %A" e
+          }
+
+          test "a refusal inside a deep document keeps its kind, sentence and position" {
+              // Each fault sits inside 300 arrays, so every container step of the parse is on the path to
+              // it; the expected answer is the one the same text gives at the root, moved by the prefix.
+              let faults =
+                  [ "{\"k\":1,}"
+                    "{\"k\" 1}"
+                    "{\"k\":1 \"j\":2}"
+                    "{\"k\":1,\"k\":2}"
+                    "{\"k\":{\"j\":null,\"j\":1}}"
+                    "{\"k\":[1 2]}"
+                    "{\"k\":[1,]}"
+                    "{\"k\":[1,null]}"
+                    "{\"k\":nul}"
+                    "{\"k\":null}"
+                    "{\"k\":nullish}"
+                    "{\"k\":-}"
+                    "{\"k\":\"\\q\"}"
+                    "{\"k\":@}"
+                    "{\"k\":[}"
+                    "{1:2}"
+                    "[1,2]"
+                    "{\"k\":{},\"j\":[[],{}]}" ]
+
+              let prefix = String.replicate 300 "["
+              let suffix = String.replicate 300 "]"
+
+              for fault in faults do
+                  for policy in [ ReadOptions.strict; ReadOptions.tolerantOfNull ] do
+                      let expected =
+                          match Json.read policy fault with
+                          | Error(JsonRefusal.Malformed e) ->
+                              Error(
+                                  JsonRefusal.Malformed
+                                      { e with
+                                          Position = e.Position + prefix.Length }
+                              )
+                          | Ok _ -> Ok()
+                          | other -> failtestf "%s: unexpected root answer %A" fault other
+
+                      let deep =
+                          match onSmallStack (fun () -> Json.read policy (prefix + fault + suffix)) with
+                          | Ok _ -> Ok()
+                          | Error(JsonRefusal.Malformed e) -> Error(JsonRefusal.Malformed e)
+                          | other -> failtestf "%s: unexpected deep answer %A" fault other
+
+                      Expect.equal deep expected fault
+          } ]

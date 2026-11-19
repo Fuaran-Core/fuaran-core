@@ -66,7 +66,7 @@ type StandingDraft =
         Class: SlotClass
         /// Its ledger file, repo-relative and forward-slashed.
         Path: string
-        /// That file's text, with its entries printed in as the ledger reads it (D273).
+        /// That file's text, with its entries printed in as the ledger reads it (D274).
         Text: string
     }
 
@@ -89,7 +89,7 @@ type Plan =
         /// This repository's files except `copies.json`, absolute, with their new text.
         CoreWrites: (string * string) list
         /// This repository's files the act removes, absolute: an advanced draft's entry files, which its
-        /// re-headed file carries (D273).
+        /// re-headed file carries (D274).
         CoreRemovals: string list
         /// The current `copies.json` text and pin; the new pin is written once the corpus HEAD is known.
         CopiesText: string
@@ -205,7 +205,7 @@ let private classWhy (version: string) (newest: string) (kind: string) (cls: Slo
 
 /// What is wrong with the classes of the standing draft `draft`'s entries over the release `newest`: an
 /// entry of a class whose member advances the draft (by `expectedOver`, as `advancing` reads it) does not ride
-/// it, and the refusal names the slot that class opens and the file the entry moves to (D273).
+/// it, and the refusal names the slot that class opens and the file the entry moves to (D274).
 let entryClassFaults (newest: string) (draft: Ledger.Slot) : string list =
     let moves = advancing (at draft.Version) (at newest)
 
@@ -215,7 +215,7 @@ let entryClassFaults (newest: string) (draft: Ledger.Slot) : string list =
           | Some(m, v) ->
               yield
                   sprintf
-                      "%s is %s entry, and %s advances the %s draft to `%s`: take the file out of %s/, open that slot (`open-slot %s --class %s`, DECISIONS.md D265), and add it there, unchanged, as %s/%s/%s.md (D273)"
+                      "%s is %s entry, and %s advances the %s draft to `%s`: take the file out of %s/, open that slot (`open-slot %s --class %s`, DECISIONS.md D265), and add it there, unchanged, as %s/%s/%s.md (D274)"
                       e.Path
                       ((memberOf m).Replace(" member", ""))
                       (memberOf m)
@@ -237,7 +237,7 @@ let private agreeing (openedBy: string) (singular: string) (plural: string) =
 
 /// A slot file: its DRAFT heading, `paragraph` wrapped, and the sentence saying how an entry is added. It
 /// carries no entry and no section heading: each entry is a file of its own, and the act that closes the
-/// slot writes the sections (D273).
+/// slot writes the sections (D274).
 let private draftFile (version: string) (paragraph: string) =
     sprintf
         "## %s — DRAFT\n\n%s\n\n%s\n"
@@ -531,7 +531,7 @@ let private readDraft
     if not (File.Exists path) then
         cannot (sprintf "%s is missing" rel)
     else
-        // the draft as the ledger reads it: its file with its entries printed in (D273)
+        // the draft as the ledger reads it: its file with its entries printed in (D274)
         let slot =
             fst (Ledger.read root)
             |> List.tryFind (fun s -> s.Version = standing)
@@ -769,7 +769,7 @@ let private planWith (r: Request) (admitted: Admitted) : Result<Plan, string lis
             | None -> slotText r.Version admitted.Previous r.Class r.OpenedBy
             | Some d -> advanceText r.Version admitted.Newest d r.Class r.OpenedBy
 
-        // An advance re-heads the draft's file, its entries rendered in (D273); every other slot file is read as
+        // An advance re-heads the draft's file, its entries rendered in (D274); every other slot file is read as
         // it stands.
         let retired =
             admitted.Advances
@@ -918,7 +918,7 @@ let apply (p: Plan) : Result<Outcome, string> =
                 for path in p.CoreRemovals do
                     File.Delete path
 
-                // an advanced draft's entry directory goes once its files have (D273)
+                // an advanced draft's entry directory goes once its files have (D274)
                 for d in p.Advances |> Option.toList do
                     let dir = Path.Combine(r.Root, Ledger.entryDir d.Version)
 
