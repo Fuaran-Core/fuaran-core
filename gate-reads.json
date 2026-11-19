@@ -27,5 +27,15 @@
     "proofs.json",
     "version-derives.json"
   ],
-  "notRead": []
+  "notRead": [],
+  "handMerged": [
+    {
+      "path": "**/docs/releases/**",
+      "reason": "the draft slot's ledger file takes one appended entry per additive phase; two members' entries are merged by hand and the batch gate over the merged tree checks the result"
+    },
+    {
+      "path": "**/benchmarks/results/**",
+      "reason": "each performance phase adds its own dated results file and harness here; no two members edit the same file, and the batch gate runs over the merged tree"
+    }
+  ]
 }
