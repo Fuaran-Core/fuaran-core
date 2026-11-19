@@ -2203,6 +2203,41 @@ let validityTests =
                   AllValid
                   "the lenient form with no validity array"
 
+          testCase "the fill's mask starts at the first absent row, every row before it present (Phase 608)"
+          <| fun _ ->
+              for ty in ColumnType.all do
+                  let present =
+                      match ty with
+                      | IntType -> Int 7
+                      | FloatType -> Float 2.5
+                      | BoolType -> Bool true
+                      | StringType -> Str "s"
+                      | DateType -> Date "2026-03-04"
+                      | TimestampType _ -> Timestamp "2026-03-04T05:06:07Z"
+                      | DecimalType -> Decimal "2.5"
+
+                  // the first absent row at each position, and a second absent row after it
+                  for first in 0..4 do
+                      let absent i = i = first || i = first + 2
+                      let cells = [ for i in 0..4 -> if absent i then Null else present ]
+                      let bits = Mask(Vector.ofList [ for i in 0..4 -> not (absent i) ])
+
+                      match Column.ofCells "c" ty cells with
+                      | Ok c ->
+                          Expect.equal (Column.validity c) bits (sprintf "%A, first absent %d: the mask" ty first)
+
+                          Expect.equal
+                              [ for i in 0..4 -> Column.cell i c ]
+                              cells
+                              (sprintf "%A, first absent %d: every row reads back" ty first)
+
+                          match ColumnCodec.decode (ColumnCodec.encode (embedded c)) with
+                          | Ok(Embedded t) ->
+                              Expect.equal (Column.validity t.Columns.Head) bits (sprintf "%A: decode's mask" ty)
+                              Expect.equal t.Columns.Head c (sprintf "%A, first absent %d: decode" ty first)
+                          | other -> failtestf "%A: decode %A" ty other
+                      | Error e -> failtestf "%A: ofCells refused %A" ty e
+
           testCase "the wire is unchanged: AllValid writes the all-true validity array a Mask of all true wrote"
           <| fun _ ->
               let viaAllValid = ColumnCodec.encode (embedded (ints AllValid))

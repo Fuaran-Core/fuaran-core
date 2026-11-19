@@ -457,6 +457,16 @@ type ColumnError =
     /// `validity` arrays disagreeing on the wire.
     | RaggedColumns of column: string * expected: int * got: int
 
+/// A column type's storage while `TypeOps.fill` writes it (Phase 608): the element of a row stored
+/// where the type keeps it, and the storage over the filled rows and their validity. A timestamp
+/// stores its pair straight into its two vectors, so no array of pairs is built and copied out.
+[<AbstractClass>]
+type internal RowStorage<'T>() =
+    /// Store the element of row `i`.
+    abstract Set: i: int * value: 'T -> unit
+    /// The storage over the rows set, under `validity`.
+    abstract Build: validity: Validity -> ColumnData
+
 /// THE SCALAR SET AS A TABLE (Phase 514, DECISIONS.md D178): what one column type does with one
 /// value, as one row per type — the storage element it holds, how a cell becomes one and one
 /// becomes a cell, how a JSON value is read into one and written from one, the slot an absent row
@@ -470,13 +480,13 @@ type ColumnError =
 /// at all — they keep their monomorphic typed arms, as does `Column.cell`, the per-row read. A
 /// timestamp row's element is the PAIR its two vectors hold at one row (the floor epoch second and
 /// the fraction at the row's unit), a struct so a .NET walk allocates nothing per row; it is the one
-/// row whose storage is not a single vector, so its `Build` and its view are written as its own.
+/// row whose storage is not a single vector, so its storage and its view are written as its own.
 [<NoComparison; NoEquality>]
 type internal TypeOps<'T> =
     {
         /// Storage for `n` rows holding the type's zero, allocated at the row's own element type
-        /// (so a Fable build keeps its typed array).
-        Alloc: int -> 'T[]
+        /// (so a Fable build keeps its typed array), for the fill to write rows into.
+        Alloc: int -> RowStorage<'T>
         /// A cell as the element a column of the type holds (`ValueNone` for `Null`), widened as
         /// `ColumnType.widens` allows; a cell of another type is the `TypeMismatch` naming it, and a
         /// date or timestamp whose text is not canonical the `MalformedShape` naming the form. The
@@ -497,8 +507,6 @@ type internal TypeOps<'T> =
         /// for a type whose every element is carriable. The test is the one call a scan makes per
         /// row; the refusal is built only for a row that fails it.
         Uncarriable: (('T -> bool) * (string -> int -> 'T -> ColumnError)) option
-        /// The storage over a filled element array and its validity.
-        Build: 'T[] -> Validity -> ColumnData
     }
 
 /// A computation over the row of a type whose element type the caller cannot name (F# has no
@@ -636,10 +644,17 @@ module internal TypeOps =
                  + string i
                  + " names an instant outside the years 0000-9999 the canonical timestamp spells")
 
+    /// The storage of a type held in one vector: the rows written into `xs`, and `build` over the
+    /// vector adopting it.
+    let private vectorStorage (xs: 'T[]) (build: Vector<'T> * Validity -> ColumnData) : RowStorage<'T> =
+        { new RowStorage<'T>() with
+            member _.Set(i, v) = xs[i] <- v
+            member _.Build v = build (Vector.adopt xs, v) }
+
     // ---- the rows ----
 
     let private ints: TypeOps<int> =
-        { Alloc = Array.zeroCreate
+        { Alloc = fun n -> vectorStorage (Array.zeroCreate n) Ints
           OfCell =
             fun name c ->
                 match c with
@@ -653,11 +668,10 @@ module internal TypeOps =
           WriteJson = JInt
           AbsentSlot = JInt 0
           ToCell = Int
-          Uncarriable = None
-          Build = fun xs v -> Ints(Vector.adopt xs, v) }
+          Uncarriable = None }
 
     let private floats: TypeOps<float> =
-        { Alloc = Array.zeroCreate
+        { Alloc = fun n -> vectorStorage (Array.zeroCreate n) Floats
           OfCell =
             fun name c ->
                 match c with
@@ -679,11 +693,10 @@ module internal TypeOps =
             Some(
                 (fun f -> not (System.Double.IsNaN f || System.Double.IsInfinity f)),
                 fun name _ f -> NonFiniteFloat(name, JVal.nonFiniteToken f |> Option.defaultValue (string f))
-            )
-          Build = fun xs v -> Floats(Vector.adopt xs, v) }
+            ) }
 
     let private bools: TypeOps<bool> =
-        { Alloc = Array.zeroCreate
+        { Alloc = fun n -> vectorStorage (Array.zeroCreate n) Bools
           OfCell =
             fun name c ->
                 match c with
@@ -697,11 +710,10 @@ module internal TypeOps =
           WriteJson = JBool
           AbsentSlot = JBool false
           ToCell = Bool
-          Uncarriable = None
-          Build = fun xs v -> Bools(Vector.adopt xs, v) }
+          Uncarriable = None }
 
     let private strs: TypeOps<string> =
-        { Alloc = fun n -> Array.create n ""
+        { Alloc = fun n -> vectorStorage (Array.create n "") Strs
           OfCell =
             fun name c ->
                 match c with
@@ -715,11 +727,10 @@ module internal TypeOps =
           WriteJson = JStr
           AbsentSlot = JStr ""
           ToCell = Str
-          Uncarriable = None
-          Build = fun xs v -> Strs(Vector.adopt xs, v) }
+          Uncarriable = None }
 
     let private dates: TypeOps<int> =
-        { Alloc = Array.zeroCreate
+        { Alloc = fun n -> vectorStorage (Array.zeroCreate n) Dates
           OfCell =
             fun name c ->
                 match c with
@@ -753,13 +764,23 @@ module internal TypeOps =
                         + string d
                         + " names no day the canonical form spells"
                     )
-            )
-          Build = fun xs v -> Dates(Vector.adopt xs, v) }
+            ) }
 
     let private timestamps (unit: TimeUnit) : TypeOps<struct (float * int)> =
         let ty = TimestampType unit
 
-        { Alloc = fun n -> Array.create n (struct (0.0, 0))
+        { Alloc =
+            fun n ->
+                let seconds = Array.zeroCreate<float> n
+                let fraction = Array.zeroCreate<int> n
+
+                { new RowStorage<struct (float * int)>() with
+                    member _.Set(i, struct (second, f)) =
+                        seconds[i] <- second
+                        fraction[i] <- f
+
+                    member _.Build v =
+                        Timestamps(unit, Vector.adopt seconds, normalFraction unit fraction v, v) }
           OfCell =
             fun name c ->
                 match c with
@@ -804,21 +825,10 @@ module internal TypeOps =
                         + string i
                         + " holds an instant the canonical form cannot spell"
                     )
-            )
-          Build =
-            fun pairs v ->
-                let seconds = Array.zeroCreate<float> pairs.Length
-                let fraction = Array.zeroCreate<int> pairs.Length
-
-                for i in 0 .. pairs.Length - 1 do
-                    let struct (second, f) = pairs[i]
-                    seconds[i] <- second
-                    fraction[i] <- f
-
-                Timestamps(unit, Vector.adopt seconds, normalFraction unit fraction v, v) }
+            ) }
 
     let private decimals: TypeOps<string> =
-        { Alloc = fun n -> Array.create n DecimalText.zero
+        { Alloc = fun n -> vectorStorage (Array.create n DecimalText.zero) Decimals
           OfCell =
             fun name c ->
                 match c with
@@ -849,8 +859,7 @@ module internal TypeOps =
                         name
                         + ": a decimal cell must carry canonical decimal text — an optional '-', integer digits with no leading zero, and a '.' with fraction digits only where the fraction is non-zero, with no trailing zero (build the cell with Cell.decimal)"
                     )
-            )
-          Build = fun xs v -> Decimals(Vector.adopt xs, v) }
+            ) }
 
     // ---- the two dispatches: the only matches over the scalar set a shared walk needs ----
 
@@ -882,6 +891,8 @@ module internal TypeOps =
     /// zero at every absent row, and `AllValid` where no row is absent (Phase 420). `Column.ofCells`
     /// and the codec's decode are this one walk, over a cell list and over the `values` array beside
     /// its `validity`; until Phase 514 each was a walk of its own with a seven-arm match beside it.
+    /// The mask is allocated at the first absent row, with the rows before it present (Phase 608),
+    /// so a column with no absent row allocates none.
     let inline fill
         (ops: TypeOps<'T>)
         (source: 'S list)
@@ -889,7 +900,8 @@ module internal TypeOps =
         : Result<ColumnData, ColumnError> =
         let n = List.length source
         let out = ops.Alloc n
-        let mask = Array.zeroCreate<bool> n
+        let mutable mask = Array.empty<bool>
+        let mutable masked = false
         let mutable fault = None
         let mutable i = 0
         let mutable rest = source
@@ -897,9 +909,15 @@ module internal TypeOps =
         while fault.IsNone && not rest.IsEmpty do
             match read i rest.Head with
             | Ok(ValueSome v) ->
-                out[i] <- v
-                mask[i] <- true
-            | Ok ValueNone -> ()
+                out.Set(i, v)
+
+                if masked then
+                    mask[i] <- true
+            | Ok ValueNone ->
+                if not masked then
+                    mask <- Array.zeroCreate n
+                    Array.fill mask 0 i true
+                    masked <- true
             | Error e -> fault <- Some e
 
             i <- i + 1
@@ -907,7 +925,7 @@ module internal TypeOps =
 
         match fault with
         | Some e -> Error e
-        | None -> Ok(ops.Build out (Validity.ofVector (Vector.adopt mask)))
+        | None -> Ok(out.Build(if masked then Mask(Vector.adopt mask) else AllValid))
 
 /// Column reads, the typed builders and readers, the cell-list bridge, and the pinned aggregate
 /// semantics — the single `aggregate` the compute layer's grouping and pivoting call rather than copy.
