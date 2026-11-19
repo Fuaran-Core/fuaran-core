@@ -88,13 +88,23 @@ module DecimalText =
     /// Zero, in canonical form.
     let zero: string = "0"
 
+    /// The canonical form of `s` with no option around it — `s` itself where it is already
+    /// canonical — or `null` where `s` is not decimal text. The admission an aggregate's walk
+    /// makes per row.
+    let internal canonicalOrNull (s: string) : string =
+        if canonicalShape s then
+            s
+        else
+            match parts s with
+            | Some p -> render p
+            | None -> null
+
     /// The canonical form of `s`, or `None` where `s` is not decimal text. A text already canonical
     /// is answered as itself, with no copy.
     let tryCanonical (s: string) : string option =
-        if canonicalShape s then
-            Some s
-        else
-            parts s |> Option.map render
+        match canonicalOrNull s with
+        | null -> None
+        | c -> Some c
 
     /// True where `s` is decimal text already in canonical form.
     let isCanonical (s: string) : bool = canonicalShape s
@@ -212,6 +222,11 @@ module DecimalText =
                     first
 
             System.String(text, start, last - start + 1)
+
+    /// A running sum's next total: `text` where `total` is `null` (no row yet), else the exact sum.
+    /// Both must be canonical, as an admitted row and an earlier total are.
+    let internal addToTotal (total: string) (text: string) : string =
+        if isNull total then text else addCanonical total text
 
     /// The numeric order of two decimal texts as `-1` / `0` / `1`, or `None` where either is not
     /// decimal text. Canonical or not: `1.50` and `1.5` compare equal.
