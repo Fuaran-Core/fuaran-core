@@ -79,10 +79,10 @@ module ChildProcess =
     /// The same command, run in `dir`.
     let inDir (dir: string) (c: Command) : Command = { c with WorkingDirectory = Some dir }
 
-    /// The same command, with `name` set to `value` in the child's environment.
     /// The same command, with `text` on its standard input.
     let withStdin (text: string) (c: Command) : Command = { c with Stdin = Some text }
 
+    /// The same command, with `name` set to `value` in the child's environment.
     let withEnv (name: string) (value: string) (c: Command) : Command =
         { c with
             Environment = c.Environment @ [ name, value ] }

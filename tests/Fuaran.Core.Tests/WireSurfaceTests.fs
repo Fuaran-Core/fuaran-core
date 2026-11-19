@@ -57,10 +57,13 @@ module Fuaran.Core.Tests.WireSurfaceTests
 //   CORE_APPROVE_WIRE=1 dotnet run --project tests/Fuaran.Core.Tests
 //   CORE_APPROVE_WIRE=Fuaran.Core.Query dotnet run --project tests/Fuaran.Core.Tests   (one package, or a comma list)
 //
-// Approval.fs reads the value (Phase 396). It rewrites every drifted wire baseline (or the named ones) and writes, into each one's header, the class of its
-// move since the newest `vX.Y.Z` tag. A separate test holds that stated class to a
-// recomputation against the tag it names, so a baseline cannot move without a class, and the
-// class it states cannot be wrong.
+// Approval.fs reads the value (Phase 396). For each admitted package it rewrites the baseline whose
+// rows moved, or whose header fails the stated-class check, and writes into that header the class of
+// its move since the newest release the tree's own release ledger records (Phase 700, D269); a
+// baseline whose rows did not move and whose header holds is left as it is. A clone that does not hold
+// that release's tag refuses, naming `git fetch --tags`, so one tree approves to the same bytes in
+// every clone. A separate test holds every stated class to a recomputation against the tag it names,
+// so a baseline cannot move without a class, and the class it states cannot be wrong.
 // ---------------------------------------------------------------------------
 
 open System
@@ -812,7 +815,13 @@ let internal headline (moves: WireMove list) : WireClass option =
 let internal describe (m: WireMove) =
     sprintf "%-9s %s — %s" (wireClassName m.Class) m.Doc m.What
 
-// ---- the release a header states its class since ------------------------------------------
+// ---- the release a header states its class since (Phase 700, D269) ------------------------
+//
+// A header names a release and the class of the baseline's move since it. The release is read from
+// the TREE, the newest slot its own release ledger heads `released <date> as v<v>`, never from the
+// clone's tags, so one tree approves to the same bytes in every clone. The clone is asked only for
+// what the tree cannot hold: the baseline as of a release, at that release's tag. A clone without the
+// tag a header or the ledger names says so, naming `git fetch --tags`, rather than answering for it.
 
 let private repoRoot () : string = Snapshots.repoFile ""
 
@@ -831,33 +840,49 @@ let internal ledgerNewest (slots: Ledger.Slot list) : string option =
     |> List.tryLast
     |> Option.map (fun s -> "v" + s.Version)
 
-/// The basis a header is stated against, or why this clone cannot state one.
-let internal basisFrom (_ledgerNewest: string option) (released: Result<Set<string>, string>) : Result<Basis, string> =
-    released
-    |> Result.bind (fun tags ->
-        match ChildProcess.Tags.newest tags with
-        | Some t -> Ok { Newest = t; Tags = tags }
-        | None -> Error "HEAD's history holds no `vX.Y.Z` tag")
+/// Why this clone cannot read the release `tag`, naming the remedy.
+let internal tagAbsent (tag: string) : string =
+    sprintf
+        "this clone does not hold the release tag `%s` in HEAD's history; fetch it with `git fetch --tags` and re-run"
+        tag
+
+/// The basis a header is stated against, or why this clone cannot state one: it holds no release tag at
+/// all (D168's sentence), the tree's ledger records no release, or the clone lacks the tag of the newest
+/// release the ledger records.
+let internal basisFrom (ledgerNewest: string option) (released: Result<Set<string>, string>) : Result<Basis, string> =
+    match released, ledgerNewest with
+    | Error why, _ -> Error why
+    | Ok _, None ->
+        Error
+            "the release ledger (docs/releases/) heads no slot released, so there is no release to state a class since"
+    | Ok tags, Some t when not (Set.contains t tags) -> Error(tagAbsent t)
+    | Ok tags, Some t -> Ok { Newest = t; Tags = tags }
 
 /// The class of `docs` against the package's baseline as of `tag`, in the words a header states.
-/// `baselineAt tag package` is that baseline's text, `None` where it cannot be read.
+/// `baselineAt tag package` is that baseline's text, `None` where the release holds none for the package
+/// (`first snapshot`). A tag outside `tags` is refused by name, never read as a first snapshot.
 let internal statedClassIn
-    (_tags: Set<string>)
+    (tags: Set<string>)
     (baselineAt: string -> string -> string option)
     (tag: string)
     (package: string)
     (docs: WireDoc list)
     : Result<string, string> =
-    match baselineAt tag package with
-    | None -> Ok "first snapshot"
-    | Some text ->
-        match headline (classifyPackage (parseDocs text) docs) with
-        | None -> Ok "unchanged"
-        | Some c -> Ok(wireClassName c)
+    if not (Set.contains tag tags) then
+        Error(tagAbsent tag)
+    else
+        match baselineAt tag package with
+        | None -> Ok "first snapshot"
+        | Some text ->
+            match headline (classifyPackage (parseDocs text) docs) with
+            | None -> Ok "unchanged"
+            | Some c -> Ok(wireClassName c)
 
 /// Why the header of the committed baseline `text` fails the stated-class check, `None` when it holds,
 /// or why this clone cannot tell: no class stated, the stated class wrong at the tag it names, or the
-/// package moved since the newest release while the header names an older one.
+/// package moved since the newest release while the header names an older one. The check and the
+/// approval both ask THIS, so they cannot disagree about a header; a header naming an older release
+/// stays valid while the package is unchanged since the newest, so cutting a release stales nothing.
 let internal headerFault
     (b: Basis)
     (baselineAt: string -> string -> string option)
@@ -887,17 +912,37 @@ let internal headerFault
             else
                 Ok None)
 
-/// What the approval writes for one admitted package: `Ok None` keeps the committed file, `Ok(Some text)`
-/// is the file to write, `Error` why this clone cannot write it.
+/// What the approval writes for one admitted package. It rewrites the baseline when its rows differ from
+/// the committed file's, or when the committed header fails the stated-class check; a rewritten header is
+/// stated since the ledger's newest release. Otherwise it keeps the committed file, header and all, so an
+/// approval after a release does not restate headers no row moved under. `Ok None` keeps the file,
+/// `Ok(Some text)` is the file to write, `Error` why this clone cannot write it.
 let internal approvedText
     (b: Basis)
     (baselineAt: string -> string -> string option)
     (package: string)
-    (_committed: string option)
+    (committed: string option)
     (docs: WireDoc list)
     : Result<string option, string> =
-    statedClassIn b.Tags baselineAt b.Newest package docs
-    |> Result.map (fun stated -> Some(renderBaseline package (b.Newest + ": " + stated) docs))
+    let restate () =
+        statedClassIn b.Tags baselineAt b.Newest package docs
+        |> Result.map (fun stated -> Some(renderBaseline package (b.Newest + ": " + stated) docs))
+
+    match committed with
+    | Some text when parseDocs text = docs ->
+        headerFault b baselineAt package text
+        |> Result.bind (fun fault ->
+            match fault with
+            | None -> Ok None
+            | Some _ -> restate ())
+    | _ -> restate ()
+
+/// The wire packages the stated-class check reads, given what the approval switch `admits`: every one it
+/// does NOT admit. In an approval run the check would otherwise read headers the approval is rewriting in
+/// the same run, in no fixed order; the approval holds an admitted header to the same check before it
+/// keeps it, so nothing goes unchecked.
+let internal checkedUnder (admits: string -> bool) (packages: string list) : string list =
+    packages |> List.filter (admits >> not)
 
 /// This clone's basis: the tree's release ledger and the clone's release tags.
 let private basis () : Result<Basis, string> =
@@ -1060,13 +1105,26 @@ let tests =
               // statement is anchored to the tag it NAMES rather than to the newest one, so cutting
               // a release stales nothing — but a baseline that has moved SINCE the newest tag must
               // state its class since that tag, or a move could hide under an older statement.
-              match basis () with
+              match ChildProcess.Tags.released (repoRoot ()) with
               | Error why ->
                   printfn "WireSurface stated-class check SKIPPED: %s" why
                   skiptestf "stated-class check skipped — %s" why
-              | Ok b ->
+              | Ok _ ->
+                  let b =
+                      match basis () with
+                      | Ok b -> b
+                      | Error why -> failtestf "a wire baseline's stated class cannot be checked in this clone: %s" why
+
+                  let packages = wirePackages ()
+                  let checkedHere = checkedUnder (Approval.admits Approval.Wire) packages
+
+                  if checkedHere.Length < packages.Length then
+                      printfn
+                          "WireSurface stated-class check: %d package(s) this approval run admits are held by the approval, not read here"
+                          (packages.Length - checkedHere.Length)
+
                   let problems =
-                      [ for p in wirePackages () do
+                      [ for p in checkedHere do
                             let path = wirePath p
 
                             if File.Exists path then
@@ -1249,6 +1307,25 @@ let tests =
                   (headerFault { Newest = "v1.0.0"; Tags = tags } at "P" (renderBaseline "P" "v9.9.9: unchanged" docs))
 
               refused "basisFrom" (basisFrom (Some "v9.9.9") (Ok tags))
+          }
+
+          test "in an approval run the stated-class check reads only the packages the approval does not admit" {
+              let packages = [ "Fuaran.Core.Query"; "Fuaran.Core.Wire" ]
+
+              let under request =
+                  checkedUnder (Approval.admitsFor request Approval.Wire) packages
+
+              Expect.equal (under Approval.NotRequested) packages "no approval: every package is checked"
+
+              Expect.equal
+                  (under (Approval.Only [ "Fuaran.Core.Query" ]))
+                  [ "Fuaran.Core.Wire" ]
+                  "a filtered approval: the check reads the packages it leaves alone"
+
+              Expect.equal
+                  (under Approval.Everything)
+                  []
+                  "approving every package: the check reads no header the run is rewriting"
           }
 
           // ---- the classifier, pinned on the shapes the phase names ----
