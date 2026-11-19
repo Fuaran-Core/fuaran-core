@@ -295,7 +295,7 @@ it equal to them. [`CONTRIBUTING.md`](CONTRIBUTING.md) says how an entry is adde
 
 ## 2026-11-19 — D272: an entry in the open slot is a file of its own, `docs/releases/<v>/<class>/<name>.md`, rendered into the slot's file by the act that closes the slot; a union merge attribute and a tool that resolves the conflict are declined, and the decision record keeps its shape
 
-**Status:** Live — PROPOSED, not built: the ruling is recorded for review before the change; D272.8 names what the build adds
+**Status:** Live
 
 **Recorded by Phase 702.** Every change that ships appends one entry to the standing draft's ledger file,
 `docs/releases/<version>.md` (D130, STABILITY.md "Versioning policy"). Two changes in flight therefore edit the same
@@ -442,33 +442,61 @@ entries, needs from the record as it stands:
    land in number order, or the record would need a clause for a number reserved and not yet recorded, which is a
    change to the status grammar this phase does not make.
 
+**The limit this phase leaves.** After this change a merge of `main` still conflicts, in `DECISIONS.md`, when both
+sides add a decision, exactly as measured above; the release notes no longer do. Measured on the `0.44.1` slot as
+it stands at this landing, 3 of its 11 entries come from phases that also added a decision (Phases 698, 699 and 700). Counted by reading each entry's phase from its bullet (`(Phase <n>`) and
+counting a phase as having added a decision when an entry of this record says `Recorded by Phase <n>`.
+
 This entry's own number was taken by reading the record's head at the merge of `main`, and changes if `main` has
 taken it by the final merge.
 
-**D272.8 — what the build adds.** Nothing moves until this ruling is accepted.
+**D272.8 — what the build added.**
 
-- *The test, shown red first.* In `LedgerTests`, a scratch git repository holding a draft slot; two branches cut
-  from one commit each add one entry through `Ledger.addEntry`, the one way an entry is added; merged both ways,
-  each merge exits 0 and `Ledger.read` of the merged tree reads both entries in the draft. Committed first with
-  `addEntry` adding the entry the way the guide says today, under its class's section of the slot file, it is red
-  with the conflict D272.1 measured; the change makes `addEntry` write the entry's file.
-- *The readers.* `Ledger.read` reads a standing draft as its file and its rendered entries. The shape clause gains:
-  a DRAFT slot's own file carries no entry; an entry directory stands only beside the standing DRAFT (beside a
-  closed slot it is red, naming the render and the standing draft); it holds only the three class directories and
-  only non-empty `<name>.md` files; an entry whose class would advance the slot, by `expectedOver` (D269), is red,
-  naming `open-slot`. `CORE_APPROVE_DOCS=ledger-index` renders a closed slot's directory (D272.3). `open-slot`
-  writes a new draft file with the directory sentence and no section headings, and its advance renders and removes
-  the draft's directory. The guide (`CONTRIBUTING.md`) and the index's preamble say how an entry is added.
-- *The slot as it stands.* One commit moves the eleven entries of `docs/releases/0.44.1.md` into
-  `docs/releases/0.44.1/internal/phase-<n>.md`, word for word, and a test holds the files' texts equal to the
-  bullets of that file at its parent. Released slots' files are not touched. `gate-reads.json` loses its
-  `**/docs/releases/**` `handMerged` entry, since no two changes edit one file there any more; the benchmarks entry
-  stays. `.gitattributes` does not change: the shape needs no attribute.
-- *Files outside the phase's declared set:* `docs/releases/0.44.1.md` and the new entry files (the move);
-  `STABILITY.md`, whose "Versioning policy" says a change appends its entry to the slot's file; `RELEASING.md`,
-  whose open-slot paragraph says an advance keeps the draft's entries in that file; and
-  `tests/Fuaran.Core.Tests.Fixtures/Approval.fs` only if the switch registry must name the closed slots' files
-  among what `CORE_APPROVE_DOCS` writes.
+- *The test, red first.* In `LedgerTests`, a scratch git repository holding a draft slot; two branches cut from one
+  commit each add one entry through `Ledger.addEntry`, the one way an entry is added; merged both ways, each merge
+  exits 0 and `Ledger.read` of the merged tree reads both entries in the draft. Committed first with `addEntry`
+  adding the entry the way the guide said, under its class's section of the slot file, it was red with git's
+  `CONFLICT (content): Merge conflict in docs/releases/0.9.1.md`; `addEntry` now writes the entry's file.
+- *The readers.* `Ledger.read` reads each slot with its entry directory and parses it as its close will print it
+  (`Ledger.render`), so every clause reads a draft as the release prints it. The shape clause reds an entry or a
+  section heading in the standing draft's own file, an entry beside a closed slot, anything in an entry directory
+  that is not a non-empty `.md` file under one of the three class directories, and a directory beside no slot file.
+  `OpenSlot.entryClassFaults` reds an entry whose class would advance the draft, by `expectedOver` (D269).
+  `CORE_APPROVE_DOCS=ledger-index` closes each slot the release gesture closed (`Ledger.closeSlot`: its entries
+  printed into its file, their files removed, each printed). `open-slot` writes a new draft with the sentence
+  saying how an entry is added and no section heading, reads a standing draft with its entries, and its advance
+  prints them into the never-released file and removes their files. `CONTRIBUTING.md`, the index's preamble,
+  `STABILITY.md` ("Versioning policy", whose words said an entry is appended to the slot's file) and `RELEASING.md`
+  say how an entry is added and where the release gesture prints the entries.
+- *The slot as it stands.* One commit, made last, after the final merge of `main`, moves every entry
+  `docs/releases/0.44.1.md` holds at its parent into `docs/releases/0.44.1/internal/phase-<n>.md`, word for word,
+  and changes nothing else; a test holds each file's text to the bullet it came from at that parent. Every entry
+  was under `### Internal`, so every file is `internal/`. Released slots' files are not touched. `.gitattributes`
+  does not change: the shape needs no attribute.
+
+**D272.9 — the conditions of the ruling, each built.**
+
+1. *Every entry is moved, whatever their number*, by the last commit of the landing (D272.8), so entries that land
+   between the ruling and the move are moved with the rest.
+2. *A branch that meets the shape cold can fix itself from what it sees.* The one sentence the draft's file keeps
+   says how an entry is added: the path, the three class directories and the name. The draft check's refusal names
+   the file to create (`docs/releases/<v>/<class>/phase-<n>.md`, the class read from the section the bullet sat
+   under and the phase from the bullet) and says the bullet goes there unchanged; the closed-slot check's refusal
+   names the render for a change that shipped in the closed slot and, for one that did not, the standing draft's
+   file it moves to, unchanged.
+3. *The limit is stated*, above and in this phase's ledger entry.
+4. *The render is held by a test*: a scratch draft with entries in all three classes and a phase with two entries
+   reads, and closes, to bytes the test states, and the draft read before the close is the closed file after it.
+5. *`gate-reads.json` keeps its `handMerged` entry for the release notes*, its reason what is true after this
+   landing: a branch cut before the shape that still appends its entry to the slot's file meets one conflict there
+   and resolves it by hand, moving the entry, unchanged, into its own file. The entry is removed when the slot open
+   at this landing, `0.44.1`, closes.
+6. *The files outside the phase's declared set* are `docs/releases/0.44.1.md` and its entry files, `STABILITY.md`
+   and `RELEASING.md`. The switch registry (`tests/Fuaran.Core.Tests.Fixtures/Approval.fs`,
+   `tests/Fuaran.Core.Tests/projections.json`) was not changed: `ledger-index` still names the index, which is the
+   file the registry holds; the slot files it now also writes are named in `STABILITY.md` and `RELEASING.md`.
+
+The decision record's shape and numbers are not in this phase (D272.7).
 
 ## 2026-11-19 — D271: the parity table runs the query declaration family through its public surfaces, comparing each refusal's code and path and never its sentence, and the rows ride the `0.44.1` draft as internal
 

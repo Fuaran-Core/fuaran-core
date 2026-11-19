@@ -135,8 +135,19 @@ of the headings.
 
 A change that adds a public surface should add or extend a `Conformance` law that certifies it, and
 update `STABILITY.md` when it touches a stability-critical surface. What each version changed is
-recorded in the release ledger, `docs/releases/<version>.md`: a change that ships appends its entry
-to the standing draft slot's file there (`STABILITY.md`, "Versioning policy").
+recorded in the release ledger, `docs/releases/<version>.md` (`STABILITY.md`, "Versioning policy"). A change
+that ships adds its entry as a file of its own beside the standing draft's file, never inside it, so two changes in
+flight never edit one file (DECISIONS.md D272):
+
+- the path is `docs/releases/<version>/<class>/<name>.md`, where `<version>` is the standing `<Version>`;
+- `<class>` is `breaking`, `additive` or `internal`, the change's class;
+- `<name>` is `phase-<n>` for a phase's entry (`phase-<n>-<word>` for its second), or `pr-<n>` for a pull request;
+- the file holds the entry's bullet and its wrapped lines exactly as the release will print them, and nothing else.
+
+The draft's own file says the same in one sentence. The act that closes the slot (the release commit, or
+`open-slot`'s advance) prints the entries into it, a section per class, and removes their files. The `Release
+ledger` family reds an entry written into the draft's own file, an entry beside a closed slot, anything else in an
+entry directory, and an entry whose class would advance the draft; each refusal names the file the entry goes to.
 
 ## Licensing of contributions
 
