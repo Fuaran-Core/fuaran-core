@@ -3548,3 +3548,102 @@ let oneCellTests =
                     Ok "\"\""
                     Ok "\"\"" ]
                   "the slots, in ColumnType.all's order" ]
+
+// ---- Phase 611: a date or an instant renders into one string ----
+
+/// The text of a day as `dateText` rendered it before Phase 611, by padding and concatenation: the oracle the
+/// single-buffer render is held to, in range and outside it.
+let private paddedDateText (days: int) : string =
+    let pad (width: int) (n: int) = (string n).PadLeft(width, '0')
+    let c = TemporalText.civilOfDays days
+    pad 4 c.Year + "-" + pad 2 c.Month + "-" + pad 2 c.Day
+
+/// The text of an instant as `instantText` rendered it before Phase 611.
+let private paddedInstantText (u: TimeUnit) (second: float) (fraction: int) : string =
+    let pad (width: int) (n: int) = (string n).PadLeft(width, '0')
+    let day = floor (second / 86400.0)
+    let sod = int (second - day * 86400.0)
+
+    let frac =
+        if fraction = 0 then
+            ""
+        else
+            "." + (pad (TimeUnit.digits u) fraction).TrimEnd('0')
+
+    paddedDateText (int day)
+    + "T"
+    + pad 2 (sod / 3600)
+    + ":"
+    + pad 2 (sod % 3600 / 60)
+    + ":"
+    + pad 2 (sod % 60)
+    + frac
+    + "Z"
+
+[<Tests>]
+let temporalTextRenderTests =
+    testList
+        "TemporalText renders a date or an instant into one string (Phase 611)"
+        [ testCase "a day outside the canonical range renders the text it always has"
+          <| fun _ ->
+              for days in
+                  [ TemporalText.MinDay - 1
+                    TemporalText.MinDay - 400
+                    TemporalText.MaxDay + 1
+                    TemporalText.MaxDay + 4000
+                    -1000000
+                    4000000 ] do
+                  Expect.equal (TemporalText.dateText days) (paddedDateText days) (sprintf "day %d" days)
+
+          testCase "instantText at each unit holds the text it rendered before, over drawn instants and every edge"
+          <| fun _ ->
+              let next = lcg 6110
+
+              for u in allUnits do
+                  let scale = TimeUnit.scale u
+
+                  let edges =
+                      [ for second in [ TemporalText.minSecond; TemporalText.maxSecond; 0.0; -1.0; 86399.0; 86400.0 ] do
+                            for fraction in [ 0; 1; scale - 1; scale / 10; scale / 2; scale; -1 ] do
+                                second, fraction
+                        // outside the canonical range: the general text, byte for byte
+                        TemporalText.minSecond - 1.0, 0
+                        TemporalText.maxSecond + 1.0, 1
+                        TemporalText.maxSecond + 86400.0 * 400.0, 0
+                        1.5, 0
+                        -0.25, 3 ]
+
+                  for second, fraction in edges do
+                      Expect.equal
+                          (TemporalText.instantText u second fraction)
+                          (paddedInstantText u second fraction)
+                          (sprintf "%A %g %d" u second fraction)
+
+                  for _ in 1..20000 do
+                      let second, fraction = drawInstant next u
+                      let text = TemporalText.instantText u second fraction
+
+                      if text <> paddedInstantText u second fraction then
+                          failtestf "%A %g %d renders %s" u second fraction text
+
+          testCase "pinned texts at each unit"
+          <| fun _ ->
+              Expect.equal (TemporalText.instantText TimeUnit.Seconds 86399.0 0) "1970-01-01T23:59:59Z" "seconds"
+
+              Expect.equal
+                  (TemporalText.instantText TimeUnit.Milliseconds 1.7e9 7)
+                  "2023-11-14T22:13:20.007Z"
+                  "milliseconds"
+
+              Expect.equal
+                  (TemporalText.instantText TimeUnit.Microseconds -1.0 5)
+                  "1969-12-31T23:59:59.000005Z"
+                  "microseconds"
+
+              Expect.equal
+                  (TemporalText.instantText TimeUnit.Nanoseconds TemporalText.maxSecond 120000000)
+                  "9999-12-31T23:59:59.12Z"
+                  "nanoseconds"
+
+              Expect.equal (TemporalText.dateText TemporalText.MinDay) "0000-01-01" "the first day"
+              Expect.equal (TemporalText.dateText TemporalText.MaxDay) "9999-12-31" "the last day" ]
