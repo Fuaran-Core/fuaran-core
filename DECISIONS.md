@@ -312,7 +312,7 @@ below the newest to be present, so two changes holding consecutive numbers must 
 that is abandoned leaves `main` red until somebody records its number. This entry decides when a missing number is
 a fault. D275.1 measures the check as it stands; D275.2 says what it is for; D275.3 is the ruling; D275.4 to D275.7
 answer the release, an abandoned number, the index and the alternatives that lost; D275.8 states what is out of
-scope; D275.9 records the build. The ruling was reviewed before it was built; what the review added is in D275.3
+scope; D275.9 records the build. The ruling was reviewed before it was built, and what that added is in D275.3
 (the clone that cannot read (b), the two refusals, a held number below an entry it would amend) and D275.4 (where
 the first refusal at a release comes).
 
