@@ -120,6 +120,27 @@ let tests =
                   let s = System.String('z', n)
                   Expect.equal (Hash.sha256Hex s) (bcl s) (sprintf "length %d" n)
 
+          testCase "and over bytes and multi-byte units that straddle a block boundary (Phase 609)"
+          <| fun _ ->
+              // Whole blocks are read from the input where it lies and only the tail is copied, so the
+              // seam between the two is checked at every length over three blocks, with every byte
+              // value present; and a four-byte unit is walked across the first boundary, so the exact
+              // array the encoder sizes is filled to its end and split by the block seam.
+              let raw = Array.init 200 (fun i -> byte ((i * 151 + 7) % 256))
+
+              for n in 0..200 do
+                  let b = raw[0 .. n - 1]
+
+                  Expect.equal
+                      (Hash.sha256Bytes b)
+                      (System.Security.Cryptography.SHA256.HashData b)
+                      (sprintf "%d raw bytes" n)
+
+              for n in 52..68 do
+                  let s = System.String('x', n) + "🔐é"
+                  Expect.equal (Hash.utf8Bytes s) (System.Text.UTF8Encoding(false).GetBytes s) (sprintf "bytes at %d" n)
+                  Expect.equal (Hash.sha256Hex s) (bcl s) (sprintf "digest at %d" n)
+
           testCase "the UTF-8 encoder produces the platform's bytes, not merely the same digest"
           <| fun _ ->
               // Checked directly as well as through the digest. Two different byte strings can only

@@ -292,88 +292,6 @@ module Hash =
     /// the compile gate beside it still cannot disagree about a number, and never could.
     let inline private (.+.) (x: uint32) (y: uint32) : uint32 = (x + y) &&& 0xFFFFFFFFu
 
-    /// UTF-8 encode a string to bytes (BMP + surrogate pairs), pure managed. `System.Text.Encoding`
-    /// does not exist under Fable, and this is the encoder `sha256Hex` hashes through — exposed
-    /// because a caller composing a digest pre-image out of parts needs the same bytes.
-    ///
-    /// **Byte-for-byte the platform's answer, ill-formed input included (Phase 290).** A high
-    /// surrogate is a pair only when the NEXT unit is a low surrogate (`DC00..DFFF`); a lone
-    /// surrogate of either half, or a high one followed by anything else, encodes as the
-    /// replacement character's three bytes `EF BF BD` — which is what `System.Text.Encoding.UTF8`
-    /// emits, and what the parity corpus (`ParityVectors`, the `utf8Bytes/ill-formed-*` rows)
-    /// pins on both pipelines. Until Phase 290 the low half was consumed unchecked, so
-    /// `"\uD801\uD800"` produced the four bytes of U+10000 and a lone surrogate was written
-    /// CESU-style — the platform-parity claim was tested over a well-formed corpus only.
-    ///
-    /// **What replacement does NOT buy: injectivity.** The platform maps `"\uD800"`, `"\uDFFF"` and
-    /// `"\uFFFD"` to ONE byte string, so a digest over ill-formed input has a second pre-image by
-    /// construction. This is the UNGUARDED, platform-parity path, and it says so; wherever a
-    /// digest must name one string, an ill-formed unit is refused before it reaches here —
-    /// `tryUtf8Bytes` / `trySha256Hex` below are that guarded form (Phase 306).
-    let utf8Bytes (s: string) : byte[] =
-        let out = ResizeArray<byte>()
-        let mutable i = 0
-
-        while i < s.Length do
-            let c = int s[i]
-
-            let pairs =
-                c >= 0xD800
-                && c <= 0xDBFF
-                && i + 1 < s.Length
-                && (let lo = int s[i + 1] in lo >= 0xDC00 && lo <= 0xDFFF)
-
-            if c < 0x80 then
-                out.Add(byte c)
-            elif c < 0x800 then
-                out.Add(byte (0xC0 ||| (c >>> 6)))
-                out.Add(byte (0x80 ||| (c &&& 0x3F)))
-            elif pairs then
-                let lo = int s[i + 1]
-                let cp = 0x10000 + ((c - 0xD800) <<< 10) + (lo - 0xDC00)
-                out.Add(byte (0xF0 ||| (cp >>> 18)))
-                out.Add(byte (0x80 ||| ((cp >>> 12) &&& 0x3F)))
-                out.Add(byte (0x80 ||| ((cp >>> 6) &&& 0x3F)))
-                out.Add(byte (0x80 ||| (cp &&& 0x3F)))
-                i <- i + 1
-            elif c >= 0xD800 && c <= 0xDFFF then
-                // A lone or ill-ordered surrogate: U+FFFD, as the platform encoder writes it.
-                out.Add(byte 0xEF)
-                out.Add(byte 0xBF)
-                out.Add(byte 0xBD)
-            else
-                out.Add(byte (0xE0 ||| (c >>> 12)))
-                out.Add(byte (0x80 ||| ((c >>> 6) &&& 0x3F)))
-                out.Add(byte (0x80 ||| (c &&& 0x3F)))
-
-            i <- i + 1
-
-        out.ToArray()
-
-    /// The first unpaired surrogate of `s`, or `None` where `s` is well-formed UTF-16 (Phase 306): a
-    /// high surrogate (`D800`–`DBFF`) not followed at once by a low one, or a low surrogate
-    /// (`DC00`–`DFFF`) with no high one before it. THE well-formedness rule of the spine (Phase 531):
-    /// the guarded canonical renderer refuses on it (`Json.firstIllFormedUnit` is its index), and the
-    /// string token reader (`JsonSyntax.readString`) holds every string it reads to the same pairing.
-    let firstIllFormedUnit (s: string) : IllFormedUtf16 option =
-        let mutable i = 0
-        let mutable found = None
-
-        while found.IsNone && i < s.Length do
-            let c = int s[i]
-
-            if c >= 0xD800 && c <= 0xDBFF then
-                if i + 1 < s.Length && int s[i + 1] >= 0xDC00 && int s[i + 1] <= 0xDFFF then
-                    i <- i + 2
-                else
-                    found <- Some { Index = i; Unit = c }
-            elif c >= 0xDC00 && c <= 0xDFFF then
-                found <- Some { Index = i; Unit = c }
-            else
-                i <- i + 1
-
-        found
-
     /// The number of bytes `utf8Bytes s` encodes `s` into, counted off its UTF-16 units without
     /// encoding it (Phase 531; the document-bytes bound's count since Phase 465): one, two or three a
     /// unit, four a surrogate pair, and three for a lone surrogate — the replacement character's, as
@@ -407,6 +325,96 @@ module Hash =
 
         total
 
+    /// UTF-8 encode a string to bytes (BMP + surrogate pairs), pure managed. `System.Text.Encoding`
+    /// does not exist under Fable, and this is the encoder `sha256Hex` hashes through — exposed
+    /// because a caller composing a digest pre-image out of parts needs the same bytes.
+    ///
+    /// **Byte-for-byte the platform's answer, ill-formed input included (Phase 290).** A high
+    /// surrogate is a pair only when the NEXT unit is a low surrogate (`DC00..DFFF`); a lone
+    /// surrogate of either half, or a high one followed by anything else, encodes as the
+    /// replacement character's three bytes `EF BF BD` — which is what `System.Text.Encoding.UTF8`
+    /// emits, and what the parity corpus (`ParityVectors`, the `utf8Bytes/ill-formed-*` rows)
+    /// pins on both pipelines. Until Phase 290 the low half was consumed unchecked, so
+    /// `"\uD801\uD800"` produced the four bytes of U+10000 and a lone surrogate was written
+    /// CESU-style — the platform-parity claim was tested over a well-formed corpus only.
+    ///
+    /// **What replacement does NOT buy: injectivity.** The platform maps `"\uD800"`, `"\uDFFF"` and
+    /// `"\uFFFD"` to ONE byte string, so a digest over ill-formed input has a second pre-image by
+    /// construction. This is the UNGUARDED, platform-parity path, and it says so; wherever a
+    /// digest must name one string, an ill-formed unit is refused before it reaches here —
+    /// `tryUtf8Bytes` / `trySha256Hex` below are that guarded form (Phase 306).
+    let utf8Bytes (s: string) : byte[] =
+        // One exact array (Phase 609): `utf8ByteCount` counts by the same rules this loop encodes by,
+        // so the array is filled to its last byte and never grown or copied.
+        let out = Array.zeroCreate<byte> (int (utf8ByteCount s))
+        let mutable i = 0
+        let mutable j = 0
+
+        while i < s.Length do
+            let c = int s[i]
+
+            let pairs =
+                c >= 0xD800
+                && c <= 0xDBFF
+                && i + 1 < s.Length
+                && (let lo = int s[i + 1] in lo >= 0xDC00 && lo <= 0xDFFF)
+
+            if c < 0x80 then
+                out[j] <- byte c
+                j <- j + 1
+            elif c < 0x800 then
+                out[j] <- byte (0xC0 ||| (c >>> 6))
+                out[j + 1] <- byte (0x80 ||| (c &&& 0x3F))
+                j <- j + 2
+            elif pairs then
+                let lo = int s[i + 1]
+                let cp = 0x10000 + ((c - 0xD800) <<< 10) + (lo - 0xDC00)
+                out[j] <- byte (0xF0 ||| (cp >>> 18))
+                out[j + 1] <- byte (0x80 ||| ((cp >>> 12) &&& 0x3F))
+                out[j + 2] <- byte (0x80 ||| ((cp >>> 6) &&& 0x3F))
+                out[j + 3] <- byte (0x80 ||| (cp &&& 0x3F))
+                j <- j + 4
+                i <- i + 1
+            elif c >= 0xD800 && c <= 0xDFFF then
+                // A lone or ill-ordered surrogate: U+FFFD, as the platform encoder writes it.
+                out[j] <- 0xEFuy
+                out[j + 1] <- 0xBFuy
+                out[j + 2] <- 0xBDuy
+                j <- j + 3
+            else
+                out[j] <- byte (0xE0 ||| (c >>> 12))
+                out[j + 1] <- byte (0x80 ||| ((c >>> 6) &&& 0x3F))
+                out[j + 2] <- byte (0x80 ||| (c &&& 0x3F))
+                j <- j + 3
+
+            i <- i + 1
+
+        out
+
+    /// The first unpaired surrogate of `s`, or `None` where `s` is well-formed UTF-16 (Phase 306): a
+    /// high surrogate (`D800`–`DBFF`) not followed at once by a low one, or a low surrogate
+    /// (`DC00`–`DFFF`) with no high one before it. THE well-formedness rule of the spine (Phase 531):
+    /// the guarded canonical renderer refuses on it (`Json.firstIllFormedUnit` is its index), and the
+    /// string token reader (`JsonSyntax.readString`) holds every string it reads to the same pairing.
+    let firstIllFormedUnit (s: string) : IllFormedUtf16 option =
+        let mutable i = 0
+        let mutable found = None
+
+        while found.IsNone && i < s.Length do
+            let c = int s[i]
+
+            if c >= 0xD800 && c <= 0xDBFF then
+                if i + 1 < s.Length && int s[i + 1] >= 0xDC00 && int s[i + 1] <= 0xDFFF then
+                    i <- i + 2
+                else
+                    found <- Some { Index = i; Unit = c }
+            elif c >= 0xDC00 && c <= 0xDFFF then
+                found <- Some { Index = i; Unit = c }
+            else
+                i <- i + 1
+
+        found
+
     /// `utf8Bytes`, GUARDED (Phase 306): the UTF-8 bytes of a well-formed string, or the first
     /// unpaired surrogate as a typed refusal. Over a well-formed string it is exactly
     /// `Ok (utf8Bytes s)`, and there the encoding is INJECTIVE — two well-formed strings with one
@@ -418,91 +426,112 @@ module Hash =
         | Some bad -> Error bad
         | None -> Ok(utf8Bytes s)
 
-    /// The compression function: pad per FIPS 180-4 §5.1.1 and fold, returning the eight state words.
-    /// Both public forms below project from this, so the byte form and the hex form cannot drift.
-    let private sha256Words (input: byte[]) : uint32[] =
-        let data = ResizeArray<byte>()
-        data.AddRange input
-        let byteLen = input.Length
-        // Padding: 0x80, then zeros, then the 64-bit big-endian bit length.
-        data.Add 0x80uy
+    /// One SHA-256 compression (FIPS 180-4 §6.2.2): fold the 64-byte block of `block` at `off` into the
+    /// eight state words `hs`, with `w` as the message-schedule scratch.
+    let private compress (hs: uint32[]) (w: uint32[]) (block: byte[]) (off: int) : unit =
+        for t in 0..15 do
+            let k = off + t * 4
 
-        while data.Count % 64 <> 56 do
-            data.Add 0uy
+            w[t] <-
+                (uint32 block[k] <<< 24)
+                ||| (uint32 block[k + 1] <<< 16)
+                ||| (uint32 block[k + 2] <<< 8)
+                ||| (uint32 block[k + 3])
+
+        for t in 16..63 do
+            let s0 = (rotr w[t - 15] 7) ^^^ (rotr w[t - 15] 18) ^^^ (w[t - 15] >>> 3)
+            let s1 = (rotr w[t - 2] 17) ^^^ (rotr w[t - 2] 19) ^^^ (w[t - 2] >>> 10)
+            w[t] <- w[t - 16] .+. s0 .+. w[t - 7] .+. s1
+
+        let mutable a = hs[0]
+        let mutable bb = hs[1]
+        let mutable c = hs[2]
+        let mutable d = hs[3]
+        let mutable e = hs[4]
+        let mutable f = hs[5]
+        let mutable g = hs[6]
+        let mutable h = hs[7]
+
+        for t in 0..63 do
+            let s1 = (rotr e 6) ^^^ (rotr e 11) ^^^ (rotr e 25)
+            let ch = (e &&& f) ^^^ ((~~~e) &&& g)
+            let temp1 = h .+. s1 .+. ch .+. sha256K[t] .+. w[t]
+            let s0 = (rotr a 2) ^^^ (rotr a 13) ^^^ (rotr a 22)
+            let maj = (a &&& bb) ^^^ (a &&& c) ^^^ (bb &&& c)
+            let temp2 = s0 .+. maj
+            h <- g
+            g <- f
+            f <- e
+            e <- d .+. temp1
+            d <- c
+            c <- bb
+            bb <- a
+            a <- temp1 .+. temp2
+
+        hs[0] <- hs[0] .+. a
+        hs[1] <- hs[1] .+. bb
+        hs[2] <- hs[2] .+. c
+        hs[3] <- hs[3] .+. d
+        hs[4] <- hs[4] .+. e
+        hs[5] <- hs[5] .+. f
+        hs[6] <- hs[6] .+. g
+        hs[7] <- hs[7] .+. h
+
+    /// The hash: pad per FIPS 180-4 §5.1.1 and fold, returning the eight state words. Both public forms
+    /// below project from this, so the byte form and the hex form cannot drift.
+    ///
+    /// **The input is read where it lies (Phase 609).** Every whole 64-byte block is compressed straight
+    /// from `input`; only the tail — the last partial block, the `0x80` marker and the bit length, one
+    /// block or two — is copied, into a scratch of 64 or 128 bytes. The message is never copied whole.
+    /// All plain arrays and integer arithmetic, so the Fable path is the same code.
+    let private sha256Words (input: byte[]) : uint32[] =
+        let hs =
+            [| 0x6a09e667u
+               0xbb67ae85u
+               0x3c6ef372u
+               0xa54ff53au
+               0x510e527fu
+               0x9b05688cu
+               0x1f83d9abu
+               0x5be0cd19u |]
+
+        let w = Array.zeroCreate<uint32> 64
+        let byteLen = input.Length
+        let whole = byteLen / 64
+
+        for b in 0 .. whole - 1 do
+            compress hs w input (b * 64)
+
+        // The tail: the remaining bytes, 0x80, zeros, and the 64-bit big-endian bit length in the last
+        // eight bytes. It takes a second block when fewer than nine bytes of the first are free.
+        let rest = byteLen - whole * 64
+        let tail = Array.zeroCreate<byte> (if rest < 56 then 64 else 128)
+
+        for k in 0 .. rest - 1 do
+            tail[k] <- input[whole * 64 + k]
+
+        tail[rest] <- 0x80uy
 
         // The bit length as two `uint32` halves — no `uint64`, which Fable cannot carry exactly. The
         // high half is 0 for any input under 512 MB.
         let lo = uint32 byteLen <<< 3
         let hi = uint32 byteLen >>> 29
+        let n = tail.Length
+        tail[n - 8] <- byte ((hi >>> 24) &&& 0xFFu)
+        tail[n - 7] <- byte ((hi >>> 16) &&& 0xFFu)
+        tail[n - 6] <- byte ((hi >>> 8) &&& 0xFFu)
+        tail[n - 5] <- byte (hi &&& 0xFFu)
+        tail[n - 4] <- byte ((lo >>> 24) &&& 0xFFu)
+        tail[n - 3] <- byte ((lo >>> 16) &&& 0xFFu)
+        tail[n - 2] <- byte ((lo >>> 8) &&& 0xFFu)
+        tail[n - 1] <- byte (lo &&& 0xFFu)
 
-        for shift in [ 24; 16; 8; 0 ] do
-            data.Add(byte ((hi >>> shift) &&& 0xFFu))
+        compress hs w tail 0
 
-        for shift in [ 24; 16; 8; 0 ] do
-            data.Add(byte ((lo >>> shift) &&& 0xFFu))
+        if n = 128 then
+            compress hs w tail 64
 
-        let mutable h0 = 0x6a09e667u
-        let mutable h1 = 0xbb67ae85u
-        let mutable h2 = 0x3c6ef372u
-        let mutable h3 = 0xa54ff53au
-        let mutable h4 = 0x510e527fu
-        let mutable h5 = 0x9b05688cu
-        let mutable h6 = 0x1f83d9abu
-        let mutable h7 = 0x5be0cd19u
-
-        let w = Array.zeroCreate<uint32> 64
-        let blocks = data.Count / 64
-
-        for b in 0 .. blocks - 1 do
-            let off = b * 64
-
-            for t in 0..15 do
-                w[t] <-
-                    (uint32 data[off + t * 4] <<< 24)
-                    ||| (uint32 data[off + t * 4 + 1] <<< 16)
-                    ||| (uint32 data[off + t * 4 + 2] <<< 8)
-                    ||| (uint32 data[off + t * 4 + 3])
-
-            for t in 16..63 do
-                let s0 = (rotr w[t - 15] 7) ^^^ (rotr w[t - 15] 18) ^^^ (w[t - 15] >>> 3)
-                let s1 = (rotr w[t - 2] 17) ^^^ (rotr w[t - 2] 19) ^^^ (w[t - 2] >>> 10)
-                w[t] <- w[t - 16] .+. s0 .+. w[t - 7] .+. s1
-
-            let mutable a = h0
-            let mutable bb = h1
-            let mutable c = h2
-            let mutable d = h3
-            let mutable e = h4
-            let mutable f = h5
-            let mutable g = h6
-            let mutable h = h7
-
-            for t in 0..63 do
-                let s1 = (rotr e 6) ^^^ (rotr e 11) ^^^ (rotr e 25)
-                let ch = (e &&& f) ^^^ ((~~~e) &&& g)
-                let temp1 = h .+. s1 .+. ch .+. sha256K[t] .+. w[t]
-                let s0 = (rotr a 2) ^^^ (rotr a 13) ^^^ (rotr a 22)
-                let maj = (a &&& bb) ^^^ (a &&& c) ^^^ (bb &&& c)
-                let temp2 = s0 .+. maj
-                h <- g
-                g <- f
-                f <- e
-                e <- d .+. temp1
-                d <- c
-                c <- bb
-                bb <- a
-                a <- temp1 .+. temp2
-
-            h0 <- h0 .+. a
-            h1 <- h1 .+. bb
-            h2 <- h2 .+. c
-            h3 <- h3 .+. d
-            h4 <- h4 .+. e
-            h5 <- h5 .+. f
-            h6 <- h6 .+. g
-            h7 <- h7 .+. h
-
-        [| h0; h1; h2; h3; h4; h5; h6; h7 |]
+        hs
 
     let private hexChars = "0123456789abcdef"
 
@@ -522,16 +551,19 @@ module Hash =
 
         out
 
-    /// Lowercase-hex SHA-256 of arbitrary bytes.
+    /// Lowercase-hex SHA-256 of arbitrary bytes: one `char[64]`, eight nibbles a word, most
+    /// significant first (Phase 609).
     let sha256HexOfBytes (input: byte[]) : string =
         let words = sha256Words input
-        let sb = System.Text.StringBuilder()
+        let chars = Array.zeroCreate<char> 64
 
-        for v in words do
-            for shift in [ 28; 24; 20; 16; 12; 8; 4; 0 ] do
-                sb.Append(hexChars[int ((v >>> shift) &&& 0xFu)]) |> ignore
+        for i in 0..7 do
+            let v = words[i]
 
-        sb.ToString()
+            for k in 0..7 do
+                chars[i * 8 + k] <- hexChars[int ((v >>> (28 - k * 4)) &&& 0xFu)]
+
+        System.String(chars)
 
     /// Lowercase-hex SHA-256 over the UTF-8 bytes of a string — the form nearly every call site
     /// wants. Byte-for-byte the platform's answer on .NET, ill-formed surrogates included (the
