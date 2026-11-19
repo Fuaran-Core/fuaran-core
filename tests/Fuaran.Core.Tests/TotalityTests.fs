@@ -1372,6 +1372,99 @@ let tests =
               Expect.isGreaterThan negativeZero 50 "-0 answered as itself, where the order cannot tell it from 0"
               Expect.isGreaterThan nans 500 "NaN answered with its own payload"
 
+          testCase "a day or an instant past the canonical range keeps the rendered text's answer (Phase 612)"
+          <| fun _ ->
+              let same (what: string) (col: Column) =
+                  for fn in [ Min; Max; CountDistinct; First; Last ] do
+                      Expect.equal (Column.aggregate fn col) (CellWalk.aggregate fn col) (sprintf "%s, %A" what fn)
+
+              // Text order and day order disagree past four digits: `10000-01-01` sorts before `2026-01-01`.
+              let day2026 = TemporalText.daysOfCivil 2026 1 1
+              let pastRange = TemporalText.MaxDay + 1
+              let dates = Column.ofDates "d" (Vector.ofArray [| day2026; pastRange |]) AllValid
+              Expect.equal (Column.aggregate Max dates) (Ok(Date "2026-01-01")) "Max is the text order's greatest"
+              Expect.equal (Column.aggregate Min dates) (Ok(Date "10000-01-01")) "Min is the text order's least"
+              same "a day past the range" dates
+
+              let inRange =
+                  Column.ofDates "d" (Vector.ofArray [| day2026; TemporalText.MaxDay; TemporalText.MinDay |]) AllValid
+
+              Expect.equal (Column.aggregate Max inRange) (Ok(Date "9999-12-31")) "in range, the day order"
+              same "days in range" inRange
+
+              // A half second renders as its whole second, so the two rows are one value.
+              let second = 1767225600.0
+
+              let halves =
+                  { Name = "t"
+                    Data = Timestamps(TimeUnit.Milliseconds, Vector.ofArray [| second; second + 0.5 |], None, AllValid) }
+
+              Expect.equal
+                  (Column.aggregate CountDistinct halves)
+                  (Ok(Int 1))
+                  "a half second is its whole second's text"
+
+              same "a second that is not whole" halves
+
+              // A fraction of the unit's scale renders as a tenth, the text of the fraction 100.
+              let scale =
+                  { Name = "t"
+                    Data =
+                      Timestamps(
+                          TimeUnit.Milliseconds,
+                          Vector.ofArray [| second; second |],
+                          Some(Vector.ofArray [| 1000; 100 |]),
+                          AllValid
+                      ) }
+
+              Expect.equal (Column.aggregate CountDistinct scale) (Ok(Int 1)) "the fraction 1000 is the text of 100"
+              same "a fraction of the unit's scale" scale
+
+              // In range, the second and then the fraction, `-0` the same second as `0`.
+              let instants =
+                  { Name = "t"
+                    Data =
+                      Timestamps(
+                          TimeUnit.Milliseconds,
+                          Vector.ofArray [| 0.0; -0.0; second; second; TemporalText.minSecond |],
+                          Some(Vector.ofArray [| 0; 0; 5; 50; 0 |]),
+                          AllValid
+                      ) }
+
+              Expect.equal (Column.aggregate CountDistinct instants) (Ok(Int 4)) "-0 and 0 are one instant"
+
+              Expect.equal
+                  (Column.aggregate Max instants)
+                  (Ok(Timestamp "2026-01-01T00:00:00.05Z"))
+                  "the fraction 50 after the fraction 5"
+
+              same "instants in range" instants
+
+              let bools = Column.ofBools "b" (Vector.ofArray [| false; true; false |]) AllValid
+              Expect.equal (Column.aggregate Max bools) (Ok(Bool true)) "a bool's Max"
+              Expect.equal (Column.aggregate CountDistinct bools) (Ok(Int 2)) "a bool's distinct values"
+              same "bools" bools
+
+          testCase "Max over an in-range timestamp column renders only its answer (Phase 612)"
+          <| fun _ ->
+              let n = 100000
+
+              let col =
+                  Column.ofTimestamps
+                      "t"
+                      TimeUnit.Milliseconds
+                      (Vector.ofArray (Array.init n (fun i -> 1767225600.0 + float (i % 86400))))
+                      (Some(Vector.ofArray (Array.init n (fun i -> i % 1000))))
+                      AllValid
+
+              Column.aggregate Max col |> ignore
+              let before = GC.GetAllocatedBytesForCurrentThread()
+              let answer = Column.aggregate Max col
+              let allocated = GC.GetAllocatedBytesForCurrentThread() - before
+              Expect.equal answer (Ok(Timestamp "2026-01-01T23:59:59.399Z")) "the greatest instant"
+              // Rendering a cell per row allocated about 600 bytes a row (60 MB here) before Phase 612.
+              Expect.isLessThan allocated 65536L "no cell or text per row"
+
           testCase "an int Sum is exact past 2^22 rows, where a float total alone would round (Phase 421)"
           <| fun _ ->
               // 2^22 + 3 rows of int32's maximum: past 2^53 / (2^31 - 1) rows a single float total
