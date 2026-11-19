@@ -82,47 +82,60 @@ module JsonSyntax =
     /// the reading package's question, and the line reader does not ask it. Three steps — the
     /// integer part, the fraction, the exponent — which `proofs/JsonParse.fst`'s `is_json_number`
     /// states clause for clause (Phase 299's body, moved here from `Json.isJsonNumber`).
-    let isNumber (tok: string) : bool =
-        let n = tok.Length
+    ///
+    /// The text is `s[start .. start + len - 1]` (Phase 616): the parser holds a token to the grammar
+    /// where it stands in its input, with no copy of it taken. A step answers a `ValueOption`, so the
+    /// check allocates nothing.
+    let internal isNumberIn (s: string) (start: int) (len: int) : bool =
+        let n = start + len
 
-        let isDigit (k: int) = k < n && tok[k] >= '0' && tok[k] <= '9'
+        let isDigit (k: int) = k < n && s[k] >= '0' && s[k] <= '9'
 
         let rec digitsFrom (k: int) =
             if isDigit k then digitsFrom (k + 1) else k
 
         // The integer part from `k`: a lone `0`, or a non-zero digit and any digits after it.
         let afterInt (k: int) =
-            if k < n && tok[k] = '0' then Some(k + 1)
-            elif isDigit k then Some(digitsFrom k)
-            else None
+            if k < n && s[k] = '0' then ValueSome(k + 1)
+            elif isDigit k then ValueSome(digitsFrom k)
+            else ValueNone
 
         // An optional `.` and at least one digit.
         let afterFrac (k: int) =
-            if k < n && tok[k] = '.' then
+            if k < n && s[k] = '.' then
                 let e = digitsFrom (k + 1)
-                if e > k + 1 then Some e else None
+                if e > k + 1 then ValueSome e else ValueNone
             else
-                Some k
+                ValueSome k
 
         // An optional `e`/`E`, an optional sign, and at least one digit.
         let afterExp (k: int) =
-            if k < n && (tok[k] = 'e' || tok[k] = 'E') then
-                let s =
-                    if k + 1 < n && (tok[k + 1] = '+' || tok[k + 1] = '-') then
+            if k < n && (s[k] = 'e' || s[k] = 'E') then
+                let d =
+                    if k + 1 < n && (s[k + 1] = '+' || s[k + 1] = '-') then
                         k + 2
                     else
                         k + 1
 
-                let e = digitsFrom s
-                if e > s then Some e else None
+                let e = digitsFrom d
+                if e > d then ValueSome e else ValueNone
             else
-                Some k
+                ValueSome k
 
-        let start = if n > 0 && tok[0] = '-' then 1 else 0
+        let first = if len > 0 && s[start] = '-' then start + 1 else start
 
-        match afterInt start |> Option.bind afterFrac |> Option.bind afterExp with
-        | Some k -> k = n
-        | None -> false
+        match afterInt first with
+        | ValueNone -> false
+        | ValueSome k ->
+            match afterFrac k with
+            | ValueNone -> false
+            | ValueSome k ->
+                match afterExp k with
+                | ValueSome k -> k = n
+                | ValueNone -> false
+
+    /// `isNumberIn` over the whole of `tok`.
+    let isNumber (tok: string) : bool = isNumberIn tok 0 tok.Length
 
     let private refusalOf
         (fault: JsonStringFault)

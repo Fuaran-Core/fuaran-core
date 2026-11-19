@@ -631,13 +631,108 @@ module Json =
     /// `tryRender` under the `encode` name — the total, guarded encode entry point.
     let tryEncode (v: JVal) : Result<string, string> = tryRender v
 
-    /// The index of the first digit of `tok` from `k` on that is not `0` (or `tok.Length`): where
-    /// `readInt32`'s significant digits begin (Phase 372).
-    let rec private firstSignificant (tok: string) (k: int) : int =
-        if k < tok.Length && tok[k] = '0' then
-            firstSignificant tok (k + 1)
+    /// The index of the first digit of `s` from `k` on, before `stop`, that is not `0` (or `stop`):
+    /// where `readInt32`'s significant digits begin (Phase 372).
+    let rec private firstSignificant (s: string) (k: int) (stop: int) : int =
+        if k < stop && s[k] = '0' then
+            firstSignificant s (k + 1) stop
         else
             k
+
+    /// `s[start .. start + len - 1]` as a string (Phase 616): the one copy of a token the Fable
+    /// build takes, and none when the range is already the whole string. The .NET build reads a
+    /// token in place and calls this only to word a refusal.
+    let private slice (s: string) (start: int) (len: int) : string =
+        if start = 0 && len = s.Length then
+            s
+        else
+            s.Substring(start, len)
+
+    /// `Double.TryParse` of `s[start .. start + len - 1]` under the invariant culture and
+    /// `NumberStyles.Float`: over a span on .NET (Phase 616), over the token's string under Fable.
+    let private tryDouble (s: string) (start: int) (len: int) : struct (bool * float) =
+#if FABLE_COMPILER
+        match
+            System.Double.TryParse(
+                slice s start len,
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture
+            )
+        with
+        | true, v -> struct (true, v)
+        | _ -> struct (false, 0.0)
+#else
+        let mutable v = 0.0
+
+        let ok =
+            System.Double.TryParse(
+                System.MemoryExtensions.AsSpan(s, start, len),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                &v
+            )
+
+        struct (ok, v)
+#endif
+
+    /// True where `s[start .. start + len - 1]` is exactly `text`, compared ordinally in place on
+    /// .NET (Phase 616).
+    let private textAt (s: string) (start: int) (len: int) (text: string) : bool =
+        len = text.Length
+#if FABLE_COMPILER
+        && slice s start len = text
+#else
+        && System.String.CompareOrdinal(s, start, text, 0, len) = 0
+#endif
+
+    /// `readInt32` over `s[start .. start + len - 1]` (Phase 616): the same rule, read in place on
+    /// .NET, answered as a `ValueOption` so the parser's integer read allocates nothing.
+    let internal readInt32In (s: string) (start: int) (len: int) : int voption =
+        let stop = start + len
+
+        let digitsFrom =
+            if len > 0 && (s[start] = '-' || s[start] = '+') then
+                start + 1
+            else
+                start
+
+        let mutable shaped = stop > digitsFrom
+
+        for k in digitsFrom .. stop - 1 do
+            if s[k] < '0' || s[k] > '9' then
+                shaped <- false
+
+        if not shaped then
+            ValueNone
+        // Counted only when the digit run is longer than ten, so a short token pays one comparison.
+        elif stop - digitsFrom > 10 && stop - firstSignificant s digitsFrom stop > 10 then
+            ValueNone
+        else
+#if FABLE_COMPILER
+            match
+                System.Int32.TryParse(
+                    slice s start len,
+                    System.Globalization.NumberStyles.AllowLeadingSign,
+                    System.Globalization.CultureInfo.InvariantCulture
+                )
+            with
+            | true, v -> ValueSome v
+            | _ -> ValueNone
+#else
+            let mutable v = 0
+
+            if
+                System.Int32.TryParse(
+                    System.MemoryExtensions.AsSpan(s, start, len),
+                    System.Globalization.NumberStyles.AllowLeadingSign,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    &v
+                )
+            then
+                ValueSome v
+            else
+                ValueNone
+#endif
 
     /// THE integer reader of the wire (Phase 299): `Int32.TryParse` under the INVARIANT culture with
     /// `NumberStyles.AllowLeadingSign` and nothing else — no white space, no separators, no culture's
@@ -664,36 +759,9 @@ module Json =
     /// reader, which alone decides the ten-digit edge. Both hosts run this one path, so the suite
     /// holds the branch the node measurement depends on.
     let readInt32 (tok: string) : int option =
-        let digitsFrom =
-            if tok.Length > 0 && (tok[0] = '-' || tok[0] = '+') then
-                1
-            else
-                0
-
-        let mutable shaped = tok.Length > digitsFrom
-
-        for k in digitsFrom .. tok.Length - 1 do
-            if tok[k] < '0' || tok[k] > '9' then
-                shaped <- false
-
-        if not shaped then
-            None
-        // Counted only when the digit run is longer than ten, so a short token pays one comparison.
-        elif
-            tok.Length - digitsFrom > 10
-            && tok.Length - firstSignificant tok digitsFrom > 10
-        then
-            None
-        else
-            match
-                System.Int32.TryParse(
-                    tok,
-                    System.Globalization.NumberStyles.AllowLeadingSign,
-                    System.Globalization.CultureInfo.InvariantCulture
-                )
-            with
-            | true, v -> Some v
-            | _ -> None
+        match readInt32In tok 0 tok.Length with
+        | ValueSome v -> Some v
+        | ValueNone -> None
 
     /// True where `tok` is a number token of the JSON grammar, exactly (Phase 299; RFC 8259 §6):
     ///
@@ -706,6 +774,12 @@ module Json =
     /// grammar is the text kernel's (`JsonSyntax.isNumber`, Phase 531), the one the op stream's line
     /// reader holds a bare literal to.
     let isJsonNumber (tok: string) : bool = JsonSyntax.isNumber tok
+
+    /// `isJsonNumber` over `s[start .. start + len - 1]` (Phase 616): the grammar's range form, which is
+    /// internal to `Fuaran.Core.Text`, so it is named only here, from a `NoInlining` function
+    /// (DECISIONS.md D129).
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+    let private isJsonNumberIn (s: string) (start: int) (len: int) : bool = JsonSyntax.isNumberIn s start len
 
     /// What a number token of the grammar reads as (Phase 640): the `JInt` reading, the `JFloat`
     /// reading, or the refusal and its sentence. A struct, so the scanner's typed reads build no
@@ -720,15 +794,22 @@ module Json =
     /// the document model's conversion to `JVal` reads a number's text by the rule `Json.read` reads
     /// the token by, and there is no second copy of it). `isFloat` says the token carries a point or
     /// an exponent.
-    let internal readNumberToken (tok: string) (isFloat: bool) : NumberReading =
+    ///
+    /// The token is `input[start .. start + len - 1]` (Phase 616). The .NET build reads it where it
+    /// stands — `TryParse` over a span, the int53 bound and the float layout compared ordinally in
+    /// place — and copies it only to word a refusal. The Fable build takes the token's one string,
+    /// as it always did, and reads that.
+    let internal readNumberIn (input: string) (start: int) (len: int) (isFloat: bool) : NumberReading =
+#if FABLE_COMPILER
+        let s = slice input start len
+        let start = 0
+#else
+        let s = input
+#endif
+        let tok () = slice s start len
+
         let asFloat () =
-            match
-                System.Double.TryParse(
-                    tok,
-                    System.Globalization.NumberStyles.Float,
-                    System.Globalization.CultureInfo.InvariantCulture
-                )
-            with
+            match tryDouble s start len with
             // Finiteness gate: a syntactically-valid float token whose magnitude
             // exceeds the double range (e.g. "1e400") TryParses to ±Infinity on
             // .NET Core — but the Fuaran wire model has no non-finite float (the
@@ -737,13 +818,13 @@ module Json =
             // one entry point built for untrusted wire data, breaking
             // `render ∘ parse = id`. Reject it as a named MalformedNumber.
             // (NaN cannot arise from a valid JSON number token; guarded anyway.)
-            | true, v when System.Double.IsNaN v || System.Double.IsInfinity v ->
+            | struct (true, v) when System.Double.IsNaN v || System.Double.IsInfinity v ->
                 Refused(
                     "number outside the finite double range; it cannot round-trip on the wire: "
-                    + tok
+                    + tok ()
                 )
-            | true, v -> ReadsFloat v
-            | _ -> Refused("malformed number: " + tok)
+            | struct (true, v) -> ReadsFloat v
+            | _ -> Refused("malformed number: " + tok ())
 
         if isFloat then
             asFloat ()
@@ -757,32 +838,31 @@ module Json =
             // corrupt it — unless it is the canonical layout of a double (Phase 253,
             // below), which no reading can corrupt. (Fable-clean: Int32.TryParse +
             // Double.TryParse + the shared `FloatLayout` only.)
-            match readInt32 tok with
-            | Some v -> ReadsInt v
-            | None ->
+            match readInt32In s start len with
+            | ValueSome v -> ReadsInt v
+            | ValueNone ->
                 // Safety is judged on the TOKEN, not on a parsed double: 2^53 + 1
                 // rounds to 2^53 as a double, so a range check on the value would
                 // wrongly accept it. An integer is int53-safe iff |value| ≤ 2^53 =
                 // 9007199254740992 (16 digits). Compare the digit string lexically —
                 // the grammar above refuses a leading zero, so for equal length that IS
                 // the numeric order. Fable-clean (string + Double.TryParse only, no Int64).
-                let digits = if tok[0] = '-' then tok.Substring 1 else tok
+                let digitsFrom = if s[start] = '-' then start + 1 else start
+                let digits = start + len - digitsFrom
 
                 let int53Safe =
-                    digits.Length < 16
-                    || (digits.Length = 16
-                        && System.String.CompareOrdinal(digits, "9007199254740992") <= 0)
+                    digits < 16
+                    || (digits = 16
+#if FABLE_COMPILER
+                        && System.String.CompareOrdinal(slice s digitsFrom 16, "9007199254740992") <= 0)
+#else
+                        && System.String.CompareOrdinal(s, digitsFrom, "9007199254740992", 0, 16) <= 0)
+#endif
 
                 if int53Safe then
-                    match
-                        System.Double.TryParse(
-                            tok,
-                            System.Globalization.NumberStyles.Float,
-                            System.Globalization.CultureInfo.InvariantCulture
-                        )
-                    with
-                    | true, v -> ReadsFloat v
-                    | _ -> Refused("malformed number: " + tok)
+                    match tryDouble s start len with
+                    | struct (true, v) -> ReadsFloat v
+                    | _ -> Refused("malformed number: " + tok ())
                 else
                     // Phase 253 — past 2^53 the token is admitted EXACTLY when it is the
                     // canonical float layout (`FloatLayout.finite`) of the double it reads as.
@@ -793,23 +873,20 @@ module Json =
                     // property the refusal below is named for; every other token past 2^53 —
                     // 2^53 + 1, a 19-digit id — still fails it, and is refused as before.
                     // (DECISIONS: "an integer token past 2^53 is read when it is a canonical float".)
-                    match
-                        System.Double.TryParse(
-                            tok,
-                            System.Globalization.NumberStyles.Float,
-                            System.Globalization.CultureInfo.InvariantCulture
-                        )
-                    with
-                    | true, v when
+                    match tryDouble s start len with
+                    | struct (true, v) when
                         not (System.Double.IsNaN v || System.Double.IsInfinity v)
-                        && FloatLayout.finite v = tok
+                        && textAt s start len (FloatLayout.finite v)
                         ->
                         ReadsFloat v
                     | _ ->
                         Refused(
                             "integer literal outside the int53 safe range (|n| > 2^53); it cannot round-trip without precision loss: "
-                            + tok
+                            + tok ()
                         )
+
+    /// `readNumberIn` over the whole of `tok`: the reading the document model's conversion takes.
+    let internal readNumberToken (tok: string) (isFloat: bool) : NumberReading = readNumberIn tok 0 tok.Length isFloat
 
     /// True where a number token of the grammar is a FLOAT token — it carries a point or an exponent
     /// — which is what the scanner's flag records while it scans one (Phase 640).
@@ -974,18 +1051,24 @@ module Json =
         let isDigitAt (k: int) =
             k < n && input[k] >= '0' && input[k] <= '9'
 
+        // True where the literal `lit` (`true`, `false`, `null`) stands at the cursor; nothing is
+        // consumed. Compared in place on .NET (Phase 616); the Fable build keeps its `Substring`.
+        let literalAt (lit: string) : bool =
+            i + lit.Length <= n && textAt input i lit.Length lit
+
         // The token is SCANNED as it always was — an optional sign, then digits, point, digits,
         // exponent, each optional — so a refusal reports the token and position it always did; it
-        // is then held to the JSON number grammar (`isJsonNumber`) before anything reads it.
-        // `scanNumberText` stops there, answering the token and whether it is a float token (Phase
-        // 640: the text `Reader.numberText` reads, with no value read from it). The number reader
-        // then reads it (`readNumberToken`), returns the double and records, in `numIsInt` /
+        // is then held to the JSON number grammar (`isJsonNumberIn`, where it stands in the
+        // input) before anything reads it. `scanNumberToken` stops there, answering where the token
+        // starts, its length and whether it is a float token (Phase 640: the text
+        // `Reader.numberText` reads, with no value read from it; Phase 616: no copy of it taken). The
+        // number reader then reads it (`readNumberIn`), returns the double and records, in `numIsInt` /
         // `numInt`, whether the token is the integer `parse` reads as `JInt` (Phase 368: so `Reader`
         // takes a number into a typed buffer through this same routine, with no `JVal` case built).
         let mutable numIsInt = false
         let mutable numInt = 0
 
-        let scanNumberText () : struct (string * bool) =
+        let scanNumberToken () : struct (int * int * bool) =
             let start = i
             let mutable isFloat = false
 
@@ -1012,19 +1095,19 @@ module Json =
                 while isDigitAt i do
                     i <- i + 1
 
-            let tok = input.Substring(start, i - start)
+            let len = i - start
 
-            if not (isJsonNumber tok) then
-                fail MalformedNumber ("malformed number: " + tok)
+            if not (isJsonNumberIn input start len) then
+                fail MalformedNumber ("malformed number: " + input.Substring(start, len))
 
-            struct (tok, isFloat)
+            struct (start, len, isFloat)
 
         // Both refusals fire AFTER the token scan, at the end of the token, as they always have.
         let scanNumber () : float =
             numIsInt <- false
-            let struct (tok, isFloat) = scanNumberText ()
+            let struct (start, len, isFloat) = scanNumberToken ()
 
-            match readNumberToken tok isFloat with
+            match readNumberIn input start len isFloat with
             | ReadsInt v ->
                 numIsInt <- true
                 numInt <- v
@@ -1126,7 +1209,7 @@ module Json =
                     expect ':'
                     skipWs ()
 
-                    let erased = tolerateMemberNull && i + 4 <= n && input.Substring(i, 4) = "null"
+                    let erased = tolerateMemberNull && literalAt "null"
 
                     if erased then
                         i <- i + 4
@@ -1197,7 +1280,7 @@ module Json =
                 // grammar, as the reading held it, and no value is read from it, so a token the
                 // `JVal` reading would refuse (an integer past 2^53, a magnitude past the double
                 // range) is not the document's refusal: the reading read it as written.
-                let struct (_, _) = scanNumberText ()
+                scanNumberToken () |> ignore
                 JBool true
             | 'n' ->
                 // Under `EraseMemberNull` a member-position null never reaches here — `parseObject`
@@ -1216,7 +1299,7 @@ module Json =
             | c -> fail UnexpectedChar ("unexpected character '" + string c + "'")
 
         and parseLiteral (lit: string) (v: JVal) : JVal =
-            if i + lit.Length <= n && input.Substring(i, lit.Length) = lit then
+            if literalAt lit then
                 i <- i + lit.Length
                 v
             else
@@ -1252,7 +1335,7 @@ module Json =
         let nullToken () : unit =
             valueStart () |> ignore
 
-            if i + 4 <= n && input.Substring(i, 4) = "null" then
+            if literalAt "null" then
                 i <- i + 4
             else
                 fail ExpectedToken "expected 'null'"
@@ -1286,8 +1369,8 @@ module Json =
         /// The number token at the value position as its text, held to the grammar and read as no
         /// value (Phase 640).
         member _.NumberText() : string =
-            let struct (tok, _) = scanNumberText ()
-            tok
+            let struct (start, len, _) = scanNumberToken ()
+            input.Substring(start, len)
 
         member _.Value(depth: int) : JVal = parseValue depth
         member _.Token() : JsonToken = token ()
