@@ -17,8 +17,10 @@ module Fuaran.Core.Tests.DecisionsTests
 //      the grammar the file's preamble states: clauses `Live`, `Amended-by D<n>[, D<n>…]`,
 //      `Superseded-by D<n>`, `Moved-to-compute`, `Never-minted`, joined by `; `, then an optional
 //      ` — ` note. `Live` and `Never-minted` stand alone.
-//   3. The ordinals run from D1 to the newest with none missing and none repeated (a number never
-//      assigned is recorded as `Never-minted`, as D6 is).
+//   3. No ordinal is repeated, and none is missing from D1 to the newest the last release carried
+//      (a number never assigned is recorded as `Never-minted`, as D6 is). A number above that may be
+//      missing while a change that holds it is in flight (D275); the `Release ledger` family refuses
+//      every missing number once the standing slot is no longer the draft.
 //   4. A status naming another entry names one that exists, is newer, and was minted.
 //   5. The block between the index markers is byte-equal to the render of the entries, in ordinal
 //      order. `CORE_APPROVE_DOCS=DECISIONS` rewrites it (Approval.fs, one truthiness).
@@ -199,8 +201,57 @@ let internal parse (text: string) : Result<Entry list, string list> =
     else
         Error(List.ofSeq errors)
 
-/// Properties 2 (clause combination), 3 and 4 over parsed entries.
-let internal check (entries: Entry list) : string list =
+/// The numbers from D1 to the newest that no entry carries, ascending.
+let internal missing (entries: Entry list) : int list =
+    match entries with
+    | [] -> []
+    | _ ->
+        let present = entries |> List.map (fun e -> e.Id) |> Set.ofList
+
+        [ for id in 1 .. Set.maxElement present do
+              if not (present.Contains id) then
+                  yield id ]
+
+/// Which missing numbers property 3 admits (D275, clause (b)).
+type internal Floor =
+    /// None: every missing number is refused (the synthetic samples).
+    | Whole
+    /// The newest number the record carried at the release tag `tag`: a missing number at or below it is
+    /// refused, one above it is admitted.
+    | Released of newest: int * tag: string
+    /// The release's record could not be read (no git, no release tag): clause (b) is not read, every
+    /// missing number is admitted here, and the `Release ledger` family's clause (a) still refuses one at
+    /// the commit that closes the standing slot.
+    | Unread of why: string
+
+/// The newest number the headings of `text` declare, read by the heading grammar alone, so a record older
+/// than the status lines still answers.
+let internal newestIn (text: string) : int option =
+    split text
+    |> Array.choose (fun l ->
+        let m = heading.Match l
+        if m.Success then Some(int m.Groups.[2].Value) else None)
+    |> Array.sortDescending
+    |> Array.tryHead
+
+/// D275 (b): the record at the newest release tag in the history of `root`'s HEAD (`ChildProcess.Tags`, the
+/// one tag reader), and its newest number.
+let internal releaseFloor (root: string) : Floor =
+    match ChildProcess.Tags.released root with
+    | Error why -> Unread why
+    | Ok tags ->
+        match ChildProcess.Tags.newest tags with
+        | None -> Whole // the clone holds release tags and HEAD descends from none: no floor stands
+        | Some tag ->
+            match ChildProcess.git root (sprintf "show %s:DECISIONS.md" tag) with
+            | Error why -> Unread why
+            | Ok text ->
+                match newestIn (text.Replace("\r\n", "\n")) with
+                | Some n -> Released(n, tag)
+                | None -> Unread(sprintf "DECISIONS.md at %s declares no entry heading" tag)
+
+/// Properties 2 (clause combination), 3 and 4 over parsed entries, property 3 under `floor`.
+let internal check (floor: Floor) (entries: Entry list) : string list =
     let byId = entries |> List.groupBy (fun e -> e.Id) |> Map.ofList
 
     [ for e in entries do
@@ -248,14 +299,26 @@ let internal check (entries: Entry list) : string list =
                       es.Length
                       (es |> List.map (fun e -> string e.Line) |> String.concat ", ")
 
-      match entries with
-      | [] -> yield "no entries were read"
-      | _ ->
-          let top = entries |> List.map (fun e -> e.Id) |> List.max
+      if List.isEmpty entries then
+          yield "no entries were read"
 
-          for id in 1..top do
-              if not (Map.containsKey id byId) then
-                  yield sprintf "D%d is missing — record a number nobody assigned as `Never-minted`" id ]
+      for id in missing entries do
+          match floor with
+          | Unread _ -> ()
+          | Released(newest, _) when id > newest -> ()
+          | Released(newest, tag) ->
+              yield
+                  sprintf
+                      "D%d is missing, and %s carried every number up to D%d: a released number is never missing, so restore its entry from that release's record, or record D%d `Never-minted` if no decision carries it (DECISIONS.md D275)"
+                      id
+                      tag
+                      newest
+                      id
+          | Whole ->
+              yield
+                  sprintf
+                      "D%d is missing — record it `Never-minted` if nobody assigned it, or land the change that holds it"
+                      id ]
 
 /// The index block, markers included, from the entries in ordinal order (newest first).
 let internal render (entries: Entry list) : string list =
@@ -341,7 +404,7 @@ let private sample (statusOf: int -> string) : string =
 let private errorsOf (text: string) : string list =
     match parse text with
     | Error es -> es
-    | Ok entries -> check entries
+    | Ok entries -> check Whole entries
 
 [<Tests>]
 let tests =
@@ -359,7 +422,19 @@ let tests =
                   | Error es -> failtestf "DECISIONS.md:\n  %s" (String.concat "\n  " es)
 
               Expect.isGreaterThan entries.Length 150 "the log was read — it holds every entry since D1"
-              Expect.isEmpty (check entries) "DECISIONS.md: the statuses and numbering"
+              let floor = releaseFloor (Repo.root ())
+
+              match floor with
+              | Unread why ->
+                  printfn
+                      "Decisions: D275 clause (b) not read, so every missing number is admitted here (the Release ledger family still refuses one at the commit that closes the standing slot): %s"
+                      why
+              | _ -> ()
+
+              let errs = check floor entries
+
+              if not errs.IsEmpty then
+                  failtestf "DECISIONS.md: the statuses and numbering:\n  %s" (String.concat "\n  " errs)
 
               let rendered = render entries
 
@@ -406,7 +481,15 @@ let tests =
 
               Expect.notEqual landed text "the entry was added under the index"
               let entries = Result.defaultWith (fun es -> failtestf "%A" es) (parse landed)
-              let errs = check entries
+              let floor = releaseFloor (Repo.root ())
+
+              match floor with
+              | Released(n, tag) ->
+                  Expect.isLessThan n (newest + 1) (sprintf "the missing number is above %s's newest" tag)
+              | Whole -> failtest "the release floor was not read: HEAD descends from no release tag"
+              | Unread why -> printfn "the floor is not read here, so the case admits by clause (a) alone: %s" why
+
+              let errs = check floor entries
 
               Expect.isFalse
                   (errs |> List.exists (fun e -> e.Contains(sprintf "D%d is missing" (newest + 1))))
@@ -480,6 +563,49 @@ let tests =
 
               let stray = text + "\n## Forward-looking notes\n"
               Expect.exists (errorsOf stray) (fun e -> e.Contains "not `## <date>") "a non-entry heading"
+
+          testCase
+              "go-red: a missing number at or below the last release's newest is refused by number, with its remedy"
+          <| fun _ ->
+              let skipped =
+                  (sample okStatus)
+                      .Replace("## 2026-10-01 — D2: two\n\n" + StatusPrefix + "Never-minted\n\nBody.\n\n", "")
+
+              let entries = Result.defaultWith (fun es -> failtestf "%A" es) (parse skipped)
+              Expect.equal (missing entries) [ 2 ] "the sample misses D2"
+
+              Expect.exists
+                  (check (Released(2, "v9.9.9")) entries)
+                  (fun e ->
+                      e.Contains "D2 is missing, and v9.9.9 carried every number up to D2"
+                      && e.Contains "record D2 `Never-minted`")
+                  "a number the release carried"
+
+              Expect.exists
+                  (check Whole entries)
+                  (fun e ->
+                      e.Contains "D2 is missing — record it `Never-minted`"
+                      && e.Contains "land the change that holds it")
+                  "with no floor, every missing number"
+
+              Expect.isEmpty (check (Released(1, "v9.9.9")) entries) "above the release's newest, it is admitted"
+
+          testCase "a clone that cannot read the release's record admits a missing number, and the family says why"
+          <| fun _ ->
+              let skipped =
+                  (sample okStatus)
+                      .Replace("## 2026-10-01 — D2: two\n\n" + StatusPrefix + "Never-minted\n\nBody.\n\n", "")
+
+              let entries = Result.defaultWith (fun es -> failtestf "%A" es) (parse skipped)
+              Expect.isEmpty (check (Unread "no release tag") entries) "clause (b) is not read"
+
+              Expect.exists
+                  (check (Unread "no release tag") (entries @ entries))
+                  (fun e -> e.Contains "D3 is defined 2 times")
+                  "the other clauses still run"
+
+              Expect.equal (newestIn skipped) (Some 3) "the floor reads the headings alone"
+              Expect.equal (newestIn "# Log\n\nno entries\n") None "a record with no heading has no floor"
 
           testCase "the status grammar reads what the file's preamble states"
           <| fun _ ->

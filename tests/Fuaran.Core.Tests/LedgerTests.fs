@@ -41,6 +41,19 @@ let private decisions (root: string) : Map<string, string> =
     | Ok m -> m
     | Error es -> failtestf "DECISIONS.md does not parse: %s" (String.concat "; " es)
 
+/// DECISIONS.md D275 (a): while the standing `<Version>`'s slot is not headed DRAFT (the release commit turns it
+/// `released`), the decision record carries no missing number. `missing` is `DecisionsTests.missing` of the record.
+let internal unrecordedAtRelease (standing: string option) (slots: Slot list) (missing: int list) : string list =
+    if slots |> List.exists (fun s -> Some s.Version = standing && s.State = Draft) then
+        []
+    else
+        [ for n in missing ->
+              sprintf
+                  "DECISIONS.md: D%d is missing and the standing slot %s is not the draft: record D%d `Never-minted`, or land the change that holds it, before the commit that closes the slot (DECISIONS.md D275)"
+                  n
+                  (defaultArg standing "(no <Version>)")
+                  n ]
+
 let private remedy =
     "Remedy: follow the release sequence in STABILITY.md \"Versioning policy\" — corpus re-stamp, the receiving gate green against the packed candidate, a clean pack, then the record, the heading flip (the slot's ledger file, and the index re-rendered with CORE_APPROVE_DOCS=ledger-index) and the README stamps in ONE commit, which is the commit the tag names."
 
@@ -839,4 +852,41 @@ let tests =
                           | [ e ] ->
                               Expect.equal e.Name ("phase-" + phase) (sprintf "%s holds the bullet it came from" e.Path)
                           | es -> failtestf "%d entry files hold the bullet '%s'" es.Length (b.Substring(0, 60))
+          }
+
+          test "the decision record carries no missing number once the standing slot is not the draft (D275)" {
+              let root, slots, _, _ = live ()
+
+              let entries =
+                  match
+                      DecisionsTests.parse (File.ReadAllText(Path.Combine(root, "DECISIONS.md")).Replace("\r\n", "\n"))
+                  with
+                  | Ok es -> es
+                  | Error es -> failtestf "DECISIONS.md does not parse: %s" (String.concat "; " es)
+
+              unrecordedAtRelease (standing root) slots (DecisionsTests.missing entries)
+              |> failOn "decision-record"
+          }
+
+          test "go-red: a slot turned released refuses each missing decision number, by number, with its remedy" {
+              let draft = slot "0.9.1" "## 0.9.1 — DRAFT\nDraft entries."
+              let released = slot "0.9.1" "## 0.9.1 — released 2026-11-19 as `v0.9.1`\nReleased."
+              Expect.equal draft.State Draft "the scratch draft reads as the draft"
+              Expect.isEmpty (unrecordedAtRelease (Some "0.9.1") [ draft ] [ 5; 7 ]) "the draft admits them"
+              let faults = unrecordedAtRelease (Some "0.9.1") [ released ] [ 5; 7 ]
+              Expect.hasLength faults 2 "one refusal per missing number"
+
+              for n in [ 5; 7 ] do
+                  Expect.exists
+                      faults
+                      (fun f ->
+                          f.Contains(sprintf "D%d is missing and the standing slot 0.9.1 is not the draft" n)
+                          && f.Contains(sprintf "record D%d `Never-minted`, or land the change that holds it" n))
+                      (sprintf "D%d is named with its remedy" n)
+
+              Expect.isEmpty (unrecordedAtRelease (Some "0.9.1") [ released ] []) "a whole record passes"
+
+              Expect.isNonEmpty
+                  (unrecordedAtRelease (Some "0.9.2") [ draft ] [ 5 ])
+                  "a standing version with no slot of its own is not the draft"
           } ]
