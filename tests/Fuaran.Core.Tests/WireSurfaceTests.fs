@@ -1081,6 +1081,176 @@ let tests =
                           (String.concat "\n  " problems)
           }
 
+          // ---- Phase 700 (D269): one tree approves to one header, and an approval writes only what moved ----
+
+          test
+              "the approval writes the same header whether or not the clone holds the newest release tag, or refuses naming `git fetch --tags`" {
+              // The perturbation the reproduction used — the newest release tag absent from the clone — applied
+              // to the tag SET the header is computed from, so no repository's tags move.
+              let root = repoRoot ()
+
+              match ChildProcess.Tags.released root with
+              | Error why ->
+                  printfn "WireSurface header-basis check SKIPPED: %s" why
+                  skiptestf "header-basis check skipped — %s" why
+              | Ok tags ->
+                  let ledger = Ledger.read root |> fst |> ledgerNewest
+
+                  let newest =
+                      match ChildProcess.Tags.newest tags with
+                      | Some t -> t
+                      | None -> failtest "HEAD's history holds no release tag, and the clone holds some"
+
+                  let without = Set.remove newest tags
+
+                  let header (released: Result<Set<string>, string>) (p: string) =
+                      basisFrom ledger released
+                      |> Result.bind (fun b -> approvedText b gitBaselineAt p None (renderPackage p))
+                      |> Result.map (Option.bind parseStated)
+
+                  let faults =
+                      [ for p in wirePackages () do
+                            match header (Ok tags) p, header (Ok without) p with
+                            | Ok a, Ok b when a = b -> ()
+                            | Ok _, Error why when why.Contains newest && why.Contains "git fetch --tags" -> ()
+                            | a, b -> yield sprintf "%s: with every tag %A; without %s %A" p a newest b ]
+
+                  if not (List.isEmpty faults) then
+                      failtestf
+                          "one tree approves to different headers in two clones:\n  %s"
+                          (String.concat "\n  " faults)
+
+                  Expect.equal
+                      (basisFrom ledger (Ok tags) |> Result.map _.Newest)
+                      (match ledger with
+                       | Some t -> Ok t
+                       | None -> Error "the release ledger records no release")
+                      "with every tag, a header is stated since the newest release the tree's ledger records"
+
+                  Expect.equal
+                      (basisFrom ledger (Error ChildProcess.Tags.NoReleaseTag))
+                      (Error ChildProcess.Tags.NoReleaseTag)
+                      "a clone holding no release tag refuses with D168's sentence"
+          }
+
+          test
+              "an approval writes nothing for a baseline whose rows did not move and whose header holds, whatever release is newest" {
+              // On this tree first: every committed header holds, so an approval admitting every package writes
+              // nothing (the reproduction's run A wrote nine header lines and moved no row).
+              let written =
+                  match basis () with
+                  | Error why ->
+                      printfn "WireSurface no-op approval check on this tree SKIPPED: %s" why
+                      []
+                  | Ok b ->
+                      [ for p in wirePackages () do
+                            let path = wirePath p
+
+                            if File.Exists path then
+                                match
+                                    approvedText b gitBaselineAt p (Some(File.ReadAllText path)) (renderPackage p)
+                                with
+                                | Ok None -> ()
+                                | other -> yield sprintf "%s: %A" p (other |> Result.map (Option.bind parseStated)) ]
+
+              if not (List.isEmpty written) then
+                  failtestf
+                      "an approval on this tree writes baselines whose rows did not move:\n  %s"
+                      (String.concat "\n  " written)
+
+              let docs =
+                  [ { Name = "a"
+                      Hash = "sha256:1"
+                      Canonical = """{"$type":"x"}""" } ]
+
+              let at _ p =
+                  Some(renderBaseline p "v1.0.0: first snapshot" docs)
+
+              let b =
+                  { Newest = "v2.0.0"
+                    Tags = set [ "v1.0.0"; "v2.0.0" ] }
+
+              Expect.equal
+                  (approvedText b at "P" (Some(renderBaseline "P" "v1.0.0: unchanged" docs)) docs)
+                  (Ok None)
+                  "a header true at the older release it names, the package unchanged since the newest, is kept"
+          }
+
+          test "an approval rewrites a baseline whose rows did not move when its header fails the check" {
+              let docs =
+                  [ { Name = "a"
+                      Hash = "sha256:1"
+                      Canonical = """{"$type":"x"}""" } ]
+
+              let b =
+                  { Newest = "v2.0.0"
+                    Tags = set [ "v1.0.0"; "v2.0.0" ] }
+
+              let unmoved _ p =
+                  Some(renderBaseline p "v1.0.0: first snapshot" docs)
+
+              let restated = Ok(Some(renderBaseline "P" "v2.0.0: unchanged" docs))
+
+              Expect.equal
+                  (approvedText b unmoved "P" (Some(renderBaseline "P" "v2.0.0: additive" docs)) docs)
+                  restated
+                  "a class that is wrong at the release it names is restated"
+
+              let noClass =
+                  (renderBaseline "P" "v2.0.0: unchanged" docs).Replace("# class since v2.0.0: unchanged\n", "")
+
+              Expect.equal
+                  (approvedText b unmoved "P" (Some noClass) docs)
+                  restated
+                  "a header stating no class is restated"
+
+              // The rows moved AFTER the newest release, and the header still names the older one.
+              let before =
+                  [ { Name = "a"
+                      Hash = "sha256:0"
+                      Canonical = """{"$type":"w"}""" } ]
+
+              let movedSince _ p =
+                  Some(renderBaseline p "v1.0.0: first snapshot" before)
+
+              Expect.equal
+                  (approvedText b movedSince "P" (Some(renderBaseline "P" "v1.0.0: breaking" docs)) docs)
+                  (Ok(Some(renderBaseline "P" "v2.0.0: breaking" docs)))
+                  "a package that moved since the newest release, its header naming an older one, is restated since the newest"
+          }
+
+          test
+              "a header naming a release tag the clone does not hold is refused by name, never read as a first snapshot" {
+              let docs =
+                  [ { Name = "a"
+                      Hash = "sha256:1"
+                      Canonical = """{"$type":"x"}""" } ]
+
+              // `git show` of a tag the clone does not hold answers nothing, exactly as a release without the file.
+              let at tag p =
+                  if tag = "v1.0.0" then
+                      Some(renderBaseline p "v1.0.0: first snapshot" docs)
+                  else
+                      None
+
+              let tags = set [ "v1.0.0" ]
+
+              let refused (what: string) (r: Result<'a, string>) =
+                  match r with
+                  | Error why ->
+                      Expect.stringContains why "v9.9.9" (what + ": the refusal names the absent tag")
+                      Expect.stringContains why "git fetch --tags" (what + ": and the remedy")
+                  | Ok v -> failtestf "%s answered %A for v9.9.9, a tag this clone does not hold" what v
+
+              refused "statedClassIn" (statedClassIn tags at "v9.9.9" "P" docs)
+
+              refused
+                  "headerFault"
+                  (headerFault { Newest = "v1.0.0"; Tags = tags } at "P" (renderBaseline "P" "v9.9.9: unchanged" docs))
+
+              refused "basisFrom" (basisFrom (Some "v9.9.9") (Ok tags))
+          }
+
           // ---- the classifier, pinned on the shapes the phase names ----
 
           test "go-red: Phase 213's rename, replayed against the pre-213 bytes, is BREAKING and named" {
