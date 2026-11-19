@@ -318,7 +318,7 @@ module Dag =
     /// (Phase 614; three whole-DAG lists, a `Set` and a sort before). Both walk the map with its own
     /// iterators, which allocate nothing per node, where its enumerator allocates per step.
     let heads (dag: T<'Op>) : string list =
-        let parents = System.Collections.Generic.HashSet<string>()
+        let parents = System.Collections.Generic.HashSet<string>(dag.Nodes.Count)
 
         dag.Nodes
         |> Map.iter (fun _ n ->
@@ -693,8 +693,10 @@ module Dag =
     /// edge before); the frontier stays the ordered `Set`, which is what defines the order. The node map
     /// is walked with its own iterators, which allocate nothing per node.
     let private drainNodes (key: DagNode<'Op> -> 'K) (nodes: Map<string, DagNode<'Op>>) : string list * string list =
-        let indeg = System.Collections.Generic.Dictionary<string, int>()
-        let children = System.Collections.Generic.Dictionary<string, ResizeArray<string>>()
+        let indeg = System.Collections.Generic.Dictionary<string, int>(nodes.Count)
+
+        let children =
+            System.Collections.Generic.Dictionary<string, ResizeArray<string>>(nodes.Count)
 
         let mutable ready: Set<'K * string> =
             nodes
@@ -717,7 +719,7 @@ module Dag =
                     if held = 0 then Set.add (key n, id) ready else ready)
                 Set.empty
 
-        let placed = ResizeArray<string>()
+        let placed = ResizeArray<string>(nodes.Count)
 
         while not (Set.isEmpty ready) do
             let top = Set.minElement ready
