@@ -953,39 +953,31 @@ module Json =
 
     // One open container of a `JVal` parse (Phase 663): the parse holds these in a list it indexes by
     // nesting level, in the heap, so a level costs memory and never stack. A level's record is reused by
-    // every container opened at that level; its lists are cleared when a container opens there.
+    // every container opened at that level, its lists and names emptied when a container opens there.
+    // Fields, not properties: the parse reads them once per item.
     [<Sealed>]
-    type private OpenContainer() =
-        let mutable items: ResizeArray<JVal> = null
-        let mutable fields: ResizeArray<string * JVal> = null
-        let mutable names: MemberNames = Unchecked.defaultof<MemberNames>
-
-        member val IsObject = false with get, set
+    type private OpenContainer =
+        val mutable IsObject: bool
         /// The container's slot in the scanner's path frames.
-        member val Top = 0 with get, set
+        val mutable Top: int
         /// The items or members accumulated so far.
-        member val Count = 0 with get, set
+        val mutable Count: int
         /// The member being read: its name, and where its opening quote stands.
-        member val Key: string = null with get, set
-        member val KeyAt = 0 with get, set
+        val mutable Key: string
+        val mutable KeyAt: int
+        val Items: ResizeArray<JVal>
+        val Fields: ResizeArray<string * JVal>
+        val Names: MemberNames
 
-        member _.Items =
-            if isNull items then
-                items <- ResizeArray<JVal>()
-
-            items
-
-        member _.Fields =
-            if isNull fields then
-                fields <- ResizeArray<string * JVal>()
-
-            fields
-
-        member _.Names =
-            if isNull (box names) then
-                names <- MemberNames()
-
-            names
+        new() =
+            { IsObject = false
+              Top = 0
+              Count = 0
+              Key = null
+              KeyAt = 0
+              Items = ResizeArray<JVal>()
+              Fields = ResizeArray<string * JVal>()
+              Names = MemberNames() }
 
     /// The ONE grammar (Phase 368): the scanner `read` reads a document with, and the only one
     /// `Reader` reads with. Every routine below is the parser's own: the whitespace and
@@ -1380,110 +1372,143 @@ module Json =
             | c when c = '-' || (c >= '0' && c <= '9') -> parseNumber ()
             | c -> fail UnexpectedChar ("unexpected character '" + string c + "'")
 
-        // The open containers of a `JVal` parse, by nesting level below the value `parseValue` started at.
+        // The `JVal` parse's state (Phase 663). The parse keeps its open containers here, in the heap, and
+        // NOT on the call stack: `containers` holds one reused record per nesting level below the value the
+        // parse started at, `level` how many are open, and `innermost` the deepest of them. A level costs
+        // one record, never a frame, so the depth cap is reached on any thread stack, however small, and
+        // refuses by name where a recursion would have ended the process (a stack overflow cannot be
+        // caught on .NET). The state is the scanner's rather than the parse's locals, so no closure
+        // captures it; a parse is never re-entered (no step it runs reads a `JVal`), and each starts at
+        // level 0.
         let containers = ResizeArray<OpenContainer>()
+        let mutable level = 0
+        let mutable innermost = Unchecked.defaultof<OpenContainer>
+        let mutable parsed = Unchecked.defaultof<JVal>
 
-        // One `JVal` from the value position, its containers nested at `depth` and below (Phase 663). The
-        // parse keeps its open containers in `containers`, in the heap, and NOT on the call stack: a nesting
-        // level costs one reused record, never a frame, so the depth cap is reached on any thread stack,
-        // however small, and refuses by name where a recursion would have ended the process (a stack
-        // overflow cannot be caught on .NET). It runs the container steps above in the order the loops
-        // run them, so every refusal is raised at the same position, with the same kind and message.
-        //
-        // Four states: a value is DUE at the cursor; an item or member is due in the innermost open
-        // container; a value is DONE and goes to the container it belongs to (or is the answer, when none
-        // is open); the container's separator is due after its item or member.
-        let parseValue (depth: int) : JVal =
-            let mutable level = 0
-            let mutable value = Unchecked.defaultof<JVal>
-            let mutable state = 0 // 0 value due, 1 item or member due, 2 value done, 3 separator due
+        // A container opened at the next level: its record reset, its path frame pushed.
+        let enter (isObject: bool) =
+            if level = containers.Count then
+                containers.Add(OpenContainer())
 
-            let enter (isObject: bool) =
-                if level = containers.Count then
-                    containers.Add(OpenContainer())
+            let c = containers[level]
+            c.IsObject <- isObject
+            c.Top <- pushFrame ()
+            c.Count <- 0
 
-                let c = containers[level]
-                c.IsObject <- isObject
-                c.Top <- pushFrame ()
-                c.Count <- 0
+            if isObject then
+                c.Fields.Clear()
+                c.Names.Reset()
+            else
+                c.Items.Clear()
 
-                if isObject then
-                    c.Fields.Clear()
-                    c.Names.Reset()
+            level <- level + 1
+            innermost <- c
+
+        // The innermost container closed: its value built into `parsed`, its frame popped.
+        let leave () =
+            let c = innermost
+
+            parsed <-
+                if c.IsObject then
+                    JObj(List.ofSeq c.Fields)
                 else
-                    c.Items.Clear()
+                    JArr(List.ofSeq c.Items)
 
-                level <- level + 1
+            popFrame c.Top
+            level <- level - 1
 
-            while state <> 4 do
-                match state with
-                | 0 ->
-                    match valueStart () with
-                    | '{' ->
-                        if openContainer (depth + level) '{' '}' then
-                            enter true
-                            state <- 1
-                        else
-                            value <- JObj []
-                            state <- 2
-                    | '[' ->
-                        if openContainer (depth + level) '[' ']' then
-                            enter false
-                            state <- 1
-                        else
-                            value <- JArr []
-                            state <- 2
-                    | c ->
-                        value <- parseScalar c
-                        state <- 2
-                | 1 ->
-                    let c = containers[level - 1]
+            innermost <-
+                if level = 0 then
+                    Unchecked.defaultof<OpenContainer>
+                else
+                    containers[level - 1]
 
-                    if c.IsObject then
-                        let struct (key, keyAt, erased) = memberDue c.Top c.Count
+        // The value due at the cursor, its first significant character `ch` read: true when a container
+        // opened there (its first item or member is due), false when `parsed` holds the whole value.
+        let start (depth: int) (ch: char) : bool =
+            match ch with
+            | '{' ->
+                if openContainer (depth + level) '{' '}' then
+                    enter true
+                    true
+                else
+                    parsed <- JObj []
+                    false
+            | '[' ->
+                if openContainer (depth + level) '[' ']' then
+                    enter false
+                    true
+                else
+                    parsed <- JArr []
+                    false
+            | '"' ->
+                parsed <- JStr(parseString ())
+                false
+            | c ->
+                parsed <- parseScalar c
+                false
 
-                        if erased then
-                            state <- 3
-                        else
-                            c.Key <- key
-                            c.KeyAt <- keyAt
-                            state <- 0
+        // `parsed` is done and goes to the innermost container `c`, and the separator after it is read: true
+        // when another item or member of `c` is due, false when `c` closed (and `parsed` is `c`'s value).
+        let afterValue (c: OpenContainer) : bool =
+            if c.IsObject then
+                c.Fields.Add((c.Key, parsed))
+                c.Count <- c.Count + 1
+                memberAccumulated c.Names c.Key c.KeyAt
+
+                if memberDone () then
+                    true
+                else
+                    leave ()
+                    false
+            else
+                c.Items.Add parsed
+                c.Count <- c.Count + 1
+
+                if itemDone c.Top then
+                    true
+                else
+                    leave ()
+                    false
+
+        // One `JVal` from the value position, its containers nested at `depth` and below (Phase 663). It
+        // runs the container steps above in the order the loops run them, so every refusal is raised at the
+        // same position, with the same kind and message. While a head is due, the innermost container's
+        // next head is read (an item's bound, or a member's key, which may be an erased `null` with no value)
+        // and its value started: a container opens, and its own head is due; any other value is done at
+        // once and goes to the container. While none is due, the container that just closed goes to the one
+        // that holds it.
+        let parseValue (depth: int) : JVal =
+            level <- 0
+            innermost <- Unchecked.defaultof<OpenContainer>
+            let mutable headDue = start depth (valueStart ())
+
+            while headDue || level > 0 do
+                let c = innermost
+
+                if not headDue then
+                    headDue <- afterValue c
+                elif c.IsObject then
+                    let struct (key, keyAt, erased) = memberDue c.Top c.Count
+
+                    if erased then
+                        // No value: the separator is due at once.
+                        if not (memberDone ()) then
+                            leave ()
+                            headDue <- false
                     else
-                        itemDue c.Top c.Count
-                        state <- 0
-                | 2 ->
-                    if level = 0 then
-                        state <- 4
-                    else
-                        let c = containers[level - 1]
+                        c.Key <- key
+                        c.KeyAt <- keyAt
 
-                        if c.IsObject then
-                            c.Fields.Add((c.Key, value))
-                            c.Count <- c.Count + 1
-                            memberAccumulated c.Names c.Key c.KeyAt
-                        else
-                            c.Items.Add value
-                            c.Count <- c.Count + 1
+                        if not (start depth (valueStart ())) then
+                            headDue <- afterValue c
+                else
+                    itemDue c.Top c.Count
 
-                        state <- 3
-                | _ ->
-                    let c = containers[level - 1]
-                    let more = if c.IsObject then memberDone () else itemDone c.Top
+                    if not (start depth (valueStart ())) then
+                        headDue <- afterValue c
 
-                    if more then
-                        state <- 1
-                    else
-                        value <-
-                            if c.IsObject then
-                                JObj(List.ofSeq c.Fields)
-                            else
-                                JArr(List.ofSeq c.Items)
-
-                        popFrame c.Top
-                        level <- level - 1
-                        state <- 2
-
-            value
+            parsed
 
         // The kind of the value due, from its first significant character, unconsumed (Phase 467):
         // the dispatch `parseValue` makes, answered instead of taken. The two positions no value
