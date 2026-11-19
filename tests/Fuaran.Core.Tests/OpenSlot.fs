@@ -114,6 +114,9 @@ let private triple (v: string) : (int * int * int) option = ChildProcess.Tags.ve
 
 let private show (a: int, b: int, c: int) = sprintf "%d.%d.%d" a b c
 
+/// `version` as a triple, `0.0.0` where it does not parse.
+let private at (version: string) = defaultArg (triple version) (0, 0, 0)
+
 /// The version a slot of `cls` opens over the release `newest`.
 let expectedOver (cls: SlotClass) (a: int, b: int, c: int) : int * int * int =
     match cls with
@@ -160,34 +163,54 @@ let wrap (width: int) (text: string) : string list =
 
 /// `major`, `minor` or `patch`: what moved from `previous` to `version`.
 let private kindOf (version: string) (previous: string) =
-    let (a, b, _) = defaultArg (triple version) (0, 0, 0)
-    let (pa, pb, _) = defaultArg (triple previous) (0, 0, 0)
+    let (a, b, _) = at version
+    let (pa, pb, _) = at previous
 
     if a <> pa then "major"
     elif b <> pb then "minor"
     else "patch"
 
-/// Why a slot of `cls` at `version` (a `kind` slot) is the number it is, and what a later member does.
-let private classWhy (version: string) (kind: string) (cls: SlotClass) =
-    let (a, b, _) = defaultArg (triple version) (0, 0, 0)
+/// `a breaking member`, `an additive member`: a member of `cls`, in the class words of STABILITY.md's
+/// "Versioning policy".
+let private memberOf (cls: SlotClass) =
+    sprintf "%s %s member" (if cls = Breaking then "a" else "an") (className cls)
+
+/// The classes whose member ADVANCES a slot at `slot` over the release `newest`, each with the version it
+/// advances it to: those `expectedOver` opens past `slot` (Phase 698). A member of every other class rides it,
+/// which is what `plan` admits and refuses.
+let private advancing (slot: int * int * int) (newest: int * int * int) : (SlotClass * (int * int * int)) list =
+    [ Internal; Additive; Breaking ]
+    |> List.choose (fun m ->
+        let v = expectedOver m newest
+        if compare v slot > 0 then Some(m, v) else None)
+
+/// What a later member does to the slot at `version` over the release `newest`, each advancing class by name.
+let private advanceClause (version: string) (newest: string) =
+    match advancing (at version) (at newest) with
+    | [] -> "every later member rides it"
+    | moves ->
+        (moves
+         |> List.map (fun (m, v) ->
+             sprintf "%s advances it to the `%s` %s" (memberOf m) (show v) (kindOf (show v) newest))
+         |> String.concat " and ")
+        + " rather than riding it"
+
+/// Why a slot of `cls` at `version` over the release `newest` (a `kind` slot) is the number it is, and what a
+/// later member does.
+let private classWhy (version: string) (newest: string) (kind: string) (cls: SlotClass) =
+    let (a, _, _) = at version
+    let later = advanceClause version newest
 
     match cls with
     | Breaking when a = 0 ->
-        "through the `0.x` line a breaking class advances the MINOR, which makes it a MINOR slot, and every later member rides it"
-    | Breaking -> "a breaking class advances the MAJOR, which makes it a MAJOR slot, and every later member rides it"
+        sprintf "through the `0.x` line a breaking class advances the MINOR, which makes it a MINOR slot, and %s" later
+    | Breaking -> sprintf "a breaking class advances the MAJOR, which makes it a MAJOR slot, and %s" later
     | _ ->
-        let higher, next =
-            if kind = "patch" && (a = 0 || cls = Internal) then
-                "a member of a higher class", sprintf "the `%s` minor" (show (a, b + 1, 0))
-            else
-                "a breaking member", sprintf "the `%s` major" (show (a + 1, 0, 0))
-
         sprintf
-            "the work in this slot is %s, which makes it a %s slot, and %s advances it to %s rather than riding it"
+            "the work in this slot is %s, which makes it a %s slot, and %s"
             (className cls)
             (kind.ToUpperInvariant())
-            higher
-            next
+            later
 
 /// The verb in number with who acts: `Phase 555 opens`, `Phases 487 and 491 open`.
 let private agreeing (openedBy: string) (singular: string) (plural: string) =
@@ -222,7 +245,7 @@ let slotText (version: string) (previous: string) (cls: SlotClass) (openedBy: st
             kind
             previous
             previous
-            (classWhy version kind cls)
+            (classWhy version previous kind cls)
             openedBy
             (agreeing openedBy "opens" "open")
             version
@@ -234,16 +257,23 @@ let slotText (version: string) (previous: string) (cls: SlotClass) (openedBy: st
 let advanceText (version: string) (newest: string) (draft: StandingDraft) (cls: SlotClass) (openedBy: string) =
     let kind = kindOf version newest
 
+    // the classes that do not ride the draft; `plan` admits an advance only when `cls` is one of them
+    let notRiding =
+        advancing (at draft.Version) (at newest)
+        |> List.map (fst >> memberOf)
+        |> String.concat " or "
+
     let paragraph =
         sprintf
-            "**Slot class: %s.** The %s after the released `%s`. It advances the untagged `%s` draft, a %s slot of class %s, which a member of a higher class does not ride: %s ([`STABILITY.md`](../../STABILITY.md), \"Versioning policy\"). No `v%s` tag was cut, so the entries under `%s` ship in `%s`, and its file keeps them as the record of their class. %s %s it. The conformance `kitVersion` stamp lines move to `%s` with the slot, and the corpus pin moves to the re-stamp of the declared copies."
+            "**Slot class: %s.** The %s after the released `%s`. It advances the untagged `%s` draft, a %s slot of class %s, which %s does not ride: %s ([`STABILITY.md`](../../STABILITY.md), \"Versioning policy\"). No `v%s` tag was cut, so the entries under `%s` ship in `%s`, and its file keeps them as the record of their class. %s %s it. The conformance `kitVersion` stamp lines move to `%s` with the slot, and the corpus pin moves to the re-stamp of the declared copies."
             (className cls)
             kind
             newest
             draft.Version
             ((kindOf draft.Version newest).ToUpperInvariant())
             (className draft.Class)
-            (classWhy version kind cls)
+            notRiding
+            (classWhy version newest kind cls)
             draft.Version
             draft.Version
             version
