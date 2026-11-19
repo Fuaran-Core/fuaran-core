@@ -212,6 +212,11 @@ let private classWhy (version: string) (newest: string) (kind: string) (cls: Slo
             (kind.ToUpperInvariant())
             later
 
+/// What is wrong with the classes of the standing draft `draft`'s entries over the release `newest`.
+let entryClassFaults (newest: string) (draft: Ledger.Slot) : string list =
+    ignore (newest, draft)
+    []
+
 /// The verb in number with who acts: `Phase 555 opens`, `Phases 487 and 491 open`.
 let private agreeing (openedBy: string) (singular: string) (plural: string) =
     if openedBy.StartsWith("Phases ", StringComparison.Ordinal) then

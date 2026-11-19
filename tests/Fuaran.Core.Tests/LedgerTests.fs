@@ -639,4 +639,126 @@ let tests =
                       | code, out ->
                           gitIn root [ "merge"; "--abort" ] |> ignore
                           failtestf "on %s, `git merge %s` exited %d:\n%s" ours theirs code out)
+          }
+
+          test
+              "go-red: an entry or a section heading in the standing draft's own file names the file the entry moves to" {
+              scratch (fun root ->
+                  writeFile (Path.Combine(root, Dir, "0.9.1.md")) (scratchDraft + "\n### Internal\n\n" + entryA)
+                  let slots, strays = read root
+                  let faults = shapeFaults Set.empty (Some "0.9.1") slots strays
+
+                  Expect.exists
+                      faults
+                      (fun f ->
+                          f.Contains "docs/releases/0.9.1.md:7 carries an entry"
+                          && f.Contains "docs/releases/0.9.1/internal/phase-901.md"
+                          && f.Contains "unchanged")
+                      "the bullet is red, naming the file to create and that the bullet goes there unchanged"
+
+                  Expect.exists
+                      faults
+                      (fun f -> f.Contains "docs/releases/0.9.1.md:5 carries a section heading, '### Internal'")
+                      "the section heading is red: the close writes the sections")
+          }
+
+          test "go-red: an entry beside a closed slot names the standing draft's file it moves to" {
+              scratch (fun root ->
+                  writeFile
+                      (Path.Combine(root, Dir, "0.9.0.md"))
+                      "## 0.9.0 — released 2026-01-01 as `v0.9.0`\n\nA release.\n"
+
+                  writeFile (Path.Combine(root, Dir, "0.9.0", "internal", "phase-902.md")) entryB
+                  writeFile (Path.Combine(root, Dir, "0.9.1.md")) scratchDraft
+                  let slots, strays = read root
+
+                  Expect.exists
+                      (shapeFaults (set [ "v0.9.0" ]) (Some "0.9.1") slots strays)
+                      (fun f ->
+                          f.Contains "docs/releases/0.9.0/internal/phase-902.md is an entry of 0.9.0, which is closed"
+                          && f.Contains "CORE_APPROVE_DOCS=ledger-index"
+                          && f.Contains "move it, unchanged, to docs/releases/0.9.1/internal/phase-902.md")
+                      "the entry is red, naming both remedies")
+          }
+
+          test "go-red: an entry directory holds only the three class directories and non-empty .md files" {
+              scratch (fun root ->
+                  writeFile (Path.Combine(root, Dir, "0.9.1.md")) scratchDraft
+                  writeFile (Path.Combine(root, Dir, "0.9.1", "internal", "phase-901.md")) entryA
+
+                  for rel, text in
+                      [ "0.9.1/notes.txt", "x"
+                        "0.9.1/fixes/phase-1.md", entryB
+                        "0.9.1/internal/phase-2.txt", entryB
+                        "0.9.1/internal/phase-3.md", "  \n"
+                        "0.9.7/internal/phase-4.md", entryB ] do
+                      writeFile (Path.Combine(root, Dir, rel)) text
+
+                  let slots, strays = read root
+                  let faults = shapeFaults Set.empty (Some "0.9.1") slots strays
+
+                  for named in
+                      [ "docs/releases/0.9.1/notes.txt is not an entry"
+                        "docs/releases/0.9.1/fixes/ is not an entry"
+                        "docs/releases/0.9.1/internal/phase-2.txt is not an entry"
+                        "docs/releases/0.9.1/internal/phase-3.md is not an entry"
+                        "docs/releases/0.9.7/ is an entry directory beside no slot file" ] do
+                      Expect.exists faults (fun f -> f.Contains named) (sprintf "red: %s" named)
+
+                  Expect.isFalse
+                      (faults |> List.exists (fun f -> f.Contains "phase-901.md"))
+                      "and the well-formed entry is not")
+          }
+
+          test
+              "a draft renders to the bytes its close writes: a section per class, each class's entries in their names' order" {
+              scratch (fun root ->
+                  let paragraph = String.concat "\n" (entryParagraph "0.9.1")
+                  writeFile (Path.Combine(root, Dir, "0.9.1.md")) (scratchDraft + "\n" + paragraph + "\n")
+
+                  for rel, text in
+                      [ "breaking/phase-12.md", "- **A breaking sample** (Phase 12, `C.fs`) — class **breaking**.\n"
+                        "additive/pr-3.md",
+                        "- **A contributed sample** (pull request 3, `E.fs`) — class **additive**.\n"
+                        "additive/phase-7.md", "- **An additive sample** (Phase 7, `D.fs`) — class **additive**.\n"
+                        "internal/phase-10.md",
+                        "- **A later internal sample** (Phase 10, `G.fs`) — class **internal**.\n"
+                        "internal/phase-5-tests.md",
+                        "- **Its second entry** (Phase 5, `F.fs`) — class **internal**: the tests,\n  on two lines.\n"
+                        "internal/phase-5.md", "- **An internal sample** (Phase 5, `F.fs`) — class **internal**.\n" ] do
+                      writeFile (Path.Combine(root, Dir, "0.9.1", rel)) text
+
+                  let expected =
+                      String.concat
+                          "\n"
+                          [ "## 0.9.1 — DRAFT"
+                            ""
+                            "**Slot class: additive.** A scratch slot over the released `0.9.0`."
+                            ""
+                            "### Breaking"
+                            ""
+                            "- **A breaking sample** (Phase 12, `C.fs`) — class **breaking**."
+                            ""
+                            "### Additive"
+                            ""
+                            "- **An additive sample** (Phase 7, `D.fs`) — class **additive**."
+                            "- **A contributed sample** (pull request 3, `E.fs`) — class **additive**."
+                            ""
+                            "### Internal"
+                            ""
+                            "- **An internal sample** (Phase 5, `F.fs`) — class **internal**."
+                            "- **Its second entry** (Phase 5, `F.fs`) — class **internal**: the tests,"
+                            "  on two lines."
+                            "- **A later internal sample** (Phase 10, `G.fs`) — class **internal**."
+                            "" ]
+
+                  let before = fst (read root) |> List.find (fun s -> s.Version = "0.9.1")
+                  Expect.equal before.Text expected "the ledger reads the draft as its close will print it"
+
+                  closeSlot root before |> ignore
+                  let closed = File.ReadAllText(Path.Combine(root, Dir, "0.9.1.md"))
+                  Expect.equal closed expected "the close writes those bytes into the slot's file"
+                  Expect.equal closed before.Text "the draft read before the close is the closed file after it"
+
+                  Expect.isFalse (Directory.Exists(Path.Combine(root, Dir, "0.9.1"))) "and the entry directory is gone")
           } ]

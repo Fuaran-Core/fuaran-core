@@ -217,6 +217,21 @@ let read (root: string) : Slot list * string list =
 
 // ---- adding an entry ------------------------------------------------------------------------
 
+/// The one sentence a standing draft's file carries in place of its entries (D272): how an entry is added.
+let entrySentence (version: string) : string =
+    sprintf
+        "**Each entry of this slot is a file of its own** (DECISIONS.md D272): add one as `%s/%s/<class>/<name>.md`, with `<class>` one of `breaking`, `additive` or `internal` and `<name>` `phase-<n>` (`phase-<n>-<word>` for a phase's second entry) or `pr-<n>`, holding the entry's bullet exactly as it will print, and the act that closes the slot renders the entries here, a section per class."
+        Dir
+        version
+
+/// That sentence as the draft's file lays it out.
+let entryParagraph (version: string) : string list = [ entrySentence version ]
+
+/// Close `s` under `root`: its file as it reads. Answers the files written, repo-relative.
+let closeSlot (root: string) (s: Slot) : string list =
+    File.WriteAllText(Path.Combine(root, s.Path), s.Text)
+    [ s.Path ]
+
 /// Add `text`, one entry (its bullet and its wrapped lines), to the standing draft `version` under `root`,
 /// as class `cls` (`breaking`, `additive` or `internal`) named `name` (`phase-<n>`): the one way an entry is
 /// added, the way the guide (CONTRIBUTING.md) states it. Answers the file written, repo-relative.
