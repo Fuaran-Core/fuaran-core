@@ -985,3 +985,181 @@ let newerDagTests =
               match Dag.fromJsonlVerified (OpStream.canonical h sw) tampered with
               | Error(StreamLoadFault.Broken _) -> ()
               | other -> failtestf "expected the break, got %A" other ]
+
+// Phase 614 - `Dag.heads` and the drain keep their sets in a `HashSet` and `Dictionary`s instead of
+// whole-DAG lists and immutable maps rebuilt per edge. The order is the frontier's, which did not move,
+// so the walks are held to the previous implementations, kept here verbatim, over hand-built DAGs with
+// repeated parents, dangling parents, self-loops and cycles.
+module private PreviousWalks =
+    let heads (dag: Dag.T<'Op>) : string list =
+        let parents =
+            dag.Nodes |> Map.toList |> List.collect (fun (_, n) -> n.Parents) |> Set.ofList
+
+        dag.Nodes
+        |> Map.toList
+        |> List.map fst
+        |> List.filter (fun id -> not (parents.Contains id))
+        |> List.sort
+
+    /// The drain before Phase 614, with the frontier's direction as a parameter so the comparison can
+    /// be shown to fail (`largestFirst`).
+    let drainNodes
+        (largestFirst: bool)
+        (key: DagNode<'Op> -> 'K)
+        (nodes: Map<string, DagNode<'Op>>)
+        : string list * string list =
+        let mutable indeg: Map<string, int> = Map.empty
+        let mutable children: Map<string, string list> = Map.empty
+
+        for KeyValue(id, n) in nodes do
+            let held = n.Parents |> List.filter nodes.ContainsKey
+            indeg <- Map.add id (List.length held) indeg
+
+            for p in held do
+                children <- Map.add p (id :: (Map.tryFind p children |> Option.defaultValue [])) children
+
+        let mutable ready: Set<'K * string> =
+            indeg
+            |> Map.toSeq
+            |> Seq.filter (fun (_, d) -> d = 0)
+            |> Seq.map (fun (id, _) -> key nodes[id], id)
+            |> Set.ofSeq
+
+        let placed = ResizeArray<string>()
+
+        while not (Set.isEmpty ready) do
+            let top =
+                if largestFirst then
+                    Set.maxElement ready
+                else
+                    Set.minElement ready
+
+            ready <- Set.remove top ready
+            let id = snd top
+            placed.Add id
+
+            match Map.tryFind id children with
+            | Some kids ->
+                for k in kids do
+                    let d = indeg[k] - 1
+                    indeg <- Map.add k d indeg
+
+                    if d = 0 then
+                        ready <- Set.add (key nodes[k], k) ready
+            | None -> ()
+
+        let placedSet = Set.ofSeq placed
+
+        List.ofSeq placed,
+        nodes
+        |> Map.toList
+        |> List.map fst
+        |> List.filter (fun id -> not (Set.contains id placedSet))
+
+    let orderOf (placed: string list, unplaced: string list) : Result<string list, Dag.Cyclic> =
+        match unplaced with
+        | [] -> Ok placed
+        | _ -> Error { Unplaced = unplaced }
+
+    let totalOrderBy largestFirst key (dag: Dag.T<'Op>) =
+        drainNodes largestFirst key dag.Nodes |> orderOf
+
+    let tryTopoOrder (dag: Dag.T<'Op>) (head: string) =
+        let anc = Dag.ancestorsOf dag head
+
+        drainNodes false (fun _ -> 0) (dag.Nodes |> Map.filter (fun id _ -> Set.contains id anc))
+        |> orderOf
+
+    /// A hand-built DAG of `n` nodes over ids whose ordinal order is not their creation order. `acyclic`
+    /// draws parents only from earlier nodes; otherwise any node (itself included) may be a parent.
+    /// Either way a parent may repeat and may be an id the DAG does not hold.
+    let generate (rng: System.Random) (acyclic: bool) : Dag.T<int> =
+        let n = rng.Next(1, 24)
+        let alphabet = "aBcDeF019_-Z"
+
+        let ids =
+            Seq.initInfinite (fun _ ->
+                System.String(Array.init (rng.Next(1, 4)) (fun _ -> alphabet[rng.Next alphabet.Length])))
+            |> Seq.distinct
+            |> Seq.take n
+            |> Array.ofSeq
+
+        let pick i =
+            if acyclic then
+                (if i = 0 then None else Some ids[rng.Next i])
+            else
+                Some ids[rng.Next n]
+
+        ids
+        |> Array.mapi (fun i id ->
+            let parents =
+                [ for _ in 1 .. rng.Next 4 do
+                      match rng.Next 8, pick i with
+                      | 0, _ -> yield "missing-" + string (rng.Next 3)
+                      | 1, Some p ->
+                          yield p
+                          yield p
+                      | _, Some p -> yield p
+                      | _, None -> () ]
+
+            id,
+            { Id = id
+              Parents = parents
+              Actor = Human "x"
+              Op = rng.Next 5 })
+        |> Map.ofArray
+        |> Dag.ofNodes
+        |> function
+            | Ok d -> d
+            | Error m -> failtestf "a generated map filed a node off its id: %A" m
+
+[<Tests>]
+let walkRewriteTests =
+    let sample =
+        let rng = System.Random 614
+        [ for i in 1..600 -> PreviousWalks.generate rng (i % 2 = 0) ]
+
+    let keyed (n: DagNode<int>) = -n.Op
+
+    testList
+        "Dag walks keep their answers (Phase 614)"
+        [ testCase "heads is the previous heads over every sampled DAG"
+          <| fun _ ->
+              for dag in sample do
+                  Expect.equal (Dag.heads dag) (PreviousWalks.heads dag) "heads"
+
+          testCase "the whole-DAG drain is the previous drain at a constant and a domain key, cyclic answers included"
+          <| fun _ ->
+              let mutable cyclic = 0
+
+              for dag in sample do
+                  let mine = Dag.totalOrderBy (fun _ -> 0) dag
+                  Expect.equal mine (PreviousWalks.totalOrderBy false (fun _ -> 0) dag) "constant key"
+
+                  Expect.equal (Dag.totalOrderBy keyed dag) (PreviousWalks.totalOrderBy false keyed dag) "domain key"
+
+                  Expect.equal
+                      (Dag.ranks dag |> Result.map Map.count)
+                      (mine |> Result.map List.length)
+                      "ranks number every placed node"
+
+                  if Result.isError mine then
+                      cyclic <- cyclic + 1
+
+              Expect.isGreaterThan cyclic 0 "the sample holds cyclic DAGs, so the unplaced arm is compared"
+
+          testCase "every node's closure drains as before"
+          <| fun _ ->
+              for dag in sample do
+                  for KeyValue(id, _) in dag.Nodes do
+                      Expect.equal (Dag.tryTopoOrder dag id) (PreviousWalks.tryTopoOrder dag id) id
+
+          testCase "a drain taking the LARGEST ready node disagrees over the same sample - the comparison can fail"
+          <| fun _ ->
+              let differs =
+                  sample
+                  |> List.exists (fun dag ->
+                      Dag.totalOrderBy (fun _ -> 0) dag
+                      <> PreviousWalks.totalOrderBy true (fun _ -> 0) dag)
+
+              Expect.isTrue differs "the sample has frontiers wider than one node" ]

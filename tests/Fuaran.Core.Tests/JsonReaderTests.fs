@@ -1136,3 +1136,103 @@ let limits =
               | Error e -> Expect.equal e.Code DecodeCode.InvalidJson "malformed text is InvalidJson"
               | Ok v -> failtestf "accepted %A" v
           } ]
+
+// ---- tokens read in place (Phase 616) ----
+
+/// Every string of up to `len` characters over `alphabet`, the empty one excluded.
+let private stringsOver (alphabet: string) (len: int) : string list =
+    let rec go (k: int) : string list =
+        if k = 0 then
+            [ "" ]
+        else
+            [ for s in go (k - 1) do
+                  yield s
+
+                  if s.Length = k - 1 then
+                      for c in alphabet do
+                          yield s + string c ]
+            |> List.distinct
+
+    go len |> List.filter (fun s -> s <> "")
+
+/// A parse outcome with its refusal position moved back by `by`: the outcome the same token gives
+/// standing `by` characters later in a document.
+let private outcomeAt (by: int) (r: Result<JVal, JsonRefusal>) : string =
+    match r with
+    | Ok v -> "ok " + Json.render v
+    | Error(JsonRefusal.Malformed e) -> sprintf "malformed %A %d %s" e.Kind (e.Position - by) e.Message
+    | Error other -> sprintf "%A" other
+
+[<Tests>]
+let inPlace =
+    testList
+        "Json.read reads a number or a literal where it stands (Phase 616)"
+        [ test "a token answers the same alone and after any prefix" {
+              // The .NET build reads a token as a range of its input, never as a copy, so the one
+              // thing it could get wrong is the range: a token read at offset 0 and the same token
+              // read after a prefix must answer the same value, refusal kind, sentence and position
+              // (moved by the prefix). Every token of up to five characters over the number grammar's
+              // alphabet and the literals' letters, each alone and inside an array after a member.
+              let tokens =
+                  stringsOver "-019.eE+" 5
+                  @ [ "true"
+                      "false"
+                      "null"
+                      "tru"
+                      "fals"
+                      "nul"
+                      "nulx"
+                      "truex"
+                      "9007199254740993" ]
+                  @ [ for t in numberTokens -> t ]
+
+              for t in tokens do
+                  let alone = Json.read ReadOptions.strict t |> outcomeAt 0
+
+                  let inArray =
+                      match Json.read ReadOptions.strict ("[12345," + t + "]") with
+                      | Ok(JArr [ JInt 12345; v ]) -> "ok " + Json.render v
+                      | Ok other -> "ok-other " + Json.render other
+                      | r -> outcomeAt 7 r
+
+                  // A token the array form reads past (its own `,` or `]` is not part of it) only
+                  // differs where the alone form refused at its end: compare the readings that read.
+                  if alone.StartsWith "ok" || inArray.StartsWith "ok" then
+                      Expect.equal inArray alone (sprintf "token %s" t)
+          }
+
+          test "the member null look-ahead reads where it stands" {
+              let tolerant = ReadOptions.tolerantOfNull
+
+              Expect.equal
+                  (Json.read tolerant "{\"a\":null,\"b\":1}")
+                  (Ok(JObj [ "b", JInt 1 ]))
+                  "a member null is erased"
+
+              match Json.read tolerant "{\"a\":nul}" with
+              | Error(JsonRefusal.Malformed e) -> Expect.equal e.Kind NullNotRepresentable "a near miss is not erased"
+              | other -> failtestf "accepted or misread %A" other
+
+              match Json.read tolerant "{\"a\":nulL}" with
+              | Error(JsonRefusal.Malformed e) -> Expect.equal e.Kind NullNotRepresentable "the comparison is ordinal"
+              | other -> failtestf "accepted or misread %A" other
+          }
+
+          test "a number past 2^53 is admitted only as its own float layout, in place" {
+              for prefix in [ ""; "[0,"; "{\"k\":" ] do
+                  let close =
+                      match prefix with
+                      | "" -> ""
+                      | "[0," -> "]"
+                      | _ -> "}"
+
+                  Expect.isOk (Json.read ReadOptions.strict (prefix + "10000000000000000" + close)) "1e16's layout"
+
+                  Expect.isError
+                      (Json.read ReadOptions.strict (prefix + "10000000000000001" + close))
+                      "not a float layout"
+
+                  Expect.isOk (Json.read ReadOptions.strict (prefix + "-9007199254740992" + close)) "-2^53"
+
+                  Expect.isError (Json.read ReadOptions.strict (prefix + "-9007199254740993" + close)) "-(2^53 + 1)"
+          } ]

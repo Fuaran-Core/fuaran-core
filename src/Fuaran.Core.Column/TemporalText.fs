@@ -173,7 +173,26 @@ module TemporalText =
     /// The epoch second of `9999-12-31T23:59:59Z`.
     let maxSecond: float = float MaxDay * 86400.0 + 86399.0
 
+    // The text of a value outside the canonical range (a day, a second of the day or a fraction the form cannot
+    // spell), which renders through the general padding so its bytes stay what they have always been.
     let private pad (width: int) (n: int) : string = (string n).PadLeft(width, '0')
+
+    // Write `n`, in `[0, 10^width)`, as exactly `width` decimal digits into `buf` from `at`.
+    let private writeDigits (buf: char[]) (at: int) (width: int) (n: int) : unit =
+        let mutable v = n
+
+        for k in width - 1 .. -1 .. 0 do
+            buf[at + k] <- char (48 + v % 10)
+            v <- v / 10
+
+    // Write the ten characters `YYYY-MM-DD` of a day in range (`isDayInRange`) into `buf` from `at`.
+    let private writeDate (buf: char[]) (at: int) (days: int) : unit =
+        let struct (year, month, day) = civilParts days
+        writeDigits buf at 4 year
+        buf[at + 4] <- '-'
+        writeDigits buf (at + 5) 2 month
+        buf[at + 7] <- '-'
+        writeDigits buf (at + 8) 2 day
 
     // The date part of both forms, over the first ten characters of a string at least that long.
     let private datePart (s: string) : (int * int * int) option =
@@ -202,8 +221,13 @@ module TemporalText =
     /// The canonical text of a day count in range (`isDayInRange`). Outside it the text is not
     /// canonical; `Table.validate` refuses such a day before anything renders it.
     let dateText (days: int) : string =
-        let struct (year, month, day) = civilParts days
-        pad 4 year + "-" + pad 2 month + "-" + pad 2 day
+        if isDayInRange days then
+            let buf = Array.zeroCreate<char> 10
+            writeDate buf 0 days
+            System.String(buf)
+        else
+            let struct (year, month, day) = civilParts days
+            pad 4 year + "-" + pad 2 month + "-" + pad 2 day
 
     // ---- instants ----
 
@@ -276,23 +300,59 @@ module TemporalText =
     let instantText (unit: TimeUnit) (second: float) (fraction: int) : string =
         let day = floor (second / 86400.0)
         let sod = int (second - day * 86400.0)
+        let days = int day
 
-        let frac =
-            if fraction = 0 then
-                ""
-            else
-                let digits = (pad (TimeUnit.digits unit) fraction).TrimEnd('0')
-                "." + digits
+        if
+            isDayInRange days
+            && sod >= 0
+            && sod < 86400
+            && fraction >= 0
+            && fraction < TimeUnit.scale unit
+        then
+            // The fraction's significant digits: the unit's width less its trailing zeros.
+            let mutable digits = 0
+            let mutable f = fraction
 
-        dateText (int day)
-        + "T"
-        + pad 2 (sod / 3600)
-        + ":"
-        + pad 2 (sod % 3600 / 60)
-        + ":"
-        + pad 2 (sod % 60)
-        + frac
-        + "Z"
+            if fraction <> 0 then
+                digits <- TimeUnit.digits unit
+
+                while f % 10 = 0 do
+                    f <- f / 10
+                    digits <- digits - 1
+
+            let length = if digits = 0 then 20 else 21 + digits
+            let buf = Array.zeroCreate<char> length
+            writeDate buf 0 days
+            buf[10] <- 'T'
+            writeDigits buf 11 2 (sod / 3600)
+            buf[13] <- ':'
+            writeDigits buf 14 2 (sod % 3600 / 60)
+            buf[16] <- ':'
+            writeDigits buf 17 2 (sod % 60)
+
+            if digits > 0 then
+                buf[19] <- '.'
+                writeDigits buf 20 digits f
+
+            buf[length - 1] <- 'Z'
+            System.String(buf)
+        else
+            let frac =
+                if fraction = 0 then
+                    ""
+                else
+                    let digits = (pad (TimeUnit.digits unit) fraction).TrimEnd('0')
+                    "." + digits
+
+            dateText days
+            + "T"
+            + pad 2 (sod / 3600)
+            + ":"
+            + pad 2 (sod % 3600 / 60)
+            + ":"
+            + pad 2 (sod % 60)
+            + frac
+            + "Z"
 
     /// THE order of two timestamp texts (Phase 422, DECISIONS.md D143.3): chronological over
     /// canonical texts — the fixed-width `YYYY-MM-DDThh:mm:ss` prefix ordinally, then the fraction

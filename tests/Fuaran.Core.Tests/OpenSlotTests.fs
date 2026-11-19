@@ -707,6 +707,103 @@ let tests =
                        |> List.exists (fun l -> l.EndsWith(sprintf "git -C \"%s\" push origin core-topic" f.Core)))
                       "the Core push names the remote and the Core branch")
 
+          // Phase 698: the paragraph's statement of what advances the slot is the tool's own rule. A member of
+          // class m ADVANCES a slot when `expectedOver m` opens a version past the slot's, and rides it otherwise,
+          // which is what `plan` refuses and admits. The rule is read here from `expectedOver`, and the words
+          // from STABILITY.md's "Versioning policy", independently of how the paragraph is built.
+          testCase "the slot paragraph names the class that advances the number, as expectedOver answers it"
+          <| fun _ ->
+              let classes = [ OpenSlot.Internal; OpenSlot.Additive; OpenSlot.Breaking ]
+
+              let show (a: int, b: int, c: int) = sprintf "%d.%d.%d" a b c
+
+              let kind (a: int, b: int, _: int) (na: int, nb: int, _: int) =
+                  if a <> na then "major"
+                  elif b <> nb then "minor"
+                  else "patch"
+
+              let memberOf (cls: OpenSlot.SlotClass) =
+                  (if cls = OpenSlot.Breaking then "a " else "an ")
+                  + OpenSlot.className cls
+                  + " member"
+
+              let advancing slot newest =
+                  classes
+                  |> List.choose (fun m ->
+                      let v = OpenSlot.expectedOver m newest
+                      if compare v slot > 0 then Some(m, v) else None)
+
+              let flat (t: string) = t.Replace("\n", " ")
+
+              // what the paragraph must say of a slot at `slot`: each advancing class by name, with the
+              // version it advances to, no riding class as advancing, and no unnamed class
+              let holds (what: string) (text: string) slot newest =
+                  let moves = advancing slot newest
+
+                  for m, v in moves do
+                      Expect.stringContains
+                          text
+                          (sprintf "%s advances it to the `%s` %s" (memberOf m) (show v) (kind v newest))
+                          (sprintf "%s: expectedOver says %s advances it to %s" what (memberOf m) (show v))
+
+                  for m in classes |> List.filter (fun m -> not (List.exists (fun (a, _) -> a = m) moves)) do
+                      Expect.isFalse
+                          (text.Contains(memberOf m + " advances it"))
+                          (sprintf
+                              "%s: expectedOver says %s rides it, and the paragraph says it advances it"
+                              what
+                              (memberOf m))
+
+                  Expect.isFalse
+                      (text.Contains "a member of a higher class")
+                      (sprintf "%s: the paragraph names no class: %s" what text)
+
+                  if List.isEmpty moves then
+                      Expect.stringContains text "every later member rides it" (sprintf "%s: nothing advances it" what)
+
+              for newest in [ (0, 44, 0); (1, 2, 3) ] do
+                  for cls in classes do
+                      // opening over the release
+                      let slot = OpenSlot.expectedOver cls newest
+
+                      let text = flat (OpenSlot.slotText (show slot) (show newest) cls "Phase 555")
+
+                      holds (sprintf "the %s slot over %s" (OpenSlot.className cls) (show newest)) text slot newest
+
+                      // advancing each standing draft the act admits an advance of (a lower class whose version
+                      // the change's class opens past)
+                      for d in classes do
+                          let draftAt = OpenSlot.expectedOver d newest
+
+                          if compare slot draftAt > 0 then
+                              let draft: OpenSlot.StandingDraft =
+                                  { Version = show draftAt
+                                    Class = d
+                                    Path = sprintf "docs/releases/%s.md" (show draftAt)
+                                    Text = "" }
+
+                              let text =
+                                  flat (OpenSlot.advanceText (show slot) (show newest) draft cls "Phase 999")
+
+                              let what =
+                                  sprintf
+                                      "the %s slot over %s advancing the %s %s draft"
+                                      (OpenSlot.className cls)
+                                      (show newest)
+                                      (OpenSlot.className d)
+                                      (show draftAt)
+
+                              holds what text slot newest
+
+                              // the draft: the classes that do not ride it, by name, and no other
+                              let notRiding =
+                                  advancing draftAt newest |> List.map (fst >> memberOf) |> String.concat " or "
+
+                              Expect.stringContains
+                                  text
+                                  (sprintf "which %s does not ride" notRiding)
+                                  (sprintf "%s: expectedOver says %s does not ride the draft" what notRiding)
+
           testCase "the class sentence agrees in number with who opens the slot"
           <| fun _ ->
               let sentence (openedBy: string) =
