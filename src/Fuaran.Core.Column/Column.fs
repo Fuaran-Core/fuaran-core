@@ -1312,10 +1312,10 @@ module Column =
             if ColumnStorage.isSet rows i then
                 let text = items[offset + i]
 
-                match DecimalText.tryCanonical text with
-                | Some c -> step i c
-                | None ->
+                match DecimalText.canonicalOrNull text with
+                | null ->
                     outside <- Some(CellOutsideType(col.Name, col.Type, "decimal text '" + text + "' (not decimal)"))
+                | c -> step i c
 
             i <- i + 1
 
@@ -1902,16 +1902,13 @@ module Column =
         | CountDistinct -> answer (walk (fun _ _ -> ())) (fun () -> Ok(Int(distinctCount col)))
         | Sum ->
             // EXACT (`0.33.0`) — never through `float`, so nothing is rounded and nothing overflows —
-            // and a `Decimal`; `Null` over no present row.
-            let total: string option ref = ref None
+            // and a `Decimal`; `Null` over no present row. The total is `null` until the first row.
+            let total: string ref = ref null
 
             let add _ text =
-                total.Value <-
-                    match total.Value with
-                    | None -> Some text
-                    | Some t -> Some(DecimalText.add t text |> Option.defaultValue t)
+                total.Value <- DecimalText.addToTotal total.Value text
 
-            answer (walk add) (fun () -> Ok(total.Value |> Option.map Decimal |> Option.defaultValue Null))
+            answer (walk add) (fun () -> Ok(if isNull total.Value then Null else Decimal total.Value))
         | Mean
         | StdDev
         | Median ->
