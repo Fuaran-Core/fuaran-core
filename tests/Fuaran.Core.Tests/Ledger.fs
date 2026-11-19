@@ -515,18 +515,36 @@ let private entryFaults (standing: string option) (s: Slot) : string list =
                   elif l.StartsWith("- ", StringComparison.Ordinal) then
                       let phase = Regex.Match(l, @"\(Phases? (\d+)")
 
+                      // the bullet and its wrapped lines, for the class it states when no section names one
+                      let block =
+                          own[i..]
+                          |> Array.indexed
+                          |> Array.takeWhile (fun (j, x) -> j = 0 || x.StartsWith("  ", StringComparison.Ordinal))
+                          |> Array.map snd
+                          |> String.concat " "
+
+                      let stated =
+                          Regex.Match(block, @"class \*\*(breaking|additive|internal)\*\*")
+                          |> fun m -> if m.Success then Some m.Groups[1].Value else None
+
+                      let cls, which =
+                          match sectionAbove i |> Option.orElse stated with
+                          | Some c -> c, ""
+                          | None -> "<class>", ", `<class>` being the change's class, breaking, additive or internal"
+
                       yield
                           sprintf
-                              "%s:%d carries an entry in the standing draft's own file ('%s'): an entry is a file of its own; move the bullet and its wrapped lines, unchanged, to %s/%s/%s.md (DECISIONS.md D272)"
+                              "%s:%d carries an entry in the standing draft's own file ('%s'): an entry is a file of its own; move the bullet and its wrapped lines, unchanged, to %s/%s/%s.md%s (DECISIONS.md D272)"
                               s.Path
                               (i + 1)
                               (excerpt l)
                               (entryDir s.Version)
-                              (sectionAbove i |> Option.defaultValue "<class>")
+                              cls
                               (if phase.Success then
                                    "phase-" + phase.Groups[1].Value
                                else
-                                   "<name>") ]
+                                   "<name>")
+                              which ]
 
     let closed =
         if s.State = Draft then
