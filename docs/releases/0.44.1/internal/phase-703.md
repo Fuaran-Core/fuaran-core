@@ -1,4 +1,4 @@
-- **A host's adoption record moves when the family or the host's answers change** (Phase 703, DECISIONS.md D272;
+- **A host's adoption record moves when the family or the host's answers change** (Phase 703, DECISIONS.md D273;
   `docs/conformance-corpus.md`, the adoption-record section; a comment in `ApplyVectorExport.fs`) — class
   **internal**: records and documents only; no `api/` or `api/wire/` row, conformance byte, manifest, corpus file or
   corpus pin moves. A record moves at first adoption, when the family's vectors change and the host measures them,
