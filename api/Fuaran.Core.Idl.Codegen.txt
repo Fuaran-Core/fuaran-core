@@ -6,6 +6,7 @@
 # See STABILITY.md "Public-surface baselines" for what each move class means.
 attribute Fuaran.Core.Idl.Codegen.Types.Bump RequireQualifiedAccess
 attribute Fuaran.Core.Idl.Codegen.Types.Derivation RequireQualifiedAccess
+attribute Fuaran.Core.Idl.Codegen.Types.KindTable RequireQualifiedAccess
 attribute Fuaran.Core.Idl.Codegen.Types.MethodPromise RequireQualifiedAccess
 attribute Fuaran.Core.Idl.Codegen.Types.PresenceSnap RequireQualifiedAccess
 attribute Fuaran.Core.Idl.Codegen.Types.ProvenanceModule RequireQualifiedAccess
@@ -21,7 +22,7 @@ ctor Fuaran.Core.Idl.Codegen.Types.ConstraintSnap..ctor(System.String, Microsoft
 ctor Fuaran.Core.Idl.Codegen.Types.ContractSnap..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.MethodSnap>, System.String)
 ctor Fuaran.Core.Idl.Codegen.Types.EnumSnap..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>)
 ctor Fuaran.Core.Idl.Codegen.Types.FieldSnap..ctor(System.String, System.String, Fuaran.Core.Idl.Codegen.Types.WireType, Fuaran.Core.Idl.Codegen.Types.HostSurface, Fuaran.Core.Idl.Codegen.Types.PresenceSnap, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.String, System.Boolean)
-ctor Fuaran.Core.Idl.Codegen.Types.GenSupport..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.KindProjection>)
+ctor Fuaran.Core.Idl.Codegen.Types.GenSupport..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.KindProjection>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.KindTable>)
 ctor Fuaran.Core.Idl.Codegen.Types.Host..ctor(System.String, System.String, Fuaran.Core.Idl.Codegen.Types.HostRole)
 ctor Fuaran.Core.Idl.Codegen.Types.HostSurface..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.JVal>>)
 ctor Fuaran.Core.Idl.Codegen.Types.KindProjection..ctor(System.String, System.String, System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>>)
@@ -103,6 +104,7 @@ field Fuaran.Core.Idl.Codegen.Types.Change+Tags.WireShapeChanged : System.Int32 
 field Fuaran.Core.Idl.Codegen.Types.Derivation+Tags.DefaultRecords : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.Derivation+Tags.Fold : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.Derivation+Tags.KeyedPositions : System.Int32 (literal)
+field Fuaran.Core.Idl.Codegen.Types.Derivation+Tags.KindTable : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.Derivation+Tags.MapMsg : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.Derivation+Tags.Projections : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.Derivation+Tags.SlotsOf : System.Int32 (literal)
@@ -117,6 +119,11 @@ field Fuaran.Core.Idl.Codegen.Types.FSharpConsequence+Tags.StalePackageSlot : Sy
 field Fuaran.Core.Idl.Codegen.Types.FSharpConsequence+Tags.TypeNameReference : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.HostRole+Tags.CodecHost : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.HostRole+Tags.RenderProjection : System.Int32 (literal)
+field Fuaran.Core.Idl.Codegen.Types.KindTable+Tags.Enum : System.Int32 (literal)
+field Fuaran.Core.Idl.Codegen.Types.KindTable+Tags.Flag : System.Int32 (literal)
+field Fuaran.Core.Idl.Codegen.Types.KindTable+Tags.OptionalField : System.Int32 (literal)
+field Fuaran.Core.Idl.Codegen.Types.KindTable+Tags.Text : System.Int32 (literal)
+field Fuaran.Core.Idl.Codegen.Types.KindTable+Tags.Texts : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.MethodPromise+Tags.Destination : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.MethodPromise+Tags.Idempotent : System.Int32 (literal)
 field Fuaran.Core.Idl.Codegen.Types.MethodPromise+Tags.RateLimit : System.Int32 (literal)
@@ -263,6 +270,7 @@ record-field Fuaran.Core.Idl.Codegen.Types.GenSupport.DecodeSplice #3 : Microsof
 record-field Fuaran.Core.Idl.Codegen.Types.GenSupport.Docs #0 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>
 record-field Fuaran.Core.Idl.Codegen.Types.GenSupport.EncodeSplice #2 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 record-field Fuaran.Core.Idl.Codegen.Types.GenSupport.KindProjections #6 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.KindProjection>
+record-field Fuaran.Core.Idl.Codegen.Types.GenSupport.KindTables #7 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.KindTable>
 record-field Fuaran.Core.Idl.Codegen.Types.GenSupport.TypeSplice #1 : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 record-field Fuaran.Core.Idl.Codegen.Types.Host.Id #0 : System.String
 record-field Fuaran.Core.Idl.Codegen.Types.Host.Language #1 : System.String
@@ -415,6 +423,7 @@ type Fuaran.Core.Idl.Codegen.Types.ConstraintSnap (record)
 type Fuaran.Core.Idl.Codegen.Types.ContractSnap (record)
 type Fuaran.Core.Idl.Codegen.Types.Derivation (union)
 type Fuaran.Core.Idl.Codegen.Types.Derivation+Fold (type)
+type Fuaran.Core.Idl.Codegen.Types.Derivation+KindTable (type)
 type Fuaran.Core.Idl.Codegen.Types.Derivation+Projections (type)
 type Fuaran.Core.Idl.Codegen.Types.Derivation+SlotsOf (type)
 type Fuaran.Core.Idl.Codegen.Types.Derivation+Tags (type)
@@ -428,6 +437,13 @@ type Fuaran.Core.Idl.Codegen.Types.HostRole (union)
 type Fuaran.Core.Idl.Codegen.Types.HostRole+Tags (type)
 type Fuaran.Core.Idl.Codegen.Types.HostSurface (record)
 type Fuaran.Core.Idl.Codegen.Types.KindProjection (record)
+type Fuaran.Core.Idl.Codegen.Types.KindTable (union)
+type Fuaran.Core.Idl.Codegen.Types.KindTable+Enum (type)
+type Fuaran.Core.Idl.Codegen.Types.KindTable+Flag (type)
+type Fuaran.Core.Idl.Codegen.Types.KindTable+OptionalField (type)
+type Fuaran.Core.Idl.Codegen.Types.KindTable+Tags (type)
+type Fuaran.Core.Idl.Codegen.Types.KindTable+Text (type)
+type Fuaran.Core.Idl.Codegen.Types.KindTable+Texts (type)
 type Fuaran.Core.Idl.Codegen.Types.KindVerdict (record)
 type Fuaran.Core.Idl.Codegen.Types.MethodPromise (union)
 type Fuaran.Core.Idl.Codegen.Types.MethodPromise+Destination (type)
@@ -548,6 +564,7 @@ union-case Fuaran.Core.Idl.Codegen.Types.Derivation.DefaultRecords #6()
 union-case Fuaran.Core.Idl.Codegen.Types.Derivation.KeyedPositions #1()
 union-case Fuaran.Core.Idl.Codegen.Types.Derivation.MapMsg #3()
 union-case Fuaran.Core.Idl.Codegen.Types.Derivation.NewFold #4(unionName: System.String)
+union-case Fuaran.Core.Idl.Codegen.Types.Derivation.NewKindTable #9(tableName: System.String)
 union-case Fuaran.Core.Idl.Codegen.Types.Derivation.NewProjections #5(unionName: System.String, fieldNames: Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 union-case Fuaran.Core.Idl.Codegen.Types.Derivation.NewSlotsOf #2(typeName: System.String)
 union-case Fuaran.Core.Idl.Codegen.Types.Derivation.SpecDecoders #8()
@@ -561,6 +578,11 @@ union-case Fuaran.Core.Idl.Codegen.Types.FSharpConsequence.StalePackageSlot #3()
 union-case Fuaran.Core.Idl.Codegen.Types.FSharpConsequence.TypeNameReference #2()
 union-case Fuaran.Core.Idl.Codegen.Types.HostRole.CodecHost #0()
 union-case Fuaran.Core.Idl.Codegen.Types.HostRole.RenderProjection #1()
+union-case Fuaran.Core.Idl.Codegen.Types.KindTable.NewEnum #4(enumName: System.String, rows: Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>)
+union-case Fuaran.Core.Idl.Codegen.Types.KindTable.NewFlag #1(rows: Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.Boolean>>)
+union-case Fuaran.Core.Idl.Codegen.Types.KindTable.NewOptionalField #2(rows: Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Core.FSharpOption`1<System.String>>>)
+union-case Fuaran.Core.Idl.Codegen.Types.KindTable.NewText #0(rows: Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>)
+union-case Fuaran.Core.Idl.Codegen.Types.KindTable.NewTexts #3(rows: Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>>)
 union-case Fuaran.Core.Idl.Codegen.Types.MethodPromise.NewDestination #0(before: System.Boolean, after: System.Boolean)
 union-case Fuaran.Core.Idl.Codegen.Types.MethodPromise.NewIdempotent #1(before: System.Boolean, after: System.Boolean)
 union-case Fuaran.Core.Idl.Codegen.Types.MethodPromise.NewRateLimit #3(before: Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.Int32, System.Int32>>, after: Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.Int32, System.Int32>>)
