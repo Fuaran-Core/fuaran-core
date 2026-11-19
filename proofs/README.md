@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 435 claims — 321 proved (320 across 40 models, 1 a host's own proof), 68 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
+**The ladder, counted:** 435 claims — 321 proved (320 across 40 models, 1 a host's own proof), 68 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`, 0 `witness-obligation`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -48,8 +48,9 @@ closed, because a ladder that can grow a level can hide a demotion; `kit/LADDER.
 2. **Tested** — sampled agreement: an extracted model run beside production by `Proofs.Oracle`, or a law
    family over generated inputs. Agreement is over the pools drawn, never over all inputs.
 3. **Assumed** — stated, and classed in the contract table below: a `domain-obligation` a domain discharges,
-   a `model-bridge` between a model and the code, a `premise` nothing discharges, or a `host-premise` each
-   host discharges on its own runtime by reproducing a probe.
+   a `model-bridge` between a model and the code, a `premise` nothing discharges, a `host-premise` each
+   host discharges on its own runtime by reproducing a probe, or a `witness-obligation` a domain's witness
+   discharges by its own tests.
 4. **Policy** — a documented choice, which no theorem addresses.
 
 "Formally verified" is spent on level 1 alone. A row says what it claims in `statement` and what it does not
@@ -67,7 +68,7 @@ Every ladder in this directory ends at level 3 — **assumed, and stated as such
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
 is not enough, because the 44 assumed rows across these ladders are four different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
-every `assumed` row, from a closed set of four, and this section is that classification in one
+every `assumed` row, from a closed set of five, and this section is that classification in one
 place together with the contract it implies.
 
 - **`domain-obligation` — what YOU owe, and what a green kit run discharges.** The hypotheses
@@ -94,10 +95,19 @@ place together with the contract it implies.
   a host discharges the premise on its own runtime by reproducing every vector of it — sampled, as
   every level-3 discharge is. A domain discharges none of them. `../docs/host-premises.md` states
   each in plain language, with what a Rust, Go or Python host does to answer it. 5 rows.
+- **`witness-obligation` — what every implementation of a domain's own WITNESS must answer, and
+  what that witness's own tests discharge.** A property a theorem takes as a hypothesis about a
+  witness member, where the member is the domain's and no law of the shipped kit can reach it: an
+  op's declared inverse that undoes it, a substitution that preserves a view's shape. Each row names
+  a **`dischargedBy`** in the `<Witness>.<member>` form, the member whose tests discharge it, and its
+  `evidence.assumption` says what that member answers. A row a conformance law discharges is a
+  `domain-obligation` instead. This repository's ladder holds none: the class is for a domain's own
+  ladder. 0 rows.
 
 **The contract line, stated once:** a domain running the conformance kit discharges the first class
-and **can never discharge the other three**; a host porting this kernel discharges the fourth, each
-row by its probe, and only for itself. A green kit run is evidence about your witness and about
+and **can never discharge the next three**; a host porting this kernel discharges the fourth, each
+row by its probe, and only for itself; and a domain discharges the fifth by its own witness's tests,
+never by a kit run. A green kit run is evidence about your witness and about
 nothing else in this table — which is what makes it worth having, and what a reader must not
 over-read.
 
