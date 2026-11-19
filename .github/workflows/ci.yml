@@ -5,6 +5,14 @@ on:
     branches: [main]
   pull_request:
 
+# A pull request's run is superseded by the next push to its branch, and the proofs job alone takes
+# more than an hour, so a superseded run is cancelled instead of being left to finish. A push to main
+# is never cancelled and never queued behind another: each commit there keeps a run of its own, so a
+# red is attributed to the commit that caused it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Phase 395 — both configurations, because they ship differently: Debug is the contributor's own
   # path (`./verify.ps1`), Release is what publish-packages verifies and then packs `--no-build`. A
