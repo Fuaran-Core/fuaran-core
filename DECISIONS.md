@@ -625,8 +625,11 @@ It rides the `0.44.0` draft (D268.15 records what the tool reported). Under (T) 
 changes, and `QueryTicket` and `QueryCapture` are added. A ticket document, if (T) took one, would add an `api/wire/`
 row, and the phase would stop and report it.
 
-**D268.13 — what a port needs.** The Rust port does not yet follow Phase 692 (the `0.44.0` ledger), so it follows
-D267's clause first: its live dispatch puts a resolver's `Ready` rows through the table validation and refuses
+**D268.13 — what a port needs.** Neither D267's rows clause nor this verb has a twin in the Rust port: its query
+dispatch is generic in the host's answer (its resolver is `FnOnce(&Query) -> Result<T, QueryError>`), and it carries
+no result page, `Deferred` envelope, capture or replay (the port's DECISIONS.md D14.3, D14.5 and D14.6; its D19.8
+names holding a resolver's rows and the result's writers out of its scope). A port that carries a captured dispatch
+follows D267's clause first: its live dispatch puts a resolver's `Ready` rows through the table validation and refuses
 `ExecutionFailed` with the column layer's reason. Then, wherever its captured dispatch leaves a capture open, it adds
 the seam's settle verb, which:
 
