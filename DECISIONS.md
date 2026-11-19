@@ -318,6 +318,13 @@ consumer for it.
 4. **The class is internal, so the rows ride the open `0.44.1` draft.** The surface tool reads 21 baselines and 0
    moved: the rows and their helpers are private to `ParityVectors`, and `vectors` stays one public value. Nothing a
    consumer compiles against or runs moves, so no slot is advanced and no consumer's pin is raised.
+5. **The rows live in a module of their own.** With them, `ParityVectors.fs` passed the 2,000-line source ceiling
+   (D125's rule), so the family's section and its rows moved to the internal module `ParityQueryDeclarationRows`,
+   compiled before it, with the three ASCII helpers every row prints through (`printable`, `asciiOr`,
+   `refusalOf`) moved there, not copied. `ParityVectors.vectors` ends with its rows, so no label, order or byte of
+   the table moves, and a consumer compiling the kit's sources with Fable compiles the module with it. Rejected:
+   naming `ParityVectors.fs` in D125's exceptions (its module has no public type a division would rename), and
+   fewer rows (the family's vectors are what the leg measures).
 
 ## 2026-11-18 — D268: a pending query capture is settled through a verb of the query seam, which journals what a dispatch whose resolver answered at once journals; the generic verb, used directly on one, runs no clause
 
