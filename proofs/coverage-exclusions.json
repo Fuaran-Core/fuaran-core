@@ -2048,7 +2048,8 @@
         "Validator.runAllTagged",
         "Validator.runAll",
         "Validator.runPack",
-        "Validator.tryFind"
+        "Validator.tryFind",
+        "Validator.wholeTree"
       ],
       "class": "measured-elsewhere",
       "reason": "The generic rule framework (the package-level `content-free-seam` exclusion): a registry and a fold over the domain's own rules. The validator tests stand in.",
