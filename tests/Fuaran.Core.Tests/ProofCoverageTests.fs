@@ -641,6 +641,67 @@ let proofCoverageTests =
                     "measured-elsewhere", 2 ]
                   "and each exclusion counted under its class"
 
+          // ---- Phase 715: the example-only census by package and owner ----
+
+          testCase "the example-only census counts the measured-elsewhere route per package and owner"
+          <| fun _ ->
+              Expect.equal
+                  (exampleOnlyCensus opFixture)
+                  [ { PackageId = "Pkg.B"
+                      Owner = "Thing"
+                      Published = 5
+                      ExampleOnly = 2 }
+                    { PackageId = "Pkg.A"
+                      Owner = "Conformance"
+                      Published = 1
+                      ExampleOnly = 0 }
+                    { PackageId = "Pkg.A"
+                      Owner = "Thing"
+                      Published = 2
+                      ExampleOnly = 0 } ]
+                  "every owner is a row, most example-only first, and only the measured-elsewhere route counts"
+
+              Expect.equal
+                  (renderExampleOnlyCensus (exampleOnlyCensus opFixture))
+                  "example-only Pkg.B 2/5: Thing 2/5"
+                  "one line per package with an example-only operation, naming its owners"
+
+          testCase "the example-only census counts an operation by its first route, as the tally does"
+          <| fun _ ->
+              // `Thing.tested` keeps its measured-elsewhere exclusion and gains a tested ladder row: the
+              // ladder maps it first, so it is no longer held only by examples.
+              let inputs =
+                  { opFixture with
+                      Ladder = opFixture.Ladder @ [ "t2", "tested", [ "Thing.tested" ] ] }
+
+              let _, tally = checkOperations inputs
+              let rows = exampleOnlyCensus inputs
+
+              Expect.equal (rows |> List.sumBy _.ExampleOnly) 1 "only Thing.reached is example-only"
+
+              Expect.equal
+                  (rows |> List.sumBy _.ExampleOnly)
+                  (tally.ByClass |> List.find (fst >> (=) "measured-elsewhere") |> snd)
+                  "the census and the tally read one route"
+
+          testCase "the example-only census of this tree agrees with the operation tally, and prints itself"
+          <| fun _ ->
+              let inputs = liveOperationInputs ()
+              let _, tally = checkOperations inputs
+              let rows = exampleOnlyCensus inputs
+
+              printfn "%s" (renderExampleOnlyCensus rows)
+
+              Expect.equal
+                  (rows |> List.sumBy _.Published)
+                  tally.Operations
+                  "every published operation is in exactly one row"
+
+              Expect.equal
+                  (rows |> List.sumBy _.ExampleOnly)
+                  (tally.ByClass |> List.find (fst >> (=) "measured-elsewhere") |> snd)
+                  "the census's example-only total is the tally's measured-elsewhere count"
+
           testCase "every public operation is mapped on this tree, and the clause says so in one line"
           <| fun _ ->
               let inputs = liveOperationInputs ()

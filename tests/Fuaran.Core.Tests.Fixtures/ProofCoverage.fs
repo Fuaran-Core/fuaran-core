@@ -540,26 +540,50 @@ let internal mentions (text: string) (token: string) =
         + (if isWord token[token.Length - 1] then @"(?![\w])" else "")
     )
 
-/// Every finding the operation clause yields, with the tally the README table renders.
-let checkOperations (inputs: OperationInputs) : string list * OperationTally =
-    let census = inputs.Census |> List.map _.Name |> Set.ofList
+/// The four ways the records map an operation, read once from the inputs: the operations a proved or
+/// tested ladder row names, the roster's lines, the family entry points the census publishes, and the
+/// exclusions by member.
+type private OperationRouting =
+    { LadderOps: Set<string>
+      RosterOps: Set<string>
+      EntryOps: Set<string>
+      Excluded: Map<string, OperationExclusion list> }
 
-    let ladderOps =
+let private routingOf (inputs: OperationInputs) : OperationRouting =
+    { LadderOps =
         inputs.Ladder
         |> List.filter (fun (_, level, _) -> level = "proved" || level = "tested")
         |> List.collect (fun (_, _, ops) -> ops)
         |> Set.ofList
-
-    let rosterOps = inputs.Rosters |> List.collect snd |> Set.ofList
-
-    let entryOps = Set.intersect census inputs.Families
-
-    let excluded =
+      RosterOps = inputs.Rosters |> List.collect snd |> Set.ofList
+      EntryOps = Set.intersect (inputs.Census |> List.map _.Name |> Set.ofList) inputs.Families
+      Excluded =
         inputs.Exclusions
         |> List.collect (fun e -> e.Members |> List.map (fun m -> m, e))
         |> List.groupBy fst
         |> List.map (fun (m, es) -> m, es |> List.map snd)
-        |> Map.ofList
+        |> Map.ofList }
+
+/// The route that maps an operation, the first that applies: `ladder`, `family`, the class of its
+/// exclusion, or `unmapped`. Each operation is counted once, under this route, by the tally and the census.
+let private routeIn (r: OperationRouting) (op: string) =
+    if r.LadderOps.Contains op then
+        "ladder"
+    elif r.RosterOps.Contains op || r.EntryOps.Contains op then
+        "family"
+    else
+        match Map.tryFind op r.Excluded with
+        | Some(e :: _) -> e.Class
+        | _ -> "unmapped"
+
+/// Every finding the operation clause yields, with the tally the README table renders.
+let checkOperations (inputs: OperationInputs) : string list * OperationTally =
+    let census = inputs.Census |> List.map _.Name |> Set.ofList
+    let routing = routingOf inputs
+    let ladderOps = routing.LadderOps
+    let rosterOps = routing.RosterOps
+    let entryOps = routing.EntryOps
+    let excluded = routing.Excluded
 
     let directlyMapped (op: string) =
         ladderOps.Contains op
@@ -713,15 +737,7 @@ let checkOperations (inputs: OperationInputs) : string list * OperationTally =
                     "published by %s and mapped to no ladder row, law-family roster line or recorded exclusion"
                     o.Package))
 
-    let routeOf (op: string) =
-        if ladderOps.Contains op then
-            "ladder"
-        elif rosterOps.Contains op || entryOps.Contains op then
-            "family"
-        else
-            match Map.tryFind op excluded with
-            | Some(e :: _) -> e.Class
-            | _ -> "unmapped"
+    let routeOf = routeIn routing
 
     let countIn (ops: Operation list) (route: string) =
         ops |> List.filter (fun o -> routeOf o.Name = route) |> List.length
@@ -754,6 +770,59 @@ let renderOperationPredicate (mapped: bool) (t: OperationTally) : string =
         t.Rostered
         (t.ByClass |> List.sumBy snd)
         (t.ByClass |> List.map (fun (c, n) -> sprintf "%d %s" n c) |> String.concat ", ")
+
+/// One row of the example-only census (Phase 335's count, re-run by Phase 715): the operations one
+/// owner publishes from one package, and how many of them are held by example tests and nothing
+/// stronger — the operations whose route is a `measured-elsewhere` exclusion. The owner is the
+/// operation's name without its last segment (`Wire.Decoder` for `Wire.Decoder.field`).
+type ExampleOnlyRow =
+    { PackageId: string
+      Owner: string
+      Published: int
+      ExampleOnly: int }
+
+/// The example-only census by package and owner, every owner the census publishes, most example-only
+/// first (then by package and owner). Its `ExampleOnly` column sums to the tally's `measured-elsewhere`
+/// count, because both read the one route.
+let exampleOnlyCensus (inputs: OperationInputs) : ExampleOnlyRow list =
+    let routeOf = routeIn (routingOf inputs)
+
+    let ownerOf (name: string) =
+        match name.LastIndexOf '.' with
+        | -1 -> name
+        | i -> name.Substring(0, i)
+
+    inputs.Census
+    |> List.groupBy (fun o -> o.Package, ownerOf o.Name)
+    |> List.map (fun ((p, owner), ops) ->
+        { PackageId = p
+          Owner = owner
+          Published = List.length ops
+          ExampleOnly =
+            ops
+            |> List.filter (fun o -> routeOf o.Name = "measured-elsewhere")
+            |> List.length })
+    |> List.sortBy (fun r -> -r.ExampleOnly, r.PackageId, r.Owner)
+
+/// The census as one line per package that has an example-only operation, most first:
+/// `example-only <package> <n>/<published>: <owner> <n>/<published>, …`, listing only the owners with one.
+let renderExampleOnlyCensus (rows: ExampleOnlyRow list) : string =
+    rows
+    |> List.groupBy _.PackageId
+    |> List.map (fun (p, rs) -> p, rs, rs |> List.sumBy _.ExampleOnly, rs |> List.sumBy _.Published)
+    |> List.filter (fun (_, _, n, _) -> n > 0)
+    |> List.sortBy (fun (p, _, n, _) -> -n, p)
+    |> List.map (fun (p, rs, n, published) ->
+        sprintf
+            "example-only %s %d/%d: %s"
+            p
+            n
+            published
+            (rs
+             |> List.filter (fun r -> r.ExampleOnly > 0)
+             |> List.map (fun r -> sprintf "%s %d/%d" r.Owner r.ExampleOnly r.Published)
+             |> String.concat ", "))
+    |> String.concat "\n"
 
 let operationTableBegin =
     "<!-- operation-coverage:begin — generated from ../api/*.txt, ../proofs.json, the kit's operation roster and coverage-exclusions.json by `render proofs-readme`; held by the Proofs.Ladder family -->"
