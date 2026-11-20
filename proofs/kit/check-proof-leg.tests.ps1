@@ -942,11 +942,11 @@ Assert-That 'K2. KIT MODEL SHADOWED — the same kit model copied beside the cal
 
 $k3 = Invoke-Leg ($kitBase + @{ OracleDir = $kitOracle; FloorDir = $kitFloor })
 Assert-That 'K3. FLOOR CONTROL — a committed runtime floor byte-identical to the kit''s holds: exit 0' (
-    $k3.Exit -eq 0 -and $k3.Green -and [bool](@($k3.Lines -match 'oracle/Prims\.fs is the kit''s runtime floor').Count)) "exit $($k3.Exit): $(Show-Tail $k3)"
+    $k3.Exit -eq 0 -and $k3.Green -and [bool](@($k3.Lines -match 'oracle/Prims\.fs is byte-identical to .*kit-floor[\\/]Prims\.fs, the runtime floor -FloorDir names').Count)) "exit $($k3.Exit): $(Show-Tail $k3)"
 
 Set-Content (Join-Path $kitOracle 'Prims.fs') ($floorText + "let forked = 1`n") -NoNewline
 $k4 = Invoke-Leg ($kitBase + @{ OracleDir = $kitOracle; FloorDir = $kitFloor })
 Assert-That 'K4. FLOOR FORKED — a committed runtime floor that is not the kit''s is refused' (
-    $k4.Exit -ne 0 -and -not $k4.Green -and [bool](@($k4.Lines -match 'oracle/Prims\.fs is not the kit''s runtime floor').Count)) "exit $($k4.Exit): $(Show-Tail $k4)"
+    $k4.Exit -ne 0 -and -not $k4.Green -and [bool](@($k4.Lines -match 'oracle/Prims\.fs is not byte-identical to .*kit-floor[\\/]Prims\.fs, the runtime floor -FloorDir names').Count)) "exit $($k4.Exit): $(Show-Tail $k4)"
 
 Complete-LegTests

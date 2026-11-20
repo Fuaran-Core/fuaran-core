@@ -129,6 +129,10 @@ and what to do: record it `Never-minted`, or land the change that holds it.
   public surface must compile under both .NET and Fable — the Fable consumer's compile gate enforces it, and
   `fable-exclusions.json` records any package deliberately off that surface (STABILITY.md
   "Fable cleanliness").
+- **A bare phase number names this repository's own roadmap.** `Phase N` in a comment, `STABILITY.md` or a document
+  cites this repository's phase N. A phase from another roadmap carries that roadmap's prefix: `fuaran#N` for the UI
+  language's roadmap, where this repository's first phases were tracked and whose numbers now name different work
+  here. Decision records and release notes keep the citations they were written with.
 
 ## The design invariants — please read before a non-trivial change
 

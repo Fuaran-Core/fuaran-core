@@ -1692,7 +1692,7 @@ module Json =
 
     /// Portable, FSharp.Core-only JSON parser → the `JVal` model, the one STRING form: `read
     /// ReadOptions.strict`, its refusal as a sentence. Fable-clean (no System.Text.Json), so decode
-    /// runs under BOTH the .NET and Fable pipelines (Phase 241). `render (Result-of parse)` is the
+    /// runs under BOTH the .NET and Fable pipelines (fuaran#241). `render (Result-of parse)` is the
     /// identity over canonical wire JSON (compact, author-ordered keys). A bare `null` token is
     /// rejected by name (the wire model has no null). On failure the `Error` names what was
     /// expected — `"not valid JSON: <msg> at position <pos>"`. Nesting is capped at

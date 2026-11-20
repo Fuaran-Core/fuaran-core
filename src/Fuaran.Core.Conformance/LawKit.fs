@@ -258,7 +258,7 @@ module internal LawKit =
             body rng i (failAt runner.Seed i)
 
     /// The container capability a generator declares, total: `None` means every node can hold
-    /// children (Phase 251).
+    /// children (fuaran#251).
     let canHoldOf (gen: OpGen<'Node, 'Id>) : 'Node -> bool =
         gen.CanHold |> Option.defaultValue (fun _ -> true)
 

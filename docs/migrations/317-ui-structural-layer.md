@@ -1,4 +1,4 @@
-# Migration: generate the `Fuaran.UI` structural layer from the IDL (Phase 317)
+# Migration: generate the `Fuaran.UI` structural layer from the IDL (fuaran#317)
 
 **What this is.** The path to replace the hand-written `Fuaran.UI` *structural* wire layer — the
 `NodeKind` DU + its per-kind spec records in `Types.fs`, and the `encodeNode` in
@@ -48,7 +48,7 @@ reproduce the wire exactly, but carrying no behaviour. This is deliberate and lo
 - **Behaviour re-attaches domain-side.** The switch-over does **not** delete the `'Msg`-generic
   authoring surface. `Fuaran.UI` keeps its typed author facades (`GridSpecOf<'row,'Msg>`, the
   closure-bearing `Binding` / `Action` builders); the generated structural layer is the **wire
-  projection** those facades reduce to. Named holes (Phase 318) are how behaviour is re-bound on top
+  projection** those facades reduce to. Named holes (fuaran#318) are how behaviour is re-bound on top
   of inert generated structure.
 
 ## Migration recipe (the `fuaran` tier — `fuaran#317`)
@@ -67,7 +67,7 @@ reproduce the wire exactly, but carrying no behaviour. This is deliberate and lo
    `Types.fs` and `CanonicalJson.encodeNode` with the generated module (re-export under the existing
    names so downstream call sites are untouched). Keep the `'Msg`-generic author facades as a layer
    that constructs generated structural values (the erasure boundary above).
-4. **Re-attach behaviour** via the named-hole surface (Phase 318) — the generated structure is inert;
+4. **Re-attach behaviour** via the named-hole surface (fuaran#318) — the generated structure is inert;
    holes bind the closures the erasure dropped.
 
 ### Out of scope for this migration (deferred, annotated on the phase)
@@ -75,8 +75,9 @@ reproduce the wire exactly, but carrying no behaviour. This is deliberate and lo
 - The **node envelope** (`state` / `style` / `accessibility`) — no corpus `Node` fixture carries it.
 - **Multi-param generic author facades** (`GridSpecOf<'row,'Msg>`) — a typed author surface, not
   wire-visible; they sit *above* the generated structural layer, unchanged by the switch.
-- **`grid-transform`** — a `Binding.Transform` embeds a `Fuaran.Core.DataFrame` pipeline rendered by
-  Core's own `DataFrameCodec` / `ColumnCodec`, a separate wire surface from the UI structural layer.
+- **`grid-transform`** — a `Binding.Transform` embeds a dataframe pipeline (the compute repository's
+  `Fuaran.Compute.DataFrame`) rendered by that package's codec over Core's `ColumnCodec`, a separate
+  wire surface from the UI structural layer.
 - The two `null`-bearing fixtures (`multiselect-1` + `form-segmented`) — a `Binding.Static None`
   renders JSON `null`, which the FSharp.Core `JVal` model (`Fuaran.Core.Wire`) has no case for. A
   wire-`null`-representation decision for the owning team, **not** something to bolt on unilaterally.

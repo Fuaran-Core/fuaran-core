@@ -3,7 +3,7 @@ namespace Fuaran.Core.Idl
 open Fuaran.Core
 
 // ---------------------------------------------------------------------------
-// Phase 316 — IDL inversion spike.
+// fuaran#316 — IDL inversion spike.
 //
 // The IDL is the *canonical source* a host's structural layer is generated from:
 // today F# `Types.fs` is the root and `schema.json` is derived from it; the
@@ -93,7 +93,7 @@ type IdlType =
     /// A function-typed field (Binding accessor, `Action` callback, `onChange`
     /// handler, column projection): unobservable on the wire, rendered as the
     /// fixed sentinel string `"<closure>"`. The real ~40-kind `Fuaran.UI` tier is
-    /// full of these (Phase 317 real-tier migration); the spike had none. There is
+    /// full of these (fuaran#317 real-tier migration); the spike had none. There is
     /// no authored content — the encoder emits the sentinel unconditionally.
     | TClosure
     /// A function-typed field carrying its **host signature** (Phase 689). Wire
@@ -111,7 +111,7 @@ type IdlType =
     /// [[TOpaque]] in the way that matters: `TOpaque` ERASES to a sentinel because
     /// the encoder cannot see the value, whereas a `TJson` value is real data the
     /// wire must round-trip faithfully at any nesting depth. Reaching for `TOpaque`
-    /// here is silent data loss (Phase 676).
+    /// here is silent data loss (fuaran#676).
     | TJson
     /// A wire-visible field whose value is a HOST type with its own canonical codec
     /// (see [[HostedCodec]]) — `Binding.Transform`'s `source` / `pipeline`, and the
@@ -132,12 +132,12 @@ type IdlType =
     /// bags. Distinct from [[TRecord]] (fixed field names) — the keys vary per value.
     | TMap of valueType: IdlType
     /// A BARE node kind — the `$type`-discriminated kind object WITHOUT the `id`
-    /// envelope a [[TNode]] carries (Phase 703). `TreeOp.EditNode`'s `newKind` is
+    /// envelope a [[TNode]] carries (fuaran#703). `TreeOp.EditNode`'s `newKind` is
     /// the wire position that needs it: `{"$type":"Markdown","text":"Edited"}`,
     /// which is a kind, not a node. Distinct from [[TNode]] in exactly the way the
     /// wire is — one has an `id`, the other does not.
     | TKind
-    /// A tree op (Phase 703) — the op vocabulary's own recursion, which exists for
+    /// A tree op (fuaran#703) — the op vocabulary's own recursion, which exists for
     /// exactly one wire position: `TreeOp.Batch`'s `ops` list. Resolves against
     /// [[Idl]]'s `Ops`, the way [[TNode]] resolves against `Kinds`.
     | TOp
@@ -485,7 +485,7 @@ type Optionality =
     /// values (so `VInt 2` at a float slot whose default is `VFloat 2.0` is omitted), and
     /// restored to the default when the member is absent.
     | OmitDefault of IdlValue
-    /// **Never on the wire at all** (Phase 691) — present in the host declaration,
+    /// **Never on the wire at all** (fuaran#691) — present in the host declaration,
     /// absent from every encoding, restored from the slot's declared placeholder on
     /// decode. `WIRE_FORMAT.md` §9's "wire-omitted fields (by design)": `Node.Motion`
     /// and `Node.ExtraAttributes` are consumer-authored and deliberately not AI-visible,
@@ -716,7 +716,7 @@ and KeyedCase =
 /// `Cases` are the HOST case identifiers (the F# DU cases the generator emits);
 /// `Wires` are their wire strings, positionally parallel. `Wires = []` means the
 /// two coincide — each case name IS its wire string, which is every declaration
-/// written before Phase 707 and remains the overwhelmingly common shape.
+/// written before fuaran#707 and remains the overwhelmingly common shape.
 ///
 /// The split exists because a wire vocabulary is not obliged to respect F#
 /// case-name constraints: `liveRegion`'s wire strings are lower-case
@@ -873,7 +873,7 @@ and IdlValue =
     /// A node with no envelope (matches [[TNode]]): its id, its kind tag, and the kind's fields
     /// by name. The decoder answers this case whenever the envelope decodes to nothing.
     | VNode of id: string * kindTag: string * fields: (string * IdlValue) list
-    /// A node carrying its ENVELOPE as well as its kind (Phase 698) — the
+    /// A node carrying its ENVELOPE as well as its kind (fuaran#698) — the
     /// `WIRE_FORMAT.md` §3.1 fields a node holds beside `id`/`kind`, declared per
     /// domain in [[Idl.NodeFields]].
     ///
@@ -913,7 +913,7 @@ and IdlValue =
     | VMap of entries: (string * IdlValue) list
 
 /// A declared default for one kind field — applied by the generated smart
-/// constructors (Phase 317 increment 7). `Kind`/`Field` address the field;
+/// constructors (fuaran#317 increment 7). `Kind`/`Field` address the field;
 /// `Value` is the default authored value. The node ENVELOPE has no kind tag, so a
 /// declared envelope default is addressed by the EMPTY `Kind` (Phase 195) — a
 /// kind's tag is its wire discriminator and can never be empty, so the address is
@@ -1091,7 +1091,7 @@ type Idl =
         /// member on decode (see [[IdlDefault]]).
         Defaults: IdlDefault list
         /// The node ENVELOPE — fields a `Node` carries beside `id` and `kind`
-        /// (Phase 690). Empty (the default) generates `{ Id; Kind }`, exactly as
+        /// (fuaran#690). Empty (the default) generates `{ Id; Kind }`, exactly as
         /// before; the Fuaran-UI vocabulary declares `state` / `style` /
         /// `accessibility` here, per `WIRE_FORMAT.md` §3.1.
         ///
@@ -1099,7 +1099,7 @@ type Idl =
         /// kind" is a property of the DOMAIN's tree, not of the generator: another
         /// Fuaran domain has a different envelope, or none at all.
         NodeFields: IdlField list
-        /// The TREE-OP vocabulary (Phase 703) — `WIRE_FORMAT.md` §3.4's
+        /// The TREE-OP vocabulary (fuaran#703) — `WIRE_FORMAT.md` §3.4's
         /// `$type`-discriminated op cases, the wire's second root beside `Node`.
         /// Empty (the default) means the domain declares no ops, exactly as before.
         ///

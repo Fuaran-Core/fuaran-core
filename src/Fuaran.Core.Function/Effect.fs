@@ -1,6 +1,6 @@
 namespace Fuaran.Core
 
-// The mandatory two-axis effect signature of the artifact-function protocol (Phase 181): the host
+// The mandatory two-axis effect signature of the artifact-function protocol (fuaran#181): the host
 // axis, the determinism factor set, their join, and the canonical determinism label.
 
 /// Axis 1 — does the artifact touch the world.

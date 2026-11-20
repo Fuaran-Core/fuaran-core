@@ -524,7 +524,7 @@ module internal DiffRules =
                  sprintf "op `%s` added — a new `$type` branch on the TreeOp union; existing op streams stay valid." t,
                  "WIRE_FORMAT.md §3.4; VOCABULARY.md §4.1 by the same additive argument")
                 // The op vocabulary has no generated F# shape at all — the F# type emitter leaves
-                // that leg unshipped (Phase 703) — so an op change moves no declaration. This row
+                // that leg unshipped (fuaran#703) — so an op change moves no declaration. This row
                 // changes the day that leg lands.
                 (always noShape)
                 (sprintf "op added: %s" t)

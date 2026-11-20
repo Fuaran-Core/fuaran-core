@@ -5,7 +5,7 @@ open Fuaran.Core.Idl.Codegen.Types
 open Fuaran.Core.Idl.Emit
 
 // ---------------------------------------------------------------------------
-// Phase 700 — the IDL diff classifier + host-strand report.
+// fuaran#700 — the IDL diff classifier + host-strand report.
 //
 // The stability classification rules are already written and mechanical-shaped
 // but hand-applied: `STABILITY.md` (adding a `NodeKind` case = minor; removal /
@@ -106,7 +106,7 @@ module Diff =
     /// the native render-arm row, because both are conditional and both have
     /// been got wrong in a downstream consumer before:
     ///
-    /// - Phase 801 recorded that a payload-FIELD addition binds neither the C#
+    /// - fuaran#801 recorded that a payload-FIELD addition binds neither the C#
     ///   `Coverage` reflection nor the VB analyzer's `Vocabulary.cs`, because
     ///   both pin `NodeKind`. §11 step 6 nonetheless speaks of "attribute rows",
     ///   so a field change is `Check`, not `NotBound` — the two authorities do

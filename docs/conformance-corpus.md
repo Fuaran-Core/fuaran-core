@@ -122,7 +122,7 @@ are rows of the cross-pipeline value table (`ParityVectors`, `decimal/`, `decima
 `decimalAggregate/`), so the receiving gate's value leg compares them under Fable as well.
 
 **`transformLaws` (`laws/transform-laws.json`) was the second until Phase 258.** It is a PARITY
-family — the `Fuaran.Core.DataFrame` reference evaluator's ANSWERS over a declared sample — and it
+family — the dataframe reference evaluator's ANSWERS over a declared sample — and it
 left with that evaluator (DECISIONS.md D66, D70): [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute) emits it, stamps it
 with its own `<Version>` and declares the corpus copy as its derived file. The corpus path is
 unchanged, so no host reads a different place; only its producer moved.

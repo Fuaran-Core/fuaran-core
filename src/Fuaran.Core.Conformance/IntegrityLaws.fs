@@ -385,7 +385,7 @@ module internal IntegrityLaws =
         |> fst
 
     /// The attestation / replay-as-provenance laws (Phase 60) — the teeth on `IAttestationSink` +
-    /// `attestHead` / `verifyAttestation` and the typed-`Actor`-in-hash posture (Phase 320). Over a
+    /// `attestHead` / `verifyAttestation` and the typed-`Actor`-in-hash posture (fuaran#320). Over a
     /// seed-replayable sample of chains built from `gen` under a supplied `StreamWitness` + test sink,
     /// certifies the three-stage guarantee **integrity → attestation → deterministic replay**:
     ///
@@ -908,7 +908,7 @@ module internal IntegrityLaws =
             // The dropped record must be INTERIOR (needs ≥3): dropping the tail record is a
             // truncation, and a hash chain authenticates prefixes — every truncation IS a valid
             // shorter chain, undetectable by chain verification alone (by design; pinning a head
-            // against truncation is the attestation seam's job, Phase 320). At len = 2 the only
+            // against truncation is the attestation seam's job, fuaran#320). At len = 2 the only
             // index-1 drop is exactly that tail truncation, so this branch would assert something
             // cryptographically impossible. Surfaced by the UI adoption's rejection-heavy stream
             // generator, which legitimately builds 2-record chains (2026-07-05).

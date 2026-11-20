@@ -253,7 +253,7 @@ module internal Core =
     /// Phase 195 — the typed refusal every backend returns on an OP-VOCABULARY slot
     /// (`TKind` / `TOp`) in a field type.
     ///
-    /// Phase 703 models the op vocabulary and certifies the interpreter leg against the
+    /// fuaran#703 models the op vocabulary and certifies the interpreter leg against the
     /// corpus; emitting an op family from a SOURCE backend is a separate, larger piece of
     /// work (`TreeOp` is msg-carrying through `TKind`/`TNode`, so it lands as a generic type
     /// group). Nothing walks `idl.Ops` in these backends yet — so the slot is refused as a
@@ -484,7 +484,7 @@ module internal Core =
         | TOp -> Error(opVocabularySlot "the F# type emitter" t)
         | TList inner -> fsType inner |> Result.map (fun s -> s + " list")
         // Closure / opaque fields carry no observable data — the generated structural layer is
-        // ENCODER-ONLY and `'Msg`-erased (Phase 317 real-tier boundary): a function-typed field
+        // ENCODER-ONLY and `'Msg`-erased (fuaran#317 real-tier boundary): a function-typed field
         // (`Binding.Query`'s accessor, every `onChange` / `onClick`) and an `obj`-erased field
         // (`Sparkline.source`'s seq, `Select.value`) both collapse to `unit`. There is no host
         // behaviour or CLR shape to reconstruct here — the encoder emits the fixed `"<closure>"` /
@@ -498,7 +498,7 @@ module internal Core =
         // the authoring type: the encoder never reads the value, so the slot's
         // host type was always free.
         | TFn s -> Ok("(" + s.FSharp + ")")
-        // Phase 676 — a JSON slot is a real `JVal`, NOT erased to `unit`: it carries
+        // fuaran#676 — a JSON slot is a real `JVal`, NOT erased to `unit`: it carries
         // data in both directions, which is the whole difference from `TOpaque`.
         | TJson -> Ok "JVal"
         // A hosted slot declares the real host type — that is its whole point.

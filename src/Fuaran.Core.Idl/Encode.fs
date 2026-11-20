@@ -107,7 +107,7 @@ module Encode =
         | WireForm.Undeclared(Undeclared.Union(name, _)), VUnion _ -> Error(sprintf "unknown union '%s'" name)
         | WireForm.Unbound v, _ -> Error(sprintf "unsubstituted type variable '%s'" v)
         | WireForm.Sentinel(value, wire), v when v = value -> Ok(JStr wire)
-        // Phase 676 — verbatim passthrough. Emitting the `JVal` unchanged is what keeps the bytes
+        // fuaran#676 — verbatim passthrough. Emitting the `JVal` unchanged is what keeps the bytes
         // canonical: `Canonical.write Rendering.CrossHost` already sorts keys Ordinal, escapes per rule 6 and lays floats
         // out per rule 5, so a passthrough inherits all three instead of re-implementing them. A
         // hosted slot's content is the host codec's business, carried the same way (see
@@ -134,7 +134,7 @@ module Encode =
                 (entries
                  |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b)))
         | WireForm.Node, VNode(id, kindTag, fields) -> encodeNode idl id kindTag fields
-        // Phase 698 — the enveloped form, at ANY depth: a nested child carries its
+        // fuaran#698 — the enveloped form, at ANY depth: a nested child carries its
         // envelope through exactly this arm, so the sweep is not root-only.
         | WireForm.Node, VNodeEnv(id, envelope, kindTag, fields) -> encodeNodeEnv idl id envelope kindTag fields
         // A bare kind and an op are both `$type`-tagged objects with named fields —
@@ -322,7 +322,7 @@ module Encode =
                     JObj [ "id", JStr id; "kind", typedWith idl.Wire.Discriminator kindTag fs ]
                 | NodeEnvelopeShape.FlatKind -> JObj((idl.Wire.Discriminator, JStr kindTag) :: ("id", JStr id) :: fs))
 
-    /// The enveloped partner of [[encodeNode]] (Phase 698) — `id` + `kind` + the
+    /// The enveloped partner of [[encodeNode]] (fuaran#698) — `id` + `kind` + the
     /// declared node envelope. The envelope rides the SAME [[encodeFields]] the kind
     /// fields ride, so `Optional`-absent, `OmitDefault`-at-default and `HostOnly`
     /// behave identically on a node field and on a kind field; that shared path is
@@ -396,7 +396,7 @@ module Encode =
             encodeNodeEnv idl id envelope kindTag fields |> Result.bind (render idl)
         | _ -> Error "top-level authored value must be a node"
 
-    /// Encode an authored TREE OP to canonical wire JSON (Phase 703) — the wire's
+    /// Encode an authored TREE OP to canonical wire JSON (fuaran#703) — the wire's
     /// second root. Separate from [[encode]] rather than folded into it: the two
     /// roots are distinguishable on the wire (a node carries `id` + `kind`, an op a
     /// top-level `$type`), but which one a caller MEANT is not the codec's guess to
