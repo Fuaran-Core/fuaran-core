@@ -575,6 +575,47 @@ token permission and on a job's display name. A job in the publish run is about 
 being packed and is red or green in the same run that would pack it. The cost is one more proof run
 per release, which a release can afford.
 
+### Bumping the pin
+
+F\* releases about weekly, and a prover moving under the leg can change what "the proof checks" means without a
+line of any model changing (the release Phase 131 pinned had already removed proof hints). So the pin moves the
+way a package pin does: deliberately, in one commit, with the proof leg as its gate. `check.ps1` prints the newest
+upstream release beside the pinned one on every run that can reach GitHub, so a stale pin is seen before a fix
+needs the newer prover; that line is informational and never changes the verdict.
+
+There are two pins, one per leg, each read by the kit engine: `fstar-pin.json` is the present leg, the one
+`check.ps1` runs, and `kit/fstar-pin-custard.json` (`leg: custard`) is the kit's newer leg, which this repository
+exercises only through the leg's own tests. Both carry `fstar` (the release tag), `z3` (the Z3 the release
+bundles, which the engine checks) and one entry per operating system, `windows` and `linux`, each naming that
+release's `asset`, its upstream `url` and the `sha256` GitHub publishes for it; the present pin's entries also
+carry the `mirror` described above. To move the present pin:
+
+1. Before anything lands, download each new asset from upstream, check it against the published digest, and
+   attach it to a new `prover-fstar-<release>` mirror release (`kit/README.md`, "The pin's mirror", has the
+   commands).
+2. Edit `fstar-pin.json`: `fstar`, `z3`, and every entry's `asset`, `url`, `mirror` and `sha256`. An entry left
+   on the old release is refused on its operating system by name.
+3. Remove the installed prover, `proofs/.fstar/` (or point `FSTAR_HOME` at the new release). The present leg
+   installs into `proofs/.fstar/fstar/` and uses whatever is there; an old release found there is refused by its
+   version, not replaced. The next run downloads the new archive and refuses one whose hash is not the pin's.
+4. `pwsh ./proofs/check.ps1 -Runs 3`: every module, cold, three times, then the extraction diff, the host and the
+   leg's own refusals. A module over its budget on the new prover is a finding ("Bumping a budget", below); a
+   module the new prover refutes is a red leg, and the bump waits for it.
+5. If the only red is oracle drift, the new backend extracts differently: `pwsh ./proofs/check.ps1 -Extract`
+   rewrites `oracle/*.fs`, then run `-Runs 3` again to green. Run `pwsh ./proofs/kit/extraction-post-pass.tests.ps1`
+   as well, which answers whether the post-pass is still needed on the new release.
+6. `fstar-pin.json` is in the kit's release asset, so rebuild its sha: `pwsh ./proofs/kit/build-kit-asset.ps1
+   -Update`, which rewrites `copies.json`'s `proofsKit.sha256`.
+7. Commit the pin, any extraction diff and the asset sha together, in ONE commit whose message names the old and
+   the new release (`proofs: move the F* pin from v2026.09.06 to <new>`), so the commit that changes the prover is
+   the commit that shows what the change did to the extraction.
+
+The pin is a shared input of the whole leg, so until a strict run records the new tree every `-Since` run checks
+every module (below). The custard pin moves the same way, without steps 1 and 3: it has no mirror yet, and its
+leg installs each release beside the others, in `proofs/.fstar/<release>/`. Its gate is the leg's tests with both
+pins named, `pwsh ./proofs/kit/check-proof-leg.tests.ps1 -PinFile proofs/fstar-pin.json,proofs/kit/fstar-pin-custard.json`,
+whose custard arms run the newer prover.
+
 ### The module cone — `-Since`, `-Modules`, and when to run which (Phase 328)
 
 A phase that edits one model used to pay for all twenty-one: the leg checks every registered module
