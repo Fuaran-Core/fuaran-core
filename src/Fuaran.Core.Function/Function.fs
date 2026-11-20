@@ -513,7 +513,7 @@ module BoundedMemo =
 module Signature =
 
     /// One segment of a qualified name: one or more ASCII letters, digits, `_` or `-` (D281).
-    let private wellFormedSegment (s: string) : bool =
+    let internal wellFormedSegment (s: string) : bool =
         s.Length > 0
         && s
            |> Seq.forall (fun c ->
@@ -640,8 +640,27 @@ module Function =
     /// names (Phase 712), distinct addresses, spaces a
     /// value can lie in, and no binding that another binding erases. `compose` runs it over the
     /// tree it builds; a host runs it over an artifact before deriving the capability it registers.
+    ///
+    /// The witness also sees the SEGMENTS a qualified name is joined from (Phase 712, D281): a hole
+    /// whose own name, or the name of a slot it was composed through, holds a `.` or breaks the
+    /// segment grammar is `IllFormedHoleName`, at that hole's place in declaration order, even where
+    /// the joined name reads as well-formed (`a.b` written as one name is not the slot `a`'s `b`).
     let validate (w: ArtifactWitness<'Node, 'Id>) (node: 'Node) : Result<unit, DeclarationFault> =
-        Signature.validate (signature w "" node)
+        let holes = w.Holes node
+
+        let sg =
+            { Name = ""
+              Holes = holes |> List.map SigEntry.ofHoleDecl
+              Effect = w.Effect node }
+
+        match
+            holes
+            |> List.tryFindIndex (fun h -> not (List.forall Signature.wellFormedSegment (h.Slots @ [ h.Name ])))
+        with
+        | Some i ->
+            Signature.validate { sg with Holes = List.take i sg.Holes }
+            |> Result.bind (fun () -> Error(IllFormedHoleName sg.Holes[i].Name))
+        | None -> Signature.validate sg
         |> Result.bind (fun () ->
             match holeUnderSlot w node with
             | Some fault -> Error fault
