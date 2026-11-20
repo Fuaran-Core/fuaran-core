@@ -9,6 +9,10 @@ open Fuaran.Core.Idl.Emit.Annotations
 /// `RequireQualifiedAccess` enums and the recursion group every other declaration joins.
 module internal FSharpTypes =
 
+    /// A member's comment lines, each line-terminated, as they print ahead of its declaration.
+    let private docPrefix (lines: string list) =
+        lines |> List.map (fun l -> l + "\n") |> String.concat ""
+
     /// A record or spec field under its comment block: the support doc `supportDoc` (printed at
     /// the field's indent, [[supportAt]]) and the authored annotation lines in the mode it sets
     /// ([[memberDocLines]], Phase 713).
@@ -28,17 +32,13 @@ module internal FSharpTypes =
 
         // Phase 113 — a record field's attribute sits on its own line above it.
         let prefix =
-            (memberDocLines "      " supportDoc f.Annotations
-             @ (obsoleteAttr f.Annotations
-                |> Option.map (fun a -> "      " + a)
-                |> Option.toList))
-            |> List.map (fun l -> l + "\n")
-            |> String.concat ""
+            memberDocLines "      " supportDoc f.Annotations
+            @ (obsoleteAttr f.Annotations
+               |> Option.map (fun a -> "      " + a)
+               |> Option.toList)
+            |> docPrefix
 
         tyR |> Result.map (fun ty -> prefix + sprintf "      %s: %s" (pascal f.Name) ty)
-
-    /// A field with no support doc above it.
-    let fsField (msg: Set<string>) (f: IdlField) : Result<string, CodegenError> = fsFieldUnder None msg f
 
     /// Phase 119 — an enum case takes its annotations exactly where a UNION case takes
     /// them: the doc block above the bar, the single attribute INLINE after it, which is
@@ -47,10 +47,7 @@ module internal FSharpTypes =
     let enumCaseDecl (supportDoc: string option) (e: IdlEnum) (case: string) =
         let a = e.AnnotationsOf case
 
-        let docs =
-            memberDocLines "    " supportDoc a
-            |> List.map (fun l -> l + "\n")
-            |> String.concat ""
+        let docs = memberDocLines "    " supportDoc a |> docPrefix
 
         let attr =
             match obsoleteAttr a with
@@ -89,10 +86,7 @@ module internal FSharpTypes =
             // Phase 113 — a union case's attribute sits INLINE after the bar
             // (`| [<Obsolete(...)>] Tag of ...`), which is where F# accepts it; the doc
             // block sits above the bar, like any other.
-            let docs =
-                memberDocLines "    " supportDoc c.Annotations
-                |> List.map (fun l -> l + "\n")
-                |> String.concat ""
+            let docs = memberDocLines "    " supportDoc c.Annotations |> docPrefix
 
             let attr =
                 match obsoleteAttr c.Annotations with
@@ -149,8 +143,7 @@ module internal FSharpTypes =
         let annotated =
             memberDocLines "" (supportAt (doc ("type:" + e.Name) "")) e.Annotations
             @ (obsoleteAttr e.Annotations |> Option.toList)
-            |> List.map (fun l -> l + "\n")
-            |> String.concat ""
+            |> docPrefix
 
         annotated
         + "[<RequireQualifiedAccess>]\n"
@@ -258,6 +251,9 @@ module internal FSharpTypes =
                     declBody (k.Tag + "Spec") k.Fields fields
                     + eqMembers ("S:" + k.Tag) (k.Tag + "Spec") k.Fields)
 
+        // Phase 705 — each case carries its kind's authored DOC, under its support block at
+        // `case:NodeKind.<Tag>`. Only the doc: the notes and the `Obsolete` attribute stay on the
+        // `<Kind>Spec` record, where they have always been, so marking a kind moves no case.
         let nodeKindBody =
             None,
             [ "[<RequireQualifiedAccess>]" ],
@@ -265,21 +261,36 @@ module internal FSharpTypes =
             + declParams msg "NodeKind" []
             + " =\n"
             + (kinds
-               |> List.map (fun k -> sprintf "    | %s of %sSpec%s" k.Tag k.Tag (declParams msg (k.Tag + "Spec") []))
+               |> List.map (fun k ->
+                   docPrefix (
+                       memberDocLines
+                           "    "
+                           (supportAt (doc ("case:NodeKind." + k.Tag) "    "))
+                           { Fuaran.Core.Idl.Annotations.Empty with
+                               Doc = k.Annotations.Doc }
+                   )
+                   + sprintf "    | %s of %sSpec%s" k.Tag k.Tag (declParams msg (k.Tag + "Spec") []))
                |> String.concat "\n")
 
-        // fuaran#690 — `id` + `kind` + the declared envelope. An IDL declaring no
-        // envelope keeps the original one-liner, so nothing about it changes.
+        // fuaran#690 — `id` + `kind` + the declared envelope. Phase 705 — `Id` and `Kind` are not
+        // declared fields, so their docs are the support blocks at `field:Node.Id` and
+        // `field:Node.Kind`; an envelope field takes `field:Node.<Field>` as every record field
+        // does. An IDL declaring no envelope and no node doc keeps the original one-liner.
+        let nodeFieldDoc (name: string) =
+            memberDocLines "      " (supportAt (doc ("field:Node." + name) "      ")) Fuaran.Core.Idl.Annotations.Empty
+
+        let idDoc, kindDoc = nodeFieldDoc "Id", nodeFieldDoc "Kind"
+
         let nodeBody =
-            if List.isEmpty idl.NodeFields then
+            if List.isEmpty idl.NodeFields && List.isEmpty idDoc && List.isEmpty kindDoc then
                 Ok(None, [], sprintf "Node%s = { Id: string; Kind: NodeKind%s }" nodeArgs kindArgs)
             else
-                idl.NodeFields
-                |> List.map (fsField msg)
-                |> sequenceR
+                fieldDecls "Node" idl.NodeFields
                 |> Result.map (fun envelope ->
                     let fields =
-                        "      Id: string" :: sprintf "      Kind: NodeKind%s" kindArgs :: envelope
+                        docPrefix idDoc + "      Id: string"
+                        :: docPrefix kindDoc + sprintf "      Kind: NodeKind%s" kindArgs
+                        :: (if List.isEmpty idl.NodeFields then [] else [ envelope ])
 
                     // Phase 252 — a host-only ENVELOPE member takes the node's equality
                     // away exactly as a spec's does; the node then compares id, kind and

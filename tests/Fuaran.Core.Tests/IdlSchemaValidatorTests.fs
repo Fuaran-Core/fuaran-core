@@ -155,3 +155,242 @@ let schemaValidator =
                   closure (text.Replace("\"$defs\":{", "\"$defs\":{\"Orphan303\":{\"type\":\"string\"},"))
 
               Expect.contains (Set.difference defs reachable) "Orphan303" "the orphan is named") ]
+
+// ---------------------------------------------------------------------------
+// Phase 704 — the schema leg states the vocabulary's docs. A declaration's `doc` is its
+// definition's `description`, a case's is its branch's and a field's is its property's; a
+// vocabulary that documents nothing emits the bytes it emitted before, pinned by digest because
+// the repository commits no generated vocabulary schema to compare against. A generic union is
+// defined once per instantiation under the resolution's instance names, which a host's
+// hand-written schema already uses for the same definitions.
+// ---------------------------------------------------------------------------
+
+let private sha256 (s: string) : string =
+    System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes s)
+    |> Array.map (fun b -> b.ToString "x2")
+    |> String.concat ""
+
+/// Each undocumented vocabulary's schema, as the leg emitted it before Phase 704 (bytes, digest).
+let private undocumentedPins: (string * Idl * int * string) list =
+    let certification name =
+        CertificationVectors.vocabularies |> List.find (fun v -> v.Name = name) |> _.Idl
+
+    [ "reference", ReferenceIdl.refIdl, 9432, "89a86662a588fcf5c40370c483bc044116cae2c49517e2bb1abea48e91ad9bd6"
+      "document", certification "document", 3878, "add582492c169fe1cc0ab66524800992a9c0c127fe840d552deeb22c19890dbb"
+      "score", certification "score", 7217, "67c8b04837817d3c944c1032910893ed38441e8b1cd6d84681ee3466ce7e5ccd" ]
+
+let private doc (d: string) = { Annotations.Empty with Doc = Some d }
+
+/// A doc carrying a quote and a line break, so the description is shown to be escaped and kept.
+let private textDoc =
+    "Text a reader sees, \"as written\".\nA lookup resolves it by key."
+
+let private documentField (name: string) (d: string) (fields: IdlField list) =
+    fields
+    |> List.map (fun f -> if f.Name = name then { f with Annotations = doc d } else f)
+
+/// The reference vocabulary with a doc on one declaration of each sort: an enum, a union and one
+/// of its cases, a generic union and one of its cases, a record and a field, a kind and a field, an
+/// op and a field, and an envelope member.
+let private documentedIdl: Idl =
+    let idl = ReferenceIdl.refIdl
+
+    let documentCase (tag: string) (d: string) (u: IdlUnion) =
+        { u with
+            Cases =
+                u.Cases
+                |> List.map (fun c -> if c.Tag = tag then { c with Annotations = doc d } else c) }
+
+    { idl with
+        Enums =
+            idl.Enums
+            |> List.map (fun e ->
+                if e.Name = "LayoutKind" then
+                    { e with
+                        Annotations = doc "How a group lays out its children." }
+                else
+                    e)
+        Unions =
+            idl.Unions
+            |> List.map (fun u ->
+                match u.Name with
+                | "Text" -> { u with Annotations = doc textDoc } |> documentCase "Inline" "The text itself."
+                | "Slot" ->
+                    { u with
+                        Annotations = doc "A value, fixed or named." }
+                    |> documentCase "Fixed" "The value, stated."
+                | _ -> u)
+        Records =
+            idl.Records
+            |> List.map (fun r ->
+                if r.Name = "Point" then
+                    { r with
+                        Annotations = doc "A point on the plane."
+                        Fields = documentField "x" "The horizontal coordinate." r.Fields }
+                else
+                    r)
+        Kinds =
+            idl.Kinds
+            |> List.map (fun k ->
+                if k.Tag = "Measure" then
+                    { k with
+                        Annotations = doc "One measured quantity."
+                        Fields = documentField "label" "What the quantity is called." k.Fields }
+                else
+                    k)
+        Ops =
+            idl.Ops
+            |> List.map (fun o ->
+                if o.Tag = "Insert" then
+                    { o with
+                        Annotations = doc "Insert a node under a parent."
+                        Fields = documentField "index" "Where among the parent's children." o.Fields }
+                else
+                    o)
+        NodeFields = documentField "hidden" "Whether the node is drawn." idl.NodeFields }
+
+let private member' (key: string) (v: JVal) : JVal =
+    match v with
+    | JObj fs ->
+        match fs |> List.tryFind (fun (k, _) -> k = key) with
+        | Some(_, x) -> x
+        | None -> failtestf "no member `%s` in %s" key (Json.render v)
+    | other -> failtestf "`%s` asked of a non-object %s" key (Json.render other)
+
+let private at (path: string list) (v: JVal) : JVal =
+    (v, path) ||> List.fold (fun x k -> member' k x)
+
+let private parsed (text: string) : JVal =
+    match Json.parse text with
+    | Ok v -> v
+    | Error m -> failtestf "the emitted schema is not JSON: %s" m
+
+/// The branch of a union definition whose discriminator const is `tag`.
+let private branch (tag: string) (def: JVal) : JVal =
+    match member' "oneOf" def with
+    | JArr bs ->
+        bs
+        |> List.find (fun b ->
+            match b with
+            | JObj fs when fs |> List.exists (fun (k, _) -> k = "properties") ->
+                at [ "properties"; "$type"; "const" ] b = JStr tag
+            | _ -> false)
+    | other -> failtestf "`oneOf` is not an array: %s" (Json.render other)
+
+/// The schema with every string-valued `description` removed.
+let rec private undescribed (v: JVal) : JVal =
+    match v with
+    | JObj fs ->
+        JObj(
+            fs
+            |> List.choose (fun (k, x) ->
+                match k, x with
+                | "description", JStr _ -> None
+                | _ -> Some(k, undescribed x))
+        )
+    | JArr xs -> JArr(List.map undescribed xs)
+    | other -> other
+
+[<Tests>]
+let schemaDocs =
+    testList
+        "Phase 704 — the schema leg states the vocabulary's docs"
+        [ for name, idl, length, digest in undocumentedPins do
+              testCase (sprintf "%s: a vocabulary that documents nothing emits the bytes it did before" name) (fun _ ->
+                  let text = schemaOf idl
+                  Expect.equal text.Length length (sprintf "%s: the schema's length is unchanged" name)
+                  Expect.equal (sha256 text) digest (sprintf "%s: the schema's bytes are unchanged" name))
+
+          testCase "a declaration's doc is its definition's description, leading" (fun _ ->
+              let schema = parsed (schemaOf documentedIdl)
+              let defs = member' "$defs" schema
+
+              for def, expected in
+                  [ "LayoutKind", "How a group lays out its children."
+                    "Text", textDoc
+                    "Point", "A point on the plane."
+                    "Measure", "One measured quantity."
+                    "Insert", "Insert a node under a parent." ] do
+                  match member' def defs with
+                  | JObj(("description", d) :: _) -> Expect.equal d (JStr expected) (sprintf "%s's description" def)
+                  | other -> failtestf "%s does not lead with its description: %s" def (Json.render other))
+
+          testCase "a generic union's doc is on every instantiation, and its case's on each branch" (fun _ ->
+              let defs = member' "$defs" (parsed (schemaOf documentedIdl))
+
+              for inst in [ "Slot_float"; "Slot_str" ] do
+                  let def = member' inst defs
+                  Expect.equal (member' "description" def) (JStr "A value, fixed or named.") (inst + "'s description")
+
+                  Expect.equal
+                      (member' "description" (branch "Fixed" def))
+                      (JStr "The value, stated.")
+                      (inst + ": the Fixed branch's description")
+
+                  Expect.isFalse
+                      (match branch "Ref" def with
+                       | JObj fs -> fs |> List.exists (fun (k, _) -> k = "description")
+                       | _ -> true)
+                      (inst + ": an undocumented case's branch carries none"))
+
+          testCase "a case's doc is its branch's description" (fun _ ->
+              let defs = member' "$defs" (parsed (schemaOf documentedIdl))
+
+              Expect.equal
+                  (member' "description" (branch "Inline" (member' "Text" defs)))
+                  (JStr "The text itself.")
+                  "the Inline branch's description")
+
+          testCase "a field's doc is its property's description, after the type's keywords" (fun _ ->
+              let defs = member' "$defs" (parsed (schemaOf documentedIdl))
+
+              for path, keyword, expected in
+                  [ [ "Point"; "properties"; "x" ], "anyOf", "The horizontal coordinate."
+                    [ "Measure"; "properties"; "label" ], "$ref", "What the quantity is called."
+                    [ "Insert"; "properties"; "index" ], "type", "Where among the parent's children."
+                    [ "Node"; "properties"; "hidden" ], "type", "Whether the node is drawn." ] do
+                  match at path defs with
+                  | JObj [ (k, _); ("description", d) ] ->
+                      Expect.equal k keyword (sprintf "%A: the type's keyword comes first" path)
+                      Expect.equal d (JStr expected) (sprintf "%A's description" path)
+                  | other -> failtestf "%A is not the type then its description: %s" path (Json.render other))
+
+          testCase "the docs add descriptions and nothing else" (fun _ ->
+              let documented = parsed (schemaOf documentedIdl)
+              let plain = schemaOf ReferenceIdl.refIdl
+              Expect.notEqual (Json.render documented) plain "the documented schema differs"
+
+              Expect.equal
+                  (Json.render (undescribed documented))
+                  plain
+                  "without its descriptions it is the plain schema")
+
+          testCase "the documented schema is well-formed, closed and accepts the vocabulary's documents" (fun _ ->
+              let text = schemaOf documentedIdl
+              assertClosed "documented reference" text
+              let schema = build text
+
+              for wire in
+                  [ for _, value, _ in ReferenceIdl.nodeCases do
+                        match Encode.encode documentedIdl value with
+                        | Ok w -> w
+                        | Error m -> failtestf "a fixture did not encode: %s" m ] do
+                  Expect.isTrue (evaluate schema wire) (sprintf "the schema accepts %s" wire))
+
+          testCase "a generic union is defined once per instantiation, under its instance names" (fun _ ->
+              // A guard rather than a red-first test: the behaviour predates Phase 704 (fuaran#1068),
+              // and this pins the names a host's published schema reproduces.
+              let defs = member' "$defs" (parsed (schemaOf ReferenceIdl.refIdl))
+
+              let names =
+                  match defs with
+                  | JObj fs -> fs |> List.map fst
+                  | _ -> []
+
+              Expect.containsAll names [ "Slot_float"; "Slot_str" ] "one definition per instantiation"
+              Expect.isFalse (List.contains "Slot" names) "never the bare generic name"
+
+              Expect.equal
+                  (at [ "properties"; "value"; "type" ] (branch "Fixed" (member' "Slot_str" defs)))
+                  (JStr "string")
+                  "each instantiation is the union at its argument") ]
