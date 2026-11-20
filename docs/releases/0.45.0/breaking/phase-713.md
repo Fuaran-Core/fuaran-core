@@ -1,5 +1,5 @@
 - **An enum or a union that declares no case is refused at its declaration** (Phase 713, `Fuaran.Core.Idl` and
-  `Fuaran.Core.Idl.Codegen`, DECISIONS.md D279) — class **breaking**: no public signature moves, and a vocabulary that
+  `Fuaran.Core.Idl.Codegen`, DECISIONS.md D280) — class **breaking**: no public signature moves, and a vocabulary that
   loaded is refused. `Declare.errors` names each such type, `enum '<name>' declares no case, so it has no value` (or
   `union '<name>'`), at `$.enums[i].cases` or `$.unions[i].cases`, beside the other declaration faults and in the
   order they are walked, so the artifact reader and `Proposal.applyDelta` refuse it there; it used to load, emit and
