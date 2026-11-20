@@ -35,7 +35,7 @@ through one reader. So a baseline-class report on a branch cut before the newest
 newest tag in this branch's history", not "since the newest tag anywhere". A tag your branch does not
 contain cannot be a baseline for it (DECISIONS.md D123). Once a release slot's heading is flipped to
 released, its tag must already exist in the history being gated, so the one green order at a release
-is tag, then gate.
+is tag, then gate, then push the commit and the tag together.
 
 ```powershell
 ./run.ps1        # restore tools, format, build, test, sample

@@ -8,7 +8,14 @@ procedure this page repeats. Its fourth step, the release commit, is the release
 it prints the slot's entry files into the slot's file, removes them and re-renders the index, all with
 `CORE_APPROVE_DOCS=ledger-index` (DECISIONS.md D274); the `Release ledger` family reds a released slot whose entries
 were not printed. The release act itself is performed by tooling outside this repository,
-whose preflight re-reads the packed public surfaces before it records the release. This page starts where the contract ends, at the pushed `v<v>` tag.
+whose preflight re-reads the packed public surfaces before it records the release.
+
+**Before the push.** Whoever performs the release tags the release commit `v<v>` in their own clone and runs `./verify.ps1` on it, with the
+corpus leg asked ([`CONTRIBUTING.md`](CONTRIBUTING.md), "Prerequisites"). Several checks read the tag together with the turned heading, so they
+first run complete there. The commit and the tag go up together, in one atomic push, only when that run is green. A red run is fixed by amending
+the release commit and moving the tag, which nothing but that clone has seen.
+
+This page starts where the contract ends, at the pushed `v<v>` tag.
 
 The registry is [nuget.org](https://www.nuget.org/packages?q=Fuaran.Core), and every package
 publishes from [`.github/workflows/publish-packages.yml`](.github/workflows/publish-packages.yml).

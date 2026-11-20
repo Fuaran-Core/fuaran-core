@@ -55,7 +55,7 @@ let internal unrecordedAtRelease (standing: string option) (slots: Slot list) (m
                   n ]
 
 let private remedy =
-    "Remedy: follow the release sequence in STABILITY.md \"Versioning policy\" — corpus re-stamp, the receiving gate green against the packed candidate, a clean pack, then the record, the heading flip (the slot's ledger file, and the index re-rendered with CORE_APPROVE_DOCS=ledger-index) and the README stamps in ONE commit, which is the commit the tag names."
+    "Remedy: follow the release sequence in STABILITY.md \"Versioning policy\" — corpus re-stamp, the receiving gate green against the packed candidate, a clean pack, then the record, the heading flip (the slot's ledger file, and the index re-rendered with CORE_APPROVE_DOCS=ledger-index) and the README stamps in ONE commit, which is the commit the tag names. Tag it locally and run verify.ps1 on it, and push the commit and the tag together only when that run is green."
 
 let private failOn (what: string) (faults: string list) =
     match faults with

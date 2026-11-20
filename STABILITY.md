@@ -82,16 +82,16 @@ this order, because each step reads the one before it:
    <folder>`, green on both legs. A package this repository adds since the last release needs the
    host's candidate-only reference first, or the gate's membership check fails it by name.
 3. Pack again from the clean tree for publication, so the packed surface is the one the gate measured.
-4. In ONE commit: write the `**Release record` and `**Receiving gate run:**` paragraphs in the slot's
-   ledger file, turn its heading to `released <date> as `v<v>``, print its entries into it and re-render the index (both with
-   `CORE_APPROVE_DOCS=ledger-index`, which removes the entry files it prints; DECISIONS.md D274), and regenerate the README's version stamps
-   (`dotnet run --project tests/Fuaran.Core.Tests -- --filter ReadmeClaims` with `CORE_APPROVE_README=1` set in the environment). The
-   stamps are derived from the tags, so the regeneration runs under a provisional LOCAL tag on the
-   candidate commit (its `api/` is the release's); delete that tag after the commit. By this commit `DECISIONS.md` holds no missing number, each one given up recorded `Never-minted` (DECISIONS.md D275).
-5. Tag THAT commit `v<v>` and push the commit and the tag together
-   (`git push --atomic origin main v<v>`), so no CI run sees the turned heading without its tag. A
-   push of the commit alone runs `main`'s CI red on the second clause until the tag exists, and a tag
-   on any earlier commit is red in the publish workflow on the first: both are the gate working.
+4. In ONE commit: write the `**Release record` and `**Receiving gate run:**` paragraphs in the slot's ledger file, turn its heading to `released <date> as
+   `v<v>``, print its entries into it and re-render the index (both with `CORE_APPROVE_DOCS=ledger-index`, which removes the entry files it prints, D274),
+   and regenerate the README's version stamps (`dotnet run --project tests/Fuaran.Core.Tests -- --filter ReadmeClaims` with `CORE_APPROVE_README=1` set).
+   The stamps are derived from the tags, so the regeneration runs under a provisional LOCAL tag on the candidate commit (its `api/` is the release's);
+   delete that tag after the commit. By this commit `DECISIONS.md` holds no missing number, each one given up recorded `Never-minted` (D275).
+5. Tag THAT commit `v<v>` locally and run the gate on it (`verify.ps1`, the corpus leg asked): the clauses that read the tag together with the
+   turned heading first run complete here. Fix a red gate by amending the release commit and moving the tag, which has not left your machine.
+6. Only when that gate is green, push the commit and the tag together (`git push --atomic origin main v<v>`), so no CI run sees the turned heading
+   without its tag: a push of the commit alone runs `main`'s CI red on the second clause until the tag exists, and a tag on any earlier commit is
+   red in the publish workflow on the first.
 
 **Adding a public operation now carries a coverage line (Phase 335).** The `Proofs.Coverage` family
 reads the committed API baselines (`api/*.txt`) as its census of public operations, so the commit that
