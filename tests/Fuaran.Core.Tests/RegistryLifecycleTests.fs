@@ -69,7 +69,7 @@ let private queries (ids: string list) : QueryRegistry<unit> =
     ids
     |> List.fold (fun r id -> QueryRegistry.register (query id) r |> orFail) QueryRegistry.empty
 
-let private family (id: string) : RuleFamily<unit, string> = { Id = id; Run = fun _ _ -> [] }
+let private family (id: string) : RuleFamily<unit, string> = Validator.wholeTree id (fun _ _ -> [])
 
 let private rules (ids: string list) : Validator.RuleRegistry<unit, string> =
     Validator.ofFamilies (ids |> List.map family) |> orFail

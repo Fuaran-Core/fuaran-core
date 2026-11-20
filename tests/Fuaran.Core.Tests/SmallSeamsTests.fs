@@ -177,8 +177,7 @@ let private flagAll (code: string) : RuleFamily<RNode, string> =
     Validator.perNode code (fun w n -> [ Defect.create code Severity.Warning code (Some(w.Id n)) ])
 
 let private throwing: RuleFamily<RNode, string> =
-    { Id = "boom"
-      Run = fun _ _ -> failwith "rule exploded" }
+    Validator.wholeTree "boom" (fun _ _ -> failwith "rule exploded")
 
 let private table (cols: (string * ColumnType * Cell list) list) : Table =
     { Schema = cols |> List.map (fun (n, ty, _) -> Field.create n ty)

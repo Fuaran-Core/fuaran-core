@@ -23,6 +23,7 @@ and the commit that closes the slot refuses it (D275).
 | Id | Date | Decision | Status |
 |---|---|---|---|
 | D280 | 2026-11-20 | an enum or a union that declares no case is refused at its declaration; an annotation's comment lines follow the mode its support doc block sets; the contract refusal for an empty enumeration stays | Live |
+| D279 | 2026-11-20 | `RuleFamily` is opaque behind two constructors, a whole-tree family and a per-node family, so the walker can run every per-node family of a registry over one preorder; a later family shape is a new constructor; amends D184 | Live |
 | D278 | 2026-11-20 | a per-kind table is declared by name in the support record, never in the vocabulary; its column is a closed set of data forms; the F# derivation emits it as one exhaustive match and generation refuses a missing, unknown or duplicate row; the TypeScript backend refuses it | Live |
 | D277 | 2026-11-20 | the release sequence tags the release commit, runs the gate on it, and pushes the commit and the tag together only when the gate is green; a red gate is fixed by amending the release commit and moving the unpushed tag | Live |
 | D276 | 2026-11-20 | the names of packages that have left this repository are a rule of the publication sweep, with a declared exception for each record that must name them; a one-off sweep of the residue is declined | Live |
@@ -117,7 +118,7 @@ and the commit that closes the slot refuses it (D275).
 | D187 | 2026-10-20 | One chain over every record kind (`ChainShape`), one sealed state over an anchor (`Sealed`), one JSONL walk | Live |
 | D186 | 2026-10-20 | the pipeline's dirty set is `Propagation`'s closure instantiated at the pipeline's edges — in the model, which opens `Propagation` instead of restating it, and in the name, `dependencyMap` replacing the `dirtySet` forward; amends D173.2 | Live |
 | D185 | 2026-10-20 | `ObserverState` is opaque, so its order cannot drift from its entries; the defect family that named a drifted state and the checked walk that refused one are removed; applies D117.3 | Live |
-| D184 | 2026-10-20 | one rule registry, `Validator.Rules<'Subject,'Id>`, over the registration-ordered lattice; the column validator's registry is its instance at a table, the fifth registry; one walker; amends D117 | Live |
+| D184 | 2026-10-20 | one rule registry, `Validator.Rules<'Subject,'Id>`, over the registration-ordered lattice; the column validator's registry is its instance at a table, the fifth registry; one walker; amends D117 | Amended-by D279 |
 | D183 | 2026-10-20 | One read surface — `ReadOptions` and four readers; the string-error twin deleted | Live |
 | D182 | 2026-10-20 | the diff is one run of the emitter's passes and refuses through `Rejection`; under a keyed scope a holder's keyed subtrees are its content; a tree carrying an id twice has no index | Live |
 | D181 | 2026-10-20 | the engine is four verbs over two records — `Policy` (grammar, references) and `OpScope` (structural witness, ids, `CanHold`, keyed positions); every combination exists by construction, the old per-combination names are removed, `CanHold` is asked of every parent an op writes, and a keyed-position refusal names its slot by index | Live |
@@ -346,6 +347,51 @@ holding `<` or `&` emitted a comment the compiler reads as XML and cannot parse 
    loaded is refused, which changes the answer an existing caller of the reader, `Declare.errors` or
    `Proposal.applyDelta` receives. The comment change moves generated F# only where a member carries both
    channels. The change rides the `0.45.0` breaking slot.
+
+## 2026-11-20 — D279: `RuleFamily` is opaque behind two constructors, a whole-tree family and a per-node family, so the walker can run every per-node family of a registry over one preorder; a later family shape is a new constructor; amends D184
+
+**Status:** Live
+
+**Recorded by Phase 709.** `RuleFamily` was a public record, `{ Id; Run }`, and `Run` an opaque function of the root.
+`Validator.perNode` built one whose `Run` walked the whole tree, so a registry of thirty per-node families walked it
+thirty times and the walker could not see that they might share one walk. Phase 615 measured the cost (at 5,021 nodes,
+18.9 MB and 29 extra preorders a call) and found that no additive change could recover it: the walker can share a
+walk only if a family says what shape it is, and a field on a public record breaks every full literal (FS0764).
+D184.5 had frozen the type to `1.0` for that reason.
+
+1. **The representation is private.** `RuleFamily<'Node,'Id>` is a union with private cases. Code outside the
+   validator builds one only through `Validator.wholeTree id run` (checks over the whole tree, given its root: what
+   `Run` was) or `Validator.perNode id rule` (a rule of one node, unchanged in signature). Its id is a public member,
+   `family.Id`, and `Validator.asCheck w family` is how one family is run alone, its check of the root. No new read of
+   a family's body is added, because `asCheck` already was that read for packs and rule registries.
+2. **Opaque, where it could have gained a field.** A `Shape` field (whole-tree or per-node) on the record was the
+   smaller change for this phase and the wrong one for the next: a per-kind family, or an incremental one that reads
+   an op's change set, would each be another field, and each another break for every consumer that writes the
+   literal. Behind constructors, a new shape is a new private case and a new constructor: additive, and no consumer's
+   source changes. The break is taken once, on the `0.45.0` breaking slot, and is the last this type needs for a new
+   shape.
+3. **One walk.** `runAll` and `runAllTagged` take the preorder once, when the first per-node family runs, and every
+   per-node family reads it; each whole-tree family runs as before. The findings' order does not move: family order,
+   then preorder within a family, as when each family walked for itself. A registry with no per-node family takes no
+   preorder. Rejected: a walk that visits each node once and calls every family's rule there. It saves no walk the
+   shared preorder does not, and it must buffer each family's findings to keep their order, which is the order
+   consumers read.
+4. **Faults are each family's, as before.** A rule that throws is one `RULE-FAULT` error for its family, and its
+   findings at earlier nodes go with it, as when it walked alone; the other families still run. A walk that throws
+   (a witness's `Children`) is a `RULE-FAULT` for every per-node family, with the exception's message, which is what
+   each family's own walk reported; whole-tree families still run.
+5. **The per-family walk is kept as the oracle, not as code a caller can choose.** `asCheck` still runs a per-node
+   family over its own preorder, which is what one family alone costs. The tests hold `runAllTagged` equal, finding for
+   finding and in order, to every family run alone through `asCheck` and the one rule walker (`Rules.run`), over
+   generated trees, registries and a witness that throws mid-tree.
+6. **The stock families are whole-tree.** `containment`, `referenceIntegrity` and `referenceOrder` read pairs, the
+   reference graph and declaration order, not one node at a time, so they move to `wholeTree` unchanged in what they
+   find. `RuleRegistry` keeps its public `Families` field: a registry is still a list of families, and the families
+   in it are opaque.
+7. **The class is removal, filed under breaking.** The surface guard reads the record's constructor and two fields
+   removed, `wholeTree` and the `Id` property added. A consumer's record literal fails to compile until it becomes a
+   `wholeTree` call, and a read of `Run` until it goes through `asCheck`; `docs/ADOPTION.md` shows both side by side.
+   This amends D184.5, which kept the type unchanged until `1.0`.
 
 ## 2026-11-20 — D278: a per-kind table is declared by name in the support record, never in the vocabulary; its column is a closed set of data forms; the F# derivation emits it as one exhaustive match and generation refuses a missing, unknown or duplicate row; the TypeScript backend refuses it
 
@@ -6852,7 +6898,7 @@ is the twin again); collapsing the DAG's capability twins into the stream.
 
 ## 2026-10-20 — D184: one rule registry, `Validator.Rules<'Subject,'Id>`, over the registration-ordered lattice; the column validator's registry is its instance at a table, the fifth registry; one walker; amends D117
 
-**Status:** Live
+**Status:** Amended-by D279
 
 **Context.** D117 made a registry a lattice and counted four (`CapabilityRegistry`, `FunctionRegistry`, `QueryRegistry`, `Validator.RuleRegistry`). A fifth, `ColumnValidator.Registry`, had `empty` / `enumerate` / `tryFind` / `register` / `ofRules` and none of the lifecycle, and the validator package walked rules three ways (`runAllTagged`, `runPack`, `ColumnValidator.validateTagged`), each with its own loop over the `RULE-FAULT` guard. `ColumnRule` and `PackCheck` were one shape under two field names. The operator ruled (3A) on 2026-10-17: the column registry comes onto the lattice and D117 counts five.
 

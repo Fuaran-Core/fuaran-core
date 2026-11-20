@@ -366,7 +366,7 @@ let tests =
                             [ RNode.leaf "p0" "para" ""
                               RNode.node "s1" "section" [ RNode.leaf "n2" "note" "" ] ]
 
-                    let defects = (Validator.containment grammar).Run nodew tree
+                    let defects = (Validator.asCheck nodew (Validator.containment grammar)).Run tree
 
                     Expect.equal (defects |> List.map _.Node) [ Some "p0"; Some "n2" ] "both, in preorder"
 
@@ -378,9 +378,8 @@ let tests =
                         "the message names the legal children"
 
                     Expect.equal
-                        ((Validator.containment grammar).Run
-                            nodew
-                            (RNode.node "root" "para" [ RNode.leaf "x" "para" "" ]))
+                        ((Validator.asCheck nodew (Validator.containment grammar))
+                            .Run(RNode.node "root" "para" [ RNode.leaf "x" "para" "" ]))
                             .Head.Message
                         "a para cannot sit under a para; a para holds no children"
                         "a kind that holds nothing"
@@ -421,7 +420,8 @@ let tests =
                           Validator.ReferenceDefect.ReferenceCycle [ "b"; "a" ] ]
                         "in the documented order"
 
-                    let family = (Validator.referenceIntegrity refw idw).Run nodew tree
+                    let family =
+                        (Validator.asCheck nodew (Validator.referenceIntegrity refw idw)).Run tree
 
                     Expect.equal
                         (family |> List.map (fun d -> d.Code, d.Severity))
@@ -463,7 +463,7 @@ let tests =
                         "b1 and the later sibling a2 are forward; the ancestor a and the root's descendant b are not"
 
                     Expect.equal
-                        ((Validator.referenceOrder refw idw).Run nodew tree
+                        ((Validator.asCheck nodew (Validator.referenceOrder refw idw)).Run tree
                          |> List.map (fun d -> d.Code, d.Node))
                         [ "REF-FORWARD", Some "a1"; "REF-FORWARD", Some "a1" ]
                         "the opt-in family"

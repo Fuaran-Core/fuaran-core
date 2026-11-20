@@ -148,6 +148,38 @@ OpStream.verifyChain OpStream.defaultHash streamW records          // tamper-evi
 Jsonl.read streamW jsonl  : Result<_, StreamLoadFault<_>>   // portable — runs in-browser; a typed fault
 ```
 
+## 3b. Build rule families through their constructors (from `0.45.0`)
+
+A domain's validator registers `RuleFamily` values in a `Validator.RuleRegistry`. From `0.45.0` the family's
+representation is private (Phase 709, [DECISIONS.md D279](../DECISIONS.md)): a family is built through one of two
+constructors, its id is read as `family.Id`, and one family is run alone through `Validator.asCheck`. A record
+literal no longer compiles. The change is mechanical:
+
+| Before `0.45.0` | From `0.45.0` |
+|---|---|
+| `{ Id = "my-family"; Run = fun w root -> check w root }` | `Validator.wholeTree "my-family" (fun w root -> check w root)` |
+| `Validator.perNode "my-rule" rule` | unchanged |
+| `family.Id` | unchanged (a member now, not a field) |
+| `family.Run w root` | `(Validator.asCheck w family).Run root` |
+
+```fsharp
+// Before 0.45.0: a record literal.
+let ruleFamily : RuleFamily<Item, string> =
+    { Id = "pre-emit"
+      Run = fun w root -> preEmitDefects w root }
+
+// From 0.45.0: the whole-tree constructor, the same id and the same function.
+let ruleFamily : RuleFamily<Item, string> =
+    Validator.wholeTree "pre-emit" (fun w root -> preEmitDefects w root)
+```
+
+`wholeTree` keeps what `Run` did: the function is called once per run, with the root. `perNode` is the shape to
+prefer when a family checks one node at a time, because `Validator.runAll` runs every `perNode` family of a
+registry over one preorder of the tree, where a whole-tree family that maps a rule over a preorder of its own
+pays for its own walk. Restating such a family with `perNode` changes no finding: findings still come out in
+family order, then preorder within a family, and a family that throws is still one `RULE-FAULT` error while the
+others run.
+
 ## 4. Offer the domain as something to invoke
 
 Steps 1 to 3 make your tree editable through Core. The invocable seams make it *callable*: a model

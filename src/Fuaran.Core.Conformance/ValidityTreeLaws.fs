@@ -127,7 +127,9 @@ module internal ValidityTreeLaws =
             let start = pruned drawn
 
             validator.Check(
-                (let defects = (Validator.containment allowedChildren).Run nodew drawn
+                (let defects =
+                    (Validator.asCheck nodew (Validator.containment allowedChildren)).Run drawn
+
                  let pairs = Ops.illegalChildren allowedChildren nodew drawn
 
                  List.length defects = List.length pairs
@@ -469,8 +471,10 @@ module internal ValidityTreeLaws =
                 fun () -> at (sprintf "forwardReferences answered %A" forward)
             )
 
-            let integrity = (Validator.referenceIntegrity refw idw).Run nodew t
-            let order = (Validator.referenceOrder refw idw).Run nodew t
+            let integrity =
+                (Validator.asCheck nodew (Validator.referenceIntegrity refw idw)).Run t
+
+            let order = (Validator.asCheck nodew (Validator.referenceOrder refw idw)).Run t
 
             families.Check(
                 List.length integrity = List.length reported
@@ -873,7 +877,7 @@ module internal ValidityTreeLaws =
                 ({ RuleId = f.Id
                    Run =
                      fun root ->
-                         f.Run nodew root
+                         (Validator.asCheck nodew f).Run root
                          |> List.map (fun d -> Validator.Finding.guided (guidanceOf d) d) }
                 : Validator.GuidedCheck<'Node, 'Id>))
             |> Validator.Rules.ofGuided
