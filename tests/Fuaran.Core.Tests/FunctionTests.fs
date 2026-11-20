@@ -183,6 +183,22 @@ let tests =
                   Expect.equal (valueOf "gx2" r) (Some "second") "second hole — no capture"
               | Error e -> failtestf "unexpected %A" e
 
+          // D281: hole names are not unique, and both gates admit a repeated one. A name check in
+          // `Signature.validate` would refuse this artifact (and `compose`, which runs it, the hygiene
+          // case); one at the capability gate would refuse the capability. Either is a ruling, not a fix.
+          testCase "hygiene — a declaration may repeat a hole name; only its addresses must be distinct (D281)"
+          <| fun _ ->
+              let art = twoSameName ()
+              let sg = Function.signature artw "two" art
+              Expect.equal (sg.Holes |> List.map _.Name) [ "x"; "x" ] "two holes share one name"
+              Expect.equal (sg.Holes |> List.map _.Addr |> List.distinct |> List.length) 2 "at two addresses"
+              Expect.equal (Function.validate artw art) (Ok()) "the artifact gate admits the repeated name"
+              let cap = Capability.create "two" sg Server (Returns.Value AnyString)
+
+              Expect.isOk
+                  (CapabilityRegistry.register cap CapabilityRegistry.empty<unit>)
+                  "the capability gate admits it, and its invocation is keyed by address"
+
           testCase "totality — a bounded repeat is total, an unbounded one is not"
           <| fun _ ->
               let bounded =
