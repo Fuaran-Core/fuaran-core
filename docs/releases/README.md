@@ -12,7 +12,17 @@ never here. A tag without a file, or a file that does not open with its own head
 slot is headed `released <date> as v<version>` and the untagged standing `<Version>` is headed
 `DRAFT`. This index is what `Directory.Build.props` points a downstream version check at (`<FuaranStabilityRecord>`).
 
-## 0.44.1 — DRAFT
+While a slot is the standing DRAFT its entries are files of their own beside its file,
+`<version>/<class>/<name>.md` (`<class>` one of `breaking`, `additive` or `internal`; `<name>` `phase-<n>` or
+`pr-<n>`), each holding its bullet exactly as it will print, so two changes in flight never edit one file. The act
+that closes the slot (the release commit, with `CORE_APPROVE_DOCS=ledger-index`, or `open-slot`'s advance) prints
+them into the slot's file, a section per class, and removes them (DECISIONS.md D274).
+
+## 0.45.0 — DRAFT
+
+[`0.45.0.md`](0.45.0.md)
+
+## 0.44.1 — released 2026-11-20 as `v0.44.1`
 
 [`0.44.1.md`](0.44.1.md)
 

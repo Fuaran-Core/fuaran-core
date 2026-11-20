@@ -35,7 +35,7 @@ type EffectCapture =
         Hash: string
     }
 
-/// A signed checkpoint over a chain head (Phase 320). `Head` is the hash being attested — a chain
+/// A signed checkpoint over a chain head (fuaran#320). `Head` is the hash being attested — a chain
 /// `Hash` at a commit / publish boundary. The hash-chain already attests the *whole prefix* (each
 /// `Hash` folds in its `PrevHash`), so signing the head is O(commits), not O(ops): one signature
 /// covers every op up to that point. `KeyId` names the signing key; `Signature` is the host's
@@ -52,7 +52,7 @@ type Attestation =
         Signature: string
     }
 
-/// The cryptographic-attestation seam (Phase 320), following the default-no-op portability-interface
+/// The cryptographic-attestation seam (fuaran#320), following the default-no-op portability-interface
 /// pattern (mirrors `IFuaranTelemetrySink` et al.). Core stays FSharp.Core-only + Fable-clean: the
 /// interface compiles under Fable, while the real KMS / HSM signing lives host-side behind it.
 /// `Sign` attests a chain head at a commit / publish boundary; `Verify` re-checks an attestation
@@ -892,7 +892,7 @@ module AttestationDescriptor =
                 else
                     None
 
-/// Attestation of a chain's head (Phase 320; the party-bound forms Phase 311; the public module since
+/// Attestation of a chain's head (fuaran#320; the party-bound forms Phase 311; the public module since
 /// Phase 516): sign the head through a host's `IAttestationSink`, and re-verify a signature against the
 /// head a chain has now. Every verb that reads a head reads it under the config the chain was written
 /// under, whose genesis is the head of an empty chain.
@@ -908,7 +908,7 @@ module Attestation =
             member _.Sign _ = None
             member _.Verify _ _ = false }
 
-    /// Attest the current head of a chain at a commit / publish boundary (Phase 320). Signs the head
+    /// Attest the current head of a chain at a commit / publish boundary (fuaran#320). Signs the head
     /// hash via `sink` — O(commits), not O(ops), since the hash-chain already binds every prior op
     /// into the head. `None` from the no-op sink. The signed `Attestation` plus deterministic replay
     /// is the replay-as-provenance contract: a verifier re-derives the head from the op log, then
@@ -916,7 +916,7 @@ module Attestation =
     let attestHead (sink: IAttestationSink) (cfg: StreamConfig) (records: OpRecord<'Op> list) : Attestation option =
         sink.Sign(OpStream.head cfg records)
 
-    /// Re-verify an attestation against a chain's *current* head (Phase 320). Independent
+    /// Re-verify an attestation against a chain's *current* head (fuaran#320). Independent
     /// re-verification: a third party recomputes the head from the records (`verifyChain` proves the
     /// chain is intact; `head` reads its tip) and checks the signature covers exactly that head.
     let verifyAttestation

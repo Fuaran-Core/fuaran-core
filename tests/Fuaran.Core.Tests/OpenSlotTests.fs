@@ -340,19 +340,20 @@ let tests =
                   | Error es -> Expect.exists es (fun s -> s.Contains "a DRAFT slot stands") "named")
 
           testCase
-              "one act advances a standing draft of a lower class: the draft's file is headed never released and keeps its entries"
+              "one act advances a standing draft of a lower class: the draft's file is headed never released and its entries are rendered into it"
           <| fun _ ->
               using None (fun f ->
-                  // an internal draft opened by the act, committed, and ridden by one entry
+                  // an internal draft opened by the act, committed, and ridden by one entry, a file of its own (D274)
                   openDraft f opening OpenSlot.Internal
                   let draftPath = Path.Combine(f.Core, Ledger.Dir, opening + ".md")
-
-                  let entry =
-                      "### Internal\n\n- **A ridden entry** (Phase 998) — class **internal**.\n"
-
-                  File.AppendAllText(draftPath, entry)
+                  let entryRel = sprintf "%s/%s/internal/phase-998.md" Ledger.Dir opening
+                  let entry = "- **A ridden entry** (Phase 998) — class **internal**.\n"
+                  write (Path.Combine(f.Core, entryRel)) entry
                   commitAll f.Core "an entry rides the draft"
-                  let draftBefore = File.ReadAllText draftPath
+
+                  // the draft as the ledger reads it: its file and its entries, as its close prints them
+                  let draftBefore =
+                      (fst (Ledger.read f.Core) |> List.find (fun s -> s.Version = opening)).Text
 
                   let plan =
                       match OpenSlot.plan (f.Request("0.10.0", OpenSlot.Breaking)) with
@@ -391,12 +392,24 @@ let tests =
                   let after = File.ReadAllText draftPath
                   let tail (t: string) = t.Substring(t.IndexOf "**Slot class:")
 
-                  Expect.equal (tail after) (tail draftBefore) "its slot paragraph and its entries are kept as written"
+                  Expect.equal
+                      (tail after)
+                      (tail draftBefore)
+                      "its slot paragraph is kept as written, and its entries are rendered into it"
+
+                  Expect.stringContains after ("### Internal\n\n" + entry) "the entry, under its class's section"
+                  Expect.isFalse (File.Exists(Path.Combine(f.Core, entryRel))) "and its file is gone"
+
+                  Expect.isFalse
+                      (Directory.Exists(Path.Combine(f.Core, Ledger.Dir, opening)))
+                      "with the draft's entry directory"
 
                   Expect.contains
                       outcome.CoreFiles
                       (Ledger.Dir + "/" + opening + ".md")
                       "the commit carries the re-heading"
+
+                  Expect.contains outcome.CoreFiles entryRel "and the entry file's removal"
 
                   // the new slot says what it advanced
                   let slotText =
@@ -813,27 +826,87 @@ let tests =
               Expect.stringContains (sentence "Phase 555") "Phase 555 opens it." "one phase opens"
               Expect.stringContains (sentence "Phases 474 and 549") "Phases 474 and 549 open it." "several phases open"
 
-          testCase "the draft carries the headings its class admits, empty, in the entry's reading order"
+          testCase "a new draft says how an entry is added, and carries no section heading: the close writes them"
           <| fun _ ->
               let draft (cls: OpenSlot.SlotClass) =
                   OpenSlot.slotText "0.10.0" "0.9.0" cls "Phase 555"
 
-              let sections (text: string) =
-                  text.Replace("\r\n", "\n").Split('\n')
-                  |> Array.filter (fun l -> l.StartsWith "### ")
-                  |> Array.toList
+              for cls in [ OpenSlot.Breaking; OpenSlot.Additive; OpenSlot.Internal ] do
+                  let text = draft cls
 
-              Expect.equal (sections (draft OpenSlot.Breaking)) [ "### Breaking"; "### Additive" ] "breaking: both"
-              Expect.equal (sections (draft OpenSlot.Additive)) [ "### Additive" ] "additive: one"
-              Expect.equal (sections (draft OpenSlot.Internal)) [] "internal: none"
+                  Expect.isTrue
+                      (text.EndsWith("\n\n" + String.concat "\n" (Ledger.entryParagraph "0.10.0") + "\n"))
+                      (sprintf
+                          "%s: the draft ends with the sentence saying how an entry is added"
+                          (OpenSlot.className cls))
 
-              // empty: nothing follows the last heading but its own spacing
-              Expect.isTrue
-                  ((draft OpenSlot.Breaking).EndsWith "### Breaking\n\n### Additive\n")
-                  "the sections hold no body"
+                  Expect.isFalse
+                      (text.Split('\n') |> Array.exists (fun l -> l.StartsWith "### "))
+                      (sprintf "%s: no section heading" (OpenSlot.className cls))
 
               // the draft stays a slot file the ledger reads
               Expect.equal
                   (Ledger.versionHeadings (draft OpenSlot.Breaking))
                   [ "0.10.0", "## 0.10.0 — DRAFT" ]
-                  "one DRAFT heading, no other slot's" ]
+                  "one DRAFT heading, no other slot's"
+
+          testCase
+              "go-red: an entry of a class that advances the draft names the slot it opens and where the entry goes"
+          <| fun _ ->
+              let root =
+                  Path.Combine(Path.GetTempPath(), "fuaran-core-702-" + Guid.NewGuid().ToString("N"))
+
+              try
+                  write
+                      (Path.Combine(root, Ledger.Dir, opening + ".md"))
+                      (OpenSlot.slotText opening released OpenSlot.Additive "Phase 555")
+
+                  for rel in [ "internal/phase-1.md"; "additive/phase-2.md"; "breaking/phase-3.md" ] do
+                      write
+                          (Path.Combine(root, Ledger.Dir, opening, rel))
+                          "- **A sample** (Phase 1, `A.fs`) — class **internal**.\n"
+
+                  let draft = fst (Ledger.read root) |> List.find (fun s -> s.Version = opening)
+
+                  match OpenSlot.entryClassFaults released draft with
+                  | [ only ] ->
+                      Expect.stringContains
+                          only
+                          "docs/releases/0.9.1/breaking/phase-3.md is a breaking entry, and a breaking member advances the 0.9.1 draft to `0.10.0`"
+                          "the breaking entry is red: it advances the additive draft"
+
+                      Expect.stringContains
+                          only
+                          "add it there, unchanged, as docs/releases/0.10.0/breaking/phase-3.md"
+                          "and the refusal names the file it moves to"
+                  | faults -> failtestf "one entry advances the draft, %d faults: %A" faults.Length faults
+              finally
+                  try
+                      Directory.Delete(root, true)
+                  with _ ->
+                      ()
+
+          // A guard over the live ledger: every entry of the standing draft rides it (D274). It cannot be red
+          // first, since no entry in this tree has ever sat in a class that advances its slot.
+          testCase "the standing draft holds no entry of a class that advances it"
+          <| fun _ ->
+              let root = Repo.root ()
+
+              match
+                  ChildProcess.Tags.released root |> Result.map ChildProcess.Tags.newest,
+                  OpenSlot.standingVersion (File.ReadAllText(Path.Combine(root, "Directory.Build.props")))
+              with
+              | Ok(Some newestTag), Ok standing ->
+                  match
+                      fst (Ledger.read root)
+                      |> List.tryFind (fun s -> s.Version = standing && s.State = Ledger.Draft)
+                  with
+                  | None -> ()
+                  | Some draft ->
+                      Expect.equal
+                          (OpenSlot.entryClassFaults (newestTag.Substring 1) draft)
+                          []
+                          "an entry whose class advances the draft does not ride it"
+              | Ok None, _ -> skiptest "no release tag in this tree's history: no draft rides one"
+              | Error why, _ -> skiptestf "the release tags could not be read: %s" why
+              | _, Error why -> failtest why ]

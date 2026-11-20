@@ -259,7 +259,7 @@ module internal WireForm =
         | WireForm.Unbound _ -> false
 
     /// **The sampler's depth floor, read off the lowering** — whether sampling a value of `t` AT the
-    /// floor can still reach a node (Phase 698; here since Phase 513, so the predicate and the draw
+    /// floor can still reach a node (fuaran#698; here since Phase 513, so the predicate and the draw
     /// switch on one form). At the floor [[Sample]] draws a list or map EMPTY, a union from its nullary
     /// cases when it has any, and an optional field absent; so a node, a bare kind and an op reach
     /// (none has a floor arm of its own), a record reaches through a required field that does, a union

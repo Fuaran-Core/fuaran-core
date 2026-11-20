@@ -15,6 +15,9 @@
 ///
 /// Tags are read through `ChildProcess.Tags.released` (`--merged HEAD`). A clone that cannot answer
 /// (no git, or no release tag at all, D168) skips the tag clauses by name; the shape clauses still run.
+/// A clone with no release tag whose record says nothing is released yet (every slot DRAFT), or that a
+/// first release is in progress (the one released slot is the standing version and carries
+/// `FirstReleaseMarker`), reads the record instead (`tagsToRead`), so a first release is gated before its tag.
 /// Every clause has a go-red over synthetic slots beside the live case, and the live ledger is planted
 /// with the two `0.35.2` failure shapes, so a reader that matched nothing could not pass for one that
 /// checks.
@@ -41,8 +44,21 @@ let private decisions (root: string) : Map<string, string> =
     | Ok m -> m
     | Error es -> failtestf "DECISIONS.md does not parse: %s" (String.concat "; " es)
 
+/// DECISIONS.md D275 (a): while the standing `<Version>`'s slot is not headed DRAFT (the release commit turns it
+/// `released`), the decision record carries no missing number. `missing` is `DecisionsTests.missing` of the record.
+let internal unrecordedAtRelease (standing: string option) (slots: Slot list) (missing: int list) : string list =
+    if slots |> List.exists (fun s -> Some s.Version = standing && s.State = Draft) then
+        []
+    else
+        [ for n in missing ->
+              sprintf
+                  "DECISIONS.md: D%d is missing and the standing slot %s is not the draft: record D%d `Never-minted`, or land the change that holds it, before the commit that closes the slot (DECISIONS.md D275)"
+                  n
+                  (defaultArg standing "(no <Version>)")
+                  n ]
+
 let private remedy =
-    "Remedy: follow the release sequence in STABILITY.md \"Versioning policy\" — corpus re-stamp, the receiving gate green against the packed candidate, a clean pack, then the record, the heading flip (the slot's ledger file, and the index re-rendered with CORE_APPROVE_DOCS=ledger-index) and the README stamps in ONE commit, which is the commit the tag names."
+    "Remedy: follow the release sequence in STABILITY.md \"Versioning policy\" — corpus re-stamp, the receiving gate green against the packed candidate, a clean pack, then the record, the heading flip (the slot's ledger file, and the index re-rendered with CORE_APPROVE_DOCS=ledger-index) and the README stamps in ONE commit, which is the commit the tag names. Tag it locally and run verify.ps1 on it, and push the commit and the tag together only when that run is green."
 
 let private failOn (what: string) (faults: string list) =
     match faults with
@@ -54,6 +70,70 @@ let private live () =
     let root = Repo.root ()
     let slots, strays = read root
     root, slots, strays, ChildProcess.Tags.released root
+
+// ---- a repository's first release (Phase 259's refinement, with a marker) --------------------------------
+
+/// The paragraph a first release's slot carries, written in the release commit beside its record. With no release
+/// tag anywhere, it is what tells a first release in progress from a clone that lost its tags.
+[<Literal>]
+let FirstReleaseMarker = "**First release.**"
+
+/// What a clone holding no release tag at all can still say about itself, read from the record alone.
+type internal Tagless =
+    /// Every slot is headed DRAFT: nothing has been released, so an empty tag set is the truth.
+    | NothingReleased
+    /// The one released slot is the standing `<Version>` and carries the marker: the release commit of a
+    /// repository's first release, before the tag it is about to receive.
+    | FirstRelease of version: string
+    /// The record names a release, and no tag is here: the clone is missing its tags (D168 skips it by name).
+    | RecordsRelease
+
+let internal taglessReading (standing: string option) (slots: Slot list) : Tagless =
+    let released =
+        slots
+        |> List.filter (fun s ->
+            match s.State with
+            | Released _ -> true
+            | _ -> false)
+
+    match released with
+    | [] when not slots.IsEmpty && slots |> List.forall (fun s -> s.State = Draft) -> NothingReleased
+    | [ s ] when
+        Some s.Version = standing
+        && s.Paragraphs
+           |> List.exists (fun p -> p.StartsWith(FirstReleaseMarker, StringComparison.Ordinal))
+        ->
+        FirstRelease s.Version
+    | _ -> RecordsRelease
+
+/// The tags a tag-reading clause reads, with the note it prints when the record stood in for them, or the reason it
+/// skips. A clone holding release tags reads them. A clone holding none reads the empty set while every slot is a
+/// draft, and the tag the release commit is about to receive while the record says a first release is in progress,
+/// so a first release meets a green gate BEFORE its tag; otherwise it skips by name, as D168 rules.
+let internal tagsToRead
+    (standing: string option)
+    (slots: Slot list)
+    (read: Result<Set<string>, string>)
+    : Result<Set<string> * string option, string> =
+    match read with
+    | Error why when why = ChildProcess.Tags.NoReleaseTag ->
+        match taglessReading standing slots with
+        | NothingReleased ->
+            Ok(Set.empty, Some "no release tag, and every slot is headed DRAFT: nothing is released yet")
+        | FirstRelease v ->
+            Ok(
+                Set.singleton ("v" + v),
+                Some(
+                    sprintf
+                        "no release tag, and %s's slot carries %s: read as the first release, tagged `v%s` by the commit under test"
+                        v
+                        FirstReleaseMarker
+                        v
+                )
+            )
+        | RecordsRelease -> Error why
+    | Error why -> Error why
+    | Ok tags -> Ok(tags, None)
 
 // ---- synthetic slots ------------------------------------------------------------------------
 
@@ -100,6 +180,66 @@ let private faultsOf tags standing slots =
 let private editing (v: string) (f: string -> string) =
     sample |> List.map (fun s -> if s.Version = v then slot v (f s.Text) else s)
 
+// ---- scratch ledgers (Phase 702, D274) ----------------------------------------------------------
+
+/// `git <arguments>` in `dir`: its exit code and what it wrote. The merge clause reads the code itself.
+let private gitIn (dir: string) (arguments: string list) : int * string =
+    match ChildProcess.argv "git" arguments |> ChildProcess.inDir dir |> ChildProcess.run with
+    | Ok o -> o.Exit, (o.Stdout + o.Stderr).Trim()
+    | Error why -> failtestf "git could not run: %s" why
+
+let private gitOk (dir: string) (arguments: string list) =
+    match gitIn dir arguments with
+    | 0, _ -> ()
+    | code, out -> failtestf "git %s exited %d: %s" (String.concat " " arguments) code out
+
+let private writeFile (path: string) (text: string) =
+    Directory.CreateDirectory(Path.GetDirectoryName path) |> ignore
+    File.WriteAllText(path, text)
+
+/// `body` over a fresh scratch directory, removed after (git's read-only object files cleared first).
+let private scratch (body: string -> unit) =
+    let root =
+        Path.Combine(Path.GetTempPath(), "fuaran-core-702-" + Guid.NewGuid().ToString("N"))
+
+    Directory.CreateDirectory root |> ignore
+
+    try
+        body root
+    finally
+        try
+            for p in Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories) do
+                File.SetAttributes(p, FileAttributes.Normal)
+
+            Directory.Delete(root, true)
+        with _ ->
+            ()
+
+/// The standing draft every scratch ledger opens with.
+let private scratchDraft =
+    "## 0.9.1 — DRAFT\n\n**Slot class: additive.** A scratch slot over the released `0.9.0`.\n"
+
+let private entryA =
+    "- **A first sample entry** (Phase 901, `A.fs`) — class **internal**: no `api/` row, wire byte or\n  refusal moves.\n"
+
+let private entryB =
+    "- **A second sample entry** (Phase 902, `B.fs`) — class **internal**: no `api/` row, wire byte or\n  refusal moves.\n"
+
+/// The entries a slot file's own text holds, each as an entry file holds it: a `- ` line and the wrapped lines
+/// after it (two spaces in), ending in one line break.
+let private bulletsOf (text: string) : string list =
+    let rec go (acc: string list) (lines: string list) =
+        match lines with
+        | [] -> List.rev acc
+        | l :: rest when l.StartsWith("- ", StringComparison.Ordinal) ->
+            let wrapped =
+                rest |> List.takeWhile (fun x -> x.StartsWith("  ", StringComparison.Ordinal))
+
+            go ((String.concat "\n" (l :: wrapped) + "\n") :: acc) (List.skip wrapped.Length rest)
+        | _ :: rest -> go acc rest
+
+    go [] (text.Replace("\r\n", "\n").Split('\n') |> Array.toList)
+
 [<Tests>]
 let tests =
     testList
@@ -117,8 +257,10 @@ let tests =
                   "the ledger holds at least one slot file — an empty read would make every clause vacuous"
 
               let tags =
-                  match tags with
-                  | Ok tags -> tags
+                  match tagsToRead (standing root) slots tags with
+                  | Ok(tags, note) ->
+                      note |> Option.iter (printfn "release-ledger tag clause: %s")
+                      tags
                   | Error why ->
                       // Without the tags the per-tag half has nothing to read; the shape still runs.
                       printfn "release-ledger tag clause SKIPPED: %s" why
@@ -131,6 +273,19 @@ let tests =
               let root, slots, _, _ = live ()
               let path = Path.Combine(root, IndexPath)
               Approval.validate Approval.Docs
+
+              // D274.3: the release gesture's switch also closes each slot the gesture closed, rendering its
+              // entries into its file and removing their files; the shape clause reds one it has not.
+              let slots =
+                  match slots |> List.filter (fun s -> s.State <> Draft && s.Text <> s.Own) with
+                  | closing when not closing.IsEmpty && Approval.admits Approval.Docs Approval.Files.LedgerIndex ->
+                      for s in closing do
+                          for p in closeSlot root s do
+                              printfn "%s: closed %s (%s)" Approval.Docs s.Version p
+
+                      fst (read root)
+                  | _ -> slots
+
               let current = File.ReadAllText(path).Replace("\r\n", "\n")
               let rendered = renderIndex current slots
 
@@ -147,32 +302,42 @@ let tests =
           test "every tag is headed released with its receiving-gate record, and every released heading has its tag" {
               let root, slots, _, tags = live ()
 
-              match tags with
+              match tagsToRead (standing root) slots tags with
               | Error why ->
                   printfn "Release-record check SKIPPED: %s" why
                   skiptestf "release-record check skipped — %s" why
-              | Ok tags ->
-                  Expect.isNonEmpty
-                      (tags
-                       |> Set.toList
-                       |> List.choose ChildProcess.Tags.version
-                       |> List.filter (fun v -> v >= recordFloor))
-                      "at least one tag in HEAD's history sits at or above the record floor — with none every clause below passes vacuously"
+              | Ok(tags, note) ->
+                  match note with
+                  | Some note -> printfn "Release-record check: %s" note
+                  | None ->
+                      Expect.isNonEmpty
+                          (tags
+                           |> Set.toList
+                           |> List.choose ChildProcess.Tags.version
+                           |> List.filter (fun v -> v >= recordFloor))
+                          "at least one tag in HEAD's history sits at or above the record floor — with none every clause below passes vacuously"
 
                   releaseFaults recordFloor (decisions root) tags (standing root) slots
                   |> failOn "release-record"
           }
 
           test "no 'no tag exists' sentence survives the tag it denies" {
-              let _, slots, _, tags = live ()
+              let root, slots, _, tags = live ()
 
-              match tags with
+              match tagsToRead (standing root) slots tags with
               | Error why ->
                   // Skipped by NAME with the reason printed, never passed silently: the source-archive
-                  // / no-git case, or a clone holding no release tag at all (D168).
+                  // / no-git case, or a clone holding no release tag whose record names a release (D168).
                   printfn "draft-slot tag check SKIPPED: %s" why
                   skiptestf "draft-slot tag check skipped — %s" why
-              | Ok tags ->
+              | Ok(tags, Some note) ->
+                  // The record stood in for the tags: nothing released, or a first release before its tag.
+                  printfn "draft-slot tag check: %s" note
+
+                  Expect.isEmpty
+                      (staleDraftSentences tags slots)
+                      "a first release's slot retires its 'no tag exists' sentence in the release commit"
+              | Ok(tags, None) ->
                   // A clone holding release tags of which HEAD descends from none FAILS here rather
                   // than skipping: with no tag the comparison below passes vacuously.
                   Expect.isNonEmpty (Set.toList tags) "HEAD's history holds at least one `vX.Y.Z` release tag"
@@ -548,4 +713,355 @@ let tests =
                   (renderIndex "# Ledger\n\nPreamble.\n" slots)
                   index
                   "an index with no entries renders them under its preamble"
+          }
+
+          // Phase 702 (D274): the measurement it starts from, as a test. Two changes cut from one commit
+          // each add one entry, the one way an entry is added; git must merge them in either order.
+          test "two changes that each add an entry merge clean in either order, and the merged ledger reads both" {
+              scratch (fun root ->
+                  gitOk root [ "init"; "-q"; "-b"; "main" ]
+
+                  for k, v in
+                      [ "user.name", "ledger test"
+                        "user.email", "ledger@example.invalid"
+                        "commit.gpgsign", "false"
+                        "core.autocrlf", "false" ] do
+                      gitOk root [ "config"; k; v ]
+
+                  writeFile (Path.Combine(root, Dir, "0.9.1.md")) scratchDraft
+                  gitOk root [ "add"; "-A" ]
+                  gitOk root [ "commit"; "-q"; "-m"; "the draft" ]
+
+                  for branch, name, entry in [ "a", "phase-901", entryA; "b", "phase-902", entryB ] do
+                      gitOk root [ "checkout"; "-q"; "-b"; branch; "main" ]
+                      addEntry root "0.9.1" "internal" name entry |> ignore
+                      gitOk root [ "add"; "-A" ]
+                      gitOk root [ "commit"; "-q"; "-m"; "an entry" ]
+
+                  for ours, theirs in [ "a", "b"; "b", "a" ] do
+                      gitOk root [ "checkout"; "-q"; ours ]
+
+                      match gitIn root [ "merge"; "--no-edit"; theirs ] with
+                      | 0, _ ->
+                          let draft = fst (read root) |> List.find (fun s -> s.Version = "0.9.1")
+
+                          Expect.stringContains
+                              draft.Text
+                              entryA
+                              (sprintf "on %s, the merged ledger reads entry A" ours)
+
+                          Expect.stringContains
+                              draft.Text
+                              entryB
+                              (sprintf "on %s, the merged ledger reads entry B" ours)
+
+                          gitOk root [ "reset"; "-q"; "--hard"; "ORIG_HEAD" ]
+                      | code, out ->
+                          gitIn root [ "merge"; "--abort" ] |> ignore
+                          failtestf "on %s, `git merge %s` exited %d:\n%s" ours theirs code out)
+          }
+
+          test
+              "go-red: an entry or a section heading in the standing draft's own file names the file the entry moves to" {
+              scratch (fun root ->
+                  writeFile (Path.Combine(root, Dir, "0.9.1.md")) (scratchDraft + "\n### Internal\n\n" + entryA)
+                  let slots, strays = read root
+                  let faults = shapeFaults Set.empty (Some "0.9.1") slots strays
+
+                  Expect.exists
+                      faults
+                      (fun f ->
+                          f.Contains "docs/releases/0.9.1.md:7 carries an entry"
+                          && f.Contains "docs/releases/0.9.1/internal/phase-901.md"
+                          && f.Contains "unchanged")
+                      "the bullet is red, naming the file to create and that the bullet goes there unchanged"
+
+                  Expect.exists
+                      faults
+                      (fun f -> f.Contains "docs/releases/0.9.1.md:5 carries a section heading, '### Internal'")
+                      "the section heading is red: the close writes the sections")
+          }
+
+          test "go-red: an entry beside a closed slot names the standing draft's file it moves to" {
+              scratch (fun root ->
+                  writeFile
+                      (Path.Combine(root, Dir, "0.9.0.md"))
+                      "## 0.9.0 — released 2026-01-01 as `v0.9.0`\n\nA release.\n"
+
+                  writeFile (Path.Combine(root, Dir, "0.9.0", "internal", "phase-902.md")) entryB
+                  writeFile (Path.Combine(root, Dir, "0.9.1.md")) scratchDraft
+                  let slots, strays = read root
+
+                  Expect.exists
+                      (shapeFaults (set [ "v0.9.0" ]) (Some "0.9.1") slots strays)
+                      (fun f ->
+                          f.Contains "docs/releases/0.9.0/internal/phase-902.md is an entry of 0.9.0, which is closed"
+                          && f.Contains "CORE_APPROVE_DOCS=ledger-index"
+                          && f.Contains "move it, unchanged, to docs/releases/0.9.1/internal/phase-902.md")
+                      "the entry is red, naming both remedies")
+          }
+
+          test "go-red: an entry directory holds only the three class directories and non-empty .md files" {
+              scratch (fun root ->
+                  writeFile (Path.Combine(root, Dir, "0.9.1.md")) scratchDraft
+                  writeFile (Path.Combine(root, Dir, "0.9.1", "internal", "phase-901.md")) entryA
+
+                  for rel, text in
+                      [ "0.9.1/notes.txt", "x"
+                        "0.9.1/fixes/phase-1.md", entryB
+                        "0.9.1/internal/phase-2.txt", entryB
+                        "0.9.1/internal/phase-3.md", "  \n"
+                        "0.9.7/internal/phase-4.md", entryB ] do
+                      writeFile (Path.Combine(root, Dir, rel)) text
+
+                  let slots, strays = read root
+                  let faults = shapeFaults Set.empty (Some "0.9.1") slots strays
+
+                  for named in
+                      [ "docs/releases/0.9.1/notes.txt is not an entry"
+                        "docs/releases/0.9.1/fixes/ is not an entry"
+                        "docs/releases/0.9.1/internal/phase-2.txt is not an entry"
+                        "docs/releases/0.9.1/internal/phase-3.md is not an entry"
+                        "docs/releases/0.9.7/ is an entry directory beside no slot file" ] do
+                      Expect.exists faults (fun f -> f.Contains named) (sprintf "red: %s" named)
+
+                  Expect.isFalse
+                      (faults |> List.exists (fun f -> f.Contains "phase-901.md"))
+                      "and the well-formed entry is not")
+          }
+
+          test
+              "a draft renders to the bytes its close writes: a section per class, each class's entries in their names' order" {
+              scratch (fun root ->
+                  let paragraph = String.concat "\n" (entryParagraph "0.9.1")
+                  writeFile (Path.Combine(root, Dir, "0.9.1.md")) (scratchDraft + "\n" + paragraph + "\n")
+
+                  for rel, text in
+                      [ "breaking/phase-12.md", "- **A breaking sample** (Phase 12, `C.fs`) — class **breaking**.\n"
+                        "additive/pr-3.md",
+                        "- **A contributed sample** (pull request 3, `E.fs`) — class **additive**.\n"
+                        "additive/phase-7.md", "- **An additive sample** (Phase 7, `D.fs`) — class **additive**.\n"
+                        "internal/phase-10.md",
+                        "- **A later internal sample** (Phase 10, `G.fs`) — class **internal**.\n"
+                        "internal/phase-5-tests.md",
+                        "- **Its second entry** (Phase 5, `F.fs`) — class **internal**: the tests,\n  on two lines.\n"
+                        "internal/phase-5.md", "- **An internal sample** (Phase 5, `F.fs`) — class **internal**.\n" ] do
+                      writeFile (Path.Combine(root, Dir, "0.9.1", rel)) text
+
+                  let expected =
+                      String.concat
+                          "\n"
+                          [ "## 0.9.1 — DRAFT"
+                            ""
+                            "**Slot class: additive.** A scratch slot over the released `0.9.0`."
+                            ""
+                            "### Breaking"
+                            ""
+                            "- **A breaking sample** (Phase 12, `C.fs`) — class **breaking**."
+                            ""
+                            "### Additive"
+                            ""
+                            "- **An additive sample** (Phase 7, `D.fs`) — class **additive**."
+                            "- **A contributed sample** (pull request 3, `E.fs`) — class **additive**."
+                            ""
+                            "### Internal"
+                            ""
+                            "- **An internal sample** (Phase 5, `F.fs`) — class **internal**."
+                            "- **Its second entry** (Phase 5, `F.fs`) — class **internal**: the tests,"
+                            "  on two lines."
+                            "- **A later internal sample** (Phase 10, `G.fs`) — class **internal**."
+                            "" ]
+
+                  let before = fst (read root) |> List.find (fun s -> s.Version = "0.9.1")
+                  Expect.equal before.Text expected "the ledger reads the draft as its close will print it"
+
+                  closeSlot root before |> ignore
+                  let closed = File.ReadAllText(Path.Combine(root, Dir, "0.9.1.md"))
+                  Expect.equal closed expected "the close writes those bytes into the slot's file"
+                  Expect.equal closed before.Text "the draft read before the close is the closed file after it"
+
+                  Expect.isFalse (Directory.Exists(Path.Combine(root, Dir, "0.9.1"))) "and the entry directory is gone")
+          }
+          // Phase 702 (D274): the open slot's entries moved into their own files, word for word, by two commits, each
+          // made on the commit named here: the first moved the twelve entries the slot held, the second the three a
+          // merge of main brought in the old shape (Phase 703's among them, as main had come to word it, replacing the
+          // text the first move had taken). A guard written after the moves, so it cannot be red first; it holds each
+          // move against the tree it was made from (a phase moved twice by the later move) for as long as the slot
+          // stands, and its entries' words once the slot closes.
+          test "the 0.44.1 slot's entries moved into their own files word for word" {
+              let root = Repo.root ()
+
+              let movedFrom =
+                  [ "50bc140e9a02a7d9cd8145e8948e7a01b9232d7f"
+                    "223e4813b808080b420120ed0d56c486a41398e8" ]
+
+              let phaseOf (b: string) =
+                  Regex.Match(b, @"\(Phases? (\d+)").Groups[1].Value
+
+              let befores =
+                  movedFrom
+                  |> List.map (fun sha -> sha, ChildProcess.git root (sprintf "show %s:%s/0.44.1.md" sha Dir))
+
+              match
+                  befores
+                  |> List.tryPick (fun (sha, r) ->
+                      match r with
+                      | Error why -> Some(sha, why)
+                      | Ok _ -> None)
+              with
+              | Some(sha, why) -> skiptestf "the commit %s a move was made on is not in this clone: %s" sha why
+              | None ->
+                  // each phase's entry as the last move took it
+                  let bullets =
+                      befores
+                      |> List.collect (fun (_, r) ->
+                          match r with
+                          | Ok before -> bulletsOf before
+                          | Error _ -> [])
+                      |> List.fold (fun (m: Map<string, string>) b -> m.Add(phaseOf b, b)) Map.empty
+
+                  Expect.equal bullets.Count 14 "the two moves took fourteen phases' entries, Phase 703's twice"
+                  let slot = fst (read root) |> List.find (fun s -> s.Version = "0.44.1")
+
+                  for KeyValue(phase, b) in bullets do
+                      Expect.stringContains slot.Text b "the slot reads every moved entry, word for word"
+
+                      if slot.State = Draft then
+                          match slot.Entries |> List.filter (fun e -> e.Text = b) with
+                          | [ e ] ->
+                              Expect.equal e.Name ("phase-" + phase) (sprintf "%s holds the bullet it came from" e.Path)
+                          | es -> failtestf "%d entry files hold the bullet '%s'" es.Length (b.Substring(0, 60))
+          }
+
+          test "the decision record carries no missing number once the standing slot is not the draft (D275)" {
+              let root, slots, _, _ = live ()
+
+              let entries =
+                  match
+                      DecisionsTests.parse (File.ReadAllText(Path.Combine(root, "DECISIONS.md")).Replace("\r\n", "\n"))
+                  with
+                  | Ok es -> es
+                  | Error es -> failtestf "DECISIONS.md does not parse: %s" (String.concat "; " es)
+
+              unrecordedAtRelease (standing root) slots (DecisionsTests.missing entries)
+              |> failOn "decision-record"
+          }
+
+          test "go-red: a slot turned released refuses each missing decision number, by number, with its remedy" {
+              let draft = slot "0.9.1" "## 0.9.1 — DRAFT\nDraft entries."
+              let released = slot "0.9.1" "## 0.9.1 — released 2026-11-19 as `v0.9.1`\nReleased."
+              Expect.equal draft.State Draft "the scratch draft reads as the draft"
+              Expect.isEmpty (unrecordedAtRelease (Some "0.9.1") [ draft ] [ 5; 7 ]) "the draft admits them"
+              let faults = unrecordedAtRelease (Some "0.9.1") [ released ] [ 5; 7 ]
+              Expect.hasLength faults 2 "one refusal per missing number"
+
+              for n in [ 5; 7 ] do
+                  Expect.exists
+                      faults
+                      (fun f ->
+                          f.Contains(sprintf "D%d is missing and the standing slot 0.9.1 is not the draft" n)
+                          && f.Contains(sprintf "record D%d `Never-minted`, or land the change that holds it" n))
+                      (sprintf "D%d is named with its remedy" n)
+
+              Expect.isEmpty (unrecordedAtRelease (Some "0.9.1") [ released ] []) "a whole record passes"
+
+              Expect.isNonEmpty
+                  (unrecordedAtRelease (Some "0.9.2") [ draft ] [ 5 ])
+                  "a standing version with no slot of its own is not the draft"
+          }
+
+          // ---- a repository's first release ----------------------------------------------------
+
+          test "go-red: a tagless clone whose every slot is a draft reads no tag, with a note, and is green" {
+              let drafts = [ slot "0.1.0" "## 0.1.0 — DRAFT\n\nThe first slot." ]
+              let noTag = Error ChildProcess.Tags.NoReleaseTag
+
+              match tagsToRead (Some "0.1.0") drafts noTag with
+              | Ok(tags, Some note) ->
+                  Expect.isEmpty tags "nothing is released, so the clauses read the empty tag set"
+                  Expect.stringContains note "every slot is headed DRAFT" "the note says why the tags were not needed"
+                  Expect.isEmpty (faultsOf tags (Some "0.1.0") drafts) "the release-record clauses are green"
+                  Expect.isEmpty (shapeFaults tags (Some "0.1.0") drafts []) "and the shape clauses"
+              | other -> failtestf "a draft-only tagless clone read as %A, not as nothing released" other
+
+              Expect.equal
+                  (tagsToRead (Some "0.1.0") drafts (Error "git: not a repository"))
+                  (Error "git: not a repository")
+                  "a clone that cannot be read at all still skips by its own reason"
+          }
+
+          test "go-red: a first release's commit, marked, is green before its tag; unmarked it is not" {
+              let record =
+                  String.concat
+                      "\n"
+                      [ "**Release record — the receiving gate: GREEN.** Prose about the run."
+                        ""
+                        "**Receiving gate run:** `fuaran-dotnet` at `606f76e`, `core-fable.ps1"
+                        "-CoreVersion 0.36.0 -CoreFeed <folder>`; compile leg 16 packages green; value leg 419/419 vectors"
+                        "byte-identical." ]
+
+              let heading = "## 0.36.0 — released 2026-11-20 as `v0.36.0`\n\n"
+
+              let markedText =
+                  heading + FirstReleaseMarker + " Nothing was tagged before it.\n\n" + record
+
+              let marked = [ slot "0.36.0" markedText ]
+              let unmarked = [ slot "0.36.0" (heading + record) ]
+              let noTag = Error ChildProcess.Tags.NoReleaseTag
+
+              match tagsToRead (Some "0.36.0") marked noTag with
+              | Ok(tags, Some note) ->
+                  Expect.equal tags (set [ "v0.36.0" ]) "the clauses read the tag the release commit receives"
+                  Expect.stringContains note "first release" "the note names the first release"
+                  Expect.isEmpty (faultsOf tags (Some "0.36.0") marked) "the record is held, and green"
+                  Expect.isEmpty (shapeFaults tags (Some "0.36.0") marked []) "and the shape"
+              | other -> failtestf "a marked first release read as %A" other
+
+              Expect.exists
+                  (faultsOf
+                      (set [ "v0.36.0" ])
+                      (Some "0.36.0")
+                      [ slot "0.36.0" (markedText.Replace("value leg 419/419", "value leg 418/419")) ])
+                  (fun f -> f.Contains "not green on both legs")
+                  "the record it reads is checked, not waved through: a short value leg is red"
+
+              Expect.equal
+                  (tagsToRead (Some "0.36.0") unmarked noTag)
+                  noTag
+                  "without the marker the turned heading reads as a release with its tags missing: skipped by name (D168)"
+
+              Expect.exists
+                  (faultsOf Set.empty (Some "0.36.0") unmarked)
+                  (fun f -> f.Contains "heads 0.36.0 released, and no `v0.36.0` tag")
+                  "which is what reading no tag would have said of it"
+          }
+
+          test "go-red: a tagless clone whose record names an earlier release skips by name (D168)" {
+              let noTag = Error ChildProcess.Tags.NoReleaseTag
+
+              let earlier =
+                  [ slot "0.37.0" "## 0.37.0 — DRAFT\n\nThe next slot."
+                    slot
+                        "0.36.0"
+                        ("## 0.36.0 — released 2026-11-20 as `v0.36.0`\n\n"
+                         + FirstReleaseMarker
+                         + " Once.") ]
+
+              Expect.equal
+                  (tagsToRead (Some "0.37.0") earlier noTag)
+                  noTag
+                  "a released slot the standing version has moved past means the tags are missing, marker or not"
+
+              Expect.equal
+                  (tagsToRead
+                      (Some "0.36.0")
+                      [ earlier[1]; slot "0.35.0" "## 0.35.0 — released 2026-11-01 as `v0.35.0`" ]
+                      noTag)
+                  noTag
+                  "a marked slot beside another released one is not a first release"
+
+              Expect.equal
+                  (tagsToRead (Some "0.37.0") earlier (Ok(set [ "v0.36.0" ])))
+                  (Ok(set [ "v0.36.0" ], None))
+                  "a clone holding its tags reads them, with no note"
           } ]

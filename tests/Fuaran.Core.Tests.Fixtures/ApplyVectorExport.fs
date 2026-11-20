@@ -97,8 +97,8 @@ module SpineAdoption =
     let private rs693 =
         AdoptionSource.Host("0.44.0", "f70a2a2765e83615b766a5fbc1467fc354364675")
 
-    /// The Rust spine (`Fuaran-Core/fuaran-core-rs`). A family whose leg did not change keeps the
-    /// measurement that stands.
+    /// The Rust spine (`Fuaran-Core/fuaran-core-rs`). A family whose vectors and whose answers did not
+    /// change keeps the measurement that stands, over a pin move or a change in how a leg reports (D273).
     let internal rust =
         { Host = "fuaran-core-rs"
           Measured =

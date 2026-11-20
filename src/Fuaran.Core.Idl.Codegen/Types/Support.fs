@@ -8,7 +8,7 @@ open Fuaran.Core.Idl
 // last, and every emitter read a field-for-field mirror of them (`Core.Projection`,
 // `Core.Support`, `FSharpDerive.Request`) through three converters; the mirrors are gone.
 
-/// Phase 945 — a per-kind HOST PROJECTION: the F# record, encoder and decoder for one
+/// fuaran#945 — a per-kind HOST PROJECTION: the F# record, encoder and decoder for one
 /// node kind are supplied verbatim instead of being derived from the kind's IDL fields.
 /// The IDL fields REMAIN the wire truth (the artifact, the schema and the diff still
 /// read them); the projection changes only what the generated F# looks like — the
@@ -48,7 +48,7 @@ type KindProjection =
         RecordFields: IdlField list option
     }
 
-/// Phase 689 (DECISIONS.md D272) — a PER-KIND TABLE: one fact the vocabulary declares about every node kind,
+/// Phase 689 (DECISIONS.md D278) — a PER-KIND TABLE: one fact the vocabulary declares about every node kind,
 /// one row per kind, keyed by the kind's tag. The case is the column's value type, a closed set of data forms
 /// and never an expression, so a row of the wrong type cannot be written. Rows keep their authored order, so a
 /// duplicate row survives to the generation that refuses it. `Derivation.KindTable` emits a table as a total
@@ -68,7 +68,7 @@ type KindTable =
     /// must emit.
     | Enum of enumName: string * rows: (string * string) list
 
-/// Phase 945 — the declared-support channel for `fsharpModuleWith`: doc comments,
+/// fuaran#945 — the declared-support channel for `fsharpModuleWith`: doc comments,
 /// verbatim splices and host projections that were previously HAND-EDITS to the
 /// generated artefact (the "hand-added ahead of the IDL backfill" regions). Everything
 /// here is versioned data beside the IDL, so the emission is reproducible and the

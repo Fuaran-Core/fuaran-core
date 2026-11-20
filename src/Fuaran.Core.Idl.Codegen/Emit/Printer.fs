@@ -110,7 +110,7 @@ module internal SlotTraversal =
         | TClosure -> Ok p.Closure
         | TFn s -> Ok(p.Fn s)
         | TOpaque -> Ok p.Opaque
-        // Phase 676 — verbatim passthrough.
+        // fuaran#676 — verbatim passthrough.
         | TJson -> Ok p.Json
         | THosted h ->
             match p.Hosted h with
@@ -383,7 +383,7 @@ type internal MemberEncPrinter =
 
 /// The one traversal over a member's presence when it is WRITTEN, printed by a [[MemberEncPrinter]]
 /// (Phase 511's presence rule: Required → always; Optional → omitted when absent; HostOnly → never
-/// on the wire, in any state (Phase 691); OmitDefault → omitted at its default).
+/// on the wire, in any state (fuaran#691); OmitDefault → omitted at its default).
 module internal MemberEncTraversal =
 
     /// A piece as it reads in a list where some members may be absent.
@@ -677,7 +677,7 @@ type internal ValueWalk =
         Value: IdlType -> IdlValue -> Result<string, CodegenError>
     }
 
-/// What a backend prints for an AUTHORED value in source (the scaffold leg, Phase 252/317): a value
+/// What a backend prints for an AUTHORED value in source (the scaffold leg, Phase 252 and fuaran#317): a value
 /// of the generated types, built under every presence rule its declaration states.
 type internal ValuePrinter =
     {
@@ -743,7 +743,7 @@ module internal ValueTraversal =
                 | Some r ->
                     members p idl ("record '" + name + "'") Map.empty r.Fields fields
                     |> Result.map (p.Record r)
-            // Phase 698 — the enveloped form. The envelope's members and the kind's go through the
+            // fuaran#698 — the enveloped form. The envelope's members and the kind's go through the
             // SAME presence rule, so the two halves of a node cannot drift.
             | TNode, VNode(id, kindTag, fields) -> node p idl id [] kindTag fields
             | TNode, VNodeEnv(id, envelope, kindTag, fields) -> node p idl id envelope kindTag fields

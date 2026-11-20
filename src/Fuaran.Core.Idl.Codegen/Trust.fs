@@ -2,7 +2,7 @@ namespace Fuaran.Core.Idl
 
 open System
 
-/// The codegen trust boundary over the `IdlValue` tree (Phase 321 task 2 + the
+/// The codegen trust boundary over the `IdlValue` tree (fuaran#321 task 2 + the
 /// task-3 wiring): gate every node of the vocabulary's GATED kind against an
 /// allowlist + content-hash, and run `Sanitize.*` over declared URL / markdown
 /// fields, producing a hardened value that is inert-by-construction when scaffolded
@@ -195,7 +195,7 @@ module Trust =
                     go sanitised
 
                 VNode(id, kindTag, fields |> List.map (fun (n, fv) -> n, hardenField n fv))
-            // Phase 698 — an enveloped node hardens as its bare form does, plus its
+            // fuaran#698 — an enveloped node hardens as its bare form does, plus its
             // envelope values. It DELEGATES to the arms above rather than repeating
             // them: a second copy of the gate here is exactly how an enveloped node of
             // the gated kind would quietly stop being gated. When the gate replaces the
@@ -369,7 +369,7 @@ module Trust =
     /// leaves a needed [[HardenPolicy]] member undeclared, then gate every node of the
     /// vocabulary's GATED kind to inert-by-default and sanitise every declared URL /
     /// markdown field, recursively over the whole tree. The result scaffolds / encodes
-    /// to inert-by-construction, sanitised output (Phase 321 tasks 2 + 3).
+    /// to inert-by-construction, sanitised output (fuaran#321 tasks 2 + 3).
     ///
     /// Takes the vocabulary because the tokens it addresses by name — which kind is
     /// gated, what the placeholder is made of, which case carries a literal — are the
@@ -396,7 +396,7 @@ module Trust =
 
     /// Harden then scaffold an authored node to F# source (the codegen boundary
     /// end to end): the emitted source constructs an inert-by-construction,
-    /// sanitised tree, prefixed with the Phase 321 provenance stamp. `wireHash` /
+    /// sanitised tree, prefixed with the fuaran#321 provenance stamp. `wireHash` /
     /// `actor` feed the stamp.
     let scaffoldFSharp
         (policy: Policy)

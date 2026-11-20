@@ -9,7 +9,7 @@ written by `render proofs-readme` and held by the `Proofs.Ladder` family (Phase 
 by hand either: the line below is generated from the ladder.
 
 <!-- ladder-summary:begin — rendered from ../proofs.json by `render proofs-readme`; held by the Proofs.Ladder family -->
-**The ladder, counted:** 435 claims — 321 proved (320 across 40 models, 1 a host's own proof), 68 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`), 2 policy.
+**The ladder, counted:** 435 claims — 321 proved (320 across 40 models, 1 a host's own proof), 68 tested, 44 assumed (8 `domain-obligation`, 25 `model-bridge`, 6 `premise`, 5 `host-premise`, 0 `witness-obligation`), 2 policy.
 <!-- ladder-summary:end -->
 
 **No schedule is kept for the `model-bridge` rows (Phase 400; Phase 537).** A bridge is `permanent` or
@@ -48,8 +48,9 @@ closed, because a ladder that can grow a level can hide a demotion; `kit/LADDER.
 2. **Tested** — sampled agreement: an extracted model run beside production by `Proofs.Oracle`, or a law
    family over generated inputs. Agreement is over the pools drawn, never over all inputs.
 3. **Assumed** — stated, and classed in the contract table below: a `domain-obligation` a domain discharges,
-   a `model-bridge` between a model and the code, a `premise` nothing discharges, or a `host-premise` each
-   host discharges on its own runtime by reproducing a probe.
+   a `model-bridge` between a model and the code, a `premise` nothing discharges, a `host-premise` each
+   host discharges on its own runtime by reproducing a probe, or a `witness-obligation` a domain's witness
+   discharges by its own tests.
 4. **Policy** — a documented choice, which no theorem addresses.
 
 "Formally verified" is spent on level 1 alone. A row says what it claims in `statement` and what it does not
@@ -67,7 +68,7 @@ Every ladder in this directory ends at level 3 — **assumed, and stated as such
 Phase 174 that was the whole of what such a row said. For a domain instantiating this substrate it
 is not enough, because the 44 assumed rows across these ladders are four different kinds of thing
 and a domain can act on exactly one of them. `../proofs.json` therefore carries a **`class`** on
-every `assumed` row, from a closed set of four, and this section is that classification in one
+every `assumed` row, from a closed set of five, and this section is that classification in one
 place together with the contract it implies.
 
 - **`domain-obligation` — what YOU owe, and what a green kit run discharges.** The hypotheses
@@ -94,10 +95,19 @@ place together with the contract it implies.
   a host discharges the premise on its own runtime by reproducing every vector of it — sampled, as
   every level-3 discharge is. A domain discharges none of them. `../docs/host-premises.md` states
   each in plain language, with what a Rust, Go or Python host does to answer it. 5 rows.
+- **`witness-obligation` — what every implementation of a domain's own WITNESS must answer, and
+  what that witness's own tests discharge.** A property a theorem takes as a hypothesis about a
+  witness member, where the member is the domain's and no law of the shipped kit can reach it: an
+  op's declared inverse that undoes it, a substitution that preserves a view's shape. Each row names
+  a **`dischargedBy`** in the `<Witness>.<member>` form, the member whose tests discharge it, and its
+  `evidence.assumption` says what that member answers. A row a conformance law discharges is a
+  `domain-obligation` instead. This repository's ladder holds none: the class is for a domain's own
+  ladder. 0 rows.
 
 **The contract line, stated once:** a domain running the conformance kit discharges the first class
-and **can never discharge the other three**; a host porting this kernel discharges the fourth, each
-row by its probe, and only for itself. A green kit run is evidence about your witness and about
+and **can never discharge the next three**; a host porting this kernel discharges the fourth, each
+row by its probe, and only for itself; and a domain discharges the fifth by its own witness's tests,
+never by a kit run. A green kit run is evidence about your witness and about
 nothing else in this table — which is what makes it worth having, and what a reader must not
 over-read.
 
@@ -297,7 +307,7 @@ is no concrete computation here for a theorem to be about); and `Fuaran.Core.Pro
 (**`law-tested-by-design`** — real computation, theorem declined in favour of a named `Conformance`
 family, which the entry cites and the gate holds to the shipped roster). Each entry's own prose is
 in `coverage-exclusions.json`; it is the decision, and the token is only its kind. There were nine
-until Phase 154: `Fuaran.Core.DataFrame`'s entry retired the day `Pipeline.fst` gave the package a
+until Phase 154: the dataframe package's entry retired the day `Pipeline.fst` gave the package a
 model, because clause 1's second direction fails an exclusion for a package that has since gained
 one — and what that entry declined (the verbs' semantics, left to `incrementalLaws` and its
 siblings) is still declined for the twelve verbs that evaluate no expression, as the model's own
@@ -306,8 +316,8 @@ expression evaluator under them, clauses; the cell primitives are the `pipeline-
 row). The file keeps the retirement under `$retired` so the next reader finds the decision where the
 entry was. Phase 258 then moved the package itself, with both compute models and their rows, to
 [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute) (DECISIONS.md D66), and with it the two
-exclusions Phase 257 had filed for `Fuaran.Core.DataFrame.CSharp` and
-`Fuaran.Core.DataFrame.Conformance`: the eight left were this repository's whole list again. Phase 231
+exclusions Phase 257 had filed for the dataframe facade and the dataframe conformance
+package: the eight left were this repository's whole list again. Phase 231
 then removed `Fuaran.Core.CSharp`, the other `facade` entry, with the package itself (DECISIONS.md D28),
 which left seven. Phase 306 retired `Fuaran.Core.Column`'s — the entry said an operator who wanted the
 codec proved would delete it, and `WireColumn.fst` is that theorem ([`WireColumn`](#wirecolumn) below) — which leaves the six
@@ -564,6 +574,47 @@ for (a dispatch, a tag pushed ahead of its commit) cannot have — and it makes 
 token permission and on a job's display name. A job in the publish run is about the exact commit
 being packed and is red or green in the same run that would pack it. The cost is one more proof run
 per release, which a release can afford.
+
+### Bumping the pin
+
+F\* releases about weekly, and a prover moving under the leg can change what "the proof checks" means without a
+line of any model changing (the release Phase 131 pinned had already removed proof hints). So the pin moves the
+way a package pin does: deliberately, in one commit, with the proof leg as its gate. `check.ps1` prints the newest
+upstream release beside the pinned one on every run that can reach GitHub, so a stale pin is seen before a fix
+needs the newer prover; that line is informational and never changes the verdict.
+
+There are two pins, one per leg, each read by the kit engine: `fstar-pin.json` is the present leg, the one
+`check.ps1` runs, and `kit/fstar-pin-custard.json` (`leg: custard`) is the kit's newer leg, which this repository
+exercises only through the leg's own tests. Both carry `fstar` (the release tag), `z3` (the Z3 the release
+bundles, which the engine checks) and one entry per operating system, `windows` and `linux`, each naming that
+release's `asset`, its upstream `url` and the `sha256` GitHub publishes for it; the present pin's entries also
+carry the `mirror` described above. To move the present pin:
+
+1. Before anything lands, download each new asset from upstream, check it against the published digest, and
+   attach it to a new `prover-fstar-<release>` mirror release (`kit/README.md`, "The pin's mirror", has the
+   commands).
+2. Edit `fstar-pin.json`: `fstar`, `z3`, and every entry's `asset`, `url`, `mirror` and `sha256`. An entry left
+   on the old release is refused on its operating system by name.
+3. Remove the installed prover, `proofs/.fstar/` (or point `FSTAR_HOME` at the new release). The present leg
+   installs into `proofs/.fstar/fstar/` and uses whatever is there; an old release found there is refused by its
+   version, not replaced. The next run downloads the new archive and refuses one whose hash is not the pin's.
+4. `pwsh ./proofs/check.ps1 -Runs 3`: every module, cold, three times, then the extraction diff, the host and the
+   leg's own refusals. A module over its budget on the new prover is a finding ("Bumping a budget", below); a
+   module the new prover refutes is a red leg, and the bump waits for it.
+5. If the only red is oracle drift, the new backend extracts differently: `pwsh ./proofs/check.ps1 -Extract`
+   rewrites `oracle/*.fs`, then run `-Runs 3` again to green. Run `pwsh ./proofs/kit/extraction-post-pass.tests.ps1`
+   as well, which answers whether the post-pass is still needed on the new release.
+6. `fstar-pin.json` is in the kit's release asset, so rebuild its sha: `pwsh ./proofs/kit/build-kit-asset.ps1
+   -Update`, which rewrites `copies.json`'s `proofsKit.sha256`.
+7. Commit the pin, any extraction diff and the asset sha together, in ONE commit whose message names the old and
+   the new release (`proofs: move the F* pin from v2026.09.06 to <new>`), so the commit that changes the prover is
+   the commit that shows what the change did to the extraction.
+
+The pin is a shared input of the whole leg, so until a strict run records the new tree every `-Since` run checks
+every module (below). The custard pin moves the same way, without steps 1 and 3: it has no mirror yet, and its
+leg installs each release beside the others, in `proofs/.fstar/<release>/`. Its gate is the leg's tests with both
+pins named, `pwsh ./proofs/kit/check-proof-leg.tests.ps1 -PinFile proofs/fstar-pin.json,proofs/kit/fstar-pin-custard.json`,
+whose custard arms run the newer prover.
 
 ### The module cone — `-Since`, `-Modules`, and when to run which (Phase 328)
 

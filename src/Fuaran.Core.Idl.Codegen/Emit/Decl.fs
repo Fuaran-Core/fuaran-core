@@ -234,7 +234,7 @@ module internal Decl =
                     | None -> ()
             | TList inner -> visit inner
             | TMap vt -> visit vt
-            // Phase 691 — a declared type NAMED IN A SIGNATURE is reachable. `TFn.FSharp` is free
+            // fuaran#691 — a declared type NAMED IN A SIGNATURE is reachable. `TFn.FSharp` is free
             // text the walker cannot parse, so this searches it for the names the IDL already
             // declares: self-limiting (it can only mark something the IDL defines), and without it
             // a type reached ONLY through a signature (`Motion`) is never emitted.
@@ -263,7 +263,7 @@ module internal Decl =
         for k in kinds do
             for f in k.Fields do
                 visit f.Type
-        // Phase 690 — the node envelope is a reachability ROOT too: its records are reachable
+        // fuaran#690 — the node envelope is a reachability ROOT too: its records are reachable
         // from no kind, so walking only the kinds emits a `Node` whose field types are undeclared.
         for f in idl.NodeFields do
             visit f.Type
@@ -964,7 +964,7 @@ module internal Decl =
                 "declare the field at a type the selected kinds reach, or correct the name"
 
     // -----------------------------------------------------------------------
-    // Phase 1068 — the instantiations of every GENERIC union, monomorphised.
+    // fuaran#1068 — the instantiations of every GENERIC union, monomorphised.
     // -----------------------------------------------------------------------
 
     /// The instance name of a type — for a non-generic declaration its own name, and for an

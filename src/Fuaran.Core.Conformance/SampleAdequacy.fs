@@ -331,7 +331,7 @@ module SampleAdequacy =
     /// roster id, and an `Unconditional` family emits none.
     ///
     /// Since Phase 257 this is THIS package's share. The families that read the dataframe layer
-    /// ship from `Fuaran.Core.DataFrame.Conformance`, and their rows ship with them, in
+    /// ship from `Fuaran.Compute.Conformance`, and their rows ship with them, in
     /// `DataFrameFamilies.roster` — a package the compute repository produces since Phase 258
     /// (DECISIONS.md D66), whose suite holds that share.
     let census: (string * AdequacyClass) list = Families.census

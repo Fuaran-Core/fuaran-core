@@ -1924,7 +1924,7 @@ foreach ($module in $legacyModules) {
     }
 }
 
-# ---- 4a. the runtime floor is the kit's (Phase 536) -----------------------------------------------
+# ---- 4a. the runtime floor is the one -FloorDir names (Phase 536) -----------------------------------------------
 #
 # The oracle project compiles the floor (`Prims.fs`, `FStar_Pervasives_Native.fs`) from inside the
 # oracle directory, so an adopter commits it there — and a committed floor that is not the kit's is a
@@ -1938,15 +1938,15 @@ if ($FloorDir) {
         $kitText = (Get-Content $floor.FullName -Raw).Replace("`r`n", "`n")
         $ownText = if (Test-Path $committedFloor) { (Get-Content $committedFloor -Raw).Replace("`r`n", "`n") } else { $null }
         if ($ownText -eq $kitText) {
-            Write-Host "==== proofs: oracle/$($floor.Name) is the kit's runtime floor, byte for byte" -ForegroundColor Green
+            Write-Host "==== proofs: oracle/$($floor.Name) is byte-identical to $(Join-Path $FloorDir $floor.Name), the runtime floor -FloorDir names" -ForegroundColor Green
         }
         elseif ($Extract) {
             [System.IO.File]::WriteAllText($committedFloor, $kitText, [System.Text.UTF8Encoding]::new($false))
-            Write-Host "==== proofs: wrote the kit's runtime floor to oracle/$($floor.Name) — commit it" -ForegroundColor Yellow
+            Write-Host "==== proofs: wrote $(Join-Path $FloorDir $floor.Name), the runtime floor -FloorDir names, to oracle/$($floor.Name) — commit it" -ForegroundColor Yellow
         }
         else {
-            Fail ("oracle/$($floor.Name) is not the kit's runtime floor ($($floor.FullName))$(if ($null -eq $ownText) { ': it is missing' }). " +
-                'The floor ships with the kit asset; re-run with -Extract to write it, then commit it.')
+            Fail ("oracle/$($floor.Name) is not byte-identical to $(Join-Path $FloorDir $floor.Name), the runtime floor -FloorDir names$(if ($null -eq $ownText) { ': it is missing' }). " +
+                'The floor ships with the asset that directory was unpacked from; re-run with -Extract to write it, then commit it.')
         }
     }
 }

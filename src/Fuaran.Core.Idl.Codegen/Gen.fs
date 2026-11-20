@@ -149,7 +149,7 @@ module Gen =
                 )
             )
 
-    /// Phase 689 (DECISIONS.md D272) — the per-kind table lookup is emitted by the F# backend only, so the
+    /// Phase 689 (DECISIONS.md D278) — the per-kind table lookup is emitted by the F# backend only, so the
     /// TypeScript backend refuses a `Derivation.KindTable` request by name rather than export nothing for it.
     let private tsDerives (derivations: Derivation list) : Result<unit, CodegenError> =
         match

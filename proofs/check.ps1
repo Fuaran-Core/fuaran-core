@@ -359,6 +359,27 @@ if ($PlanOnly) {
     exit 0
 }
 
+# The newest upstream F* release, beside the pins (README, "Bumping the pin"): ONE request, informational. It never
+# changes the verdict and prints nothing when it cannot answer (offline, rate-limited, a proxy), so a stale pin is
+# visible on every run without the leg depending on the network for anything but the download it already makes.
+function Write-UpstreamProver {
+    try {
+        $pins = @(
+            @{ Leg = 'present leg'; Path = Join-Path $PSScriptRoot 'fstar-pin.json' }
+            @{ Leg = 'custard leg'; Path = Join-Path $PSScriptRoot 'kit/fstar-pin-custard.json' }
+        ) | Where-Object { Test-Path $_.Path } | ForEach-Object { "$((Get-Content $_.Path -Raw | ConvertFrom-Json).fstar) ($($_.Leg))" }
+        $latest = Invoke-RestMethod -Uri 'https://api.github.com/repos/FStarLang/FStar/releases/latest' -TimeoutSec 5 -ErrorAction Stop
+        $tag = [string]$latest.tag_name
+        if (-not $tag) { return }
+        $current = @($pins | Where-Object { $_.StartsWith("$tag ") }).Count -gt 0
+        $line = "==== proofs: F* pinned $($pins -join ', '); newest upstream release $tag"
+        if ($current) { Write-Host $line -ForegroundColor DarkGray }
+        else { Write-Host "$line — moving a pin is a deliberate act (proofs/README.md, `"Bumping the pin`")" -ForegroundColor Yellow }
+    }
+    catch { }
+}
+Write-UpstreamProver
+
 # Phase 522 — EVERY run asks the kit for its run verdict, into a file of this process's own (two runs
 # in one worktree must not write one file), outside the cone's work directory. It becomes
 # proofs/obj/last-run.json below, once this script has added what only it knows: the cone.

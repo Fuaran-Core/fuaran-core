@@ -235,8 +235,8 @@ type Severity =
     /// content "is the host codec's business, not the schema's" (Fuaran.Core.Idl's Encode.fs), so
     /// nothing in `idl.json` says whether the two sides admit the same set.
     ///
-    /// This case exists because the Phase 700 retroactive validation found
-    /// it: the classifier called Phase 707's `liveRegion` re-model
+    /// This case exists because the fuaran#700 retroactive validation found
+    /// it: the classifier called fuaran#707's `liveRegion` re-model
     /// (`THosted` → `TEnum`) a breaking wire change, and it was not — the
     /// wire strings were already the enum's three and the corpus is
     /// byte-identical either side. Reporting `BREAKING` there is not

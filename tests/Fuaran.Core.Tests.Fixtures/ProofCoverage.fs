@@ -69,6 +69,9 @@ type CoverageTally =
         /// A `host-premise` (Phase 483): discharged per host, by that host's run of the row's probe,
         /// so it is counted apart from what a domain discharges and from what nothing does.
         HostProbed: int
+        /// A `witness-obligation` (Phase 601): discharged by the tests of the witness member it names,
+        /// which are a domain's, so counted apart from what a kit run discharges and from what nothing does.
+        WitnessDischarged: int
     }
 
 let internal finding (subject: string) (clause: string) (detail: string) =
@@ -272,6 +275,15 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
                       "assumed-accounted"
                       "is a `host-premise` and names no `probe` — a premise no host can show it answered is unaccounted" ],
                 None
+        | Some "witness-obligation" ->
+            match strMember row "dischargedBy" with
+            | Some _ -> [], Some "witness-discharged"
+            | None ->
+                [ finding
+                      id
+                      "assumed-accounted"
+                      "is a `witness-obligation` and names no `dischargedBy` — an obligation no witness member answers is unaccounted" ],
+                None
         | Some c ->
             [ finding
                   id
@@ -386,7 +398,8 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
           DomainDeclared = countAccount "domain-declared"
           Permanent = countAccount "permanent"
           Unscheduled = countAccount "unscheduled"
-          HostProbed = countAccount "host-probed" }
+          HostProbed = countAccount "host-probed"
+          WitnessDischarged = countAccount "witness-discharged" }
 
     modelFindings
     @ uncovered
@@ -405,7 +418,7 @@ let checkCoverage (inputs: CoverageInputs) (ladderText: string) : string list * 
 /// length.
 let renderPredicate (exhaustive: bool) (t: CoverageTally) : string =
     sprintf
-        "proofs: %s (%d packages modelled, %d excluded; %d assumed: %d permanent, %d domain-discharged, %d domain-declared, %d unscheduled, %d host-probed)"
+        "proofs: %s (%d packages modelled, %d excluded; %d assumed: %d permanent, %d domain-discharged, %d domain-declared, %d unscheduled, %d host-probed, %d witness-discharged)"
         (if exhaustive then "exhaustive" else "NOT exhaustive")
         t.Modelled
         t.Excluded
@@ -415,6 +428,7 @@ let renderPredicate (exhaustive: bool) (t: CoverageTally) : string =
         t.DomainDeclared
         t.Unscheduled
         t.HostProbed
+        t.WitnessDischarged
 
 // ---------------------------------------------------------------------------
 //  The real inputs

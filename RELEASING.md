@@ -4,8 +4,18 @@ This page is the operator's half of a release: what the tag sets off, the Truste
 the publish job logs in through, and what to do when a step is red. The release SEQUENCE is stated in
 exactly one place, [`STABILITY.md`, "Versioning policy"](STABILITY.md#versioning-policy), held there by
 the `Release ledger` test family (DECISIONS.md D123), and it is the CONTRACT a release honours, not a
-procedure this page repeats. The release act itself is performed by tooling outside this repository,
-whose preflight re-reads the packed public surfaces before it records the release. This page starts where the contract ends, at the pushed `v<v>` tag.
+procedure this page repeats. Its fourth step, the release commit, is the release gesture, and it closes the slot:
+it prints the slot's entry files into the slot's file, removes them and re-renders the index, all with
+`CORE_APPROVE_DOCS=ledger-index` (DECISIONS.md D274); the `Release ledger` family reds a released slot whose entries
+were not printed. The release act itself is performed by tooling outside this repository,
+whose preflight re-reads the packed public surfaces before it records the release.
+
+**Before the push.** Whoever performs the release tags the release commit `v<v>` in their own clone and runs `./verify.ps1` on it, with the
+corpus leg asked ([`CONTRIBUTING.md`](CONTRIBUTING.md), "Prerequisites"). Several checks read the tag together with the turned heading, so they
+first run complete there. The commit and the tag go up together, in one atomic push, only when that run is green. A red run is fixed by amending
+the release commit and moving the tag, which nothing but that clone has seen.
+
+This page starts where the contract ends, at the pushed `v<v>` tag.
 
 The registry is [nuget.org](https://www.nuget.org/packages?q=Fuaran.Core), and every package
 publishes from [`.github/workflows/publish-packages.yml`](.github/workflows/publish-packages.yml).
@@ -21,7 +31,8 @@ dotnet run --project tools/Fuaran.Core.Tools -- open-slot <version> --class <bre
 
 It moves `<Version>`, re-stamps the law files' `kitVersion`, commits in the corpus checkout exactly the declared
 copies it re-stamps and their shared index rows, moves `copies.json`'s corpus pin to that commit, and opens
-`docs/releases/<version>.md` headed DRAFT with its rendered index. It then prints the two steps that remain, in
+`docs/releases/<version>.md` headed DRAFT, with the sentence saying how an entry is added (each entry is a file of its
+own, `docs/releases/<version>/<class>/<name>.md`, DECISIONS.md D274), and its rendered index. It then prints the two steps that remain, in
 order: push the corpus commit, then commit and push this repository's files, which it lists. Do not open a slot by
 hand: the `0.40.2` slot was, without its corpus half, and `main` stayed red until that half landed separately.
 
@@ -30,7 +41,8 @@ higher class arrives (internal, then additive, then breaking), run the command w
 version that class opens over the newest tag: over the standing `0.43.1` internal draft, a breaking change is
 `open-slot 0.44.0 --class breaking`. The act reads the draft's class from its slot paragraph
 (`**Slot class: <c>.**`), heads the draft's file `## <draft> — never released; its entries ship in `<version>``
-with a paragraph naming who advanced it, keeps the draft's entries in that file as written, opens
+with a paragraph naming who advanced it, prints the draft's entry files into that file as written and removes them
+(DECISIONS.md D274), opens
 `docs/releases/<version>.md` DRAFT with a paragraph naming the draft it advances, and makes every other write an
 opening makes: `<Version>`, the stamps, the corpus commit, the pin and the index.
 

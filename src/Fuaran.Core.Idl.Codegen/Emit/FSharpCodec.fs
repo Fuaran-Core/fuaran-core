@@ -14,7 +14,7 @@ open Fuaran.Core.Idl.Emit.FSharpCanonicalForm
 module internal FSharpCodec =
 
     // -----------------------------------------------------------------------
-    // Phase 317 increment 3 — *feature-complete* code emission: emit a
+    // fuaran#317 increment 3 — *feature-complete* code emission: emit a
     // self-contained, compiling F# encoder module for a set of kinds, handling
     // every feature class the interpreter does — Required + Optional fields
     // (omit-on-absence via List.choose), parameterised unions (`Binding<'T>`, by
@@ -79,7 +79,7 @@ module internal FSharpCodec =
               Closure = closure
               Fn = fun _ -> closure
               Opaque = opaque
-              // Phase 676 — the canonical renderer already sorts keys, escapes and lays floats
+              // fuaran#676 — the canonical renderer already sorts keys, escapes and lays floats
               // out, so identity inherits all three.
               Json = "id"
               // The named host encode expression, verbatim ('host -> JVal). Canonicality is
@@ -264,7 +264,7 @@ let private encFloat (f: float) : JVal =
     /// Phase 524 — the F# printer of a member WRITTEN under its presence
     /// ([[MemberEncTraversal.encMember]]): a `(string * JVal) option` piece for `List.choose id`.
     /// `src` is the expression the member's value is read from — `s.Field` in a spec or record
-    /// encoder, `n.Field` on the node envelope (Phase 690), the positional binding in a union case.
+    /// encoder, `n.Field` on the node envelope (fuaran#690), the positional binding in a union case.
     let memberEncPrinter (idl: Idl) : MemberEncPrinter =
         { Applied = encPrinter
           Key = SourceLit.fsString
@@ -281,7 +281,7 @@ let private encFloat (f: float) : JVal =
                 fsDefaultLit idl t d
                 |> Result.map (fun dexpr present ->
                     match t with
-                    // A UNION default is tested by pattern-match, not `=`. Phase 691: typing a
+                    // A UNION default is tested by pattern-match, not `=`. fuaran#691: typing a
                     // closure slot gives its owning union a function-typed field, and F#
                     // functions support no equality, so the union stops supporting the
                     // `equality` constraint entirely — `CellFormat.Custom of (obj -> string)`
@@ -295,7 +295,7 @@ let private encFloat (f: float) : JVal =
                     // a union literal's members), and a component that reaches a closure has no `=`.
                     | TUnion _
                     | TTuple _ -> sprintf "(match %s with | %s -> None | _ -> %s)" src dexpr present
-                    // Phase 1080 — a LIST default is tested with `List.isEmpty`, never with
+                    // fuaran#1080 — a LIST default is tested with `List.isEmpty`, never with
                     // `= []`, and for the same reason the union arm above exists: an element
                     // type that reaches a closure carries no equality, so `SrcSetEntry`
                     // (whose `src` is a `Binding`) fails the constraint the moment the
@@ -356,7 +356,7 @@ let private encFloat (f: float) : JVal =
 
     let enumEncoder (e: IdlEnum) =
         // The case name is the F# identifier, the wire string is what goes on the
-        // wire — identical unless the enum declares a mapping (Phase 707).
+        // wire — identical unless the enum declares a mapping (fuaran#707).
         let arms =
             e.Cases
             |> List.map (fun c -> sprintf "    | %s.%s -> JStr %s" e.Name c (SourceLit.fsString (e.WireOf c)))
@@ -498,7 +498,7 @@ let private encFloat (f: float) : JVal =
                 pieces)
 
     // -----------------------------------------------------------------------
-    // Phase 672 — the structural DECODER leg.
+    // fuaran#672 — the structural DECODER leg.
     //
     // The inverse of the encoder emitters above, and deliberately only the
     // STRUCTURAL half: which `$type` maps to which case, which fields, which
@@ -566,7 +566,7 @@ let private encFloat (f: float) : JVal =
           Fn =
             fun s ->
                 sprintf "(fun (__j: JVal) -> dSentinel \"<closure>\" __j |> Result.map (fun () -> %s))" s.Placeholder
-          // Phase 676 — accept any JSON verbatim; a shape check would contradict the field's
+          // fuaran#676 — accept any JSON verbatim; a shape check would contradict the field's
           // contract.
           Json = "dJson"
           // The named host decode expression, verbatim (JVal -> Result<'host, string>). Phase 252 —
@@ -658,7 +658,7 @@ let private encFloat (f: float) : JVal =
         let closes = String.replicate (List.length binders + extraCloses) ")"
         (opens @ [ indent + final + closes ]) |> String.concat "\n"
 
-    /// [[bindChain]] for a case whose final is a declared case REFINE (Phase 945): the last
+    /// [[bindChain]] for a case whose final is a declared case REFINE (fuaran#945): the last
     /// binder is `dRefine` rather than `Result.bind`, because a refine answers a sentence
     /// (`Result<_, string>`) and every other step a typed refusal (Phase 337). Binding the
     /// last step that way leaves the refine's text exactly where it always sat — its own
@@ -732,7 +732,7 @@ let private encFloat (f: float) : JVal =
             | fs -> sprintf "%s.%s(%s)" u.Name c.Tag (fs |> List.map (fun f -> ident f.Name) |> String.concat ", ")
 
         let arm (c: IdlUnionCase) (members: (IdlField * string) list) =
-            // Phase 945 — a declared refine replaces the plain `Ok(Case(…))` final with a
+            // fuaran#945 — a declared refine replaces the plain `Ok(Case(…))` final with a
             // policy expression (field binder names in scope); the binder chain around it
             // is untouched, so a refine cannot change WHICH fields decode, only what is
             // accepted once they have.
@@ -956,7 +956,7 @@ let private encFloat (f: float) : JVal =
         |> String.concat "\n"
 
     /// A union's collecting decoder: the discriminator, then the case's members collected. A case
-    /// with a declared REFINE (Phase 945) collects its members and, when every one decoded, applies
+    /// with a declared REFINE (fuaran#945) collects its members and, when every one decoded, applies
     /// the refine to them ([[collectRefined]]) — the refine is a sentence over the decoded members,
     /// so it adds at most one defect, only once they all decoded, and at the position the
     /// short-circuiting decoder reports it.
@@ -1566,7 +1566,7 @@ let private encFloat (f: float) : JVal =
         (decl: Decl)
         : Result<string, CodegenError> =
         let decoders = List.contains Derivation.SpecDecoders requests
-        // Phase 945 — declared-doc lookup: a block of comment lines (markers included,
+        // fuaran#945 — declared-doc lookup: a block of comment lines (markers included,
         // "///" or "//" alike) attached to the named declaration path, indented to the
         // emission site. Absent path ⇒ empty string, so an IDL with no docs emits
         // byte-identically to the pre-945 generator.
@@ -1627,7 +1627,7 @@ let private encFloat (f: float) : JVal =
                 |> List.map (fun k -> sprintf "    | NodeKind.%s s -> enc%sSpec s" k.Tag k.Tag)
                 |> String.concat "\n"
 
-            // Phase 690 — the envelope rides the same `List.choose id` presence
+            // fuaran#690 — the envelope rides the same `List.choose id` presence
             // machinery every spec field uses, with `s.` rebound to `n.`, so
             // omit-on-absence / omit-at-default behave identically on a node field
             // and on a kind field. No envelope ⇒ the original two-key literal.
@@ -1664,7 +1664,7 @@ let private encFloat (f: float) : JVal =
                             "\n    match kind with\n    | JObj(__d :: __kf) -> JObj(__d :: (\"id\", JStr n.Id) :: (__kf @ ([ %s ] |> List.choose id)))\n    | __other -> __other"
                     )
 
-            // Phase 694 — the kind dispatch is its own function (was inline in
+            // fuaran#694 — the kind dispatch is its own function (was inline in
             // encNode) so the JVal accessors below can expose it: a host codec
             // splicing a bare NodeKind (a TreeOp `EditNode.newKind`) reaches the
             // same single encoder the node envelope uses.
@@ -1692,7 +1692,7 @@ let private encFloat (f: float) : JVal =
                         recordEncoder msg idl r))
              @ (kinds
                 |> List.map (fun k ->
-                    // Phase 945 — a projected kind's encoder is the projection's, verbatim.
+                    // fuaran#945 — a projected kind's encoder is the projection's, verbatim.
                     match sup.KindProjections.TryFind k.Tag with
                     | Some proj -> Ok(doc ("enc:" + k.Tag) "" + proj.Encoder)
                     | None ->
@@ -1718,7 +1718,7 @@ let private encFloat (f: float) : JVal =
             // normalised text, so it hashes exactly the bytes it heads.
             sprintf "module %s%s\n\nopen Fuaran.Core" moduleName nowarn
 
-        // Phase 672: the decoder's mutually-recursive group, mirroring `recGroup`.
+        // fuaran#672: the decoder's mutually-recursive group, mirroring `recGroup`.
         // `decNodeKind` dispatches `$type` to the per-kind spec decoder; `decNode`
         // reads the `{ id, kind }` envelope `encNode` writes.
         let decGroup =
@@ -1748,7 +1748,7 @@ let private encFloat (f: float) : JVal =
                     (SourceLit.fsString (idl.Wire.Discriminator + " '"))
 
             let decNodeDecl =
-                // Phase 690 — the envelope binds through the same `bindChain` /
+                // fuaran#690 — the envelope binds through the same `bindChain` /
                 // `decField` machinery a spec record uses, so its presence rules are
                 // the encoder's inverse by construction rather than by hand.
                 //
@@ -1790,7 +1790,7 @@ let private encFloat (f: float) : JVal =
                         recordDecoder msg idl r))
              @ (kinds
                 |> List.map (fun k ->
-                    // Phase 945 — a projected kind's decoder is the projection's, verbatim.
+                    // fuaran#945 — a projected kind's decoder is the projection's, verbatim.
                     match sup.KindProjections.TryFind k.Tag with
                     | Some proj -> Ok(doc ("dec:" + k.Tag) "" + proj.Decoder)
                     | None -> specDecoder msg idl k |> Result.map (fun d -> doc ("dec:" + k.Tag) "" + d)))
@@ -1838,7 +1838,7 @@ let private encFloat (f: float) : JVal =
                     (match idl.Wire.KeyOrder with
                      | KeyOrder.Sorted -> "Canonical.write Rendering.CrossHost"
                      | KeyOrder.Declared -> "Canonical.write Rendering.Declared") ]
-              // Phase 694 — JVal-level accessors for host codecs that splice
+              // fuaran#694 — JVal-level accessors for host codecs that splice
               // generated encodings into a larger canonical document (the
               // tier's TreeOp codec re-points at these when the hand-written
               // node encoder is deleted): the node and its kind, for every

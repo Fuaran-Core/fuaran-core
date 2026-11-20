@@ -130,7 +130,7 @@ module JsonlFault =
             "not a checkpoint line: a checkpoint is a snapshot line (\"snapshot\":true)"
 
     /// `line N: <reason> (position P)` — the `line N:` prefix every JSONL reader's `Error` string
-    /// has carried since Phase 252, now 1-based over all lines.
+    /// has carried since fuaran#252, now 1-based over all lines.
     let toString (f: JsonlFault) : string =
         sprintf "line %d: %s (position %d)" f.Line (reasonText f.Reason) f.Position
 
@@ -883,7 +883,7 @@ module Jsonl =
                               value ]
                 | Ok _ -> bad ()
 
-    /// A required member holding the typed `Actor` object (Phase 320) —
+    /// A required member holding the typed `Actor` object (fuaran#320) —
     /// `{"kind":"human","id":…}` or `{"kind":"agent","model":…,"version":…,"id":…}`, every member
     /// present and a string. An absent or unknown `kind` is a refusal, never `Human`: a store
     /// written by a newer build may carry a kind this reader does not know, and reading it as a
@@ -1182,7 +1182,7 @@ module Jsonl =
     /// (its `state` member still embedded raw) so a caller can recover the base state with
     /// `Snapshots.ofJsonl` and resume via `Snapshots.replayFrom`. A non-empty
     /// snapshot list means the file was compacted — replaying the records from origin would be wrong.
-    /// Fully portable (Phase 241).
+    /// Fully portable (fuaran#241).
     ///
     /// **Refusals (Phase 296; typed since Phase 416).** A malformed line, a member of the wrong kind
     /// (`"prevHash":null`, `"seq":0x2`), or a snapshot line anywhere but the first line is
@@ -1192,7 +1192,7 @@ module Jsonl =
     /// stored hash — the signature of a stream written by a newer host. Structural, so never
     /// `Broken`. `StreamLoadFault.toString` renders the pre-416 message. At most one snapshot line is
     /// returned. The `op` raw span is preserved byte-for-byte, so a round-trip is identical. Since
-    /// Phase 320 the `actor` member is the typed object; use `readLegacyActor` for a pre-320 file.
+    /// fuaran#320 the `actor` member is the typed object; use `readLegacyActor` for a pre-320 file.
     let readWithSnapshots
         (w: StreamWitness<'Op, 'State, 'Rej>)
         (text: string)
@@ -1200,7 +1200,7 @@ module Jsonl =
         readCarried (actorField "actor") w text
         |> bindR (fun (reads, snaps) -> settleRecords reads |> Result.map (fun recs -> recs, snaps))
 
-    /// Parse JSONL back into records, **dropping the snapshot line** (Phase 244) — correct for a
+    /// Parse JSONL back into records, **dropping the snapshot line** (fuaran#244) — correct for a
     /// linear, never-compacted stream. A thin wrapper over `readWithSnapshots` (the one scanner);
     /// a `compact` output (snapshot + tail) read this way loses its base state with no signal and
     /// replaying from origin is then wrong, so read a possibly-compacted file with
@@ -1212,7 +1212,7 @@ module Jsonl =
         : Result<OpRecord<'Op> list, StreamLoadFault<ChainBreak>> =
         readWithSnapshots w text |> Result.map fst
 
-    /// Read a **pre-Phase-320** JSONL file (Phase 320 migration) — the `actor` member is still a bare
+    /// Read a **pre-fuaran#320** JSONL file (fuaran#320 migration) — the `actor` member is still a bare
     /// JSON string, which this lifts to the typed `Human` case. The returned records carry the file's
     /// stored `PrevHash` / `Hash` (computed under the old bare-string payload), so they
     /// `verifyChain StreamConfig.legacyActor` and then `rehash StreamConfig.legacyActor StreamConfig.canonical` to the

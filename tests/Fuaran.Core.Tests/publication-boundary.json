@@ -67,6 +67,12 @@
       "pattern": "\\bFuaran/Fuaran-[A-Za-z]",
       "say": "spells a path inside a private workspace; a public file addresses a checkout by its own name (\"the wire-format-fixtures checkout\")",
       "example": "cd Fuaran/Fuaran-Core"
+    },
+    {
+      "id": "left-the-repository",
+      "pattern": "\\bFuaran\\.Core\\.(DataFrame|Column\\.Ops)\\b|\\bFuaran\\.Core\\.CSharp\\.Proof\\b",
+      "say": "names a package or project that has left this repository (the compute strand under DECISIONS.md D66, and the removed C# proof projects); name what is here, or the compute repository's current id (`Fuaran.Compute.*`). Only a record that must say where it went (the decision record, the release ledger, the README's one paragraph, the contributor note on empty directories) and the tests that refuse the old ids carry them, by the exceptions below",
+      "example": "the families ship from Fuaran.Core.DataFrame.Conformance"
     }
   ],
   "carried": [
@@ -79,6 +85,56 @@
       ],
       "text": "\"Fuaran/Fuaran-UI/wire-format-fixtures",
       "why": "a generated artefact's copy in another repository is named relative to the WORKSPACE root, the only root that can address a file in a different repository: the projection registry records each copy once as '<repo>:<path>', and its two renders spell it as their readers require (the version ledger reads '<repo>:<path>' and refuses any other form; the copy registry reads the joined workspace path and records a parent-relative spelling as the worse alternative, since it bakes the producer's own depth into every record). One text, true of the record and both renders, and of nothing else"
+    },
+    {
+      "rule": "left-the-repository",
+      "files": [
+        "DECISIONS.md",
+        "README.md",
+        "CONTRIBUTING.md",
+        "docs/releases/0.9.0.md",
+        "docs/releases/0.11.0.md",
+        "docs/releases/0.18.0.md",
+        "docs/releases/0.27.0.md",
+        "docs/releases/0.28.0.md",
+        "docs/releases/0.29.0.md",
+        "docs/releases/0.32.0.md",
+        "docs/releases/0.33.0.md",
+        "docs/releases/0.39.0.md",
+        "tests/Fuaran.Core.Tests/ComputeBoundaryTests.fs",
+        "tests/Fuaran.Core.Tests/ConformanceFamiliesTests.fs"
+      ],
+      "text": "Fuaran.Core.DataFrame",
+      "why": "the dataframe packages were this repository's up to 0.32.0 and continued from the compute repository under these ids until 0.34.0 (DECISIONS.md D66, D71). The decision record and the released notes are records of what was true when they were written; the README's paragraph on the compute strand and the contributor note on the empty directories an older clone holds exist to say where the packages went; the compute boundary test refuses the old ids by name, and the families test asserts a generated document does not carry one. Nowhere else names them"
+    },
+    {
+      "rule": "left-the-repository",
+      "files": [
+        "docs/releases/0.26.0.md",
+        "docs/releases/0.33.0.md",
+        "tests/Fuaran.Core.Tests/ComputeBoundaryTests.fs"
+      ],
+      "text": "Fuaran.Core.Column.Ops",
+      "why": "the column-operation package's old id, on lines that do not also name the dataframe package: two released notes, and the compute boundary test that refuses the id by name (DECISIONS.md D66)"
+    },
+    {
+      "rule": "left-the-repository",
+      "files": [
+        "DECISIONS.md",
+        "docs/releases/0.22.0.md",
+        "docs/releases/0.32.0.md",
+        "docs/releases/0.33.0.md"
+      ],
+      "text": "Fuaran.Core.CSharp.Proof",
+      "why": "the C# facade's proof project, removed with the facade on the 0.33.0 draft (DECISIONS.md D28): the decision record and the released notes that shipped and removed it"
+    },
+    {
+      "rule": "left-the-repository",
+      "files": [
+        "tests/Fuaran.Core.Tests/ComputeBoundaryTests.fs"
+      ],
+      "text": "fuaran.core.dataframe",
+      "why": "the compute boundary test's own probe that the old id is refused whatever its case, as a package id is"
     }
   ]
 }

@@ -51,8 +51,8 @@ is held to at most 1,500 lines, so a release's entry cannot drift back into it.
 **A version's entries go in its ledger file.** Opening a draft slot creates `docs/releases/<v>.md`
 headed `## <v> — DRAFT` and its re-rendered index in the same commit as the `<Version>` move, its stamps and
 the corpus pin; the tool's `open-slot` does all of it in one act ([`RELEASING.md`](RELEASING.md), D218). Every change that rides the slot
-appends a self-contained `###` entry there. A change to the contract itself — a new surface class, a
-new stability-critical surface, a moved posture — is edited here, and its slot's entry says so.
+adds its entry as a file of its own, `docs/releases/<v>/<class>/<name>.md` (`<class>` one of `breaking`, `additive` or `internal`), holding its bullet exactly as it will print, so two changes in flight never edit one file; the act that closes the slot, the release gesture below or `open-slot`'s advance, prints the entries into the slot's file, a section per class, and removes their files (DECISIONS.md D274).
+A change to the contract itself — a new surface class, a new stability-critical surface, a moved posture — is edited here, and its slot's entry says so.
 
 **"Released" is a gate output, not a heading's claim (Phase 392, DECISIONS.md D123).** The `Release
 ledger` family reads every tag in the checked-out history and holds four things, each red by name: a
@@ -82,16 +82,16 @@ this order, because each step reads the one before it:
    <folder>`, green on both legs. A package this repository adds since the last release needs the
    host's candidate-only reference first, or the gate's membership check fails it by name.
 3. Pack again from the clean tree for publication, so the packed surface is the one the gate measured.
-4. In ONE commit: write the `**Release record` and `**Receiving gate run:**` paragraphs in the slot's
-   ledger file, turn its heading to `released <date> as `v<v>``, re-render the index, and regenerate the README's version stamps
-   (`dotnet run --project tests/Fuaran.Core.Tests -- --filter ReadmeClaims` with `CORE_APPROVE_README=1`
-   set in the environment). The
-   stamps are derived from the tags, so the regeneration runs under a provisional LOCAL tag on the
-   candidate commit (its `api/` is the release's); delete that tag after the commit.
-5. Tag THAT commit `v<v>` and push the commit and the tag together
-   (`git push --atomic origin main v<v>`), so no CI run sees the turned heading without its tag. A
-   push of the commit alone runs `main`'s CI red on the second clause until the tag exists, and a tag
-   on any earlier commit is red in the publish workflow on the first: both are the gate working.
+4. In ONE commit: write the `**Release record` and `**Receiving gate run:**` paragraphs in the slot's ledger file, turn its heading to `released <date> as `v<v>``, print its entries into it and re-render the index
+   (both with `CORE_APPROVE_DOCS=ledger-index`, which removes the entry files it prints, D274), and regenerate the README's version stamps (`dotnet run --project tests/Fuaran.Core.Tests -- --filter ReadmeClaims` with
+   `CORE_APPROVE_README=1` set). The stamps are derived from the tags, so the regeneration runs under a provisional LOCAL tag on the candidate commit (its `api/` is the release's); delete that tag after the commit. By
+   this commit `DECISIONS.md` holds no missing number, each one given up recorded `Never-minted` (D275).
+   A repository's FIRST release, with no `vX.Y.Z` tag anywhere yet, also opens its slot's record with a paragraph starting `**First release.**` in step 4's commit: the `Release ledger` family then reads that commit as tagged `v<v>`, so steps 1–4 are gated green before the tag; unmarked, the tagless turned heading skips by name.
+5. Tag THAT commit `v<v>` locally and run the gate on it (`verify.ps1`, the corpus leg asked): the clauses that read the tag together with the
+   turned heading first run complete here. Fix a red gate by amending the release commit and moving the tag, which has not left your machine.
+6. Only when that gate is green, push the commit and the tag together (`git push --atomic origin main v<v>`), so no CI run sees the turned heading
+   without its tag: a push of the commit alone runs `main`'s CI red on the second clause until the tag exists, and a tag on any earlier commit is
+   red in the publish workflow on the first.
 
 **Adding a public operation now carries a coverage line (Phase 335).** The `Proofs.Coverage` family
 reads the committed API baselines (`api/*.txt`) as its census of public operations, so the commit that
@@ -374,7 +374,7 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
   the recoverable-envelope discipline; `fromJsonl`/`Snapshots.ofJsonl` return
   `Result` (migration notes shipped with that release).
 - **`Actor`** (`Human of id | Agent of model * version * id`) + the `OpRecord` / `DagNode` /
-  `StreamConfig` / `append` / `merge` actor field+parameter (typed since Phase 320, `0.0.1-alpha.13`).
+  `StreamConfig` / `append` / `merge` actor field+parameter (typed since fuaran#320, `0.0.1-alpha.13`).
   The typed actor is **folded into the chain hash** — a breaking hash-format bump.
   See "Typed, attested provenance" below (migration notes shipped with that release).
 - **`Hash.fnv1a` / `Hash.sha256Hex` / `Hash.sha256Bytes`** (`Core.Tree`) — the two hashing
@@ -428,8 +428,8 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
 
 ### The Column and Query strand (first-class)
 
-> **Since `0.33.0` (Phase 258, DECISIONS.md D66) `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops`
-> are produced by [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute),
+> **Since `0.33.0` (Phase 258, DECISIONS.md D66) the dataframe and column-operation packages
+> (`Fuaran.Compute.DataFrame` and `Fuaran.Compute.ColumnOps` from that repository's `0.36.0`) are produced by [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute),
 > and every change to them from `0.33.0` on is recorded in that repository's `STABILITY.md`.** The
 > promises this repository made about those two packages while it produced them (up to `0.32.0`)
 > are in the release ledger, [`docs/releases/0.32.0.md`](docs/releases/0.32.0.md#the-compute-strand-contracts-this-document-carried-until-phase-397),
@@ -441,7 +441,7 @@ its public surface carries the same stability commitment as the witness spine, a
 are **conformance-certified**, not asserted. Stable surfaces:
 
 - **The columnar model + wire codec** — the fixed Arrow scalar set (`int` / `float` / `bool` / `string`
-  / `date` / `timestamp`, and from `0.33.0` the exact `decimal`), the validity-mask null model, and `ColumnCodec`'s six-code decode envelope
+  / `date` / `timestamp`, and from `0.33.0` the exact `decimal`), the validity-mask null model, and `ColumnCodec`'s decode envelope (`ColumnError`, whose cases are stated in the type alone)
   are the cross-host contract: two hosts encode a column to byte-identical wire (same null / coercion /
   ordering / **canonical-float** semantics — floats route through `Wire.FloatLayout.canonical`, certified
   by `Conformance.canonicalFloatLaws`). Changing the scalar set, the null model, the codec envelope, or
@@ -731,7 +731,7 @@ but a domain that *persists* a digest as a content-address should note one-time 
   `Tree.Index.fingerprintOf`, `Projection.digestOf`, `ContentPack.signatureFingerprint`,
   `Function.Memo` keys, `OpStream.defaultHash`, `Schema.fingerprint`, and both `invocationKey`s.
 
-## Typed, attested provenance (Phase 320, `0.0.1-alpha.13`)
+## Typed, attested provenance (fuaran#320, `0.0.1-alpha.13`)
 
 The actor is a typed `Actor` (`Human of id | Agent of model * version * id`) **folded into the chain
 hash** — a one-shot breaking hash-format bump (the canonical payload now encodes the actor as a JSON
@@ -739,10 +739,10 @@ object, not a bare string). Attribution is therefore part of the integrity chain
 op breaks `verifyChain` / `verifyDag` exactly as op-tampering does. The `Human` / `Agent` distinction
 is the load-bearing accountability fact; an `Agent`'s `model` / `version` is a neutral attribution axis
 a consumer may use for its own analytics or provenance reporting. A pre-320 bare-string stream migrates via `fromJsonlLegacyActor` + `rehash` under
-`legacyActorConfig` (the Phase-255 migration seam) — see the migration doc. **Cross-host break:** the
+`legacyActorConfig` (the fuaran#255 migration seam) — see the migration doc. **Cross-host break:** the
 hash pre-image is a wire contract; the TS / Python / Fuaran.UI hosts must adopt the same typed-actor
 object + field ordering in the same release or chains diverge (the Fuaran.UI op-record fold is
-coordinated with the Phase-319 wire-versioning work).
+coordinated with the fuaran#319 wire-versioning work).
 
 An optional **`IAttestationSink`** signs chain checkpoints — the head at a commit / publish boundary
 (O(commits), not O(ops); the hash-chain attests the whole prefix). The default `noAttestation` is a
@@ -770,7 +770,7 @@ camelCase `{"actor":…,"session":…,"turn":…,"at":…,"op":<inner>}` envelop
   never reads a clock**; `""` means unstamped.
 - **Identity is host-side vocabulary.** `Actor` / `Session` are opaque strings — Core owns no identity
   model and stores exactly what the host supplies. This is a **distinct axis** from the chain-level typed
-  `Actor` DU folded into `OpRecord` (Phase 320, `0.0.1-alpha.13`): that names the *appender* in the chain payload; the
+  `Actor` DU folded into `OpRecord` (fuaran#320, `0.0.1-alpha.13`): that names the *appender* in the chain payload; the
   `Attributed` envelope carries per-op session/turn provenance *inside the op* via the lift. Both end up
   hash-covered.
 - **Additive + Fable-clean (GP2/GP3).** No new witness field; unattributed streams and their codecs are
@@ -796,7 +796,7 @@ self-proves green in-repo against the reference witness with a keyed FNV/HMAC-st
 ## Hash-chain integrity posture
 
 The op-stream (`OpRecord`) and op-DAG (`DagNode`) chains are **tamper-evident against accidental
-corruption**, not against a motivated adversary, *with the default hash*. Since Phase 320 (`0.0.1-alpha.13`) the
+corruption**, not against a motivated adversary, *with the default hash*. Since fuaran#320 (`0.0.1-alpha.13`) the
 typed actor is inside the hash, so attribution tampering is detected on the same footing as op tampering. `OpStream.defaultHash` is
 FNV-1a — fast, portable, Fable-clean, and **not cryptographic**: anyone who edits a record can
 recompute the whole chain. `verifyChain` / `verifyDag` detect reordering, a dropped link, or a bit
@@ -908,7 +908,7 @@ across such a stream. (The pre-Phase-296 entry points this paragraph named — `
 ### Chain pre-image portability
 
 The chain pre-image is pluggable via `StreamConfig.Payload` (`int -> Actor -> string -> string`,
-Phase 255) so a domain on a legacy chain format can verify its persisted streams and `rehash` to the
+fuaran#255) so a domain on a legacy chain format can verify its persisted streams and `rehash` to the
 canonical form without a flag-day. That flexibility is a **migration seam, not an interchange
 format**: a stream hash-chained under a bespoke `Payload` verifies only for a reader who knows that
 config, so it is **not** portable across independently built hosts. **Cross-host conformance is
@@ -1127,7 +1127,7 @@ into a `Fuaran.Core.*` package (FGP 6).
 ## Fable cleanliness
 
 Public surfaces are FSharp.Core-only and Fable-clean on **both** the encode and the decode
-path. Decode is portable as of Phase 241: `Fuaran.Core.Wire.Json.parse` is a hand-rolled
+path. Decode is portable as of fuaran#241: `Fuaran.Core.Wire.Json.parse` is a hand-rolled
 recursive-descent JSON parser (no System.Text.Json), `Fuaran.Core.Wire.Decoder`'s combinators
 operate over the resulting `JVal`, and `Fuaran.Core.OpStream.fromJsonl` ships its own
 self-contained line scanner — so a Fable-compiled host can decode, `verifyChain`, and replay

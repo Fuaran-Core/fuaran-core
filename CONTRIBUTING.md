@@ -35,7 +35,7 @@ through one reader. So a baseline-class report on a branch cut before the newest
 newest tag in this branch's history", not "since the newest tag anywhere". A tag your branch does not
 contain cannot be a baseline for it (DECISIONS.md D123). Once a release slot's heading is flipped to
 released, its tag must already exist in the history being gated, so the one green order at a release
-is tag, then gate.
+is tag, then gate, then push the commit and the tag together.
 
 ```powershell
 ./run.ps1        # restore tools, format, build, test, sample
@@ -93,11 +93,18 @@ A ruling that changes what the code promises, or declines a change someone will 
 entry in [`DECISIONS.md`](DECISIONS.md). An entry is a heading, `## <yyyy-mm-dd> — D<n>: <title>`,
 placed newest first; directly under it, after one blank line, a status line, which is mandatory:
 `**Status:** Live` for a new ruling. The clauses (`Live`, `Amended-by D<n>`, `Superseded-by D<n>`,
-`Moved-to-compute`, `Never-minted`) and how they combine are stated at the head of the file. The number
-is the next one after the newest; a number that was skipped is recorded as `Never-minted`, never
-reused. An entry that changes an earlier one also changes that entry's status line, in the same commit:
-the earlier ruling reads `Amended-by D<n>` or `Superseded-by D<n>` at its own heading, so nobody reads
-it as current. Then regenerate the index and stage the file:
+`Moved-to-compute`, `Never-minted`) and how they combine are stated at the head of the file. An entry that
+changes an earlier one also changes that entry's status line, in the same commit: the earlier ruling reads
+`Amended-by D<n>` or `Superseded-by D<n>` at its own heading, so nobody reads it as current.
+
+The number is the one held for the change before its work started, or else the next one after the newest. A held
+number may land above a number that is still missing, while the standing release slot is the draft and the
+missing number is above the newest the last release carried (DECISIONS.md D275). A held number below an entry the
+change would amend or supersede cannot be used for that: the change takes a number above that entry, and the held
+one is recorded `Never-minted`. A number that is skipped, or held for a change that is given up, is recorded
+`Never-minted`, never reused: an entry `## <date> — D<n>: never minted` with `**Status:** Never-minted` and one
+sentence saying why, dated the day it is recorded, as D6 is. Record it before the release: the commit that closes
+the slot refuses every missing number. Then regenerate the index and stage the file:
 
 ```powershell
 $env:CORE_APPROVE_DOCS = 'DECISIONS'
@@ -106,8 +113,10 @@ Remove-Item Env:CORE_APPROVE_DOCS
 ```
 
 `DecisionsTests` fails by name on a heading with no status line, a clause outside the grammar, a status
-naming an entry that is not newer, a missing or repeated number, and an index that is not the render
-of the headings.
+naming an entry that is not newer, a repeated number, a missing number at or below the newest the last
+release carried, and an index that is not the render of the headings. The `Release ledger` family fails
+by name on every missing number once the standing slot is not the draft. Each refusal names the number
+and what to do: record it `Never-minted`, or land the change that holds it.
 
 ## Coding standards
 
@@ -120,6 +129,10 @@ of the headings.
   public surface must compile under both .NET and Fable — the Fable consumer's compile gate enforces it, and
   `fable-exclusions.json` records any package deliberately off that surface (STABILITY.md
   "Fable cleanliness").
+- **A bare phase number names this repository's own roadmap.** `Phase N` in a comment, `STABILITY.md` or a document
+  cites this repository's phase N. A phase from another roadmap carries that roadmap's prefix: `fuaran#N` for the UI
+  language's roadmap, where this repository's first phases were tracked and whose numbers now name different work
+  here. Decision records and release notes keep the citations they were written with.
 
 ## The design invariants — please read before a non-trivial change
 
@@ -135,8 +148,19 @@ of the headings.
 
 A change that adds a public surface should add or extend a `Conformance` law that certifies it, and
 update `STABILITY.md` when it touches a stability-critical surface. What each version changed is
-recorded in the release ledger, `docs/releases/<version>.md`: a change that ships appends its entry
-to the standing draft slot's file there (`STABILITY.md`, "Versioning policy").
+recorded in the release ledger, `docs/releases/<version>.md` (`STABILITY.md`, "Versioning policy"). A change
+that ships adds its entry as a file of its own beside the standing draft's file, never inside it, so two changes in
+flight never edit one file (DECISIONS.md D274):
+
+- the path is `docs/releases/<version>/<class>/<name>.md`, where `<version>` is the standing `<Version>`;
+- `<class>` is `breaking`, `additive` or `internal`, the change's class;
+- `<name>` is `phase-<n>` for a phase's entry (`phase-<n>-<word>` for its second), or `pr-<n>` for a pull request;
+- the file holds the entry's bullet and its wrapped lines exactly as the release will print them, and nothing else.
+
+The draft's own file says the same in one sentence. The act that closes the slot (the release commit, or
+`open-slot`'s advance) prints the entries into it, a section per class, and removes their files. The `Release
+ledger` family reds an entry written into the draft's own file, an entry beside a closed slot, anything else in an
+entry directory, and an entry whose class would advance the draft; each refusal names the file the entry goes to.
 
 ## Licensing of contributions
 

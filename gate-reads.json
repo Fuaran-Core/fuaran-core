@@ -31,7 +31,7 @@
   "handMerged": [
     {
       "path": "**/docs/releases/**",
-      "reason": "the draft slot's ledger file takes one appended entry per additive phase; two members' entries are merged by hand and the batch gate over the merged tree checks the result"
+      "reason": "since DECISIONS.md D274 an entry is a file of its own beside the draft's file, so two members add two files and merge clean; a branch cut before that shape that still appends its entry to the slot's file meets one conflict there and resolves it by hand, moving the entry, unchanged, into its own file under the standing draft, and the batch gate over the merged tree checks the result. 0.44.1 closed with one such branch still in flight, Phase 689's, whose entry appends to 0.44.1's file; this entry is removed when the slot after 0.44.1, the one that branch's entry lands in, closes"
     },
     {
       "path": "**/benchmarks/results/**",

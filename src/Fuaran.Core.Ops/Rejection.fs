@@ -39,7 +39,7 @@ type Rejection<'Id> =
     /// (Phase 315): a move under itself and a move into its own subtree are different mistakes, and a
     /// caller that told them apart used to re-run the check to learn which it had made.
     | WouldNestUnderSelf of target: 'Id * relation: NestRelation
-    /// A node that holds children while `canHold` refuses it (Phase 251). Two sites raise it, and
+    /// A node that holds children while `canHold` refuses it (fuaran#251). Two sites raise it, and
     /// `target` names a node in a different place at each: the (new) PARENT of an insert/move, which
     /// is a node of the tree; or — since Phase 161 (DECISIONS D38) — an interior node of the SUBTREE
     /// an `InsertChild` carries, which is a node of the caller's own graft. `kindTag` is always that

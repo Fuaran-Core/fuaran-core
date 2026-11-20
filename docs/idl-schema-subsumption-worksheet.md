@@ -1,10 +1,10 @@
 # IDL JSON-schema leg — subsumption worksheet
 
-Phase 697. `Gen.jsonSchema` had only ever been smoke-tested on the 8-kind `miniIdl`. This records
+fuaran#697. `Gen.jsonSchema` had only ever been smoke-tested on the 8-kind `miniIdl`. This records
 what it does now that it has met the full corpus, and answers the one question the phase exists to
 answer: **can it subsume the hand-written `Fuaran.UI.Ops.SchemaGen`?**
 
-**Verdict: not yet.** Three gaps were named at Phase 697; Phase 703 closed the first, so two
+**Verdict: not yet.** Three gaps were named at fuaran#697; fuaran#703 closed the first, so two
 remain, and neither is in the schema leg's core. The leg is corpus-certified for what it covers,
 which is the precondition for the decision, not the decision.
 
@@ -39,7 +39,7 @@ disagreement between the two is about the schemas, not the validators.
 | `additionalProperties: false` everywhere | **Aligned with the format, not exempted.** The decoder tolerates unknown keys (`WIRE_FORMAT.md` §2.1 rule 2, field-lookup-by-name) and the published `schema.json` says so in its own header. A schema stricter than the format rejects payloads the format accepts — and breaks the forward compatibility that tolerance exists for, since an older host validating a newer producer's output would fail on a key it has not learned yet. Pinned by a test that walks the document for any `additionalProperties: false`. |
 
 A fourth, found while fixing the third: **`HostOnly` fields were being emitted as properties.** They
-are never on the wire in any state (Phase 691), so advertising them describes a key no encoder
+are never on the wire in any state (fuaran#691), so advertising them describes a key no encoder
 writes. Now filtered out of both `properties` and `required`.
 
 ## Reject family — 35 of 42 caught structurally
@@ -81,19 +81,19 @@ categories are a host-side classification recovered on decode (`WIRE_FORMAT.md` 
 family `BoxLayout` / `FlexLayout` / `GridSpec` / `GridTemplate`, and `CellValue`. `AriaRole`, which
 the IDL models as `THosted` and therefore renders as unconstrained JSON.
 
-> Counted before Phase 703. `NodeKind` and `TreeOp` were in this column at the time and are now in
+> Counted before fuaran#703. `NodeKind` and `TreeOp` were in this column at the time and are now in
 > both, which is the shape of the diff shrinking as the IDL gains expressiveness rather than as the
 > schemas are talked into agreeing.
 
 ## The three gaps that actually block subsumption
 
-1. ~~**No `TreeOp` root.**~~ **CLOSED by Phase 703.** The IDL now carries an op vocabulary
+1. ~~**No `TreeOp` root.**~~ **CLOSED by fuaran#703.** The IDL now carries an op vocabulary
    (`Idl.Ops`), the schema root is `oneOf [Node; TreeOp]` when a domain declares ops, and all 22 op
    fixtures round-trip through the interpreter byte-identically. `NodeKind` also became a named
    definition rather than an alternation inlined into `Node.kind`, matching the published schema —
    `TKind` (`EditNode.newKind`) needed something to reference.
 
-   Phase 703 left ONE leg of its own unshipped, which is now the honest remainder here: the F# and
+   fuaran#703 left ONE leg of its own unshipped, which is now the honest remainder here: the F# and
    TypeScript **emitters** do not generate an op family. Nothing walks `Idl.Ops` in either backend,
    so no generated artefact changed; the arms are explicit and fail loudly rather than falling
    through a match. Emitting a `TreeOp` DU is a genuinely larger piece of work than the modelling
@@ -102,19 +102,19 @@ the IDL models as `THosted` and therefore renders as unconstrained JSON.
 2. **`AriaRole` is unconstrained.** The hand-written schema enumerates the ARIA roles plus a
    free-string escape. The IDL renders it `true`, because its set is genuinely OPEN
    (`AriaRole.Custom of string` emits its payload verbatim) and no `TEnum` can model an open set —
-   see Phase 707, which fixed the *closed*-set half of the same problem for `liveRegion`. Closing
+   see fuaran#707, which fixed the *closed*-set half of the same problem for `liveRegion`. Closing
    this needs an IDL type for "closed set OR any string", which does not exist yet.
 3. **No constraint vocabulary on `TStr`.** `reject-emptynodeid` is the visible cost; `minLength`,
    and any future bound, are unstateable.
 
 ## Recommendation
 
-_(Updated after Phase 703 closed blocker 1.)_ Keep both, and revisit when blockers 2 and 3 are
+_(Updated after fuaran#703 closed blocker 1.)_ Keep both, and revisit when blockers 2 and 3 are
 addressed. Subsuming now would trade a schema that states two things the
 generated one cannot for one that is merely generated — a regression in what the published artefact
 promises, in exchange for removing a mirror. The mirror is worth removing, but only once the
 generated leg is at least as expressive, and each remaining gap is a one-time fix in the IDL that
-pays off across every backend rather than only here. Phase 703 is the worked example: closing the
+pays off across every backend rather than only here. fuaran#703 is the worked example: closing the
 op gap in the IDL gave the schema its second root, `idl.json` its op family, and the 700 classifier
 an op taxonomy, from one piece of modelling.
 

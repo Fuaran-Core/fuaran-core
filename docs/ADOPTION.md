@@ -42,9 +42,9 @@ let nodew : NodeWitness<Item,string> =
 let canHold (i: Item) = isContainer i.Kind                 // F1: see below
 let opGen = { Tree = genTree; FreshNode = genFresh; CanHold = Some canHold }
 
-Conformance.witnessLaws nodew idw opGen seed iters         // the witness is well-formed (Phase 253)
+Conformance.witnessLaws nodew idw opGen seed iters         // the witness is well-formed (fuaran#253)
 Conformance.opAlgebra   nodew idw opGen seed iters         // skeleton ops over your witness (251)
-Conformance.reducer     myApply myStreamGen None seed iters // your OWN reducer (Phase 254)
+Conformance.reducer     myApply myStreamGen None seed iters // your OWN reducer (fuaran#254)
 ```
 
 `witnessLaws` runs first — if your `ReplaceChildren` isn't total it tells you exactly that, instead
@@ -69,7 +69,7 @@ not adopted, never as passed. See [`construct-then-encode.md`](construct-then-en
 There is no C# facade from `0.33.0`. `Fuaran.Core.CSharp` (Phase 128) — a C#-shaped surface over the
 column layer, the artifact-function declaration family and the wire JSON model — was published up to
 `0.32.0` and removed by Phase 231, because the consumer it was shipped for kept its rule another way
-and never adopted it; its dataframe half, `Fuaran.Core.DataFrame.CSharp`, is removed by the compute
+and never adopted it; its dataframe half, the compute repository's C# facade, is removed by that
 repository in the release that raises its pin to `0.33.0`. The versions already published stay on
 nuget.org. A C# or VB tier constructs Core's values through the F# surface, wrapping only what it
 authors, and a generated C# veneer over Core's closed unions is the route by which a facade returns
@@ -137,10 +137,10 @@ id, which lists it in `spellings`. A family that adds laws has a stem of its own
 let streamW : StreamWitness<MyOp, MyState, MyRej> =
     { Apply  = MyOps.apply        // your reducer
       Encode = MyWire.encodeOp    // your op → JSON
-      Decode = MyWire.decodeOp }  // string -> Result<MyOp, string>   (Phase 252)
+      Decode = MyWire.decodeOp }  // string -> Result<MyOp, string>   (fuaran#252)
 
 // `actor` is a typed `Actor` (`Human "alice"` / `Agent("model","ver","id")`) — folded into the
-// hash since Phase 320 (`0.0.1-alpha.13`), so attribution is tamper-evident. A pre-320 stream migrates via
+// hash since fuaran#320 (`0.0.1-alpha.13`), so attribution is tamper-evident. A pre-320 stream migrates via
 // `fromJsonlLegacyActor` + `rehash` (see docs/migrations/0.0.1-alpha.13-typed-attested-provenance.md).
 OpStream.append OpStream.defaultHash streamW actor op state recs   // hash-chained
 OpStream.replay streamW state0 records                              // deterministic

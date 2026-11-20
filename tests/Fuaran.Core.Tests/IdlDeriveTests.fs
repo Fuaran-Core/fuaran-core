@@ -3304,7 +3304,7 @@ let instantiationWitnessTests =
                   "Instantiation.FloatList") ]
 
 // ---------------------------------------------------------------------------
-// Phase 689 (DECISIONS.md D272) — a per-kind table declared in the support record, emitted as a total
+// Phase 689 (DECISIONS.md D278) — a per-kind table declared in the support record, emitted as a total
 // lookup. Four kinds of evidence: the emission (one exhaustive match a table, no wildcard arm, nothing
 // without the request); each refusal, naming the table and the kind; the module compiled under the
 // nullness checking a strict consumer builds with, with an arm deleted from the same emission refused by

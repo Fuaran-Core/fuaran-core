@@ -61,14 +61,34 @@ type RunRecord =
     /// More than one such paragraph.
     | Several of count: int
 
+/// One entry of a slot that has not closed: a file of its own, `docs/releases/<v>/<class>/<name>.md` (D274).
+type Entry =
+    {
+        /// `breaking`, `additive` or `internal`: the directory it sits in.
+        Class: string
+        /// The file name without `.md`: `phase-<n>`, `phase-<n>-<word>` or `pr-<n>`.
+        Name: string
+        /// Repo-relative, forward-slashed.
+        Path: string
+        /// The bullet and its wrapped lines, LF, ending in one line break.
+        Text: string
+    }
+
 /// One slot file, parsed once.
 type Slot =
     {
         Version: string
         /// Repo-relative, forward-slashed.
         Path: string
-        /// LF line endings.
+        /// The slot as the ledger reads it, LF line endings: its file with its entries rendered in, as the act
+        /// that closes the slot prints it (D274). For a slot with no entry directory, its file.
         Text: string
+        /// The slot's own file, LF line endings.
+        Own: string
+        /// The entries in its directory, `docs/releases/<v>/`, in the order the close prints them.
+        Entries: Entry list
+        /// What that directory holds that is not an entry, repo-relative (a directory with a trailing `/`).
+        EntryStrays: string list
         /// The first non-blank line, which must be the slot's heading.
         FirstLine: string
         /// The slot's own `## <version> …` heading (the first), trailing space trimmed, with its
@@ -153,19 +173,135 @@ let private runOf (paragraphs: string list) : RunRecord =
     | [ p ] -> Cited p
     | many -> Several many.Length
 
-/// The slot file for `version` at `path`, parsed.
-let parse (version: string) (path: string) (text: string) : Slot =
-    let text = text.Replace("\r\n", "\n")
+// ---- the entries (Phase 702, D274) ----------------------------------------------------------
+
+/// The entry classes, in the order a closed slot prints its sections: the three classes of STABILITY.md's
+/// "Versioning policy".
+let EntryClasses = [ "breaking"; "additive"; "internal" ]
+
+/// `text` broken at spaces into lines of at most `width` characters (a longer word stands alone).
+let wrap (width: int) (text: string) : string list =
+    text.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+    |> Array.fold
+        (fun (lines: string list) word ->
+            match lines with
+            | current :: rest when current.Length + 1 + word.Length <= width -> (current + " " + word) :: rest
+            | [] -> [ word ]
+            | _ -> word :: lines)
+        []
+    |> List.rev
+
+/// The one sentence a standing draft's file carries in place of its entries: how an entry is added.
+let entrySentence (version: string) : string =
+    sprintf
+        "**Each entry of this slot is a file of its own** (DECISIONS.md D274): add one as `%s/%s/<class>/<name>.md`, with `<class>` one of `breaking`, `additive` or `internal` and `<name>` `phase-<n>` (`phase-<n>-<word>` for a phase's second entry) or `pr-<n>`, holding the entry's bullet exactly as it will print, and the act that closes the slot renders the entries here, a section per class."
+        Dir
+        version
+
+/// That sentence as the draft's file lays it out.
+let entryParagraph (version: string) : string list = wrap 115 (entrySentence version)
+
+/// The directory a slot's entries sit in, repo-relative.
+let entryDir (version: string) = sprintf "%s/%s" Dir version
+
+let private entryNameRe =
+    Regex(@"^(?:phase-(?<n>\d+)(?:-(?<w>.+))?|pr-(?<p>\d+))$", RegexOptions.Compiled)
+
+/// Where an entry named `name` prints within its section: a phase's entries by number (its first before a
+/// second), then pull requests by number, then any other name.
+let private entryOrder (name: string) =
+    let m = entryNameRe.Match name
+
+    if m.Success && m.Groups["n"].Success then
+        (0, int64 m.Groups["n"].Value, m.Groups["w"].Value)
+    elif m.Success then
+        (1, int64 m.Groups["p"].Value, "")
+    else
+        (2, 0L, name)
+
+/// `text` as an entry holds it: LF, ending in exactly one line break.
+let private entryText (text: string) =
+    text.Replace("\r\n", "\n").TrimEnd('\n') + "\n"
+
+/// The slot `version`'s own text with its entries printed, as the act that closes it writes it: the
+/// directory sentence taken out, then a section per class that has an entry, in `EntryClasses` order, each
+/// holding its entries as written, in their names' order. With no entries and no sentence, `own` itself.
+let render (version: string) (own: string) (entries: Entry list) : string =
+    let own = own.Replace("\r\n", "\n")
+    let sentence = entrySentence version
+
+    let joined (ls: string list) =
+        ls |> List.map _.Trim() |> String.concat " "
+
+    // the paragraphs of `own`, as runs of lines, with the sentence's run dropped
+    let lines = own.Split('\n') |> Array.toList
+
+    let rec drop (acc: string list) (rest: string list) =
+        match rest with
+        | [] -> List.rev acc
+        | l :: _ when l.Trim() <> "" ->
+            let run = rest |> List.takeWhile (fun x -> x.Trim() <> "")
+            let after = rest |> List.skip run.Length
+
+            if joined run = sentence then
+                // the sentence and the blank line before it
+                let acc =
+                    match acc with
+                    | "" :: earlier -> earlier
+                    | _ -> acc
+
+                drop acc after
+            else
+                drop (List.rev run @ acc) after
+        | l :: after -> drop (l :: acc) after
+
+    let kept = drop [] lines
+
+    if entries.IsEmpty && kept = lines then
+        own
+    else
+        let body = (String.concat "\n" kept).TrimEnd('\n') + "\n"
+
+        let sections =
+            EntryClasses
+            |> List.choose (fun c ->
+                match entries |> List.filter (fun e -> e.Class = c) with
+                | [] -> None
+                | es ->
+                    let heading = "### " + string (Char.ToUpperInvariant c[0]) + c.Substring 1
+
+                    Some(
+                        sprintf
+                            "\n%s\n\n%s"
+                            heading
+                            (es
+                             |> List.sortBy (fun e -> entryOrder e.Name)
+                             |> List.map _.Text
+                             |> String.concat "")
+                    ))
+
+        body + String.concat "" sections
+
+/// The slot file for `version` at `path`, with its entries and what else its entry directory holds, parsed:
+/// every clause reads the slot as its close will print it (`render`).
+let parseWith (version: string) (path: string) (own: string) (entries: Entry list) (strays: string list) : Slot =
+    let own = own.Replace("\r\n", "\n")
+
+    let entries =
+        entries
+        |> List.sortBy (fun e -> List.findIndex ((=) e.Class) EntryClasses, entryOrder e.Name)
+
+    let text = render version own entries
     let lines = text.Split('\n')
 
-    let own =
+    let at =
         lines
         |> Array.tryFindIndex (fun l ->
             let m = versionHeadingRe.Match l
             m.Success && m.Groups["v"].Value = version)
 
     let paragraphs =
-        match own with
+        match at with
         | None -> []
         | Some i ->
             let next =
@@ -177,11 +313,14 @@ let parse (version: string) (path: string) (text: string) : Slot =
 
             paragraphsOf (lines[i + 1 .. next - 1] |> Array.toList)
 
-    let heading = own |> Option.map (fun i -> i + 1, lines[i].TrimEnd())
+    let heading = at |> Option.map (fun i -> i + 1, lines[i].TrimEnd())
 
     { Version = version
       Path = path
       Text = text
+      Own = own
+      Entries = entries
+      EntryStrays = strays
       FirstLine = lines |> Array.tryFind (fun l -> l.Trim() <> "") |> Option.defaultValue ""
       Heading = heading
       State =
@@ -192,8 +331,55 @@ let parse (version: string) (path: string) (text: string) : Slot =
       Paragraphs = paragraphs
       Run = runOf paragraphs }
 
-/// The slot files under `root`, newest first, and the names of any other file in the directory
-/// beside the index.
+/// The slot file for `version` at `path`, parsed, with no entry directory.
+let parse (version: string) (path: string) (text: string) : Slot = parseWith version path text [] []
+
+/// The entries under `root`'s directory for `version`, and what else that directory holds.
+let private entriesUnder (root: string) (version: string) : Entry list * string list =
+    let dir = Path.Combine(root, Dir, version)
+
+    let rel (p: string) =
+        Path.GetRelativePath(root, p).Replace('\\', '/')
+
+    if not (Directory.Exists dir) then
+        [], []
+    else
+        let files = Directory.GetFiles dir |> Array.map rel |> Array.toList
+
+        let classes, others =
+            Directory.GetDirectories dir
+            |> Array.toList
+            |> List.partition (fun d -> List.contains (Path.GetFileName d) EntryClasses)
+
+        let inClass (d: string) =
+            let entries, strays =
+                Directory.GetFiles d
+                |> Array.toList
+                |> List.partition (fun f -> f.EndsWith(".md", StringComparison.Ordinal))
+
+            let entries, empty =
+                entries
+                |> List.partition (fun f -> not (String.IsNullOrWhiteSpace(File.ReadAllText f)))
+
+            let nested =
+                Directory.GetDirectories d |> Array.toList |> List.map (fun x -> rel x + "/")
+
+            entries
+            |> List.map (fun f ->
+                { Class = Path.GetFileName d
+                  Name = Path.GetFileNameWithoutExtension f
+                  Path = rel f
+                  Text = entryText (File.ReadAllText f) }),
+            (strays @ empty |> List.map rel) @ nested
+
+        let found = classes |> List.map inClass
+
+        List.collect fst found,
+        (files @ (others |> List.map (fun d -> rel d + "/")) @ List.collect snd found
+         |> List.sort)
+
+/// The slot files under `root`, each with its entries, newest first, and the names of anything else in the
+/// directory beside the index (a directory with a trailing `/`: one beside no slot file).
 let read (root: string) : Slot list * string list =
     let dir = Path.Combine(root, Dir)
 
@@ -210,10 +396,52 @@ let read (root: string) : Slot list * string list =
             |> List.filter isSlot
             |> List.map (fun n ->
                 let v = n.Substring(0, n.Length - 3)
-                parse v (Dir + "/" + n) (File.ReadAllText(Path.Combine(dir, n))))
+                let entries, strays = entriesUnder root v
+                parseWith v (Dir + "/" + n) (File.ReadAllText(Path.Combine(dir, n))) entries strays)
             |> List.sortByDescending (fun s -> versionTriple s.Version)
 
-        slots, names |> List.filter (fun n -> not (isSlot n) && n <> "README.md") |> List.sort
+        let versions = slots |> List.map _.Version |> Set.ofList
+
+        let orphans =
+            Directory.GetDirectories dir
+            |> Array.map Path.GetFileName
+            |> Array.filter (versions.Contains >> not)
+            |> Array.map (fun d -> d + "/")
+            |> Array.toList
+
+        slots,
+        (names |> List.filter (fun n -> not (isSlot n) && n <> "README.md")) @ orphans
+        |> List.sort
+
+// ---- adding and closing ---------------------------------------------------------------------
+
+/// Add `text`, one entry (its bullet and its wrapped lines), to the standing draft `version` under `root`,
+/// as class `cls` (`breaking`, `additive` or `internal`) named `name` (`phase-<n>`): the one way an entry is
+/// added, a file of its own (D274). Answers the file written, repo-relative.
+let addEntry (root: string) (version: string) (cls: string) (name: string) (text: string) : string =
+    let rel = sprintf "%s/%s/%s.md" (entryDir version) cls name
+    let path = Path.Combine(root, rel)
+    Directory.CreateDirectory(Path.GetDirectoryName path) |> ignore
+    File.WriteAllText(path, entryText text)
+    rel
+
+/// Close `s` under `root` (D274.3): its file written as the ledger reads it, its entries printed in, and its
+/// entry directory removed. Answers the files written and removed, repo-relative.
+let closeSlot (root: string) (s: Slot) : string list =
+    File.WriteAllText(Path.Combine(root, s.Path), s.Text)
+
+    for e in s.Entries do
+        File.Delete(Path.Combine(root, e.Path))
+
+    let dir = Path.Combine(root, entryDir s.Version)
+
+    if
+        Directory.Exists dir
+        && Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories) |> Seq.isEmpty
+    then
+        Directory.Delete(dir, true)
+
+    s.Path :: (s.Entries |> List.map _.Path)
 
 /// The ledger read as one text, newest slot first: the view the README's version stamps are read
 /// against (`ReadmeClaimsTests`).
@@ -255,9 +483,113 @@ let renderIndex (current: string) (slots: Slot list) : string =
 
 // ---- the clauses ----------------------------------------------------------------------------
 
+/// An excerpt of `line`, short enough to quote in a refusal.
+let private excerpt (line: string) =
+    if line.Length <= 60 then
+        line
+    else
+        line.Substring(0, 60) + "…"
+
+/// What is wrong with `s`'s entries (D274), `standing` being the standing `<Version>`.
+let private entryFaults (standing: string option) (s: Slot) : string list =
+    let own = s.Own.Split('\n')
+
+    let sectionAbove (i: int) =
+        own[.. i - 1]
+        |> Array.tryFindBack (fun l -> l.StartsWith("### ", StringComparison.Ordinal))
+        |> Option.map (fun l -> l.Substring(4).Trim().ToLowerInvariant())
+        |> Option.filter (fun c -> List.contains c EntryClasses)
+
+    let inDraft =
+        if s.State <> Draft then
+            []
+        else
+            [ for i, l in Array.indexed own do
+                  if l.StartsWith("### ", StringComparison.Ordinal) then
+                      yield
+                          sprintf
+                              "%s:%d carries a section heading, '%s', in the standing draft's own file: remove it; the act that closes the slot writes the sections from the entry files (DECISIONS.md D274)"
+                              s.Path
+                              (i + 1)
+                              (l.TrimEnd())
+                  elif l.StartsWith("- ", StringComparison.Ordinal) then
+                      let phase = Regex.Match(l, @"\(Phases? (\d+)")
+
+                      // the bullet and its wrapped lines, for the class it states when no section names one
+                      let block =
+                          own[i..]
+                          |> Array.indexed
+                          |> Array.takeWhile (fun (j, x) -> j = 0 || x.StartsWith("  ", StringComparison.Ordinal))
+                          |> Array.map snd
+                          |> String.concat " "
+
+                      let stated =
+                          Regex.Match(block, @"class \*\*(breaking|additive|internal)\*\*")
+                          |> fun m -> if m.Success then Some m.Groups[1].Value else None
+
+                      let cls, which =
+                          match sectionAbove i |> Option.orElse stated with
+                          | Some c -> c, ""
+                          | None -> "<class>", ", `<class>` being the change's class, breaking, additive or internal"
+
+                      yield
+                          sprintf
+                              "%s:%d carries an entry in the standing draft's own file ('%s'): an entry is a file of its own; move the bullet and its wrapped lines, unchanged, to %s/%s/%s.md%s (DECISIONS.md D274)"
+                              s.Path
+                              (i + 1)
+                              (excerpt l)
+                              (entryDir s.Version)
+                              cls
+                              (if phase.Success then
+                                   "phase-" + phase.Groups[1].Value
+                               else
+                                   "<name>")
+                              which ]
+
+    let closed =
+        if s.State = Draft then
+            []
+        else
+            let heading = s.Heading |> Option.map snd |> Option.defaultValue s.FirstLine
+
+            let target (e: Entry) =
+                match standing with
+                | Some v when v <> s.Version -> sprintf "%s/%s/%s.md, the standing draft's" (entryDir v) e.Class e.Name
+                | _ -> sprintf "%s/<the next slot>/%s/%s.md, once `open-slot` opens it" Dir e.Class e.Name
+
+            [ for e in s.Entries do
+                  yield
+                      sprintf
+                          "%s is an entry of %s, which is closed ('%s'): if the change shipped in %s, render it into %s with CORE_APPROVE_DOCS=ledger-index; if it did not, move it, unchanged, to %s (DECISIONS.md D274)"
+                          e.Path
+                          s.Version
+                          heading
+                          s.Version
+                          s.Path
+                          (target e)
+              if render s.Version s.Own [] <> s.Own then
+                  yield
+                      sprintf
+                          "%s is closed ('%s') and still carries the sentence saying its entries are files of their own: render it with CORE_APPROVE_DOCS=ledger-index (DECISIONS.md D274)"
+                          s.Path
+                          heading ]
+
+    let strays =
+        s.EntryStrays
+        |> List.map (fun p ->
+            sprintf
+                "%s is not an entry: an entry is a non-empty file %s/<class>/<name>.md, with <class> one of breaking, additive or internal; move its text, unchanged, to such a file, or remove it (DECISIONS.md D274)"
+                p
+                (entryDir s.Version))
+
+    inDraft @ closed @ strays
+
 /// What is wrong with the ledger's shape: each slot file opens with its own version's level-2
 /// heading and carries no other; every release tag and the standing `<Version>` has a file; a
-/// `DRAFT` heading names only the standing version; nothing else sits in the directory.
+/// `DRAFT` heading names only the standing version; nothing else sits in the directory. And, since
+/// D274, the entries: a standing draft's own file carries no entry and no section heading; an entry
+/// directory stands only beside a slot that has not closed; it holds only the three class directories
+/// and non-empty `.md` files. Each refusal names the file an entry goes to and that it goes there unchanged.
 let shapeFaults (tags: Set<string>) (standing: string option) (slots: Slot list) (strays: string list) : string list =
     let perSlot =
         slots
@@ -287,7 +619,7 @@ let shapeFaults (tags: Set<string>) (standing: string option) (slots: Slot list)
                 else
                     []
 
-            opens @ others @ draft)
+            opens @ others @ draft @ entryFaults standing s)
 
     let have = slots |> List.map _.Version |> Set.ofList
 
@@ -305,7 +637,16 @@ let shapeFaults (tags: Set<string>) (standing: string option) (slots: Slot list)
 
     let stray =
         strays
-        |> List.map (fun s -> sprintf "%s/%s is neither the index nor a slot file named `<version>.md`" Dir s)
+        |> List.map (fun s ->
+            if s.EndsWith "/" then
+                sprintf
+                    "%s/%s is an entry directory beside no slot file `%s.md`: an entry is a file of its own beside its slot's file, %s/<version>/<class>/<name>.md; move each file in it, unchanged, to the slot its change ships in (DECISIONS.md D274)"
+                    Dir
+                    s
+                    (s.TrimEnd '/')
+                    Dir
+            else
+                sprintf "%s/%s is neither the index nor a slot file named `<version>.md`" Dir s)
 
     perSlot @ missing @ stray
 

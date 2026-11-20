@@ -4,7 +4,7 @@ namespace Fuaran.Core
 /// normaliser, and the container and keyed-children laws — `TreeLaws` until the Phase 388 split along
 /// its banners.
 module internal AlgebraTreeLaws =
-    /// The witness laws (Phase 253) — check the `NodeWitness`/`IdWitness` is well-formed
+    /// The witness laws (fuaran#253) — check the `NodeWitness`/`IdWitness` is well-formed
     /// *before* the algebra laws run, so a defect localises to the accessor that's wrong
     /// instead of surfacing as a downstream `apply ∘ invert` failure (the F1 lesson):
     /// `Children (ReplaceChildren n cs) = cs`, `Id`/`KindTag` preserved under rebuild, the

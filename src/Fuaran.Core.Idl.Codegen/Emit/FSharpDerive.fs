@@ -939,7 +939,7 @@ module internal FSharpDerive =
         |> String.concat "\n"
 
     // -----------------------------------------------------------------------
-    // Emission 9 — Phase 689 (DECISIONS.md D272): the per-kind tables, each a total lookup.
+    // Emission 9 — Phase 689 (DECISIONS.md D278): the per-kind tables, each a total lookup.
     // -----------------------------------------------------------------------
 
     /// A name the lookup can be declared under without escaping: an ASCII letter or `_`, then letters, digits

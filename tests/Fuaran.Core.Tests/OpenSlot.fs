@@ -66,7 +66,7 @@ type StandingDraft =
         Class: SlotClass
         /// Its ledger file, repo-relative and forward-slashed.
         Path: string
-        /// That file's text.
+        /// That file's text, with its entries printed in as the ledger reads it (D274).
         Text: string
     }
 
@@ -88,6 +88,9 @@ type Plan =
         Families: string list
         /// This repository's files except `copies.json`, absolute, with their new text.
         CoreWrites: (string * string) list
+        /// This repository's files the act removes, absolute: an advanced draft's entry files, which its
+        /// re-headed file carries (D274).
+        CoreRemovals: string list
         /// The current `copies.json` text and pin; the new pin is written once the corpus HEAD is known.
         CopiesText: string
         OldPin: SiblingCorpus.CorpusPin
@@ -149,18 +152,6 @@ let standingVersion (propsText: string) : Result<string, string> =
 let withVersion (propsText: string) (version: string) : string =
     versionRe.Replace(propsText, sprintf "<Version>%s</Version>" version, 1)
 
-/// `text` broken at spaces into lines of at most `width` characters (a longer word stands alone).
-let wrap (width: int) (text: string) : string list =
-    text.Split(' ', StringSplitOptions.RemoveEmptyEntries)
-    |> Array.fold
-        (fun (lines: string list) word ->
-            match lines with
-            | current :: rest when current.Length + 1 + word.Length <= width -> (current + " " + word) :: rest
-            | [] -> [ word ]
-            | _ -> word :: lines)
-        []
-    |> List.rev
-
 /// `major`, `minor` or `patch`: what moved from `previous` to `version`.
 let private kindOf (version: string) (previous: string) =
     let (a, b, _) = at version
@@ -212,6 +203,31 @@ let private classWhy (version: string) (newest: string) (kind: string) (cls: Slo
             (kind.ToUpperInvariant())
             later
 
+/// What is wrong with the classes of the standing draft `draft`'s entries over the release `newest`: an
+/// entry of a class whose member advances the draft (by `expectedOver`, as `advancing` reads it) does not ride
+/// it, and the refusal names the slot that class opens and the file the entry moves to (D274).
+let entryClassFaults (newest: string) (draft: Ledger.Slot) : string list =
+    let moves = advancing (at draft.Version) (at newest)
+
+    [ for e in draft.Entries do
+          match moves |> List.tryFind (fun (m, _) -> className m = e.Class) with
+          | None -> ()
+          | Some(m, v) ->
+              yield
+                  sprintf
+                      "%s is %s entry, and %s advances the %s draft to `%s`: take the file out of %s/, open that slot (`open-slot %s --class %s`, DECISIONS.md D265), and add it there, unchanged, as %s/%s/%s.md (D274)"
+                      e.Path
+                      ((memberOf m).Replace(" member", ""))
+                      (memberOf m)
+                      draft.Version
+                      (show v)
+                      (Ledger.entryDir draft.Version)
+                      (show v)
+                      (className m)
+                      (Ledger.entryDir (show v))
+                      e.Class
+                      e.Name ]
+
 /// The verb in number with who acts: `Phase 555 opens`, `Phases 487 and 491 open`.
 let private agreeing (openedBy: string) (singular: string) (plural: string) =
     if openedBy.StartsWith("Phases ", StringComparison.Ordinal) then
@@ -219,19 +235,15 @@ let private agreeing (openedBy: string) (singular: string) (plural: string) =
     else
         singular
 
-/// A slot file: its DRAFT heading, `paragraph` wrapped, and the section headings `cls` admits, empty, in
-/// the order an entry is read: a breaking slot carries both, an additive slot `### Additive`, an internal
-/// slot neither.
-let private draftFile (version: string) (cls: SlotClass) (paragraph: string) =
-    let sections =
-        match cls with
-        | Breaking -> [ "### Breaking"; "### Additive" ]
-        | Additive -> [ "### Additive" ]
-        | Internal -> []
-        |> List.map (sprintf "\n%s\n")
-        |> String.concat ""
-
-    sprintf "## %s — DRAFT\n\n%s\n%s" version (String.concat "\n" (wrap 115 paragraph)) sections
+/// A slot file: its DRAFT heading, `paragraph` wrapped, and the sentence saying how an entry is added. It
+/// carries no entry and no section heading: each entry is a file of its own, and the act that closes the
+/// slot writes the sections (D274).
+let private draftFile (version: string) (paragraph: string) =
+    sprintf
+        "## %s — DRAFT\n\n%s\n\n%s\n"
+        version
+        (String.concat "\n" (Ledger.wrap 115 paragraph))
+        (String.concat "\n" (Ledger.entryParagraph version))
 
 /// The slot file a new slot opens with: its DRAFT heading and the slot paragraph, in the shape the
 /// `0.40.1`-`0.40.3` slots were opened with by hand.
@@ -250,7 +262,7 @@ let slotText (version: string) (previous: string) (cls: SlotClass) (openedBy: st
             (agreeing openedBy "opens" "open")
             version
 
-    draftFile version cls paragraph
+    draftFile version paragraph
 
 /// The slot file an ADVANCE opens with (D265): its DRAFT heading and a slot paragraph naming the untagged
 /// draft it advances, whose entries ship in it, as `0.31.0` said of `0.30.1`.
@@ -281,7 +293,7 @@ let advanceText (version: string) (newest: string) (draft: StandingDraft) (cls: 
             (agreeing openedBy "advances" "advance")
             version
 
-    draftFile version cls paragraph
+    draftFile version paragraph
 
 /// The draft's ledger file once `version` advances it (D265): its heading turns to `never released; its
 /// entries ship in `<version>``, a paragraph says who advanced it, and every other line is kept as written,
@@ -304,7 +316,7 @@ let neverReleasedText (draft: StandingDraft) (version: string) (advancedBy: stri
         [ yield! lines[.. line - 2]
           yield sprintf "## %s — never released; its entries ship in `%s`" draft.Version version
           yield ""
-          yield! wrap 115 note
+          yield! Ledger.wrap 115 note
           yield! lines[line..] ]
         |> String.concat "\n"
 
@@ -519,8 +531,11 @@ let private readDraft
     if not (File.Exists path) then
         cannot (sprintf "%s is missing" rel)
     else
-        let text = File.ReadAllText path
-        let slot = Ledger.parse standing rel text
+        // the draft as the ledger reads it: its file with its entries printed in (D274)
+        let slot =
+            fst (Ledger.read root)
+            |> List.tryFind (fun s -> s.Version = standing)
+            |> Option.defaultWith (fun () -> Ledger.parse standing rel (File.ReadAllText path))
 
         let stated =
             slot.Paragraphs
@@ -549,7 +564,7 @@ let private readDraft
                     { Version = standing
                       Class = cls
                       Path = rel
-                      Text = text }
+                      Text = slot.Text }
 
 /// What the version check admits: the standing version the slot replaces, the newest release, and the
 /// draft the slot advances when one stands.
@@ -754,16 +769,24 @@ let private planWith (r: Request) (admitted: Admitted) : Result<Plan, string lis
             | None -> slotText r.Version admitted.Previous r.Class r.OpenedBy
             | Some d -> advanceText r.Version admitted.Newest d r.Class r.OpenedBy
 
-        // An advance re-heads the draft's file; every other slot file is read as it stands.
+        // An advance re-heads the draft's file, its entries rendered in (D274); every other slot file is read as
+        // it stands.
         let retired =
             admitted.Advances
             |> Option.map (fun d -> d.Path, neverReleasedText d r.Version r.OpenedBy)
 
-        let index =
-            let slots, _ = Ledger.read r.Root
+        let ledger = fst (Ledger.read r.Root)
 
+        // the advanced draft's entry files, which its re-headed file now carries
+        let removals =
+            admitted.Advances
+            |> Option.bind (fun d -> ledger |> List.tryFind (fun s -> s.Version = d.Version))
+            |> Option.map (fun s -> s.Entries |> List.map (fun e -> file e.Path))
+            |> Option.defaultValue []
+
+        let index =
             let slots =
-                slots
+                ledger
                 |> List.map (fun s ->
                     match retired with
                     | Some(rel, text) when s.Path = rel -> Ledger.parse s.Version rel text
@@ -781,7 +804,12 @@ let private planWith (r: Request) (admitted: Admitted) : Result<Plan, string lis
             @ coreLaws
 
         let coreFaults =
-            match dirty r.Root ("copies.json" :: (coreWrites |> List.map (fst >> relative r.Root))) with
+            match
+                dirty
+                    r.Root
+                    ("copies.json"
+                     :: ((coreWrites |> List.map fst) @ removals |> List.map (relative r.Root)))
+            with
             | Error why -> [ why ]
             | Ok [] -> []
             | Ok changed ->
@@ -809,6 +837,7 @@ let private planWith (r: Request) (admitted: Admitted) : Result<Plan, string lis
                   CorpusDeclared = corpusDeclared
                   Families = families
                   CoreWrites = coreWrites
+                  CoreRemovals = removals
                   CopiesText = read "copies.json"
                   OldPin = pin }
         | faults -> Error faults
@@ -886,13 +915,27 @@ let apply (p: Plan) : Result<Outcome, string> =
                     Directory.CreateDirectory(Path.GetDirectoryName path) |> ignore
                     File.WriteAllText(path, text)
 
+                for path in p.CoreRemovals do
+                    File.Delete path
+
+                // an advanced draft's entry directory goes once its files have (D274)
+                for d in p.Advances |> Option.toList do
+                    let dir = Path.Combine(r.Root, Ledger.entryDir d.Version)
+
+                    if
+                        Directory.Exists dir
+                        && Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories) |> Seq.isEmpty
+                    then
+                        Directory.Delete(dir, true)
+
                 File.WriteAllText(Path.Combine(r.Root, "copies.json"), copies)
 
                 { CorpusCommit = commit
                   CorpusHead = head
                   CorpusFiles = files
                   CoreFiles =
-                    (p.CoreWrites |> List.map (fst >> relative r.Root)) @ [ "copies.json" ]
+                    ((p.CoreWrites |> List.map fst) @ p.CoreRemovals |> List.map (relative r.Root))
+                    @ [ "copies.json" ]
                     |> List.distinct
                   CorpusBranch = branchOf r.Corpus
                   CoreBranch = branchOf r.Root })))
