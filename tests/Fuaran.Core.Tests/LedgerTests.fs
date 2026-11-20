@@ -15,6 +15,9 @@
 ///
 /// Tags are read through `ChildProcess.Tags.released` (`--merged HEAD`). A clone that cannot answer
 /// (no git, or no release tag at all, D168) skips the tag clauses by name; the shape clauses still run.
+/// A clone with no release tag whose record says nothing is released yet (every slot DRAFT), or that a
+/// first release is in progress (the one released slot is the standing version and carries
+/// `FirstReleaseMarker`), reads the record instead (`tagsToRead`), so a first release is gated before its tag.
 /// Every clause has a go-red over synthetic slots beside the live case, and the live ledger is planted
 /// with the two `0.35.2` failure shapes, so a reader that matched nothing could not pass for one that
 /// checks.
@@ -67,6 +70,70 @@ let private live () =
     let root = Repo.root ()
     let slots, strays = read root
     root, slots, strays, ChildProcess.Tags.released root
+
+// ---- a repository's first release (Phase 259's refinement, with a marker) --------------------------------
+
+/// The paragraph a first release's slot carries, written in the release commit beside its record. With no release
+/// tag anywhere, it is what tells a first release in progress from a clone that lost its tags.
+[<Literal>]
+let FirstReleaseMarker = "**First release.**"
+
+/// What a clone holding no release tag at all can still say about itself, read from the record alone.
+type internal Tagless =
+    /// Every slot is headed DRAFT: nothing has been released, so an empty tag set is the truth.
+    | NothingReleased
+    /// The one released slot is the standing `<Version>` and carries the marker: the release commit of a
+    /// repository's first release, before the tag it is about to receive.
+    | FirstRelease of version: string
+    /// The record names a release, and no tag is here: the clone is missing its tags (D168 skips it by name).
+    | RecordsRelease
+
+let internal taglessReading (standing: string option) (slots: Slot list) : Tagless =
+    let released =
+        slots
+        |> List.filter (fun s ->
+            match s.State with
+            | Released _ -> true
+            | _ -> false)
+
+    match released with
+    | [] when not slots.IsEmpty && slots |> List.forall (fun s -> s.State = Draft) -> NothingReleased
+    | [ s ] when
+        Some s.Version = standing
+        && s.Paragraphs
+           |> List.exists (fun p -> p.StartsWith(FirstReleaseMarker, StringComparison.Ordinal))
+        ->
+        FirstRelease s.Version
+    | _ -> RecordsRelease
+
+/// The tags a tag-reading clause reads, with the note it prints when the record stood in for them, or the reason it
+/// skips. A clone holding release tags reads them. A clone holding none reads the empty set while every slot is a
+/// draft, and the tag the release commit is about to receive while the record says a first release is in progress,
+/// so a first release meets a green gate BEFORE its tag; otherwise it skips by name, as D168 rules.
+let internal tagsToRead
+    (standing: string option)
+    (slots: Slot list)
+    (read: Result<Set<string>, string>)
+    : Result<Set<string> * string option, string> =
+    match read with
+    | Error why when why = ChildProcess.Tags.NoReleaseTag ->
+        match taglessReading standing slots with
+        | NothingReleased ->
+            Ok(Set.empty, Some "no release tag, and every slot is headed DRAFT: nothing is released yet")
+        | FirstRelease v ->
+            Ok(
+                Set.singleton ("v" + v),
+                Some(
+                    sprintf
+                        "no release tag, and %s's slot carries %s: read as the first release, tagged `v%s` by the commit under test"
+                        v
+                        FirstReleaseMarker
+                        v
+                )
+            )
+        | RecordsRelease -> Error why
+    | Error why -> Error why
+    | Ok tags -> Ok(tags, None)
 
 // ---- synthetic slots ------------------------------------------------------------------------
 
@@ -190,8 +257,10 @@ let tests =
                   "the ledger holds at least one slot file — an empty read would make every clause vacuous"
 
               let tags =
-                  match tags with
-                  | Ok tags -> tags
+                  match tagsToRead (standing root) slots tags with
+                  | Ok(tags, note) ->
+                      note |> Option.iter (printfn "release-ledger tag clause: %s")
+                      tags
                   | Error why ->
                       // Without the tags the per-tag half has nothing to read; the shape still runs.
                       printfn "release-ledger tag clause SKIPPED: %s" why
@@ -233,32 +302,42 @@ let tests =
           test "every tag is headed released with its receiving-gate record, and every released heading has its tag" {
               let root, slots, _, tags = live ()
 
-              match tags with
+              match tagsToRead (standing root) slots tags with
               | Error why ->
                   printfn "Release-record check SKIPPED: %s" why
                   skiptestf "release-record check skipped — %s" why
-              | Ok tags ->
-                  Expect.isNonEmpty
-                      (tags
-                       |> Set.toList
-                       |> List.choose ChildProcess.Tags.version
-                       |> List.filter (fun v -> v >= recordFloor))
-                      "at least one tag in HEAD's history sits at or above the record floor — with none every clause below passes vacuously"
+              | Ok(tags, note) ->
+                  match note with
+                  | Some note -> printfn "Release-record check: %s" note
+                  | None ->
+                      Expect.isNonEmpty
+                          (tags
+                           |> Set.toList
+                           |> List.choose ChildProcess.Tags.version
+                           |> List.filter (fun v -> v >= recordFloor))
+                          "at least one tag in HEAD's history sits at or above the record floor — with none every clause below passes vacuously"
 
                   releaseFaults recordFloor (decisions root) tags (standing root) slots
                   |> failOn "release-record"
           }
 
           test "no 'no tag exists' sentence survives the tag it denies" {
-              let _, slots, _, tags = live ()
+              let root, slots, _, tags = live ()
 
-              match tags with
+              match tagsToRead (standing root) slots tags with
               | Error why ->
                   // Skipped by NAME with the reason printed, never passed silently: the source-archive
-                  // / no-git case, or a clone holding no release tag at all (D168).
+                  // / no-git case, or a clone holding no release tag whose record names a release (D168).
                   printfn "draft-slot tag check SKIPPED: %s" why
                   skiptestf "draft-slot tag check skipped — %s" why
-              | Ok tags ->
+              | Ok(tags, Some note) ->
+                  // The record stood in for the tags: nothing released, or a first release before its tag.
+                  printfn "draft-slot tag check: %s" note
+
+                  Expect.isEmpty
+                      (staleDraftSentences tags slots)
+                      "a first release's slot retires its 'no tag exists' sentence in the release commit"
+              | Ok(tags, None) ->
                   // A clone holding release tags of which HEAD descends from none FAILS here rather
                   // than skipping: with no tag the comparison below passes vacuously.
                   Expect.isNonEmpty (Set.toList tags) "HEAD's history holds at least one `vX.Y.Z` release tag"
@@ -889,4 +968,100 @@ let tests =
               Expect.isNonEmpty
                   (unrecordedAtRelease (Some "0.9.2") [ draft ] [ 5 ])
                   "a standing version with no slot of its own is not the draft"
+          }
+
+          // ---- a repository's first release ----------------------------------------------------
+
+          test "go-red: a tagless clone whose every slot is a draft reads no tag, with a note, and is green" {
+              let drafts = [ slot "0.1.0" "## 0.1.0 — DRAFT\n\nThe first slot." ]
+              let noTag = Error ChildProcess.Tags.NoReleaseTag
+
+              match tagsToRead (Some "0.1.0") drafts noTag with
+              | Ok(tags, Some note) ->
+                  Expect.isEmpty tags "nothing is released, so the clauses read the empty tag set"
+                  Expect.stringContains note "every slot is headed DRAFT" "the note says why the tags were not needed"
+                  Expect.isEmpty (faultsOf tags (Some "0.1.0") drafts) "the release-record clauses are green"
+                  Expect.isEmpty (shapeFaults tags (Some "0.1.0") drafts []) "and the shape clauses"
+              | other -> failtestf "a draft-only tagless clone read as %A, not as nothing released" other
+
+              Expect.equal
+                  (tagsToRead (Some "0.1.0") drafts (Error "git: not a repository"))
+                  (Error "git: not a repository")
+                  "a clone that cannot be read at all still skips by its own reason"
+          }
+
+          test "go-red: a first release's commit, marked, is green before its tag; unmarked it is not" {
+              let record =
+                  String.concat
+                      "\n"
+                      [ "**Release record — the receiving gate: GREEN.** Prose about the run."
+                        ""
+                        "**Receiving gate run:** `fuaran-dotnet` at `606f76e`, `core-fable.ps1"
+                        "-CoreVersion 0.36.0 -CoreFeed <folder>`; compile leg 16 packages green; value leg 419/419 vectors"
+                        "byte-identical." ]
+
+              let heading = "## 0.36.0 — released 2026-11-20 as `v0.36.0`\n\n"
+
+              let markedText =
+                  heading + FirstReleaseMarker + " Nothing was tagged before it.\n\n" + record
+
+              let marked = [ slot "0.36.0" markedText ]
+              let unmarked = [ slot "0.36.0" (heading + record) ]
+              let noTag = Error ChildProcess.Tags.NoReleaseTag
+
+              match tagsToRead (Some "0.36.0") marked noTag with
+              | Ok(tags, Some note) ->
+                  Expect.equal tags (set [ "v0.36.0" ]) "the clauses read the tag the release commit receives"
+                  Expect.stringContains note "first release" "the note names the first release"
+                  Expect.isEmpty (faultsOf tags (Some "0.36.0") marked) "the record is held, and green"
+                  Expect.isEmpty (shapeFaults tags (Some "0.36.0") marked []) "and the shape"
+              | other -> failtestf "a marked first release read as %A" other
+
+              Expect.exists
+                  (faultsOf
+                      (set [ "v0.36.0" ])
+                      (Some "0.36.0")
+                      [ slot "0.36.0" (markedText.Replace("value leg 419/419", "value leg 418/419")) ])
+                  (fun f -> f.Contains "not green on both legs")
+                  "the record it reads is checked, not waved through: a short value leg is red"
+
+              Expect.equal
+                  (tagsToRead (Some "0.36.0") unmarked noTag)
+                  noTag
+                  "without the marker the turned heading reads as a release with its tags missing: skipped by name (D168)"
+
+              Expect.exists
+                  (faultsOf Set.empty (Some "0.36.0") unmarked)
+                  (fun f -> f.Contains "heads 0.36.0 released, and no `v0.36.0` tag")
+                  "which is what reading no tag would have said of it"
+          }
+
+          test "go-red: a tagless clone whose record names an earlier release skips by name (D168)" {
+              let noTag = Error ChildProcess.Tags.NoReleaseTag
+
+              let earlier =
+                  [ slot "0.37.0" "## 0.37.0 — DRAFT\n\nThe next slot."
+                    slot
+                        "0.36.0"
+                        ("## 0.36.0 — released 2026-11-20 as `v0.36.0`\n\n"
+                         + FirstReleaseMarker
+                         + " Once.") ]
+
+              Expect.equal
+                  (tagsToRead (Some "0.37.0") earlier noTag)
+                  noTag
+                  "a released slot the standing version has moved past means the tags are missing, marker or not"
+
+              Expect.equal
+                  (tagsToRead
+                      (Some "0.36.0")
+                      [ earlier[1]; slot "0.35.0" "## 0.35.0 — released 2026-11-01 as `v0.35.0`" ]
+                      noTag)
+                  noTag
+                  "a marked slot beside another released one is not a first release"
+
+              Expect.equal
+                  (tagsToRead (Some "0.37.0") earlier (Ok(set [ "v0.36.0" ])))
+                  (Ok(set [ "v0.36.0" ], None))
+                  "a clone holding its tags reads them, with no note"
           } ]
