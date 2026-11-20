@@ -425,6 +425,37 @@ let publicationBoundaryTests =
 
               Expect.isEmpty violations "bare phase citations are allowed everywhere"
 
+          testCase "go-red: a name that has left the repository is refused, and what stayed or replaced it is not"
+          <| fun _ ->
+              // The left-the-repository rule (DECISIONS.md D66, and the decision beside it): each
+              // old id is refused on its own line, in any case; the package that stayed (`Column`),
+              // the kit (`Conformance`) and the compute repository's current ids pass.
+              // The old ids are assembled here, so this file carries none of the words it refuses.
+              let b = live.Value
+              let core = "Fuaran.Core."
+
+              let refused =
+                  [ "the evaluator in `" + core + "DataFrame`"
+                    "ship from " + core + "DataFrame.Conformance"
+                    "see `" + core + "Column.Ops`"
+                    "tests/" + core + "DataFrame.CSharp.Proof/"
+                    "run tests/" + core + "CSharp.Proof"
+                    "a cache path under " + core.ToLowerInvariant() + "dataframe/0.34.0" ]
+
+              let passed =
+                  [ "the column layer `Fuaran.Core.Column` stays"
+                    "`Fuaran.Core.Conformance` and `Fuaran.Core.ColumnCodec`"
+                    "`Fuaran.Compute.DataFrame`, `Fuaran.Compute.ColumnOps` and `Fuaran.Compute.Conformance`" ]
+
+              let probe = "docs/probe.md", String.concat "\n" (refused @ passed) + "\n"
+
+              let violations, _, _ = sweepFiles b (probe :: cleanBaseline)
+
+              Expect.equal
+                  (violations |> List.map (fun h -> h.Rule, h.Line))
+                  [ for i in 1 .. refused.Length -> "left-the-repository", i ]
+                  "every old id is refused on its own line, and nothing that stayed is"
+
           testCase "go-red: a carried exception is exempt only where its file AND its text match"
           <| fun _ ->
               let b = live.Value
@@ -463,7 +494,15 @@ let publicationBoundaryTests =
               Expect.isGreaterThan c.Files.Length 1 "the live boundary carries a several-file exception"
               let _, files = sweptSet repoRoot
 
-              let unnamed = files |> List.map fst |> List.find (fun f -> f = "README.md")
+              // README.md where the exception does not name it; otherwise the first swept file it
+              // does not name (the widest exception may carry the README's own paragraph).
+              let unnamed =
+                  let paths =
+                      files |> List.map fst |> List.filter (fun f -> not (List.contains f c.Files))
+
+                  paths
+                  |> List.tryFind (fun f -> f = "README.md")
+                  |> Option.defaultWith (fun () -> List.head paths)
 
               Expect.isFalse (List.contains unnamed c.Files) "the plant's file is not one the exception names"
 

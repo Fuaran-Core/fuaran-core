@@ -307,7 +307,7 @@ is no concrete computation here for a theorem to be about); and `Fuaran.Core.Pro
 (**`law-tested-by-design`** — real computation, theorem declined in favour of a named `Conformance`
 family, which the entry cites and the gate holds to the shipped roster). Each entry's own prose is
 in `coverage-exclusions.json`; it is the decision, and the token is only its kind. There were nine
-until Phase 154: `Fuaran.Core.DataFrame`'s entry retired the day `Pipeline.fst` gave the package a
+until Phase 154: the dataframe package's entry retired the day `Pipeline.fst` gave the package a
 model, because clause 1's second direction fails an exclusion for a package that has since gained
 one — and what that entry declined (the verbs' semantics, left to `incrementalLaws` and its
 siblings) is still declined for the twelve verbs that evaluate no expression, as the model's own
@@ -316,8 +316,8 @@ expression evaluator under them, clauses; the cell primitives are the `pipeline-
 row). The file keeps the retirement under `$retired` so the next reader finds the decision where the
 entry was. Phase 258 then moved the package itself, with both compute models and their rows, to
 [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute) (DECISIONS.md D66), and with it the two
-exclusions Phase 257 had filed for `Fuaran.Core.DataFrame.CSharp` and
-`Fuaran.Core.DataFrame.Conformance`: the eight left were this repository's whole list again. Phase 231
+exclusions Phase 257 had filed for the dataframe facade and the dataframe conformance
+package: the eight left were this repository's whole list again. Phase 231
 then removed `Fuaran.Core.CSharp`, the other `facade` entry, with the package itself (DECISIONS.md D28),
 which left seven. Phase 306 retired `Fuaran.Core.Column`'s — the entry said an operator who wanted the
 codec proved would delete it, and `WireColumn.fst` is that theorem ([`WireColumn`](#wirecolumn) below) — which leaves the six

@@ -8,7 +8,7 @@ module Fuaran.Core.Tests.FableSmokeCompletenessTests
 // package. Which packages that claim covers was once a hand-maintained
 // `<ProjectReference>` list in an in-repo Fable smoke beside a hand-written
 // exclusion COMMENT, and the one thing such a list cannot notice is the package
-// nobody added to it: measured by Phase 185, `Fuaran.Core.Column.Ops` and
+// nobody added to it: measured by Phase 185, the column-operation package and
 // `Fuaran.Core.Idl.Cli` were in neither.
 //
 // Phase 217 moved the compile and the value-parity run to the consumer that owns

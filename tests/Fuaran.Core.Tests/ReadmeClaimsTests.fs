@@ -1350,8 +1350,8 @@ let tests =
                   (absentFromBaselines
                       "method Fuaran.Core.Memo.isMemoisable(Fuaran.Core.EffectClass) : System.Boolean\n"
                       (contractBulletMembers
-                          "- **`Fuaran.Core.Memo.isMemoisable`** — kept\n- **`Fuaran.Core.DataFrame.cellString`** — moved"))
-                  [ "Fuaran.Core.DataFrame.cellString" ]
+                          "- **`Fuaran.Core.Memo.isMemoisable`** — kept\n- **`Fuaran.Core.Retired.cellString`** — moved"))
+                  [ "Fuaran.Core.Retired.cellString" ]
                   "a member no baseline carries is red"
           }
 

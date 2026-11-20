@@ -75,8 +75,9 @@ reproduce the wire exactly, but carrying no behaviour. This is deliberate and lo
 - The **node envelope** (`state` / `style` / `accessibility`) — no corpus `Node` fixture carries it.
 - **Multi-param generic author facades** (`GridSpecOf<'row,'Msg>`) — a typed author surface, not
   wire-visible; they sit *above* the generated structural layer, unchanged by the switch.
-- **`grid-transform`** — a `Binding.Transform` embeds a `Fuaran.Core.DataFrame` pipeline rendered by
-  Core's own `DataFrameCodec` / `ColumnCodec`, a separate wire surface from the UI structural layer.
+- **`grid-transform`** — a `Binding.Transform` embeds a dataframe pipeline (the compute repository's
+  `Fuaran.Compute.DataFrame`) rendered by that package's codec over Core's `ColumnCodec`, a separate
+  wire surface from the UI structural layer.
 - The two `null`-bearing fixtures (`multiselect-1` + `form-segmented`) — a `Binding.Static None`
   renders JSON `null`, which the FSharp.Core `JVal` model (`Fuaran.Core.Wire`) has no case for. A
   wire-`null`-representation decision for the owning team, **not** something to bolt on unilaterally.
