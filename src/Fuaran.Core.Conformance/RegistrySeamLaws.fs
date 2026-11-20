@@ -345,7 +345,7 @@ module internal RegistrySeamLaws =
               Where = []
               OrderBy = [] }
 
-        let familyOf (id: string) : RuleFamily<unit, string> = { Id = id; Run = fun _ _ -> [] }
+        let familyOf (id: string) : RuleFamily<unit, string> = Validator.wholeTree id (fun _ _ -> [])
 
         let build (add: 'x -> 'r -> Result<'r, 'e>) (empty: 'r) (xs: 'x list) : Result<'r, 'e> =
             xs |> List.fold (fun acc x -> acc |> Result.bind (add x)) (Ok empty)

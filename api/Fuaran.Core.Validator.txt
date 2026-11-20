@@ -12,7 +12,6 @@ attribute Fuaran.Core.Validator+ReferenceDefect`1 RequireQualifiedAccess
 attribute Fuaran.Core.Validator+RulesModule RequireQualifiedAccess
 ctor Fuaran.Core.Defect`1..ctor(System.String, Fuaran.Core.Severity, System.String, Microsoft.FSharp.Core.FSharpOption`1<!0>, System.String, Microsoft.FSharp.Collections.FSharpList`1<!0>)
 ctor Fuaran.Core.PackRule..ctor(System.String, System.String)
-ctor Fuaran.Core.RuleFamily`2..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.NodeWitness`2<!0, !1>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!1>>>>)
 ctor Fuaran.Core.Validator+Finding`1..ctor(Fuaran.Core.Defect`1<!0>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.RejectionGuidance>)
 ctor Fuaran.Core.Validator+GateVerdict`1..ctor(Fuaran.Core.Validator+GatePolicy, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!0>>, System.Boolean)
 ctor Fuaran.Core.Validator+GuidedCheck`2..ctor(System.String, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Validator+Finding`1<!1>>>)
@@ -111,7 +110,9 @@ method Fuaran.Core.Validator.tryFind`2(System.String, Fuaran.Core.Validator+Rule
 method Fuaran.Core.Validator.union`2(Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>, Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>, Fuaran.Core.RegistrationError>
 method Fuaran.Core.Validator.unregister`2(System.String, Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.Validator+RuleRegistry`2<!!0, !!1>, Fuaran.Core.RegistrationError>
 method Fuaran.Core.Validator.verdict`1(Fuaran.Core.Validator+GatePolicy, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!!0>>) : Fuaran.Core.Validator+GateVerdict`1<!!0>
+method Fuaran.Core.Validator.wholeTree`2(System.String, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.NodeWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!!1>>>>) : Fuaran.Core.RuleFamily`2<!!0, !!1>
 property Fuaran.Core.ColumnValidator.empty : Fuaran.Core.Validator+Rules`2<Fuaran.Core.Table, System.String> { get }
+property Fuaran.Core.RuleFamily`2.Id : System.String { get }
 record-field Fuaran.Core.Defect`1.Code #0 : System.String
 record-field Fuaran.Core.Defect`1.Family #4 : System.String
 record-field Fuaran.Core.Defect`1.Message #2 : System.String
@@ -120,8 +121,6 @@ record-field Fuaran.Core.Defect`1.Related #5 : Microsoft.FSharp.Collections.FSha
 record-field Fuaran.Core.Defect`1.Severity #1 : Fuaran.Core.Severity
 record-field Fuaran.Core.PackRule.Pack #0 : System.String
 record-field Fuaran.Core.PackRule.RuleId #1 : System.String
-record-field Fuaran.Core.RuleFamily`2.Id #0 : System.String
-record-field Fuaran.Core.RuleFamily`2.Run #1 : Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.NodeWitness`2<!0, !1>, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Defect`1<!1>>>>
 record-field Fuaran.Core.Validator+Finding`1.Defect #0 : Fuaran.Core.Defect`1<!0>
 record-field Fuaran.Core.Validator+Finding`1.Guidance #1 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.RejectionGuidance>
 record-field Fuaran.Core.Validator+GateVerdict`1.Blocked #2 : System.Boolean
@@ -149,7 +148,7 @@ type Fuaran.Core.RegistrationError (union)
 type Fuaran.Core.RegistrationError+DuplicateRule (type)
 type Fuaran.Core.RegistrationError+Tags (type)
 type Fuaran.Core.RegistrationError+UnknownRule (type)
-type Fuaran.Core.RuleFamily`2 (record)
+type Fuaran.Core.RuleFamily`2 (union)
 type Fuaran.Core.Severity (union)
 type Fuaran.Core.Severity+Tags (type)
 type Fuaran.Core.Validator (module)

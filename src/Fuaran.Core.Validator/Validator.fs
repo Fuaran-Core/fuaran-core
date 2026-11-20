@@ -77,15 +77,26 @@ type RegistrationError =
 
 /// A registered rule family — a named bundle of checks the walker runs over a tree.
 /// The framework owns registration + walking; the rule *body* is domain-supplied.
+///
+/// **Opaque (Phase 709, DECISIONS.md D279).** The representation is private, so a family is built
+/// only through a constructor: `Validator.wholeTree` (checks over the whole tree, given its root) or
+/// `Validator.perNode` (a rule of one node, run at every node in preorder). Its `Id` is readable,
+/// and `Validator.asCheck` runs it alone. Because the walker can tell the two shapes apart,
+/// `Validator.runAll` runs every per-node family of a registry over ONE preorder of the tree; a
+/// later shape is a new constructor, never a field every consumer's literal would have to name.
+/// Either body may throw: the walker turns a throw into one `RULE-FAULT` error for that family and
+/// keeps running the others.
 type RuleFamily<'Node, 'Id> =
-    {
-        /// The family's registry key and the provenance stamped on every finding it produces;
-        /// unique within a registry (`Validator.register` refuses a repeat).
-        Id: string
-        /// The checks over a whole tree, given its root. May throw: the walker turns a throw into
-        /// one `RULE-FAULT` error and keeps running the other families.
-        Run: NodeWitness<'Node, 'Id> -> 'Node -> Defect<'Id> list
-    }
+    private
+    | WholeTree of id: string * run: (NodeWitness<'Node, 'Id> -> 'Node -> Defect<'Id> list)
+    | PerNode of id: string * rule: (NodeWitness<'Node, 'Id> -> 'Node -> Defect<'Id> list)
+
+    /// The family's registry key and the provenance stamped on every finding it produces;
+    /// unique within a registry (`Validator.register` refuses a repeat).
+    member this.Id: string =
+        match this with
+        | WholeTree(id, _)
+        | PerNode(id, _) -> id
 
 /// The rule-pack extension point: a rule contributed by a pack layered atop a base
 /// domain's rule families (the Documents → Legal pack-atop-pack composition). This is the
@@ -239,11 +250,28 @@ module Validator =
     let ofFamilies (families: RuleFamily<'Node, 'Id> list) : Result<RuleRegistry<'Node, 'Id>, RegistrationError> =
         Ordered.ofList familyId families |> Result.map holding
 
+    /// Build a rule family from checks over the whole tree, given its root (Phase 709) — the shape
+    /// for a family that reads more than one node at a time (a grammar, a reference graph). The
+    /// walker calls `run` once per tree and collects what it returns, in its order.
+    let wholeTree (id: string) (run: NodeWitness<'Node, 'Id> -> 'Node -> Defect<'Id> list) : RuleFamily<'Node, 'Id> =
+        WholeTree(id, run)
+
     /// Build a rule family from a per-node predicate — the common shape. The walker
-    /// visits every node in preorder and collects whatever defects the rule emits.
+    /// visits every node in preorder and collects whatever defects the rule emits; every per-node
+    /// family of a registry shares that one preorder (Phase 709).
     let perNode (id: string) (rule: NodeWitness<'Node, 'Id> -> 'Node -> Defect<'Id> list) : RuleFamily<'Node, 'Id> =
-        { Id = id
-          Run = fun w root -> Tree.preorder w root |> List.collect (rule w) }
+        PerNode(id, rule)
+
+    /// The checks of `family` over the tree under `root`, unguarded — a per-node family's rule at
+    /// every node of its own preorder. What `asCheck` runs, and what one family costs walked alone.
+    let private runAlone
+        (w: NodeWitness<'Node, 'Id>)
+        (family: RuleFamily<'Node, 'Id>)
+        (root: 'Node)
+        : Defect<'Id> list =
+        match family with
+        | WholeTree(_, run) -> run w root
+        | PerNode(_, rule) -> Tree.preorder w root |> List.collect (rule w)
 
     // ---- Phase 489: a finding and its recovery guidance (DECISIONS.md D184.8) ----
     // What a refused emitter needs beside the defect is what to do and what it could have said
@@ -325,13 +353,33 @@ module Validator =
     /// that produced it (Phase 298), in family order then each family's own order. Each finding's
     /// `Family` is stamped with that id; a family that throws contributes one `RULE-FAULT` error and
     /// the families after it still run.
+    ///
+    /// **One walk (Phase 709).** The tree is walked once for all the per-node families: the preorder
+    /// is taken when the first of them runs and every one reads it, so a per-node family's findings
+    /// come in preorder exactly as when it walked the tree itself. A registry with no per-node family
+    /// takes no preorder. A walk that throws (a witness's `Children`, say) is a `RULE-FAULT` for each
+    /// per-node family, with the exception's message, as when each walked for itself.
     let runAllTagged
         (w: NodeWitness<'Node, 'Id>)
         (reg: RuleRegistry<'Node, 'Id>)
         (root: 'Node)
         : (string * Defect<'Id>) list =
-        walk familyId (fun f -> f.Run w root) reg.Families
-        |> List.map (fun (f, d) -> f.Id, d)
+        let preorder =
+            lazy
+                (try
+                    Ok(Tree.preorder w root)
+                 with ex ->
+                     Error ex)
+
+        let run (family: RuleFamily<'Node, 'Id>) : Defect<'Id> list =
+            match family with
+            | WholeTree(_, run) -> run w root
+            | PerNode(_, rule) ->
+                match preorder.Force() with
+                | Ok nodes -> nodes |> List.collect (rule w)
+                | Error ex -> raise ex
+
+        walk familyId run reg.Families |> List.map (fun (f, d) -> f.Id, d)
 
     /// Run every registered family over the tree, concatenating defects in family order — the
     /// findings of `runAllTagged`, each carrying its family in `Family`. Total (Phase 298).
@@ -513,7 +561,7 @@ module Validator =
     // rule that produced them and a `pack@version` citation, so a report can cite the rule and a
     // consumer can pin the pack version it audits against. Generic over the SUBJECT a rule reads (a
     // tree root, a document, a model, a voicing sequence) — a tree family is the instance
-    // `fun root -> family.Run w root` — and over the defect's location `'Id`.
+    // `asCheck w family`, a check of the root — and over the defect's location `'Id`.
 
     /// One rule of a pack: its id within the pack (the citation key) and its check.
     type PackCheck<'Subject, 'Id> =
@@ -572,12 +620,13 @@ module Validator =
               Defect = d })
 
     /// A tree rule family as a `PackCheck` over the tree's root (Phase 298) — the subject-generic
-    /// rule `PackCheck` already is, with the tree family the instance `fun root -> family.Run w
-    /// root`. So a tree family and a rule over any other subject (a column table, a voicing
-    /// sequence) meet in one pack without `RuleFamily` being retyped.
+    /// rule `PackCheck` already is, with the tree family the check of its root. So a tree family and
+    /// a rule over any other subject (a column table, a voicing sequence) meet in one pack without
+    /// `RuleFamily` being retyped. Since Phase 709 it is also how one family is run on its own: a
+    /// per-node family's check walks its own preorder.
     let asCheck (w: NodeWitness<'Node, 'Id>) (family: RuleFamily<'Node, 'Id>) : PackCheck<'Node, 'Id> =
         { RuleId = family.Id
-          Run = family.Run w }
+          Run = runAlone w family }
 
     /// A rule that states the recovery of its findings (Phase 489): `PackCheck`'s shape with a body
     /// answering `Finding`s, so the remedy and the alternatives are computed where the rule has the
@@ -739,28 +788,26 @@ module Validator =
     /// or authored outside the engine. `allowedChildren` maps a parent's kind tag to the kind tags it
     /// may hold, `None` meaning any.
     let containment (allowedChildren: string -> string list option) : RuleFamily<'Node, 'Id> =
-        { Id = "containment"
-          Run =
-            fun w root ->
-                Ops.illegalChildren allowedChildren w root
-                |> List.map (fun (p, c) ->
-                    let pk = w.KindTag p
-                    let legal = allowedChildren pk |> Option.defaultValue []
+        wholeTree "containment" (fun w root ->
+            Ops.illegalChildren allowedChildren w root
+            |> List.map (fun (p, c) ->
+                let pk = w.KindTag p
+                let legal = allowedChildren pk |> Option.defaultValue []
 
-                    { Code = IllegalChildCode
-                      Severity = Severity.Error
-                      Message =
-                        "a "
-                        + w.KindTag c
-                        + " cannot sit under a "
-                        + pk
-                        + (if List.isEmpty legal then
-                               "; a " + pk + " holds no children"
-                           else
-                               "; a " + pk + " holds: " + String.concat ", " legal)
-                      Node = Some(w.Id c)
-                      Family = "containment"
-                      Related = [ w.Id p ] }) }
+                { Code = IllegalChildCode
+                  Severity = Severity.Error
+                  Message =
+                    "a "
+                    + w.KindTag c
+                    + " cannot sit under a "
+                    + pk
+                    + (if List.isEmpty legal then
+                           "; a " + pk + " holds no children"
+                       else
+                           "; a " + pk + " holds: " + String.concat ", " legal)
+                  Node = Some(w.Id c)
+                  Family = "containment"
+                  Related = [ w.Id p ] }))
 
     /// One reference defect (Phase 313), over a `RefWitness`. `from` is the referring node,
     /// `declarer` a declaring node, `target` / `declared` the referenced or declared id.
@@ -953,15 +1000,14 @@ module Validator =
     /// references (`REF-DANGLING`, error), unused declarations (`REF-UNUSED`, warning) and reference
     /// cycles (`REF-CYCLE`, error), each located at the referring, declaring or first cycle node.
     let referenceIntegrity (refw: RefWitness<'Node, 'Id>) (idw: IdWitness<'Id>) : RuleFamily<'Node, 'Id> =
-        { Id = "referenceIntegrity"
-          Run = fun w root -> referenceDefects refw idw w root |> List.map (referenceDefect idw) }
+        wholeTree "referenceIntegrity" (fun w root ->
+            referenceDefects refw idw w root |> List.map (referenceDefect idw))
 
     /// The opt-in ordering family (Phase 313): `forwardReferences` as `REF-FORWARD` errors, located
     /// at the referring node. Register it beside `referenceIntegrity` in a domain that defines
     /// before it uses.
     let referenceOrder (refw: RefWitness<'Node, 'Id>) (idw: IdWitness<'Id>) : RuleFamily<'Node, 'Id> =
-        { Id = "referenceOrder"
-          Run = fun w root -> forwardReferences refw idw w root |> List.map (referenceDefect idw) }
+        wholeTree "referenceOrder" (fun w root -> forwardReferences refw idw w root |> List.map (referenceDefect idw))
 
 /// A columnar validation rule over a `Table` (Phase 37) — since Phase 521 the `Validator.PackCheck`
 /// it always had the shape of, so a column rule IS a rule of the one framework: it registers in a

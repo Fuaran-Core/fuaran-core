@@ -682,3 +682,238 @@ let findingTests =
                   (lifted.Run "x y")
                   ((wordRule "p" "y").Run "x y" |> List.map Validator.Finding.ofDefect)
                   "a plain check comes back unguided" ]
+
+
+// ---- Phase 709: the opaque family and the one walk ----
+
+/// `nodew` with its `Children` reads counted — the unit a walk is made of (`Tree.preorder` reads
+/// each node's children), so the count tells how many times a run walked the tree.
+let private counting (w: NodeWitness<RNode, string>) : NodeWitness<RNode, string> * int ref =
+    let reads = ref 0
+
+    { w with
+        Children =
+            fun n ->
+                reads.Value <- reads.Value + 1
+                w.Children n },
+    reads
+
+/// `nodew`, except that reading the children of a `bad` node throws — a walk that fails mid-tree.
+let private brittle: NodeWitness<RNode, string> =
+    { nodew with
+        Children =
+            fun n ->
+                if n.Kind = "bad" then
+                    failwith ("no children at " + n.Id)
+                else
+                    n.Children }
+
+let private kinds = [| "doc"; "section"; "para"; "note"; "bad" |]
+
+/// A seeded tree: up to three children a node, `depth` levels, ids the path from the root.
+let rec private grown (rng: System.Random) (depth: int) (id: string) : RNode =
+    let width = if depth = 0 then 0 else rng.Next 4
+
+    { RNode.node
+          id
+          kinds[rng.Next kinds.Length]
+          [ for i in 0 .. width - 1 -> grown rng (depth - 1) (id + "." + string i) ] with
+        Value = if rng.Next 3 = 0 then "" else "v" }
+
+/// Family `k` of shape `shape`: three per-node shapes (one throws at some nodes after earlier
+/// findings) and three whole-tree shapes (one walks the tree itself, one throws).
+let private familyOf (k: int) (shape: int) : RuleFamily<RNode, string> =
+    let id = sprintf "f%02d" k
+
+    match shape with
+    | 0 ->
+        Validator.perNode id (fun w n ->
+            if n.Value = "" then
+                [ Defect.create "EMPTY" Severity.Warning (w.KindTag n) (Some n.Id) ]
+            else
+                [])
+    | 1 ->
+        Validator.perNode id (fun _ n ->
+            if n.Kind = "note" then
+                [ Defect.create "NOTE" Severity.Info n.Id (Some n.Id) ]
+            else
+                [])
+    | 2 ->
+        Validator.perNode id (fun _ n ->
+            if n.Kind = "para" && n.Id.EndsWith "1" then
+                failwithf "rule %s at %s" id n.Id
+            else
+                [ Defect.create "SEEN" Severity.Info n.Kind (Some n.Id) ])
+    | 3 ->
+        Validator.wholeTree id (fun w root ->
+            [ Defect.create "COUNT" Severity.Info (string (List.length (Tree.preorder w root))) None ])
+    | 4 -> Validator.wholeTree id (fun _ root -> [ Defect.create "ROOT" Severity.Error root.Kind (Some root.Id) ])
+    | _ ->
+        Validator.wholeTree id (fun _ root ->
+            if root.Kind = "doc" then
+                failwith "whole-tree rule exploded"
+            else
+                [])
+
+let private registryOf (families: RuleFamily<RNode, string> list) : Validator.RuleRegistry<RNode, string> =
+    Validator.ofFamilies families
+    |> Result.defaultWith (fun e -> failtestf "registry: %A" e)
+
+/// THE ORACLE: every family walked on its own, in registration order — the walk `runAll` made before
+/// Phase 709, kept through `asCheck` (a family run alone) and `Rules.run` (the one guarded walker).
+let private perFamilyWalk
+    (w: NodeWitness<RNode, string>)
+    (families: RuleFamily<RNode, string> list)
+    (root: RNode)
+    : (string * Defect<string>) list =
+    match Validator.Rules.ofChecks (families |> List.map (Validator.asCheck w)) with
+    | Ok rules -> Validator.Rules.run rules root
+    | Error e -> failtestf "oracle registry: %A" e
+
+[<Tests>]
+let oneWalkTests =
+    testList
+        "Validator.RuleFamily (Phase 709)"
+        [ testCase "a family has no public representation: no public constructor, field or case"
+          <| fun _ ->
+              let t = typeof<RuleFamily<RNode, string>>
+
+              let flags =
+                  System.Reflection.BindingFlags.Public
+                  ||| System.Reflection.BindingFlags.Instance
+
+              Expect.isEmpty (t.GetConstructors flags) "no public constructor"
+
+              Expect.equal
+                  (t.GetProperties flags |> Array.map _.Name |> Array.sort)
+                  [| "Id" |]
+                  "the id is the one public read"
+
+              Expect.isEmpty
+                  (t.GetMethods(System.Reflection.BindingFlags.Public ||| System.Reflection.BindingFlags.Static)
+                   |> Array.filter (fun m -> m.Name.StartsWith "New"))
+                  "no public case constructor"
+
+          testCase "the constructors keep the id and run the body they were given"
+          <| fun _ ->
+              let whole =
+                  Validator.wholeTree "w" (fun w root -> [ Defect.create "W" Severity.Info "" (Some(w.Id root)) ])
+
+              let node =
+                  Validator.perNode "n" (fun w n -> [ Defect.create "N" Severity.Info "" (Some(w.Id n)) ])
+
+              let tree =
+                  RNode.node "r" "doc" [ RNode.leaf "a" "para" "x"; RNode.leaf "b" "para" "y" ]
+
+              Expect.equal [ whole.Id; node.Id ] [ "w"; "n" ] "the ids"
+
+              Expect.equal
+                  ((Validator.asCheck nodew whole).Run tree |> List.map _.Node)
+                  [ Some "r" ]
+                  "a whole-tree family runs once, at the root"
+
+              Expect.equal
+                  ((Validator.asCheck nodew node).Run tree |> List.map _.Node)
+                  [ Some "r"; Some "a"; Some "b" ]
+                  "a per-node family runs at every node, in preorder"
+
+          testCase "the per-node families of a registry walk the tree once"
+          <| fun _ ->
+              let tree =
+                  RNode.node
+                      "r"
+                      "doc"
+                      [ for i in 0..19 ->
+                            RNode.node
+                                (sprintf "s%d" i)
+                                "section"
+                                [ RNode.leaf (sprintf "s%d.p" i) "para" "v"
+                                  RNode.leaf (sprintf "s%d.n" i) "note" "" ] ]
+
+              let once, onceReads = counting nodew
+              Tree.preorder once tree |> ignore
+
+              let w, reads = counting nodew
+              let reg = registryOf [ for k in 0..29 -> familyOf k (k % 2) ]
+              let found = Validator.runAll w reg tree
+
+              Expect.isNonEmpty found "the families found something"
+              Expect.equal reads.Value onceReads.Value "one preorder's reads, not thirty"
+
+          testCase "a registry of whole-tree families only takes no preorder of its own (a guard: never red before)"
+          <| fun _ ->
+              let tree = grown (System.Random 7) 4 "r"
+              let w, reads = counting nodew
+              let reg = registryOf [ familyOf 0 4; familyOf 1 5 ]
+              let found = Validator.runAllTagged w reg tree
+
+              Expect.equal reads.Value 0 "no walk: neither family reads a child"
+              Expect.equal found (perFamilyWalk nodew [ familyOf 0 4; familyOf 1 5 ] tree) "the per-family findings"
+
+          testCase "an empty registry finds nothing and walks nothing (a guard)"
+          <| fun _ ->
+              let w, reads = counting nodew
+              Expect.isEmpty (Validator.runAll w Validator.empty (grown (System.Random 1) 4 "r")) "nothing"
+              Expect.equal reads.Value 0 "no walk"
+
+          testCase "a throwing rule is one RULE-FAULT for its family and the others still run (a guard)"
+          <| fun _ ->
+              let tree =
+                  RNode.node
+                      "r"
+                      "doc"
+                      [ RNode.leaf "r.0" "para" ""
+                        RNode.leaf "r.1" "para" "v"
+                        RNode.leaf "r.2" "note" "" ]
+
+              let families = [ familyOf 0 0; familyOf 1 2; familyOf 2 1; familyOf 3 4 ]
+              let found = Validator.runAllTagged nodew (registryOf families) tree
+
+              Expect.equal
+                  (found |> List.map (fun (f, d) -> f, d.Code, d.Node))
+                  [ "f00", "EMPTY", Some "r"
+                    "f00", "EMPTY", Some "r.0"
+                    "f00", "EMPTY", Some "r.2"
+                    "f01", Validator.FamilyFaultCode, None
+                    "f02", "NOTE", Some "r.2"
+                    "f03", "ROOT", Some "r" ]
+                  "f01's findings before the throw are dropped with it, as when it walked alone"
+
+              Expect.equal (snd found[3]).Message "rule 'f01' failed: rule f01 at r.1" "the fault names the family"
+
+          testCase
+              "a walk that throws is a RULE-FAULT for each per-node family, whole-tree families still run (a guard)"
+          <| fun _ ->
+              let tree = RNode.node "r" "doc" [ RNode.node "r.0" "bad" [] ]
+              let families = [ familyOf 0 0; familyOf 1 4; familyOf 2 1 ]
+              let found = Validator.runAllTagged brittle (registryOf families) tree
+
+              Expect.equal
+                  (found |> List.map (fun (f, d) -> f, d.Code))
+                  [ "f00", Validator.FamilyFaultCode
+                    "f01", "ROOT"
+                    "f02", Validator.FamilyFaultCode ]
+                  "each per-node family faults; the whole-tree family answers"
+
+              Expect.equal found (perFamilyWalk brittle families tree) "as when each walked for itself"
+
+          testCase
+              "the one walk and the per-family walk agree, finding for finding, over generated trees and registries"
+          <| fun _ ->
+              for seed in 1..300 do
+                  let rng = System.Random seed
+                  let tree = grown rng (rng.Next 6) "r"
+                  let w = if seed % 3 = 0 then brittle else nodew
+                  let families = [ for k in 0 .. rng.Next 9 - 1 -> familyOf k (rng.Next 6) ]
+                  let reg = registryOf families
+                  let expected = perFamilyWalk w families tree
+
+                  Expect.equal
+                      (Validator.runAllTagged w reg tree)
+                      expected
+                      (sprintf "seed %d: the tagged findings" seed)
+
+                  Expect.equal
+                      (Validator.runAll w reg tree)
+                      (List.map snd expected)
+                      (sprintf "seed %d: the findings" seed) ]
