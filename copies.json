@@ -13,7 +13,7 @@
     "asset": "proofs-kit-<version>.tar",
     "manifest": "proofs/kit/asset.json",
     "builder": "pwsh proofs/kit/build-kit-asset.ps1",
-    "sha256": "348840d0084308d6dfa6c5d3c879d3300e264a2951acb3cbc5378cc163c4e01c",
+    "sha256": "f0c13381a3934def05613220441262aaa9681fb76f69977a441c81bbe2748584",
     "url": "https://github.com/Fuaran-Core/fuaran-core/releases/download/v<version>/proofs-kit-<version>.tar",
     "legs": {
       "$note": "Phase 641 (DECISIONS.md D250). The one asset carries two proof legs, and an adopter selects one with the `leg` field of its own proofs/proofs-kit.json (absent is `legacy`); the template caller hands the engine that leg's prover pin, and the engine reads the leg from it. `copies` is what an adopter on the leg commits from the asset and the engine holds to it; templates are copied once and edited on both legs and are never a tracked copy. The two legs share the engine, its tests, the roster, the check step and every guard on it, the oracle-independence guard and the host step.",
