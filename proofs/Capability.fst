@@ -35,6 +35,14 @@
    derived from it, with the index a query narrows through (`FunctionEntry`, `FunctionRegistry`'s
    `indexed`).
 
+   And since Phase 712 (DECISIONS.md D281) the capability seam keys an argument by the hole's
+   QUALIFIED NAME — the names of the slots it was composed through, then its own, joined by `.` —
+   where it keyed by the address: `HoleDecl.Slots`, `SigEntry.Name` as the qualified name, the two
+   name faults of the admission gate, the seam's lookups, refusals and wire members, and the
+   function registry's `addressed`, which maps a name back to the address the artifact binds by.
+   The artifact's own operations (`apply`, `curry`, `compose`, `bindHandlers`) still bind by
+   address, so the hygiene law is unchanged; what a name now decides is admission.
+
    Two things are PARAMETERS rather than clauses, exactly as Phase 135 made `float i` a parameter
    and Phase 176 made the pipeline evaluator one. The WITNESS (`ArtifactWitness`'s `Holes`,
    `Effect`, `Bind`, the tree witness's `KindTag`, and `Tree.preorder` over it) is a record of
@@ -318,14 +326,22 @@ type space_fault =
                    JSON document with a canonical rendering of its own. A function of the string
                    ALONE: it reads no type, which is why a document space needs no resolver.
    `float_fault` — F#: `Space.wellFormed` over `FloatRange(lo, hi)` (Phase 307): `SNonFinite` when
-                   either carrier is NaN or infinite, else `SEmpty` when `lo > hi`, else nothing. *)
+                   either carrier is NaN or infinite, else `SEmpty` when `lo > hi`, else nothing.
+   `seg_ok`      — F#: `Signature.wellFormedSegment` (Phase 712, D281): one or more ASCII letters,
+                   digits, `_` or `-`. A test of the characters of a string, which the model does
+                   not read: a function of the string ALONE.
+   `name_ok`     — F#: `Signature.wellFormedName` (Phase 712, D281): every `.`-separated part of
+                   the string passes `seg_ok`. The split is a reading of characters too, so the
+                   two are two premises; no theorem here relates them. *)
 noeq type readers = {
   int_of:      string -> option int;
   float_in:    string -> string -> string -> bool;
   str_len:     string -> nat;
   kind_of:     string -> option string;
   doc_ok:      string -> bool;
-  float_fault: string -> string -> option space_fault
+  float_fault: string -> string -> option space_fault;
+  seg_ok:      string -> bool;
+  name_ok:     string -> bool
 }
 
 (* F#: `Space.validate`. *)
@@ -379,11 +395,13 @@ type hole_kind =
   | RepeatHole : value_space -> hole_kind
   | ActionHole : effect_class -> hole_kind
 
-(* F#: `HoleDecl` — `Addr` is the absolute lexical address, the hygiene surface. *)
-type hole_decl = { h_addr: string; h_name: string; h_kind: hole_kind }
+(* F#: `HoleDecl` — `Addr` is the absolute lexical address, the artifact's hygiene surface; `Slots`
+   (Phase 712, D281) the names of the slots the hole was composed through, outermost first. *)
+type hole_decl = { h_addr: string; h_name: string; h_kind: hole_kind; h_slots: list string }
 
 (* F#: `SigEntry` — since Phase 409 its kind IS the hole kind, so a space, a slot constraint and an
-   effect ceiling are read from it and an entry has one copy of each. *)
+   effect ceiling are read from it and an entry has one copy of each. Since Phase 712 `s_name` is the
+   hole's QUALIFIED name, the key an invocation binds by; `s_addr` is the artifact's. *)
 type sig_entry = {
   s_addr: string;
   s_name: string;
@@ -408,14 +426,17 @@ type arg (node:Type) =
   | ValueArg : string -> arg node
   | SlotArg  : node -> arg node
 
-(* F#: `DeclarationFault` (Phase 307) — the admission gate's vocabulary. *)
+(* F#: `DeclarationFault` (Phase 307) — the admission gate's vocabulary. The two space faults name
+   the hole's qualified name, and the two name faults are appended, since Phase 712 (D281). *)
 type decl_fault =
-  | EmptySpace        : addr:string -> space:value_space -> decl_fault
-  | NonFiniteBound    : addr:string -> decl_fault
+  | EmptySpace        : name:string -> space:value_space -> decl_fault
+  | NonFiniteBound    : name:string -> decl_fault
   | DuplicateHoleAddr : addr:string -> decl_fault
   | HoleUnderSlot     : node:string -> decl_fault
   | EmptyResult       : space:value_space -> decl_fault
   | NonFiniteResult   : decl_fault
+  | IllFormedHoleName : name:string -> decl_fault
+  | DuplicateHoleName : name:string -> decl_fault
 
 (* F#: `ApplyError`. *)
 type apply_error =
@@ -429,18 +450,18 @@ type apply_error =
   | SlotArgOpen         : addr:string -> holes:list string -> apply_error
   | IllFormedResult     : fault:decl_fault -> apply_error
 
-(* F#: `InvokeError`. *)
+(* F#: `InvokeError`. Every hole it names, it names by qualified name (Phase 712, D281). *)
 type invoke_error =
   | NoSuchCapability   : id:string -> known:list string -> invoke_error
   | DuplicateCapability: id:string -> invoke_error
-  | UnknownArg         : addr:string -> declared:list string -> invoke_error
-  | ArgOutOfSpace      : addr:string -> space:value_space -> got:string -> invoke_error
-  | RequiredArgsUnbound: addrs:list string -> invoke_error
-  | UninvocableArg     : addr:string -> invoke_error
+  | UnknownArg         : name:string -> declared:list string -> invoke_error
+  | ArgOutOfSpace      : name:string -> space:value_space -> got:string -> invoke_error
+  | RequiredArgsUnbound: names:list string -> invoke_error
+  | UninvocableArg     : name:string -> invoke_error
   | BodyFailed         : reason:string -> invoke_error
-  | NonTotalCapability : id:string -> addrs:list string -> invoke_error
+  | NonTotalCapability : id:string -> names:list string -> invoke_error
   | IllFormedCapability: id:string -> fault:decl_fault -> invoke_error
-  | DuplicateArg       : addr:string -> invoke_error
+  | DuplicateArg       : name:string -> invoke_error
 
 (* F#: `holes |> List.tryFind (fun h -> h.Addr = addr)` on declared holes. *)
 let rec find_hole (k:string) (holes:list hole_decl) : Tot (option hole_decl) =
@@ -448,16 +469,30 @@ let rec find_hole (k:string) (holes:list hole_decl) : Tot (option hole_decl) =
   | [] -> None
   | h :: t -> if h.h_addr = k then Some h else find_hole k t
 
-(* F#: `holes |> List.tryFind (fun h -> h.Addr = addr)` on signature entries. *)
+(* F#: `Capability.entryNamed` (Phase 712) — the entry an argument binds, the one whose qualified
+   name it carries. *)
 let rec find_entry (k:string) (holes:list sig_entry) : Tot (option sig_entry) =
   match holes with
   | [] -> None
-  | h :: t -> if h.s_addr = k then Some h else find_entry k t
+  | h :: t -> if h.s_name = k then Some h else find_entry k t
+
+(* F#: `holes |> List.tryFind (fun h -> h.Addr = addr)` on signature entries — the artifact's lookup,
+   which only the bridge from an accepted invocation to `apply` makes here (section 13). *)
+let rec find_at (k:string) (holes:list sig_entry) : Tot (option sig_entry) =
+  match holes with
+  | [] -> None
+  | h :: t -> if h.s_addr = k then Some h else find_at k t
 
 (* F#: `holes |> List.map (fun h -> h.Addr)` on declared holes. *)
 let addr_of (h:hole_decl) : Tot string = h.h_addr
 
-(* F#: `holes |> List.map (fun h -> h.Addr)` on signature entries. *)
+(* F#: `holes |> List.map _.Name` on signature entries — the names an invocation may bind. *)
+let rec entry_names (holes:list sig_entry) : Tot (list string) =
+  match holes with
+  | [] -> []
+  | h :: t -> h.s_name :: entry_names t
+
+(* F#: `holes |> List.map _.Addr` on signature entries. *)
 let rec entry_addrs (holes:list sig_entry) : Tot (list string) =
   match holes with
   | [] -> []
@@ -495,9 +530,24 @@ noeq type witness (node:Type) = {
   node_id:   node -> string
 }
 
-(* F#: `SigEntry.ofHoleDecl` (Phase 487), the entry `Function.signature` maps over the holes. *)
+(* F#: `String.concat "."` over a list that is never empty here — a singleton to itself. *)
+let rec join_dot (l:list string) : Tot string =
+  match l with
+  | [] -> ""
+  | [x] -> x
+  | x :: t -> x ^ "." ^ join_dot t
+
+(* F#: the names a hole's qualified name is joined from, `h.Slots @ [ h.Name ]` (Phase 712). *)
+let segments (h:hole_decl) : Tot (list string) = app h.h_slots [h.h_name]
+
+(* F#: `String.concat "." (h.Slots @ [ h.Name ])` — the hole's QUALIFIED name (Phase 712, D281): a
+   hole declared directly keeps its bare name, one composed through slot `a` is `a.<name>`. *)
+let qualified (h:hole_decl) : Tot string = join_dot (segments h)
+
+(* F#: `SigEntry.ofHoleDecl` (Phase 487), the entry `Function.signature` maps over the holes. Its
+   name is the qualified name since Phase 712. *)
 let entry_of (h:hole_decl) : Tot sig_entry =
-  { s_addr = h.h_addr; s_name = h.h_name; s_kind = h.h_kind;
+  { s_addr = h.h_addr; s_name = qualified h; s_kind = h.h_kind;
     s_required =
       (match h.h_kind with
        | ValueHole _ -> true
@@ -529,31 +579,60 @@ let entry_total (e:sig_entry) : Tot bool =
 let is_total (sg:signature) : Tot bool = for_all entry_total sg.sg_holes
 
 (* F#: `Signature.validate`'s per-entry space check — the fault `Space.wellFormed` gives the entry's
-   space, by address. *)
+   space, naming the entry's qualified name (Phase 712). *)
 let entry_space_fault (rd:readers) (e:sig_entry) : Tot (option decl_fault) =
   match entry_space e with
   | None -> None
   | Some sp ->
     (match space_wf rd sp with
-     | Some SEmpty -> Some (EmptySpace e.s_addr sp)
-     | Some SNonFinite -> Some (NonFiniteBound e.s_addr)
+     | Some SEmpty -> Some (EmptySpace e.s_name sp)
+     | Some SNonFinite -> Some (NonFiniteBound e.s_name)
      | None -> None)
 
-(* F#: `Signature.validate` (Phase 307) — the first fault in declaration order: an address an
-   earlier entry holds, or a space `Space.wellFormed` refuses. *)
-let rec validate_entries (rd:readers) (seen:list string) (holes:list sig_entry)
+(* F#: `Signature.validate`'s `go`, one entry (Phase 712, D281) — in this fixed order: the qualified
+   name against the segment grammar, then against the names of the entries before it, then the
+   address against theirs, then the space. *)
+let entry_fault (rd:readers) (names addrs:list string) (e:sig_entry) : Tot (option decl_fault) =
+  if not (rd.name_ok e.s_name) then Some (IllFormedHoleName e.s_name)
+  else if mem e.s_name names then Some (DuplicateHoleName e.s_name)
+  else if mem e.s_addr addrs then Some (DuplicateHoleAddr e.s_addr)
+  else entry_space_fault rd e
+
+(* F#: `Signature.validate` (Phase 307; the names since Phase 712) — the first fault in declaration
+   order. *)
+let rec validate_entries (rd:readers) (names addrs:list string) (holes:list sig_entry)
   : Tot (option decl_fault) (decreases holes) =
   match holes with
   | [] -> None
   | e :: rest ->
-    if mem e.s_addr seen then Some (DuplicateHoleAddr e.s_addr)
-    else
-      (match entry_space_fault rd e with
-       | Some f -> Some f
-       | None -> validate_entries rd (e.s_addr :: seen) rest)
+    (match entry_fault rd names addrs e with
+     | Some f -> Some f
+     | None -> validate_entries rd (e.s_name :: names) (e.s_addr :: addrs) rest)
 
 let validate_signature (rd:readers) (sg:signature) : Tot (option decl_fault) =
-  validate_entries rd [] sg.sg_holes
+  validate_entries rd [] [] sg.sg_holes
+
+(* F#: `Function.validate`'s segment check (Phase 712, D281) — every name a hole's qualified name is
+   joined from passes the segment grammar, so a `.` inside one of them is caught, which the joined
+   name cannot show. *)
+let segments_ok (rd:readers) (h:hole_decl) : Tot bool = for_all rd.seg_ok (segments h)
+
+(* F#: `Function.validate`'s hole check (Phase 712): production finds the first hole whose segments
+   break the grammar, validates the entries before it with `Signature.validate`, and refuses that
+   hole `IllFormedHoleName` (its qualified name) when they pass; with no such hole it validates every
+   entry. This walk is the same two passes fused: each hole's segments, then its entry's checks,
+   in declaration order — so a hole's own segment fault is reached exactly where production reaches
+   it, after every earlier entry's checks and before its own. *)
+let rec validate_holes (rd:readers) (names addrs:list string) (holes:list hole_decl)
+  : Tot (option decl_fault) (decreases holes) =
+  match holes with
+  | [] -> None
+  | h :: rest ->
+    if not (segments_ok rd h) then Some (IllFormedHoleName (qualified h))
+    else
+      (match entry_fault rd names addrs (entry_of h) with
+       | Some f -> Some f
+       | None -> validate_holes rd (qualified h :: names) (h.h_addr :: addrs) rest)
 
 (* F#: `holeUnderSlot`'s count — the slot holes among a hole list. *)
 let rec slot_count (hs:list hole_decl) : Tot nat =
@@ -578,12 +657,24 @@ let slot_over_holes (#node:Type) (w:witness node) (n:node) : Tot (option decl_fa
   if any_holes w cs && slot_count (w.holes n) > sum_slots w cs then Some (HoleUnderSlot (w.node_id n))
   else None
 
-(* F#: `Function.validate` (Phase 307) — `Signature.validate` over the derived signature, then the
-   first node in preorder that declares a slot over holes. *)
+(* F#: `Function.validate` (Phase 307) — `Signature.validate` over the derived signature, with the
+   segment check of Phase 712 (`validate_holes`), then the first node in preorder that declares a
+   slot over holes. *)
 let validate_decl (#node:Type) (rd:readers) (w:witness node) (n:node) : Tot (option decl_fault) =
-  match validate_signature rd (signature_of w "" n) with
+  match validate_holes rd [] [] (w.holes n) with
   | Some f -> Some f
   | None -> try_pick (slot_over_holes w) (w.preorder n)
+
+(* Where every hole's segments pass, the fused walk IS `Signature.validate` over the derived
+   entries — so `Function.validate` adds to it the segment check and the slot check and nothing
+   else. *)
+let rec validate_holes_entries (rd:readers) (names addrs:list string) (holes:list hole_decl)
+  : Lemma (requires for_all (segments_ok rd) holes)
+          (ensures validate_holes rd names addrs holes == validate_entries rd names addrs (map entry_of holes))
+          (decreases holes)
+  = match holes with
+    | [] -> ()
+    | h :: rest -> validate_holes_entries rd (qualified h :: names) (h.h_addr :: addrs) rest
 
 (* F#: `guardTotal`'s per-hole pick. *)
 let non_total (h:hole_decl) : Tot (option apply_error) =
@@ -782,13 +873,14 @@ let capture_covers_exercised (c:capability) (host:host_effect) (exercised:determ
          not (covers { host = host; determinism = c.c_determinism } { host = host; determinism = exercised })))
   = ()
 
-(* F#: `(string * string) list` — a typed invocation's args, addr → value. *)
+(* F#: `(string * string) list` — a typed invocation's args, qualified name → value (Phase 712). *)
 type invocation = list (string & string)
 
 (* F#: `Capability.argSpace` (Phase 307) — `SigEntry.Space` since Phase 409. *)
 let arg_space (e:sig_entry) : Tot (option value_space) = entry_space e
 
-(* F#: `Capability.repeatedAddrs` — every key the list binds again, at each repeat, in order. *)
+(* F#: `Capability.repeatedNames` (`repeatedAddrs` until Phase 712) — every key the list binds
+   again, at each repeat, in order. *)
 let rec repeated (seen:list string) (ks:list string) : Tot (list string) (decreases ks) =
   match ks with
   | [] -> []
@@ -799,29 +891,29 @@ let rec check_args (rd:readers) (holes:list sig_entry) (declared:list string) (a
   : Tot (outcome unit invoke_error) (decreases a) =
   match a with
   | [] -> Ok ()
-  | (addr, value) :: rest ->
-    match find_entry addr holes with
-    | None -> Error (UnknownArg addr declared)
+  | (name, value) :: rest ->
+    match find_entry name holes with
+    | None -> Error (UnknownArg name declared)
     | Some h ->
       match arg_space h with
-      | None -> Error (UninvocableArg addr)
+      | None -> Error (UninvocableArg name)
       | Some space ->
-        if SlotTree? space && None? (rd.kind_of value) then Error (UninvocableArg addr)
+        if SlotTree? space && None? (rd.kind_of value) then Error (UninvocableArg name)
         else if validate rd space value then check_args rd holes declared rest
-        else Error (ArgOutOfSpace addr space value)
+        else Error (ArgOutOfSpace name space value)
 
-(* F#: `validateArgs`'s step 2 — the required holes the args leave unbound. *)
+(* F#: `validateArgs`'s step 2 — the required holes the args leave unbound, by qualified name. *)
 let rec unbound_required (holes:list sig_entry) (a:invocation) : Tot (list string) =
   match holes with
   | [] -> []
   | h :: t ->
-    if h.s_required && not (has_key h.s_addr a) then h.s_addr :: unbound_required t a
+    if h.s_required && not (has_key h.s_name a) then h.s_name :: unbound_required t a
     else unbound_required t a
 
-(* F#: `Capability.validateArgs`. *)
+(* F#: `Capability.validateArgs` — by qualified name since Phase 712. *)
 let validate_args (rd:readers) (c:capability) (a:invocation) : Tot (outcome unit invoke_error) =
   let holes = c.c_signature.sg_holes in
-  let declared = entry_addrs holes in
+  let declared = entry_names holes in
   match repeated [] (keys a) with
   | d :: _ -> Error (DuplicateArg d)
   | [] ->
@@ -871,11 +963,11 @@ let rec ids (cs:list capability) : Tot (list string) =
   | [] -> []
   | c :: t -> c.c_id :: ids t
 
-(* F#: `Capability.nonTotalAddrs` — the entries `entry_total` refuses, by address. *)
-let rec non_total_addrs (holes:list sig_entry) : Tot (list string) =
+(* F#: `Capability.nonTotalNames` — the entries `entry_total` refuses, by qualified name (Phase 712). *)
+let rec non_total_names (holes:list sig_entry) : Tot (list string) =
   match holes with
   | [] -> []
-  | e :: t -> if entry_total e then non_total_addrs t else e.s_addr :: non_total_addrs t
+  | e :: t -> if entry_total e then non_total_names t else e.s_name :: non_total_names t
 
 (* F#: `Capability.resultFault` (Phase 642) — the declared result held to the well-formedness a
    hole's space is held to, and named apart from the hole faults. *)
@@ -896,7 +988,7 @@ let register (rd:readers) (c:capability) (r:registry) : Tot (outcome registry in
   match find_cap c.c_id r.capabilities with
   | Some _ -> Error (DuplicateCapability c.c_id)
   | None ->
-    if not (is_total c.c_signature) then Error (NonTotalCapability c.c_id (non_total_addrs c.c_signature.sg_holes))
+    if not (is_total c.c_signature) then Error (NonTotalCapability c.c_id (non_total_names c.c_signature.sg_holes))
     else
       match validate_signature rd c.c_signature with
       | Some f -> Error (IllFormedCapability c.c_id f)
@@ -948,8 +1040,8 @@ let rec check_args_shape (rd:readers) (holes:list sig_entry) (declared:list stri
           (decreases a)
   = match a with
     | [] -> ()
-    | (addr, value) :: rest ->
-      (match find_entry addr holes with
+    | (name, value) :: rest ->
+      (match find_entry name holes with
        | None -> ()
        | Some h ->
          (match arg_space h with
@@ -960,7 +1052,7 @@ let validate_args_shape (rd:readers) (c:capability) (a:invocation)
   : Lemma (ensures (match validate_args rd c a with
                     | Ok () -> True
                     | Error e -> DuplicateArg? e \/ UnknownArg? e \/ UninvocableArg? e \/ ArgOutOfSpace? e \/ RequiredArgsUnbound? e))
-  = check_args_shape rd c.c_signature.sg_holes (entry_addrs c.c_signature.sg_holes) a
+  = check_args_shape rd c.c_signature.sg_holes (entry_names c.c_signature.sg_holes) a
 
 let invoke_never_registry_refusal (#v:Type) (rd:readers) (c:capability) (a:invocation) (body:unit -> deferred v)
   : Lemma (ensures (match invoke rd c a body with
@@ -1029,13 +1121,13 @@ let dispatch_never_ok_failed (#v:Type) (rd:readers) (r:registry) (id:string) (a:
     | None -> ()
     | Some c -> invoke_never_ok_failed rd c a (body c)
 
-(* Every key addresses a declared entry. *)
+(* Every key names a declared entry. *)
 let rec all_declared (holes:list sig_entry) (ks:list string) : Tot bool =
   match ks with
   | [] -> true
   | k :: t -> Some? (find_entry k holes) && all_declared holes t
 
-(* What an ACCEPTED validation guarantees: every arg addresses a declared hole, and every required
+(* What an ACCEPTED validation guarantees: every arg names a declared hole, and every required
    hole is bound. *)
 let rec check_args_ok_declared (rd:readers) (holes:list sig_entry) (declared:list string) (a:invocation)
   : Lemma (requires check_args rd holes declared a == Ok ())
@@ -1043,8 +1135,8 @@ let rec check_args_ok_declared (rd:readers) (holes:list sig_entry) (declared:lis
           (decreases a)
   = match a with
     | [] -> ()
-    | (addr, value) :: rest ->
-      (match find_entry addr holes with
+    | (name, value) :: rest ->
+      (match find_entry name holes with
        | None -> ()
        | Some h ->
          (match arg_space h with
@@ -1055,17 +1147,17 @@ let validate_args_sound (rd:readers) (c:capability) (a:invocation)
   : Lemma (requires validate_args rd c a == Ok ())
           (ensures all_declared c.c_signature.sg_holes (keys a) /\
                    unbound_required c.c_signature.sg_holes a == [])
-  = check_args_ok_declared rd c.c_signature.sg_holes (entry_addrs c.c_signature.sg_holes) a
+  = check_args_ok_declared rd c.c_signature.sg_holes (entry_names c.c_signature.sg_holes) a
 
 (* What a REFUSAL guarantees: an `ArgOutOfSpace` names a value the named space really refuses, an
-   `UnknownArg` names an address no hole declares, an `UninvocableArg` names a spaceless entry
+   `UnknownArg` names a name no hole declares, an `UninvocableArg` names a spaceless entry
    or a tree-spaced one (Phase 229: a slot bound to something that is no tree). *)
 let rec refusal_is_truthful (rd:readers) (holes:list sig_entry) (declared:list string) (a:invocation)
   : Lemma (ensures (match check_args rd holes declared a with
-                    | Error (ArgOutOfSpace addr space got) -> not (validate rd space got) /\ has_key addr a
-                    | Error (UnknownArg addr d) -> None? (find_entry addr holes) /\ d == declared
-                    | Error (UninvocableArg addr) ->
-                      (match find_entry addr holes with
+                    | Error (ArgOutOfSpace name space got) -> not (validate rd space got) /\ has_key name a
+                    | Error (UnknownArg name d) -> None? (find_entry name holes) /\ d == declared
+                    | Error (UninvocableArg name) ->
+                      (match find_entry name holes with
                        | Some h -> (match arg_space h with
                                     | None -> True
                                     | Some sp -> SlotTree? sp)
@@ -1074,8 +1166,8 @@ let rec refusal_is_truthful (rd:readers) (holes:list sig_entry) (declared:list s
           (decreases a)
   = match a with
     | [] -> ()
-    | (addr, value) :: rest ->
-      (match find_entry addr holes with
+    | (name, value) :: rest ->
+      (match find_entry name holes with
        | None -> ()
        | Some h ->
          (match arg_space h with
@@ -1083,20 +1175,20 @@ let rec refusal_is_truthful (rd:readers) (holes:list sig_entry) (declared:list s
           | Some space -> if validate rd space value then refusal_is_truthful rd holes declared rest else ()))
 
 (* What survives of Phase 177's finding. A signature entry that is REQUIRED and has NO value
-   space makes the capability un-invocable by construction: an argument at its address is
+   space makes the capability un-invocable by construction: an argument under its name is
    `UninvocableArg`, and no argument there is `RequiredArgsUnbound`. Until Phase 229 that was what
    `Function.signature` made of every slot hole; since then it makes none (`slot_entry_shape`), so
    this now characterises only a hand-built entry. *)
 let rec check_args_hits_uninvocable (rd:readers) (holes:list sig_entry) (declared:list string) (a:invocation) (h:sig_entry)
-  : Lemma (requires has_key h.s_addr a /\ find_entry h.s_addr holes == Some h /\ None? (arg_space h))
+  : Lemma (requires has_key h.s_name a /\ find_entry h.s_name holes == Some h /\ None? (arg_space h))
           (ensures Error? (check_args rd holes declared a))
           (decreases a)
   = match a with
     | [] -> ()
-    | (addr, value) :: rest ->
-      if addr = h.s_addr then ()
+    | (name, value) :: rest ->
+      if name = h.s_name then ()
       else
-        (match find_entry addr holes with
+        (match find_entry name holes with
          | None -> ()
          | Some e ->
            (match arg_space e with
@@ -1109,21 +1201,21 @@ let rec find_entry_memp (k:string) (holes:list sig_entry)
                     | None -> True))
   = match holes with
     | [] -> ()
-    | h :: t -> if h.s_addr = k then () else find_entry_memp k t
+    | h :: t -> if h.s_name = k then () else find_entry_memp k t
 
 let rec unbound_required_memp (holes:list sig_entry) (a:invocation) (h:sig_entry)
-  : Lemma (requires memp h holes /\ h.s_required /\ not (has_key h.s_addr a))
+  : Lemma (requires memp h holes /\ h.s_required /\ not (has_key h.s_name a))
           (ensures Cons? (unbound_required holes a))
   = match holes with
     | [] -> ()
-    | x :: t -> if x.s_required && not (has_key x.s_addr a) then () else unbound_required_memp t a h
+    | x :: t -> if x.s_required && not (has_key x.s_name a) then () else unbound_required_memp t a h
 
 let spaceless_required_uninvocable (rd:readers) (c:capability) (a:invocation) (h:sig_entry)
-  : Lemma (requires find_entry h.s_addr c.c_signature.sg_holes == Some h /\ h.s_required /\ None? (arg_space h))
+  : Lemma (requires find_entry h.s_name c.c_signature.sg_holes == Some h /\ h.s_required /\ None? (arg_space h))
           (ensures Error? (validate_args rd c a))
   = let holes = c.c_signature.sg_holes in
-    if has_key h.s_addr a then check_args_hits_uninvocable rd holes (entry_addrs holes) a h
-    else (find_entry_memp h.s_addr holes; unbound_required_memp holes a h)
+    if has_key h.s_name a then check_args_hits_uninvocable rd holes (entry_names holes) a h
+    else (find_entry_memp h.s_name holes; unbound_required_memp holes a h)
 
 (* Phase 229. `signature` enters a `SlotHole` REQUIRED and WITH a value space: the tree space of
    its own constraint. *)
@@ -1143,12 +1235,12 @@ let slot_space_exact (rd:readers) (c:option string) (v:string)
             | None -> False))
   = ()
 
-(* Every argument addresses a declared entry that HAS a space, and lies in it. *)
+(* Every argument names a declared entry that HAS a space, and lies in it. *)
 let rec args_in_space (rd:readers) (holes:list sig_entry) (a:invocation) : Tot bool (decreases a) =
   match a with
   | [] -> true
-  | (addr, value) :: rest ->
-    (match find_entry addr holes with
+  | (name, value) :: rest ->
+    (match find_entry name holes with
      | Some h -> (match arg_space h with
                   | Some sp -> validate rd sp value
                   | None -> false)
@@ -1168,36 +1260,36 @@ let validate_args_complete (rd:readers) (c:capability) (a:invocation)
   : Lemma (requires repeated [] (keys a) == [] /\ args_in_space rd c.c_signature.sg_holes a /\
                     unbound_required c.c_signature.sg_holes a == [])
           (ensures validate_args rd c a == Ok ())
-  = check_args_in_space_ok rd c.c_signature.sg_holes (entry_addrs c.c_signature.sg_holes) a
+  = check_args_in_space_ok rd c.c_signature.sg_holes (entry_names c.c_signature.sg_holes) a
 
 (* THE POSITIVE (Phase 229, restating Phase 177's `slot_hole_uninvocable`). A slot entry — which
    `signature` spaces with `SlotTree` of its constraint — bound to a wire tree of its kind, beside
    arguments that are otherwise in space and bind every required entry, is ACCEPTED: a capability
    over a slotted artifact is invocable. *)
 let slot_hole_invocable_in_space (rd:readers) (c:capability) (a:invocation) (h:sig_entry) (v:string)
-  : Lemma (requires find_entry h.s_addr c.c_signature.sg_holes == Some h /\
+  : Lemma (requires find_entry h.s_name c.c_signature.sg_holes == Some h /\
                     SlotHole? h.s_kind /\
                     Some? (rd.kind_of v) /\
                     (None? (SlotHole?._0 h.s_kind) \/ SlotHole?._0 h.s_kind == rd.kind_of v) /\
-                    repeated [] (keys ((h.s_addr, v) :: a)) == [] /\
+                    repeated [] (keys ((h.s_name, v) :: a)) == [] /\
                     args_in_space rd c.c_signature.sg_holes a /\
-                    unbound_required c.c_signature.sg_holes ((h.s_addr, v) :: a) == [])
-          (ensures validate_args rd c ((h.s_addr, v) :: a) == Ok ())
-  = validate_args_complete rd c ((h.s_addr, v) :: a)
+                    unbound_required c.c_signature.sg_holes ((h.s_name, v) :: a) == [])
+          (ensures validate_args rd c ((h.s_name, v) :: a) == Ok ())
+  = validate_args_complete rd c ((h.s_name, v) :: a)
 
 (* ... and refused BY NAME when it is not: a tree of the wrong kind is `ArgOutOfSpace` carrying
    the slot's constraint, and anything that is no tree is `UninvocableArg`. *)
 let slot_wrong_kind_refused (rd:readers) (c:capability) (h:sig_entry) (kc:string) (v:string)
-  : Lemma (requires find_entry h.s_addr c.c_signature.sg_holes == Some h /\
+  : Lemma (requires find_entry h.s_name c.c_signature.sg_holes == Some h /\
                     entry_space h == Some (SlotTree (Some kc)) /\
                     Some? (rd.kind_of v) /\ Some?.v (rd.kind_of v) <> kc)
-          (ensures validate_args rd c [(h.s_addr, v)] == Error (ArgOutOfSpace h.s_addr (SlotTree (Some kc)) v))
+          (ensures validate_args rd c [(h.s_name, v)] == Error (ArgOutOfSpace h.s_name (SlotTree (Some kc)) v))
   = ()
 
 let slot_scalar_uninvocable (rd:readers) (c:capability) (h:sig_entry) (sc:option string) (v:string)
-  : Lemma (requires find_entry h.s_addr c.c_signature.sg_holes == Some h /\
+  : Lemma (requires find_entry h.s_name c.c_signature.sg_holes == Some h /\
                     entry_space h == Some (SlotTree sc) /\ None? (rd.kind_of v))
-          (ensures validate_args rd c [(h.s_addr, v)] == Error (UninvocableArg h.s_addr))
+          (ensures validate_args rd c [(h.s_name, v)] == Error (UninvocableArg h.s_name))
   = ()
 
 (* ======================================================================================
@@ -1261,12 +1353,12 @@ let register_keeps_distinct (rd:readers) (c:capability) (r r':registry)
 
 let empty_distinct () : Lemma (distinct (ids (enumerate empty))) = ()
 
-(* `non_total_addrs` is empty exactly when the signature is total. *)
-let rec non_total_addrs_empty (holes:list sig_entry)
-  : Lemma (non_total_addrs holes == [] <==> for_all entry_total holes)
+(* `non_total_names` is empty exactly when the signature is total. *)
+let rec non_total_names_empty (holes:list sig_entry)
+  : Lemma (non_total_names holes == [] <==> for_all entry_total holes)
   = match holes with
     | [] -> ()
-    | _ :: t -> non_total_addrs_empty t
+    | _ :: t -> non_total_names_empty t
 
 (* Phase 295 — a registry admits only total capabilities. `register` refuses a fresh id whose
    signature is not total as `NonTotalCapability`, naming a non-empty list of its entries; so every
@@ -1274,9 +1366,9 @@ let rec non_total_addrs_empty (holes:list sig_entry)
    an unbounded repeat. *)
 let register_refuses_non_total (rd:readers) (c:capability) (r:registry)
   : Lemma (requires not (mem c.c_id (ids (enumerate r))) /\ not (is_total c.c_signature))
-          (ensures register rd c r == Error (NonTotalCapability c.c_id (non_total_addrs c.c_signature.sg_holes)) /\
-                   Cons? (non_total_addrs c.c_signature.sg_holes))
-  = find_cap_mem c.c_id r.capabilities; non_total_addrs_empty c.c_signature.sg_holes
+          (ensures register rd c r == Error (NonTotalCapability c.c_id (non_total_names c.c_signature.sg_holes)) /\
+                   Cons? (non_total_names c.c_signature.sg_holes))
+  = find_cap_mem c.c_id r.capabilities; non_total_names_empty c.c_signature.sg_holes
 
 let register_admits_total (rd:readers) (c:capability) (r r':registry)
   : Lemma (requires register rd c r == Ok r')
@@ -1285,8 +1377,9 @@ let register_admits_total (rd:readers) (c:capability) (r r':registry)
 
 (* Phase 307 — a registry admits only WELL-FORMED capabilities: a fresh, total capability whose
    signature `Signature.validate` refuses is `IllFormedCapability` with exactly that fault, and
-   every capability `register` admits has a signature it accepts — distinct addresses, and spaces
-   that admit a value and have finite bounds. *)
+   every capability `register` admits has a signature it accepts — well-formed and distinct
+   qualified names (Phase 712), distinct addresses, and spaces that admit a value and have finite
+   bounds (`validated_distinct` below states the two distinctness facts). *)
 let register_refuses_ill_formed (rd:readers) (c:capability) (r:registry)
   : Lemma (requires not (mem c.c_id (ids (enumerate r))) /\ is_total c.c_signature /\
                     Some? (validate_signature rd c.c_signature))
@@ -1297,6 +1390,26 @@ let register_admits_well_formed (rd:readers) (c:capability) (r r':registry)
   : Lemma (requires register rd c r == Ok r')
           (ensures None? (validate_signature rd c.c_signature))
   = ()
+
+(* Phase 712 — what an admitted signature's entries ARE: their qualified names are distinct, and so
+   are their addresses, neither meeting what the walk had already seen. The bijection between the
+   two, which the function registry maps an invocation through (`addressed`, section 13), is
+   these two facts. *)
+let rec validated_distinct (rd:readers) (names addrs:list string) (holes:list sig_entry)
+  : Lemma (requires None? (validate_entries rd names addrs holes))
+          (ensures distinct (entry_names holes) /\ distinct (entry_addrs holes) /\
+                   (forall (k:string). mem k (entry_names holes) ==> not (mem k names)) /\
+                   (forall (k:string). mem k (entry_addrs holes) ==> not (mem k addrs)))
+          (decreases holes)
+  = match holes with
+    | [] -> ()
+    | e :: rest -> validated_distinct rd (e.s_name :: names) (e.s_addr :: addrs) rest
+
+(* ... so every signature `register` admits has distinct qualified names and distinct addresses. *)
+let signature_distinct (rd:readers) (sg:signature)
+  : Lemma (requires None? (validate_signature rd sg))
+          (ensures distinct (entry_names sg.sg_holes) /\ distinct (entry_addrs sg.sg_holes))
+  = validated_distinct rd [] [] sg.sg_holes
 
 (* Phase 642 — the declared result is held to the same gate. A fresh, total capability with a
    well-formed signature whose declared result ranges over a space `Space.wellFormed` refuses is
@@ -1380,8 +1493,9 @@ let rejected_never_bound (#node:Type) (rd:readers) (w:witness node) (strict:bool
    10. THE FIFTH THEOREM — law 2, hygiene: binding is by absolute address, never by name.
    ====================================================================================== *)
 
-(* A renaming of every hole — the witness with its names rewritten and nothing else touched. *)
-let rename (f:string -> string) (h:hole_decl) : Tot hole_decl = { h with h_name = f h.h_name }
+(* A renaming of every hole — the witness with its names rewritten and nothing else touched: a
+   hole's own name and, since Phase 712, the names of the slots it was composed through. *)
+let rename (f:string -> string) (h:hole_decl) : Tot hole_decl = { h with h_name = f h.h_name; h_slots = map f h.h_slots }
 
 let renamed (#node:Type) (f:string -> string) (w:witness node) : Tot (witness node) =
   { w with holes = (fun (m:node) -> map (rename f) (w.holes m)) }
@@ -1437,15 +1551,42 @@ let rec find_rename (f:string -> string) (slot_addr:string) (holes:list hole_dec
     | [] -> ()
     | h :: rest -> if h.h_addr = slot_addr then () else find_rename f slot_addr rest
 
-(* Phase 307 — the admission check never reads a name either: `Signature.validate` reads addresses
-   and spaces, and the slot test counts kinds. *)
-let rec validate_entries_rename (rd:readers) (f:string -> string) (seen:list string) (holes:list hole_decl)
-  : Lemma (ensures validate_entries rd seen (map entry_of (map (rename f) holes)) ==
-                   validate_entries rd seen (map entry_of holes))
+(* Phase 712 — the admission check READS names now (D281): the segment grammar, distinctness of the
+   qualified names, and the name a space fault carries. So a renaming can change its verdict, and
+   what stays fixed is everything else it reads. Stated with three readings of a verdict: a refusal
+   that is ABOUT a name, and a fault with the hole it names erased. *)
+let name_fault (f:decl_fault) : Tot bool = IllFormedHoleName? f || DuplicateHoleName? f
+
+let names_refused (r:option decl_fault) : Tot bool =
+  match r with
+  | Some f -> name_fault f
+  | None -> false
+
+let fault_shape (f:decl_fault) : Tot decl_fault =
+  match f with
+  | EmptySpace _ sp -> EmptySpace "" sp
+  | NonFiniteBound _ -> NonFiniteBound ""
+  | _ -> f
+
+let shape_of (r:option decl_fault) : Tot (option decl_fault) =
+  match r with
+  | Some f -> Some (fault_shape f)
+  | None -> None
+
+(* Two verdicts of the admission check agree but for names: one of them refuses a name, or they are
+   the same verdict up to the hole a space fault names. *)
+let agree_but_names (r1 r2:option decl_fault) : Tot bool =
+  names_refused r1 || names_refused r2 || shape_of r1 = shape_of r2
+
+(* The hole walk under a renaming, with each side's own names seen so far: the addresses, the kinds
+   and so the spaces are the renaming's to keep, and they decide every verdict but a name's. *)
+let rec validate_holes_rename (rd:readers) (f:string -> string) (n1 n2 addrs:list string) (holes:list hole_decl)
+  : Lemma (ensures agree_but_names (validate_holes rd n1 addrs (map (rename f) holes))
+                                   (validate_holes rd n2 addrs holes))
           (decreases holes)
   = match holes with
     | [] -> ()
-    | h :: rest -> validate_entries_rename rd f (h.h_addr :: seen) rest
+    | h :: rest -> validate_holes_rename rd f (qualified (rename f h) :: n1) (qualified h :: n2) (h.h_addr :: addrs) rest
 
 let rec slot_count_rename (f:string -> string) (hs:list hole_decl)
   : Lemma (slot_count (map (rename f) hs) == slot_count hs)
@@ -1468,12 +1609,24 @@ let rec pick_slot_rename (#node:Type) (w:witness node) (f:string -> string) (l:l
       slot_count_rename f (w.holes m); sum_slots_rename w f (w.children m);
       pick_slot_rename w f t
 
+(* The admission check of an artifact under a renaming agrees with it but for names: the slot test
+   counts kinds, which a renaming keeps. *)
 let validate_decl_rename (#node:Type) (rd:readers) (w:witness node) (f:string -> string) (n:node)
-  : Lemma (validate_decl rd (renamed f w) n == validate_decl rd w n)
-  = validate_entries_rename rd f [] (w.holes n); pick_slot_rename w f (w.preorder n)
+  : Lemma (agree_but_names (validate_decl rd (renamed f w) n) (validate_decl rd w n))
+  = validate_holes_rename rd f [] [] [] (w.holes n); pick_slot_rename w f (w.preorder n)
+
+(* Two results of `compose` agree but for names: every refusal made before the admission check of
+   the composed tree is the same, an admitted tree is the same tree, and the admission verdicts
+   agree but for names — so where one side admits and the other refuses, the refusal is a name's. *)
+let compose_agrees_but_names (#node:Type) (r1 r2:outcome node apply_error) : Tot prop =
+  match r1, r2 with
+  | Error (IllFormedResult f1), Error (IllFormedResult f2) -> agree_but_names (Some f1) (Some f2)
+  | Error (IllFormedResult f1), Ok _ -> name_fault f1
+  | Ok _, Error (IllFormedResult f2) -> name_fault f2
+  | _ -> r1 == r2
 
 let compose_rename (#node:Type) (rd:readers) (w:witness node) (f:string -> string) (slot_addr:string) (inner n:node)
-  : Lemma (compose rd (renamed f w) slot_addr inner n == compose rd w slot_addr inner n)
+  : Lemma (compose_agrees_but_names (compose rd (renamed f w) slot_addr inner n) (compose rd w slot_addr inner n))
   = guard_rename f (w.holes n); guard_rename f (w.holes inner);
     find_rename f slot_addr (w.holes n); addrs_rename f (w.holes n);
     (match w.bind_hole slot_addr (SlotArg inner) n with
@@ -1492,13 +1645,16 @@ let rec open_slot_rename (#node:Type) (w:witness node) (f:string -> string) (a:a
        | ValueArg _ -> ());
       open_slot_rename w f t
 
-(* THE FIFTH THEOREM, part one. F#: hole names are inert to `apply`, `curry` and `compose` —
-   every clause keys on `Addr`, and a bare `Name` selects nothing. *)
+(* THE FIFTH THEOREM, part one. F#: hole names are inert to BINDING — `apply` and `curry` answer the
+   same under every renaming, since every clause keys on `Addr` and a name selects nothing; and
+   `compose` binds the same tree and refuses the same way up to the admission check of what it
+   built, which since Phase 712 reads names (D281): there the two verdicts agree but for names. *)
 let hygiene_law (#node:Type) (rd:readers) (w:witness node) (f:string -> string) (a:args node)
                 (slot_addr:string) (inner n:node)
   : Lemma (ensures apply rd (renamed f w) a n == apply rd w a n /\
                    curry rd (renamed f w) a n == curry rd w a n /\
-                   compose rd (renamed f w) slot_addr inner n == compose rd w slot_addr inner n)
+                   compose_agrees_but_names (compose rd (renamed f w) slot_addr inner n)
+                                            (compose rd w slot_addr inner n))
   = filter_rename f (w.holes n);
     guard_rename f (data_holes w n);
     addrs_rename f (data_holes w n);
@@ -1747,12 +1903,12 @@ let audit_effect_join (#node:Type) (w:witness node) (n:node)
    ====================================================================================== *)
 
 (* The host functions the capture key is written through. F#: `Hash.fnv1a`, the ordinal order
-   `List.sortBy fst` compares addresses by, and `Hash.canonicalField` — one field of the
+   `List.sortBy fst` compares qualified names by (Phase 712), and `Hash.canonicalField` — one field of the
    pre-image, escaped and terminated — the same canonicaliser `Query.invocationKey` uses, which
    is the point of Phase 225: one encoding, so the two seams cannot drift apart again. *)
 noeq type key_renderers = {
   k_hash:      string -> string;
-  k_addr_le:   string -> string -> bool;
+  k_name_le:   string -> string -> bool;
   k_field:     string -> string;
   (* F#: `Space.canonical` (Phase 295) — the one spelling of a value in a space, `None` outside it. *)
   k_canonical: value_space -> string -> option string
@@ -1766,7 +1922,7 @@ let rec insert_binding (kr:key_renderers) (x:(string & string)) (l:invocation)
   | y :: t ->
     let (xa, _) = x in
     let (ya, _) = y in
-    if kr.k_addr_le xa ya then x :: l else y :: insert_binding kr x t
+    if kr.k_name_le xa ya then x :: l else y :: insert_binding kr x t
 
 (* F#: `args |> List.sortBy fst`. *)
 let rec sort_bindings (kr:key_renderers) (l:invocation) : Tot invocation =
@@ -1786,7 +1942,7 @@ let rec key_fields (kr:key_renderers) (l:list string) : Tot string =
   | [] -> ""
   | x :: t -> kr.k_field x ^ key_fields kr t
 
-(* The canonical pre-image of an (address-sorted) argument list. *)
+(* The canonical pre-image of an (name-sorted) argument list. *)
 let key_canonical (kr:key_renderers) (l:invocation) : Tot string =
   key_fields kr (binding_fields l)
 
@@ -1942,7 +2098,7 @@ let rec sort_bindings_mem (kr:key_renderers) (l:invocation) (y:(string & string)
   | x :: t -> sort_bindings_mem kr t y; insert_binding_mem kr x (sort_bindings kr t) y
 
 (* THE SEVENTH THEOREM. F#: `Capability.invocationKey`'s pre-image. Two argument lists whose
-   address-sorted canonical strings agree ARE the same sorted list, and so hold exactly the same
+   name-sorted canonical strings agree ARE the same sorted list, and so hold exactly the same
    bindings: distinct argument sets have distinct pre-images, whatever their values contain —
    `=`, `U+0001` and `U+0010` included, which is where the pre-225 join (`addr=value` pairs on
    `U+0001`) collided. No premise about the comparator; whether distinct pre-images HASH apart is
@@ -1963,8 +2119,8 @@ let invocation_key_injective (#sym:eqtype) (reveal:string -> list sym) (e t:sym)
 
 (* ======================================================================================
    13. THE ADMISSION GATE'S FACTS (Phase 307) — the hypotheses three proved rows rested on are
-       facts the seam enforces: an accepted argument list has distinct addresses, the capture key
-       is a function of the bindings alone, and over distinct hole addresses an accepted
+       facts the seam enforces: an accepted argument list has distinct names, the capture key
+       is a function of the bindings alone, and over distinct hole names and addresses an accepted
        invocation reaches `apply` without the three refusals a well-formed declaration rules out.
    ====================================================================================== *)
 
@@ -1977,8 +2133,8 @@ let rec repeated_none (seen:list string) (ks:list string)
     | [] -> ()
     | k :: t -> repeated_none (k :: seen) t
 
-(* F#: `validateArgs` refuses a repeated address (`DuplicateArg`), so an ACCEPTED argument list has
-   distinct addresses — the hypothesis `invocation_key_deterministic` below needs, made a fact of
+(* F#: `validateArgs` refuses a repeated name (`DuplicateArg`), so an ACCEPTED argument list has
+   distinct names — the hypothesis `invocation_key_deterministic` below needs, made a fact of
    every list the seam accepts. *)
 let validate_args_distinct (rd:readers) (c:capability) (a:invocation)
   : Lemma (requires validate_args rd c a == Ok ())
@@ -1987,14 +2143,14 @@ let validate_args_distinct (rd:readers) (c:capability) (a:invocation)
     | [] -> repeated_none [] (keys a)
     | _ -> ()
 
-(* The comparator premise, as `Query.fst` states it: `k_addr_le` is a total order — true of the
+(* The comparator premise, as `Query.fst` states it: `k_name_le` is a total order — true of the
    ordinal order production sorts by. *)
 let total_order (le:string -> string -> bool) : Tot prop =
   (forall (x y:string). le x y \/ le y x) /\
   (forall (x y:string). (le x y /\ le y x) ==> x == y) /\
   (forall (x y z:string). (le x y /\ le y z) ==> le x z)
 
-(* F#: the result of `List.sortBy fst` is ordered by address. *)
+(* F#: the result of `List.sortBy fst` is ordered by name. *)
 let rec sorted_b (le:string -> string -> bool) (l:invocation) : Tot bool =
   match l with
   | [] -> true
@@ -2015,7 +2171,7 @@ let rec insert_distinct_b (kr:key_renderers) (x:(string & string)) (l:invocation
   = match l with
     | [] -> ()
     | y :: t ->
-      if kr.k_addr_le (fst x) (fst y) then ()
+      if kr.k_name_le (fst x) (fst y) then ()
       else (insert_distinct_b kr x t; insert_keys_b kr x t (fst y))
 
 let rec sort_keys_b (kr:key_renderers) (l:invocation) (n:string)
@@ -2035,17 +2191,17 @@ let rec sort_distinct_b (kr:key_renderers) (l:invocation)
       insert_distinct_b kr x (sort_bindings kr t)
 
 let rec insert_sorted_b (kr:key_renderers) (x:(string & string)) (l:invocation)
-  : Lemma (requires total_order kr.k_addr_le /\ sorted_b kr.k_addr_le l)
-          (ensures sorted_b kr.k_addr_le (insert_binding kr x l))
+  : Lemma (requires total_order kr.k_name_le /\ sorted_b kr.k_name_le l)
+          (ensures sorted_b kr.k_name_le (insert_binding kr x l))
   = match l with
     | [] -> ()
     | y :: t ->
-      if kr.k_addr_le (fst x) (fst y) then ()
+      if kr.k_name_le (fst x) (fst y) then ()
       else insert_sorted_b kr x t
 
 let rec sort_sorted_b (kr:key_renderers) (l:invocation)
-  : Lemma (requires total_order kr.k_addr_le)
-          (ensures sorted_b kr.k_addr_le (sort_bindings kr l))
+  : Lemma (requires total_order kr.k_name_le)
+          (ensures sorted_b kr.k_name_le (sort_bindings kr l))
   = match l with
     | [] -> ()
     | x :: t -> sort_sorted_b kr t; insert_sorted_b kr x (sort_bindings kr t)
@@ -2065,11 +2221,11 @@ let rec mem_binding_key (x:(string & string)) (l:invocation)
     | [] -> ()
     | y :: t -> if x = y then () else mem_binding_key x t
 
-(* Two argument lists bind the same addresses to the same values. *)
+(* Two argument lists bind the same names to the same values. *)
 let same_bindings_b (a a':invocation) : Tot prop =
   forall (x:(string & string)). mem_binding x a = mem_binding x a'
 
-(* An address-sorted list with distinct addresses is determined by its bindings. *)
+(* A name-sorted list with distinct names is determined by its bindings. *)
 let rec sorted_unique_b (le:string -> string -> bool) (s1 s2:invocation)
   : Lemma (requires total_order le /\ sorted_b le s1 /\ sorted_b le s2 /\
                     distinct (keys s1) /\ distinct (keys s2) /\ same_bindings_b s1 s2)
@@ -2098,8 +2254,8 @@ let rec sorted_unique_b (le:string -> string -> bool) (s1 s2:invocation)
         mem_binding_key h1 t2
       end
 
-(* `spell` keeps the address, so it commutes with the address sort. *)
-let spell_addr (kr:key_renderers) (c:capability) (b:(string & string))
+(* `spell` keeps the name, so it commutes with the name sort. *)
+let spell_name (kr:key_renderers) (c:capability) (b:(string & string))
   : Lemma (fst (spell kr c b) == fst b)
   = let (a, v) = b in
     match find_entry a c.c_signature.sg_holes with
@@ -2113,7 +2269,7 @@ let rec insert_map_spell (kr:key_renderers) (c:capability) (x:(string & string))
   : Lemma (insert_binding kr (spell kr c x) (map (spell kr c) l) == map (spell kr c) (insert_binding kr x l))
   = match l with
     | [] -> ()
-    | y :: t -> spell_addr kr c x; spell_addr kr c y; insert_map_spell kr c x t
+    | y :: t -> spell_name kr c x; spell_name kr c y; insert_map_spell kr c x t
 
 let rec sort_map_spell (kr:key_renderers) (c:capability) (l:invocation)
   : Lemma (sort_bindings kr (map (spell kr c) l) == map (spell kr c) (sort_bindings kr l))
@@ -2122,11 +2278,11 @@ let rec sort_map_spell (kr:key_renderers) (c:capability) (l:invocation)
     | x :: t -> sort_map_spell kr c t; insert_map_spell kr c x (sort_bindings kr t)
 
 (* THE EIGHTH THEOREM (Phase 307; `Query.fst`'s fourth, ported). F#: `Capability.invocationKey`.
-   Two argument lists binding the same distinct addresses to the same values, in any order, key
+   Two argument lists binding the same distinct names to the same values, in any order, key
    identically — the key is a function of the capability and the BINDINGS, never of the order the
    caller wrote them in. *)
 let invocation_key_deterministic (kr:key_renderers) (c:capability) (a a':invocation)
-  : Lemma (requires total_order kr.k_addr_le /\ distinct (keys a) /\ distinct (keys a') /\ same_bindings_b a a')
+  : Lemma (requires total_order kr.k_name_le /\ distinct (keys a) /\ distinct (keys a') /\ same_bindings_b a a')
           (ensures invocation_key kr c a == invocation_key kr c a')
   = let aux (x:(string & string)) : Lemma (mem_binding x (sort_bindings kr a) = mem_binding x (sort_bindings kr a')) =
       sort_bindings_mem kr a x; sort_bindings_mem kr a' x;
@@ -2135,27 +2291,53 @@ let invocation_key_deterministic (kr:key_renderers) (c:capability) (a a':invocat
     FStar.Classical.forall_intro aux;
     sort_sorted_b kr a; sort_sorted_b kr a';
     sort_distinct_b kr a; sort_distinct_b kr a';
-    sorted_unique_b kr.k_addr_le (sort_bindings kr a) (sort_bindings kr a');
+    sorted_unique_b kr.k_name_le (sort_bindings kr a) (sort_bindings kr a');
     sort_map_spell kr c a; sort_map_spell kr c a'
 
 (* ... and the hypothesis is the seam's: two ACCEPTED invocations of one capability with the same
-   bindings key identically. Before Phase 307 `validateArgs` accepted a repeated address, and the
+   bindings key identically. Before Phase 307 `validateArgs` accepted a repeated name, and the
    key of `[a = x; a = y]` differed from the key of `[a = y; a = x]`. *)
 let accepted_invocation_key_deterministic (rd:readers) (kr:key_renderers) (c:capability) (a a':invocation)
-  : Lemma (requires total_order kr.k_addr_le /\ validate_args rd c a == Ok () /\
+  : Lemma (requires total_order kr.k_name_le /\ validate_args rd c a == Ok () /\
                     validate_args rd c a' == Ok () /\ same_bindings_b a a')
           (ensures invocation_key kr c a == invocation_key kr c a')
   = validate_args_distinct rd c a; validate_args_distinct rd c a';
     invocation_key_deterministic kr c a a'
 
-(* ---- wf_holes: distinct addresses, and an accepted invocation reaches `apply` cleanly ---- *)
+(* ---- wf_holes: distinct names and addresses, and an accepted invocation reaches `apply` cleanly ---- *)
 
-(* An invocation as `apply`'s arguments: a value at a slot entry is the tree `tree` reads it as
-   (F#: what a host does between the two seams — decode a tree argument into its node), every other
-   value stays a scalar. *)
+(* F#: `FunctionRegistry.addressed` (Phase 712, D281) — an invocation's arguments re-keyed from the
+   qualified names the seam binds by to the addresses `Function.apply` binds by, through the
+   signature: `Map.ofList` over each entry's name and address, then each argument's name looked up,
+   an argument naming no entry dropped, in the arguments' order. *)
+let rec name_addrs (holes:list sig_entry) : Tot (list (string & string)) =
+  match holes with
+  | [] -> []
+  | e :: t -> (e.s_name, e.s_addr) :: name_addrs t
+
+(* F#: `Map.tryFind k (Map.ofList l)` — `Map.ofList` keeps the LAST binding of a repeated key. *)
+let rec assoc_last (k:string) (l:list (string & string)) : Tot (option string) =
+  match l with
+  | [] -> None
+  | (k', v) :: t ->
+    (match assoc_last k t with
+     | Some x -> Some x
+     | None -> if k = k' then Some v else None)
+
+let rec addressed (#a:Type) (holes:list sig_entry) (l:list (string & a)) : Tot (list (string & a)) =
+  match l with
+  | [] -> []
+  | (k, v) :: t ->
+    (match assoc_last k (name_addrs holes) with
+     | Some ad -> (ad, v) :: addressed holes t
+     | None -> addressed holes t)
+
+(* An invocation as `apply`'s arguments, once `addressed` has keyed it by address: a value at a slot
+   entry is the tree `tree` reads it as (F#: what a host does between the two seams — decode a tree
+   argument into its node), every other value stays a scalar. *)
 let lift (#node:Type) (tree:string -> node) (holes:list sig_entry) (b:(string & string)) : Tot (string & arg node) =
   let (k, v) = b in
-  match find_entry k holes with
+  match find_at k holes with
   | Some e -> if SlotHole? e.s_kind then (k, SlotArg (tree v)) else (k, ValueArg v)
   | None -> (k, ValueArg v)
 
@@ -2183,15 +2365,15 @@ let rec has_key_assoc (k:string) (a:invocation)
     | [] -> ()
     | _ :: t -> has_key_assoc k t
 
-(* `find_entry` over a derived signature is `find_hole` over the holes, through `entry_of`. *)
-let rec find_entry_map (k:string) (hs:list hole_decl)
-  : Lemma (find_entry k (map entry_of hs) ==
+(* `find_at` over a derived signature is `find_hole` over the holes, through `entry_of`. *)
+let rec find_at_map (k:string) (hs:list hole_decl)
+  : Lemma (find_at k (map entry_of hs) ==
            (match find_hole k hs with
             | Some h -> Some (entry_of h)
             | None -> None))
   = match hs with
     | [] -> ()
-    | _ :: t -> find_entry_map k t
+    | _ :: t -> find_at_map k t
 
 let rec memp_addr (h:hole_decl) (hs:list hole_decl)
   : Lemma (memp h hs ==> mem h.h_addr (map addr_of hs))
@@ -2206,6 +2388,58 @@ let rec distinct_find (h:hole_decl) (hs:list hole_decl)
     | [] -> ()
     | _ :: t -> memp_addr h t; distinct_find h t
 
+let rec memp_name (e:sig_entry) (holes:list sig_entry)
+  : Lemma (memp e holes ==> mem e.s_name (entry_names holes))
+  = match holes with
+    | [] -> ()
+    | _ :: t -> memp_name e t
+
+(* Over distinct qualified names a member is the one entry its name finds (Phase 712). *)
+let rec distinct_find_named (e:sig_entry) (holes:list sig_entry)
+  : Lemma ((memp e holes /\ distinct (entry_names holes)) ==> find_entry e.s_name holes == Some e)
+  = match holes with
+    | [] -> ()
+    | _ :: t -> memp_name e t; distinct_find_named e t
+
+let rec memp_entry_of (h:hole_decl) (hs:list hole_decl)
+  : Lemma (memp h hs ==> memp (entry_of h) (map entry_of hs))
+  = match hs with
+    | [] -> ()
+    | _ :: t -> memp_entry_of h t
+
+let rec entry_addrs_of (hs:list hole_decl)
+  : Lemma (entry_addrs (map entry_of hs) == map addr_of hs)
+  = match hs with
+    | [] -> ()
+    | _ :: t -> entry_addrs_of t
+
+let rec assoc_last_none (k:string) (holes:list sig_entry)
+  : Lemma (requires not (mem k (entry_names holes)))
+          (ensures assoc_last k (name_addrs holes) == None)
+  = match holes with
+    | [] -> ()
+    | _ :: t -> assoc_last_none k t
+
+(* Over distinct names the map `addressed` builds is the signature's own lookup: a name finds the
+   address of the one entry carrying it, and nothing else. *)
+let rec assoc_last_find (k:string) (holes:list sig_entry)
+  : Lemma (requires distinct (entry_names holes))
+          (ensures assoc_last k (name_addrs holes) ==
+                   (match find_entry k holes with
+                    | Some e -> Some e.s_addr
+                    | None -> None))
+  = match holes with
+    | [] -> ()
+    | e :: t -> assoc_last_find k t; if k = e.s_name then assoc_last_none k t else ()
+
+(* An argument whose name the map finds is an argument of the re-keyed list, at that address. *)
+let rec addressed_has_key (holes:list sig_entry) (a:invocation) (k ad:string)
+  : Lemma (ensures (has_key k a /\ assoc_last k (name_addrs holes) == Some ad) ==> has_key ad (addressed holes a))
+          (decreases a)
+  = match a with
+    | [] -> ()
+    | (k', _) :: t -> addressed_has_key holes t k ad
+
 let rec memp_filter_data (h:hole_decl) (hs:list hole_decl)
   : Lemma (memp h (filter is_data hs) ==> memp h hs /\ is_data h)
   = match hs with
@@ -2218,8 +2452,7 @@ let rec mem_filter_data_addr (k:string) (hs:list hole_decl)
     | [] -> ()
     | _ :: t -> mem_filter_data_addr k t
 
-(* Distinct addresses survive dropping the action holes — so `toJsonSchema`'s property keys, which
-   are the data holes' addresses, are distinct. *)
+(* Distinct addresses survive dropping the action holes. *)
 let rec distinct_data (hs:list hole_decl)
   : Lemma (distinct (map addr_of hs) ==> distinct (map addr_of (filter is_data hs)))
   = match hs with
@@ -2237,14 +2470,15 @@ let data_required (h:hole_decl)
   : Lemma ((hole_total h /\ is_data h) ==> (entry_of h).s_required)
   = ()
 
+(* An accepted invocation binds every required hole, by its qualified name. *)
 let rec required_bound (hs:list hole_decl) (a:invocation) (h:hole_decl)
   : Lemma ((unbound_required (map entry_of hs) a == [] /\ memp h hs /\ (entry_of h).s_required) ==>
-           has_key h.h_addr a)
+           has_key (qualified h) a)
   = match hs with
     | [] -> ()
     | _ :: t -> required_bound t a h
 
-(* Every argument addresses an entry that takes a value. *)
+(* Every argument names an entry that takes a value. *)
 let rec all_spaced (holes:list sig_entry) (ks:list string) : Tot bool =
   match ks with
   | [] -> true
@@ -2259,28 +2493,32 @@ let rec check_args_ok_spaced (rd:readers) (holes:list sig_entry) (declared:list 
           (decreases a)
   = match a with
     | [] -> ()
-    | (addr, value) :: rest ->
-      (match find_entry addr holes with
+    | (name, value) :: rest ->
+      (match find_entry name holes with
        | None -> ()
        | Some h ->
          (match arg_space h with
           | None -> ()
           | Some space -> if validate rd space value then check_args_ok_spaced rd holes declared rest else ()))
 
-(* An address whose entry takes a value is a DATA hole's — an action entry takes none. *)
-let rec spaced_data (k:string) (hs:list hole_decl)
-  : Lemma ((match find_entry k (map entry_of hs) with
-            | Some e -> Some? (arg_space e)
-            | None -> false) ==> mem k (map addr_of (filter is_data hs)))
+(* A name whose entry takes a value is a DATA hole's, and that hole's address is the entry's — an
+   action entry takes none. *)
+let rec named_data (k:string) (hs:list hole_decl)
+  : Lemma (match find_entry k (map entry_of hs) with
+           | Some e -> Some? (arg_space e) ==> mem e.s_addr (map addr_of (filter is_data hs))
+           | None -> True)
   = match hs with
     | [] -> ()
-    | _ :: t -> spaced_data k t
+    | _ :: t -> named_data k t
 
-let rec first_unknown_spaced (hs:list hole_decl) (ks:list string)
-  : Lemma (all_spaced (map entry_of hs) ks ==> first_unknown (map addr_of (filter is_data hs)) ks == None)
-  = match ks with
+(* Every key of the re-keyed invocation is a data hole's address, so `apply` meets no unknown one. *)
+let rec addressed_data (hs:list hole_decl) (a:invocation)
+  : Lemma (requires distinct (entry_names (map entry_of hs)) /\ all_spaced (map entry_of hs) (keys a))
+          (ensures first_unknown (map addr_of (filter is_data hs)) (keys (addressed (map entry_of hs) a)) == None)
+          (decreases a)
+  = match a with
     | [] -> ()
-    | k :: t -> spaced_data k hs; first_unknown_spaced hs t
+    | (k, _) :: t -> assoc_last_find k (map entry_of hs); named_data k hs; addressed_data hs t
 
 (* The walk, over holes each of which is the one hole its address finds, is data, and is bound:
    it never refuses `NotASlot` (the lifted argument has the hole's own shape), never
@@ -2300,7 +2538,7 @@ let rec walk_wf (#node:Type) (rd:readers) (w:witness node) (tree:string -> node)
     | h :: rest ->
       has_key_assoc h.h_addr a;
       assoc_lifted tree (map entry_of all) h.h_addr a;
-      find_entry_map h.h_addr all;
+      find_at_map h.h_addr all;
       let x = Some?.v (assoc h.h_addr (lifted tree (map entry_of all) a)) in
       (match validate_arg rd w h.h_addr h.h_kind x with
        | Error _ -> ()
@@ -2321,21 +2559,24 @@ let rec open_slot_shape (#node:Type) (w:witness node) (l:args node)
        | SlotArg sub -> (match data_holes w sub with [] -> open_slot_shape w t | _ -> ())
        | ValueArg _ -> open_slot_shape w t)
 
-(* THE NINTH THEOREM (Phase 307), `wf_holes`. Over an artifact whose holes have DISTINCT addresses
-   — what `Signature.validate` enforces at every admission (`DuplicateHoleAddr`) — the standard
-   JSON Schema's property keys (the data holes' addresses) are distinct, and an invocation the
-   capability seam ACCEPTS, lifted to `apply`'s arguments, never meets `NotASlot`,
-   `RequiredHolesUnbound` or `UnknownHoleAddr` there: the two seams agree on which arguments an
-   artifact takes. What `apply` may still answer is about the VALUES and the witness —
-   `ValueOutOfSpace`, `SlotKindMismatch`, `NonTotal`, `SlotArgOpen`, `BindFailed` — and that a
-   hole beneath a slot (`HoleUnderSlot`) surfaces as the witness's `BindFailed` is the witness
-   contract's, which this model leaves abstract. *)
+(* THE NINTH THEOREM (Phase 307; by name since Phase 712), `wf_holes`. Over an artifact whose holes
+   have DISTINCT addresses and DISTINCT qualified names — what `Signature.validate` enforces at every
+   admission (`DuplicateHoleAddr`, `DuplicateHoleName`; `wf_holes_admitted` below) — the data holes'
+   addresses are distinct, and an invocation the capability seam ACCEPTS, re-keyed by name to
+   address as the function registry re-keys it (`addressed`) and lifted to `apply`'s arguments,
+   never meets `NotASlot`, `RequiredHolesUnbound` or `UnknownHoleAddr` there: the two seams agree on
+   which arguments an artifact takes. What `apply` may still answer is about the VALUES and the
+   witness — `ValueOutOfSpace`, `SlotKindMismatch`, `NonTotal`, `SlotArgOpen`, `BindFailed` — and
+   that a hole beneath a slot (`HoleUnderSlot`) surfaces as the witness's `BindFailed` is the
+   witness contract's, which this model leaves abstract. *)
 let wf_holes (#node:Type) (rd:readers) (w:witness node) (id name:string) (p:placement) (r:answer)
              (tree:string -> node) (a:invocation) (n:node)
   : Lemma (requires distinct (map addr_of (w.holes n)) /\
+                    distinct (entry_names (signature_of w name n).sg_holes) /\
                     validate_args rd (create id (signature_of w name n) p r) a == Ok ())
           (ensures distinct (map addr_of (data_holes w n)) /\
-                   (match apply rd w (lifted tree (signature_of w name n).sg_holes a) n with
+                   (let sg = (signature_of w name n).sg_holes in
+                    match apply rd w (lifted tree sg (addressed sg a)) n with
                     | Error (NotASlot _) -> False
                     | Error (RequiredHolesUnbound _) -> False
                     | Error (UnknownHoleAddr _ _) -> False
@@ -2343,31 +2584,51 @@ let wf_holes (#node:Type) (rd:readers) (w:witness node) (id name:string) (p:plac
   = let all = w.holes n in
     let entries = map entry_of all in
     let dh = data_holes w n in
-    let la = lifted tree entries a in
+    let a' = addressed entries a in
+    let la = lifted tree entries a' in
     distinct_data all;
-    assert (repeated [] (keys a) == []);
-    assert (check_args rd entries (entry_addrs entries) a == Ok ());
+    assert (check_args rd entries (entry_names entries) a == Ok ());
     assert (unbound_required entries a == []);
-    check_args_ok_spaced rd entries (entry_addrs entries) a;
-    first_unknown_spaced all (keys a);
-    keys_lifted tree entries a;
+    check_args_ok_spaced rd entries (entry_names entries) a;
+    addressed_data all a;
+    keys_lifted tree entries a';
     assert (first_unknown (map addr_of dh) (keys la) == None);
     guard_total_shape dh;
     (match guard_total dh with
      | Some _ -> ()
      | None ->
        let aux (h:hole_decl)
-         : Lemma (memp h dh ==> (find_hole h.h_addr all == Some h /\ is_data h /\ has_key h.h_addr a)) =
+         : Lemma (memp h dh ==> (find_hole h.h_addr all == Some h /\ is_data h /\ has_key h.h_addr a')) =
          memp_filter_data h all; distinct_find h all; for_all_memp hole_total h dh;
-         data_required h; required_bound all a h
+         data_required h; required_bound all a h;
+         memp_entry_of h all; distinct_find_named (entry_of h) entries;
+         assoc_last_find (qualified h) entries;
+         addressed_has_key entries a (qualified h) h.h_addr
        in
        FStar.Classical.forall_intro aux;
-       walk_wf rd w tree all a true n dh;
+       walk_wf rd w tree all a' true n dh;
        open_slot_shape w la;
        assert (apply rd w la n ==
                (match try_pick (open_slot w) la with
                 | Some e -> Error e
                 | None -> bind_walk rd w true la n [] dh)))
+
+(* ... and its hypotheses are the admission gate's: over an artifact whose derived signature
+   `Signature.validate` admits, the same conclusion. *)
+let wf_holes_admitted (#node:Type) (rd:readers) (w:witness node) (id name:string) (p:placement) (r:answer)
+                      (tree:string -> node) (a:invocation) (n:node)
+  : Lemma (requires None? (validate_signature rd (signature_of w name n)) /\
+                    validate_args rd (create id (signature_of w name n) p r) a == Ok ())
+          (ensures distinct (map addr_of (data_holes w n)) /\
+                   (let sg = (signature_of w name n).sg_holes in
+                    match apply rd w (lifted tree sg (addressed sg a)) n with
+                    | Error (NotASlot _) -> False
+                    | Error (RequiredHolesUnbound _) -> False
+                    | Error (UnknownHoleAddr _ _) -> False
+                    | _ -> True))
+  = signature_distinct rd (signature_of w name n);
+    entry_addrs_of (w.holes n);
+    wf_holes rd w id name p r tree a n
 
 (* ======================================================================================
    14. THE HANDLER TABLE (Phase 354) — `Function.bindHandlers`, the behaviour-axis analogue of
@@ -2812,8 +3073,8 @@ type pipeline_error =
   | PipelineNoSuchCapability: id:string -> known:list string -> pipeline_error
   | PipelineArgRefused      : at:string -> reason:invoke_error -> pipeline_error
   | PipelineCycle           : at:string -> cycle:list string -> pipeline_error
-  | EdgeTypeMismatch        : at:string -> addr:string -> producer:string -> consumer:string -> pipeline_error
-  | PipelineForwardEdge     : at:string -> addr:string -> upstream:string -> pipeline_error
+  | EdgeTypeMismatch        : at:string -> arg:string -> producer:string -> consumer:string -> pipeline_error
+  | PipelineForwardEdge     : at:string -> arg:string -> upstream:string -> pipeline_error
   | PipelineOutputContradicts : at:string -> cap:string -> declared:value_space -> result:answer ->
                                 pipeline_error
 
@@ -3016,7 +3277,7 @@ let path_to (ns:list pipeline_node) (target start:string) : Tot (option (list st
    declaration order (a later one closes a cycle or points forward), and its output feeds the
    argument. *)
 let edge_fault (fr:feed_readers) (rd:readers) (ns:list pipeline_node) (all_ids:list string)
-               (nid addr up:string) (arg_sp:value_space)
+               (nid name up:string) (arg_sp:value_space)
   : Tot (option pipeline_error) =
   match find_node up ns with
   | None -> Some (UnknownNode up)
@@ -3025,48 +3286,48 @@ let edge_fault (fr:feed_readers) (rd:readers) (ns:list pipeline_node) (all_ids:l
     else if index_of up all_ids > index_of nid all_ids then
       (match path_to ns nid up with
        | Some path -> Some (PipelineCycle nid (nid :: path))
-       | None -> Some (PipelineForwardEdge nid addr up))
+       | None -> Some (PipelineForwardEdge nid name up))
     else if subsumes fr rd arg_sp (node_output up_node) then None
-    else Some (EdgeTypeMismatch nid addr (space_tag (node_output up_node)) (space_tag arg_sp))
+    else Some (EdgeTypeMismatch nid name (space_tag (node_output up_node)) (space_tag arg_sp))
 
 (* F#: `Capability.argFault` — the refusal one argument earns on its own, by `validateArgs`'s rules. *)
-let arg_fault (rd:readers) (c:capability) (declared:list string) (addr value:string)
+let arg_fault (rd:readers) (c:capability) (declared:list string) (name value:string)
   : Tot (option invoke_error) =
-  match find_entry addr c.c_signature.sg_holes with
-  | None -> Some (UnknownArg addr declared)
+  match find_entry name c.c_signature.sg_holes with
+  | None -> Some (UnknownArg name declared)
   | Some h ->
     match arg_space h with
-    | None -> Some (UninvocableArg addr)
+    | None -> Some (UninvocableArg name)
     | Some space ->
-      if SlotTree? space && None? (rd.kind_of value) then Some (UninvocableArg addr)
+      if SlotTree? space && None? (rd.kind_of value) then Some (UninvocableArg name)
       else if validate rd space value then None
-      else Some (ArgOutOfSpace addr space value)
+      else Some (ArgOutOfSpace name space value)
 
 (* F#: `typeCheck`'s local `argFault` — a literal is refused as the capability refuses it, an edge
-   by the hole it addresses (declared, and taking a value) and then by `edgeFault`. *)
+   by the hole it names (declared, and taking a value) and then by `edgeFault`. *)
 let pipe_arg_fault (fr:feed_readers) (rd:readers) (ns:list pipeline_node) (all_ids:list string)
                    (cap:capability) (declared:list string) (nid:string) (b:(string & arg_source))
   : Tot (option pipeline_error) =
-  let (addr, src) = b in
+  let (name, src) = b in
   match src with
   | Literal v ->
-    (match arg_fault rd cap declared addr v with
+    (match arg_fault rd cap declared name v with
      | Some e -> Some (PipelineArgRefused nid e)
      | None -> None)
   | FromNode up ->
-    (match find_entry addr cap.c_signature.sg_holes with
-     | None -> Some (PipelineArgRefused nid (UnknownArg addr declared))
+    (match find_entry name cap.c_signature.sg_holes with
+     | None -> Some (PipelineArgRefused nid (UnknownArg name declared))
      | Some h ->
        (match entry_space h with
-        | None -> Some (PipelineArgRefused nid (UninvocableArg addr))
-        | Some sp -> edge_fault fr rd ns all_ids nid addr up sp))
+        | None -> Some (PipelineArgRefused nid (UninvocableArg name))
+        | Some sp -> edge_fault fr rd ns all_ids nid name up sp))
 
-(* F#: `holes |> List.filter (fun h -> h.Required && not (bound.Contains h.Addr)) |> List.map Addr`. *)
+(* F#: `holes |> List.filter (fun h -> h.Required && not (bound.Contains h.Name)) |> List.map _.Name`. *)
 let rec unbound_keys (holes:list sig_entry) (ks:list string) : Tot (list string) =
   match holes with
   | [] -> []
   | h :: t ->
-    if h.s_required && not (mem h.s_addr ks) then h.s_addr :: unbound_keys t ks
+    if h.s_required && not (mem h.s_name ks) then h.s_name :: unbound_keys t ks
     else unbound_keys t ks
 
 (* F#: `CapabilityPipeline.outputStates` (Phase 642) — a node's declared output states what its
@@ -3091,7 +3352,7 @@ let node_fault (fr:feed_readers) (rd:readers) (lk:capability_lookup) (ns:list pi
       then Some (PipelineOutputContradicts nid cap_id out cap.c_result)
       else
       let holes = cap.c_signature.sg_holes in
-      let declared = entry_addrs holes in
+      let declared = entry_names holes in
       match repeated [] (keys a) with
       | d :: _ -> Some (PipelineArgRefused nid (DuplicateArg d))
       | [] ->
@@ -3126,21 +3387,21 @@ let type_check (fr:feed_readers) (rd:readers) (lk:capability_lookup) (p:pipeline
 (* F#: the host `body` — a node and its resolved arguments to a value, or a failure's message. *)
 type node_body (v:Type) = pipeline_node -> list (string & pipeline_arg v) -> outcome v string
 
-(* F#: `c.Signature.Holes |> List.tryPick (fun h -> if h.Addr = addr then h.Space else None)`. *)
-let rec space_of (addr:string) (holes:list sig_entry) : Tot (option value_space) =
+(* F#: `c.Signature.Holes |> List.tryPick (fun h -> if h.Name = name then h.Space else None)`. *)
+let rec space_of (name:string) (holes:list sig_entry) : Tot (option value_space) =
   match holes with
   | [] -> None
   | h :: t ->
-    if h.s_addr = addr then
+    if h.s_name = name then
       (match entry_space h with
        | Some s -> Some s
-       | None -> space_of addr t)
-    else space_of addr t
+       | None -> space_of name t)
+    else space_of name t
 
 (* F#: `runNode`'s local `spaceOf`. *)
-let arg_space_of (lk:capability_lookup) (cap_id addr:string) : Tot (option value_space) =
+let arg_space_of (lk:capability_lookup) (cap_id name:string) : Tot (option value_space) =
   match lk.lk_find cap_id with
-  | Some c -> space_of addr c.c_signature.sg_holes
+  | Some c -> space_of name c.c_signature.sg_holes
   | None -> None
 
 (* F#: `runNode`'s fold over the arguments — each edge resolved to its upstream's realised value,
@@ -3151,20 +3412,20 @@ let rec resolve_args (#v:Type) (rd:readers) (lk:capability_lookup) (spell:v -> s
   : Tot (outcome (list (string & pipeline_arg v)) pipeline_eval_error) (decreases a) =
   match a with
   | [] -> Ok acc
-  | (addr, src) :: rest ->
+  | (name, src) :: rest ->
     match src with
-    | Literal s -> resolve_args rd lk spell results nid cap_id rest ((addr, LiteralArg s) :: acc)
+    | Literal s -> resolve_args rd lk spell results nid cap_id rest ((name, LiteralArg s) :: acc)
     | FromNode up ->
       match assoc up results with
-      | None -> Error (EvalIllTyped (PipelineForwardEdge nid addr up))
+      | None -> Error (EvalIllTyped (PipelineForwardEdge nid name up))
       | Some x ->
-        match arg_space_of lk cap_id addr with
-        | None -> Error (EvalIllTyped (PipelineArgRefused nid (UninvocableArg addr)))
+        match arg_space_of lk cap_id name with
+        | None -> Error (EvalIllTyped (PipelineArgRefused nid (UninvocableArg name)))
         | Some space ->
           let spelled = spell x in
           if validate rd space spelled then
-            resolve_args rd lk spell results nid cap_id rest ((addr, FromUpstream x) :: acc)
-          else Error (EvalArgRefused nid (ArgOutOfSpace addr space spelled))
+            resolve_args rd lk spell results nid cap_id rest ((name, FromUpstream x) :: acc)
+          else Error (EvalArgRefused nid (ArgOutOfSpace name space spelled))
 
 (* F#: `CapabilityPipeline.runNode` — resolve, then the host body; shared by `eval` and `evalFrom`. *)
 let run_node (#v:Type) (rd:readers) (lk:capability_lookup) (spell:v -> string) (body:node_body v)
@@ -3396,7 +3657,7 @@ let rec go_check_ordered (fr:feed_readers) (rd:readers) (lk:capability_lookup)
        | Invoke nid cap_id _ a ->
          (match lk.lk_find cap_id with
           | Some cap ->
-            args_upstreams_earlier fr rd all cap (entry_addrs cap.c_signature.sg_holes) nid a
+            args_upstreams_earlier fr rd all cap (entry_names cap.c_signature.sg_holes) nid a
               (node_ids pre) (node_ids rest')
           | None -> ()));
       app_snoc pre n rest';
@@ -3490,7 +3751,7 @@ let rec go_check_transfer (fr:feed_readers) (rd:readers) (lk:capability_lookup)
        | Invoke nid cap_id _ a ->
          (match lk.lk_find cap_id with
           | Some cap ->
-            args_transfer fr rd ns ns' cap (entry_addrs cap.c_signature.sg_holes) nid a
+            args_transfer fr rd ns ns' cap (entry_names cap.c_signature.sg_holes) nid a
               (node_ids pre) (node_ids rest')
           | None -> ()));
       app_snoc pre n rest';
@@ -3692,15 +3953,15 @@ let rec eval_from_empty_prior (#v:Type) (rd:readers) (lk:capability_lookup) (spe
        | Error _ -> ()
        | Ok x -> eval_from_empty_prior rd lk spell body dirty ((node_id n, x) :: results) rest)
 
-(* `tryFind` on the address, then its space, is what `tryPick` finds — where the first entry at the
-   address carries a space. *)
-let rec space_of_find (addr:string) (holes:list sig_entry)
-  : Lemma (match find_entry addr holes with
-           | Some h -> (Some? (entry_space h) ==> space_of addr holes == entry_space h)
+(* `tryFind` on the name, then its space, is what `tryPick` finds — where the first entry under the
+   name carries a space. *)
+let rec space_of_find (name:string) (holes:list sig_entry)
+  : Lemma (match find_entry name holes with
+           | Some h -> (Some? (entry_space h) ==> space_of name holes == entry_space h)
            | None -> True)
   = match holes with
     | [] -> ()
-    | h :: t -> if h.s_addr = addr then () else space_of_find addr t
+    | h :: t -> if h.s_name = name then () else space_of_find name t
 
 (* Over an accepted argument list whose upstreams all have values, resolution never answers the
    evaluator's two type-check refusals. *)
@@ -3718,18 +3979,18 @@ let rec resolve_never_ill (#v:Type) (fr:feed_readers) (rd:readers) (lk:capabilit
           (decreases a)
   = match a with
     | [] -> ()
-    | (addr, src) :: rest ->
+    | (name, src) :: rest ->
       (match src with
        | Literal s ->
          resolve_never_ill fr rd lk spell ns all_ids cap declared results nid cap_id rest
-           ((addr, LiteralArg s) :: acc)
+           ((name, LiteralArg s) :: acc)
        | FromNode up ->
-         space_of_find addr cap.c_signature.sg_holes;
+         space_of_find name cap.c_signature.sg_holes;
          (match assoc up results with
           | None -> ()
           | Some x ->
             resolve_never_ill fr rd lk spell ns all_ids cap declared results nid cap_id rest
-              ((addr, FromUpstream x) :: acc)))
+              ((name, FromUpstream x) :: acc)))
 
 let run_never_ill (#v:Type) (fr:feed_readers) (rd:readers) (lk:capability_lookup)
                   (spell:v -> string) (body:node_body v) (ns:list pipeline_node) (all_ids:list string)
@@ -3744,7 +4005,7 @@ let run_never_ill (#v:Type) (fr:feed_readers) (rd:readers) (lk:capability_lookup
     | Invoke nid cap_id _ a ->
       (match lk.lk_find cap_id with
        | Some cap ->
-         resolve_never_ill fr rd lk spell ns all_ids cap (entry_addrs cap.c_signature.sg_holes)
+         resolve_never_ill fr rd lk spell ns all_ids cap (entry_names cap.c_signature.sg_holes)
            results nid cap_id a []
        | None -> ())
 
@@ -3830,13 +4091,13 @@ let rec resolve_eq (#v:Type) (rd:readers) (lk:capability_lookup) (spell:v -> str
           (decreases a)
   = match a with
     | [] -> ()
-    | (addr, src) :: rest ->
+    | (name, src) :: rest ->
       (match src with
-       | Literal s -> resolve_eq rd lk spell r0 r1 nid cap_id rest ((addr, LiteralArg s) :: acc)
+       | Literal s -> resolve_eq rd lk spell r0 r1 nid cap_id rest ((name, LiteralArg s) :: acc)
        | FromNode up ->
          (match assoc up r0 with
           | None -> ()
-          | Some x -> resolve_eq rd lk spell r0 r1 nid cap_id rest ((addr, FromUpstream x) :: acc)))
+          | Some x -> resolve_eq rd lk spell r0 r1 nid cap_id rest ((name, FromUpstream x) :: acc)))
 
 (* Two host bodies that agree off the change set: what "only these inputs changed" means. *)
 let agree_off (#v:Type) (body0 body1:node_body v) (changed:list string) : Tot prop =
@@ -4415,18 +4676,18 @@ let arg_source_of_j (el:jval) : Tot (outcome arg_source decode_error) =
        | Ok n -> Ok (FromNode n))
     else Error (under (Key "$type") (refuse UnknownTag))
 
-(* F#: `argToJ`. *)
+(* F#: `argToJ` — `{"name", "source"}`, the hole's qualified name (Phase 712, D281). *)
 let arg_json (b:(string & arg_source)) : Tot jval =
-  JObj [("addr", JStr (fst b)); ("source", arg_source_json (snd b))]
+  JObj [("name", JStr (fst b)); ("source", arg_source_json (snd b))]
 
 (* F#: `argFromJ`. *)
 let arg_of_j (el:jval) : Tot (outcome (string & arg_source) decode_error) =
-  match field "addr" d_str el with
+  match field "name" d_str el with
   | Error e -> Error e
-  | Ok addr ->
+  | Ok name ->
     (match field "source" arg_source_of_j el with
      | Error e -> Error e
-     | Ok s -> Ok (addr, s))
+     | Ok s -> Ok (name, s))
 
 let rec args_json (a:list (string & arg_source)) : Tot (list jval) =
   match a with
@@ -4714,16 +4975,16 @@ let twins : list twin = [
     tholds = (fun () -> det_of_tag "network+random" = None) };
   { tname = "a-bounded-repeat-is-required";
     tholds = (fun () ->
-      (entry_of ({ h_addr = "r"; h_name = "r"; h_kind = RepeatHole (IntRange 0 3) })).s_required = true) };
+      (entry_of ({ h_addr = "r"; h_name = "r"; h_kind = RepeatHole (IntRange 0 3); h_slots = [] })).s_required = true) };
   { tname = "an-unbounded-repeat-is-not-required";
-    tholds = (fun () -> (entry_of ({ h_addr = "r"; h_name = "r"; h_kind = RepeatHole AnyString })).s_required = false) };
+    tholds = (fun () -> (entry_of ({ h_addr = "r"; h_name = "r"; h_kind = RepeatHole AnyString; h_slots = [] })).s_required = false) };
   { tname = "a-repeat-over-no-count-is-not-total";
     tholds = (fun () ->
       entry_total ({ s_addr = "r"; s_name = "r"; s_kind = RepeatHole AnyString; s_required = false }) = false) };
   (* Phase 307 — the count space, the duplicate scan and the admission check. *)
   { tname = "a-repeat-over-a-float-range-is-not-required";
     tholds = (fun () ->
-      (entry_of ({ h_addr = "r"; h_name = "r"; h_kind = RepeatHole (FloatRange "0" "1") })).s_required = false) };
+      (entry_of ({ h_addr = "r"; h_name = "r"; h_kind = RepeatHole (FloatRange "0" "1"); h_slots = [] })).s_required = false) };
   { tname = "a-repeat-past-the-cap-is-not-a-count";
     tholds = (fun () -> is_count (IntRange 0 1000001) = false && is_count (IntRange 0 1000000) = true) };
   { tname = "repeated-names-each-repeat-in-order";
@@ -4731,10 +4992,46 @@ let twins : list twin = [
   { tname = "a-second-address-is-the-duplicate";
     tholds = (fun () ->
       validate_entries ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
-                          kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None) }) []
+                          kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None);
+                          seg_ok = (fun _ -> true); name_ok = (fun _ -> true) }) [] []
         [ { s_addr = "a"; s_name = "a"; s_kind = ValueHole (IntRange 0 1); s_required = true };
           { s_addr = "a"; s_name = "b"; s_kind = ValueHole (IntRange 5 1); s_required = true } ]
         = Some (DuplicateHoleAddr "a")) };
+  (* Phase 712 — the qualified name, the two name faults and the order they are checked in, and the
+     function registry's map from a name to its address. *)
+  { tname = "a-qualified-name-is-the-slots-then-the-name";
+    tholds = (fun () ->
+      qualified ({ h_addr = "r/s/x"; h_name = "amount"; h_kind = ValueHole AnyString; h_slots = ["slotA"] }) = "slotA.amount" &&
+      qualified ({ h_addr = "r/s/t/x"; h_name = "amount"; h_kind = ValueHole AnyString; h_slots = ["a"; "b"] }) = "a.b.amount" &&
+      qualified ({ h_addr = "r/x"; h_name = "amount"; h_kind = ValueHole AnyString; h_slots = [] }) = "amount") };
+  { tname = "a-second-name-is-the-duplicate-before-its-address";
+    tholds = (fun () ->
+      validate_entries ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
+                          kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None);
+                          seg_ok = (fun _ -> true); name_ok = (fun _ -> true) }) [] []
+        [ { s_addr = "a"; s_name = "x"; s_kind = ValueHole (IntRange 0 1); s_required = true };
+          { s_addr = "a"; s_name = "x"; s_kind = ValueHole (IntRange 0 1); s_required = true } ]
+        = Some (DuplicateHoleName "x")) };
+  { tname = "an-ill-formed-name-is-refused-before-its-space";
+    tholds = (fun () ->
+      validate_entries ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
+                          kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None);
+                          seg_ok = (fun _ -> true); name_ok = (fun s -> s <> "a b") }) [] []
+        [ { s_addr = "a"; s_name = "a b"; s_kind = ValueHole (IntRange 5 1); s_required = true } ]
+        = Some (IllFormedHoleName "a b")) };
+  { tname = "a-space-fault-names-the-qualified-name";
+    tholds = (fun () ->
+      validate_entries ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
+                          kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None);
+                          seg_ok = (fun _ -> true); name_ok = (fun _ -> true) }) [] []
+        [ { s_addr = "r/s/x"; s_name = "s.x"; s_kind = ValueHole (IntRange 5 1); s_required = true } ]
+        = Some (EmptySpace "s.x" (IntRange 5 1))) };
+  { tname = "addressed-keys-each-argument-by-its-hole-and-drops-a-stranger";
+    tholds = (fun () ->
+      addressed [ { s_addr = "r/1"; s_name = "a"; s_kind = ValueHole AnyString; s_required = true };
+                  { s_addr = "r/2"; s_name = "b"; s_kind = ValueHole AnyString; s_required = true } ]
+        [("b", "x"); ("zz", "y"); ("a", "z")]
+        = [("r/2", "x"); ("r/1", "z")]) };
   (* Phase 354 — the handler table, the pipeline and the codecs. *)
   { tname = "map-of-list-keeps-the-later-binding-of-a-repeated-key";
     tholds = (fun () ->
@@ -4759,14 +5056,16 @@ let twins : list twin = [
     tholds = (fun () ->
       edge_fault ({ float_within = (fun _ _ _ _ -> false); int_within = (fun _ _ _ _ -> false) })
         ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
-           kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None) })
+           kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None);
+           seg_ok = (fun _ -> true); name_ok = (fun _ -> true) })
         [ Invoke "a" "c" AnyString [("x", FromNode "b")]; Invoke "b" "c" AnyString [("x", FromNode "a")] ]
         ["a"; "b"] "a" "x" "b" AnyString = Some (PipelineCycle "a" ["a"; "b"])) };
   { tname = "a-later-upstream-that-closes-no-cycle-is-a-forward-edge";
     tholds = (fun () ->
       edge_fault ({ float_within = (fun _ _ _ _ -> false); int_within = (fun _ _ _ _ -> false) })
         ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
-           kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None) })
+           kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None);
+           seg_ok = (fun _ -> true); name_ok = (fun _ -> true) })
         [ Invoke "a" "c" AnyString [("x", FromNode "b")]; Source "b" "ref" AnyString ]
         ["a"; "b"] "a" "x" "b" AnyString = Some (PipelineForwardEdge "a" "x" "b")) };
   { tname = "the-dirty-set-is-the-change-and-everything-downstream";
@@ -4807,7 +5106,8 @@ let twins : list twin = [
   { tname = "a-node-with-an-empty-output-space-is-refused-at-outputType";
     tholds = (fun () ->
       node_of_j ({ int_of = (fun _ -> None); float_in = (fun _ _ _ -> false); str_len = (fun _ -> 0);
-                   kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None) })
+                   kind_of = (fun _ -> None); doc_ok = (fun _ -> false); float_fault = (fun _ _ -> None);
+           seg_ok = (fun _ -> true); name_ok = (fun _ -> true) })
         ({ float_of_int = (fun _ -> "0") })
         (node_json (Source "s" "ref" (IntRange 5 1)))
         = Error ({ d_code = OutOfRange; d_path = [Key "outputType"] })) } ]
@@ -5710,8 +6010,8 @@ let capability_refusals_resolve (rd:readers) (cr:codec_readers) : Lemma (sound (
 
 (* ---- the typed invocation: `encodeInvocationJson` / `invocationOf` ---- *)
 
-(* F#: `fun (a, v) -> JObj [ "addr", JStr a; "value", JStr v ]`. *)
-let inv_arg_json (b:(string & string)) : Tot jval = JObj [("addr", JStr (fst b)); ("value", JStr (snd b))]
+(* F#: `fun (n, v) -> JObj [ "name", JStr n; "value", JStr v ]` — the hole's qualified name (Phase 712). *)
+let inv_arg_json (b:(string & string)) : Tot jval = JObj [("name", JStr (fst b)); ("value", JStr (snd b))]
 
 let rec inv_args_json (a:invocation) : Tot (list jval) =
   match a with
@@ -5723,18 +6023,18 @@ let invocation_json (cid:string) (a:invocation) : Tot jval =
   JObj [("$type", JStr "invocation"); ("capabilityId", JStr cid); ("args", JArr (inv_args_json a))]
 
 (* F#: `invocationOf`'s `arg`. *)
-let inv_arg_of_j : decoder (string & string) = both (field "addr" d_str) (field "value" d_str) (fun a v -> (a, v))
+let inv_arg_of_j : decoder (string & string) = both (field "name" d_str) (field "value" d_str) (fun n v -> (n, v))
 
-(* F#: `invocationOf`'s `distinctArgs` `go` — the addresses seen so far as a list (production's
+(* F#: `invocationOf`'s `distinctArgs` `go` — the names seen so far as a list (production's
    `Set<string>`, read by `Contains` alone), the FIRST repeat refused `OutOfRange` through `at` at
    `args[i]`, walked in the document (Phase 453). *)
 let rec distinct_go (cid:string) (whole:invocation) (seen:list string) (i:nat) (rest:invocation)
   : Tot (decoder (string & invocation)) (decreases rest) =
   match rest with
   | [] -> d_succeed (cid, whole)
-  | (addr, _) :: t ->
-    if mem addr seen then d_at [Key "args"; Index i] (d_fail OutOfRange)
-    else distinct_go cid whole (addr :: seen) (i + 1) t
+  | (name, _) :: t ->
+    if mem name seen then d_at [Key "args"; Index i] (d_fail OutOfRange)
+    else distinct_go cid whole (name :: seen) (i + 1) t
 
 (* F#: `CapabilityCodec.invocationOf` — both members, then `Decoder.bind distinctArgs` over the
    same document. No `$type` is read: the lenient reader checks no tag. *)
@@ -5744,18 +6044,18 @@ let invocation_of_j : decoder (string & invocation) =
     | Error e -> Error e
     | Ok (cid, args) -> distinct_go cid args [] 0 args el
 
-(* The index of the first address the list binds again, counted from `i`, with `seen` read first —
+(* The index of the first name the list binds again, counted from `i`, with `seen` read first —
    `validateArgs`' `repeated` as a position. *)
 let rec first_repeat (seen:list string) (i:nat) (a:invocation) : Tot (option nat) (decreases a) =
   match a with
   | [] -> None
-  | (addr, _) :: t -> if mem addr seen then Some i else first_repeat (addr :: seen) (i + 1) t
+  | (name, _) :: t -> if mem name seen then Some i else first_repeat (name :: seen) (i + 1) t
 
 let rec first_repeat_none (seen:list string) (i:nat) (a:invocation)
   : Lemma (ensures None? (first_repeat seen i a) <==> repeated seen (keys a) == []) (decreases a)
   = match a with
     | [] -> ()
-    | (addr, _) :: t -> first_repeat_none (addr :: seen) (i + 1) t
+    | (name, _) :: t -> first_repeat_none (name :: seen) (i + 1) t
 
 let rec inv_args_roundtrip (i:nat) (a:invocation)
   : Lemma (ensures list_from inv_arg_of_j i (inv_args_json a) == Ok a) (decreases a)
@@ -5779,17 +6079,17 @@ let rec distinct_go_roundtrip (cid:string) (whole:invocation) (seen:list string)
           (decreases rest)
   = match rest with
     | [] -> ()
-    | (addr, _) :: t ->
-      if mem addr seen then begin
+    | (name, _) :: t ->
+      if mem name seen then begin
         len_inv_args whole;
         nth_some i (inv_args_json whole);
         app_nil [Key "args"; Index i]
       end
-      else distinct_go_roundtrip cid whole (addr :: seen) (i + 1) t
+      else distinct_go_roundtrip cid whole (name :: seen) (i + 1) t
 
 (* THE INVOCATION ROUND TRIP (Phase 455), `invocation_roundtrip`. F#: `invocationOf` after
    `encodeInvocationJson`, EXACTLY, for every capability id and argument list: an argument list that
-   binds an address twice is refused `OutOfRange` at `args[i]`, `i` the second binding's position —
+   binds a name twice is refused `OutOfRange` at `args[i]`, `i` the second binding's position —
    the binding `validateArgs` refuses `DuplicateArg` — and every other reads back as itself, its
    arguments in wire order. *)
 let invocation_roundtrip (cid:string) (a:invocation)
@@ -5800,7 +6100,7 @@ let invocation_roundtrip (cid:string) (a:invocation)
   = inv_args_roundtrip 0 a;
     distinct_go_roundtrip cid a [] 0 a
 
-(* ... the identity exactly on the argument lists with no repeated address: the lists
+(* ... the identity exactly on the argument lists with no repeated name: the lists
    `validateArgs` does not refuse `DuplicateArg`. *)
 let invocation_roundtrip_identity (cid:string) (a:invocation)
   : Lemma (requires repeated [] (keys a) == [])
@@ -5812,16 +6112,16 @@ let rec distinct_go_sound (cid:string) (whole:invocation) (seen:list string) (i:
   : Lemma (ensures sound (distinct_go cid whole seen i rest)) (decreases rest)
   = match rest with
     | [] -> succeed_sound (cid, whole)
-    | (addr, _) :: t ->
-      if mem addr seen then begin
+    | (name, _) :: t ->
+      if mem name seen then begin
         fail_sound #(string & invocation) OutOfRange;
         at_sound [Key "args"; Index i] (d_fail #(string & invocation) OutOfRange)
       end
-      else distinct_go_sound cid whole (addr :: seen) (i + 1) t
+      else distinct_go_sound cid whole (name :: seen) (i + 1) t
 
 let inv_arg_sound () : Lemma (sound inv_arg_of_j) =
-  str_sound (); field_sound "addr" d_str; field_sound "value" d_str;
-  both_sound (field "addr" d_str) (field "value" d_str) (fun a v -> (a, v))
+  str_sound (); field_sound "name" d_str; field_sound "value" d_str;
+  both_sound (field "name" d_str) (field "value" d_str) (fun n v -> (n, v))
 
 (* Every refusal the invocation reader answers resolves in the document it read. *)
 let invocation_refusals_resolve () : Lemma (sound invocation_of_j) =
@@ -5889,12 +6189,14 @@ let deferred_refusals_resolve (#a:Type) (dec:jval -> outcome a string) : Lemma (
 (* F#: `CapabilitySeamCodec.encodeDeclarationFault`. *)
 let fault_json (f:decl_fault) : Tot jval =
   match f with
-  | EmptySpace addr sp -> JObj [("$type", JStr "emptySpace"); ("addr", JStr addr); ("space", space_json sp)]
-  | NonFiniteBound addr -> JObj [("$type", JStr "nonFiniteBound"); ("addr", JStr addr)]
+  | EmptySpace name sp -> JObj [("$type", JStr "emptySpace"); ("name", JStr name); ("space", space_json sp)]
+  | NonFiniteBound name -> JObj [("$type", JStr "nonFiniteBound"); ("name", JStr name)]
   | DuplicateHoleAddr addr -> JObj [("$type", JStr "duplicateHoleAddr"); ("addr", JStr addr)]
   | HoleUnderSlot node -> JObj [("$type", JStr "holeUnderSlot"); ("node", JStr node)]
   | EmptyResult sp -> JObj [("$type", JStr "emptyResult"); ("space", space_json sp)]
   | NonFiniteResult -> JObj [("$type", JStr "nonFiniteResult")]
+  | IllFormedHoleName name -> JObj [("$type", JStr "illFormedHoleName"); ("name", JStr name)]
+  | DuplicateHoleName name -> JObj [("$type", JStr "duplicateHoleName"); ("name", JStr name)]
 
 (* F#: a required string member — the derived reader's `dReq name fs dStr`. *)
 let str_f (name:string) : decoder string = field name d_str
@@ -5903,12 +6205,14 @@ let str_f (name:string) : decoder string = field name d_str
 let str_list_f (name:string) : decoder (list string) = field name (d_list d_str)
 
 let fault_cases (cr:codec_readers) : list (string & decoder decl_fault) =
-  [("emptySpace", both (str_f "addr") (field "space" (space_of_j cr)) (fun a sp -> EmptySpace a sp));
-   ("nonFiniteBound", d_map NonFiniteBound (str_f "addr"));
+  [("emptySpace", both (str_f "name") (field "space" (space_of_j cr)) (fun n sp -> EmptySpace n sp));
+   ("nonFiniteBound", d_map NonFiniteBound (str_f "name"));
    ("duplicateHoleAddr", d_map DuplicateHoleAddr (str_f "addr"));
    ("holeUnderSlot", d_map HoleUnderSlot (str_f "node"));
    ("emptyResult", d_map EmptyResult (field "space" (space_of_j cr)));
-   ("nonFiniteResult", d_succeed NonFiniteResult)]
+   ("nonFiniteResult", d_succeed NonFiniteResult);
+   ("illFormedHoleName", d_map IllFormedHoleName (str_f "name"));
+   ("duplicateHoleName", d_map DuplicateHoleName (str_f "name"))]
 
 (* F#: `CapabilitySeamCodec.decodeDeclarationFault`. *)
 let fault_of_j (cr:codec_readers) : decoder decl_fault = tag_dispatch (fault_cases cr)
@@ -5921,18 +6225,18 @@ let invoke_error_json (e:gated_error) : Tot jval =
   | GRefused (NoSuchCapability id known) ->
     JObj [("$type", JStr "noSuchCapability"); ("id", JStr id); ("known", JArr (strs known))]
   | GRefused (DuplicateCapability id) -> JObj [("$type", JStr "duplicateCapability"); ("id", JStr id)]
-  | GRefused (UnknownArg addr declared) ->
-    JObj [("$type", JStr "unknownArg"); ("addr", JStr addr); ("declared", JArr (strs declared))]
-  | GRefused (ArgOutOfSpace addr sp got) ->
-    JObj [("$type", JStr "argOutOfSpace"); ("addr", JStr addr); ("space", space_json sp); ("got", JStr got)]
-  | GRefused (RequiredArgsUnbound addrs) -> JObj [("$type", JStr "requiredArgsUnbound"); ("addrs", JArr (strs addrs))]
-  | GRefused (UninvocableArg addr) -> JObj [("$type", JStr "uninvocableArg"); ("addr", JStr addr)]
+  | GRefused (UnknownArg name declared) ->
+    JObj [("$type", JStr "unknownArg"); ("name", JStr name); ("declared", JArr (strs declared))]
+  | GRefused (ArgOutOfSpace name sp got) ->
+    JObj [("$type", JStr "argOutOfSpace"); ("name", JStr name); ("space", space_json sp); ("got", JStr got)]
+  | GRefused (RequiredArgsUnbound names) -> JObj [("$type", JStr "requiredArgsUnbound"); ("names", JArr (strs names))]
+  | GRefused (UninvocableArg name) -> JObj [("$type", JStr "uninvocableArg"); ("name", JStr name)]
   | GRefused (BodyFailed reason) -> JObj [("$type", JStr "bodyFailed"); ("reason", JStr reason)]
-  | GRefused (NonTotalCapability id addrs) ->
-    JObj [("$type", JStr "nonTotalCapability"); ("id", JStr id); ("addrs", JArr (strs addrs))]
+  | GRefused (NonTotalCapability id names) ->
+    JObj [("$type", JStr "nonTotalCapability"); ("id", JStr id); ("names", JArr (strs names))]
   | GRefused (IllFormedCapability id f) ->
     JObj [("$type", JStr "illFormedCapability"); ("id", JStr id); ("fault", fault_json f)]
-  | GRefused (DuplicateArg addr) -> JObj [("$type", JStr "duplicateArg"); ("addr", JStr addr)]
+  | GRefused (DuplicateArg name) -> JObj [("$type", JStr "duplicateArg"); ("name", JStr name)]
   | GPolicyRefused policy reason allowed ->
     JObj [("$type", JStr "policyRefused"); ("policy", JStr policy); ("reason", JStr reason);
           ("allowed", JArr (strs allowed))]
@@ -5943,16 +6247,16 @@ let refused (#a:Type) (f:a -> invoke_error) : a -> gated_error = fun x -> GRefus
 let invoke_error_cases (cr:codec_readers) : list (string & decoder gated_error) =
   [("noSuchCapability", both (str_f "id") (str_list_f "known") (fun id known -> GRefused (NoSuchCapability id known)));
    ("duplicateCapability", d_map (refused DuplicateCapability) (str_f "id"));
-   ("unknownArg", both (str_f "addr") (str_list_f "declared") (fun addr d -> GRefused (UnknownArg addr d)));
+   ("unknownArg", both (str_f "name") (str_list_f "declared") (fun name d -> GRefused (UnknownArg name d)));
    ("argOutOfSpace",
-    both (str_f "addr") (both (field "space" (space_of_j cr)) (str_f "got") (fun sp got -> (sp, got)))
-         (fun addr (sg:(value_space & string)) -> GRefused (ArgOutOfSpace addr (fst sg) (snd sg))));
-   ("requiredArgsUnbound", d_map (refused RequiredArgsUnbound) (str_list_f "addrs"));
-   ("uninvocableArg", d_map (refused UninvocableArg) (str_f "addr"));
+    both (str_f "name") (both (field "space" (space_of_j cr)) (str_f "got") (fun sp got -> (sp, got)))
+         (fun name (sg:(value_space & string)) -> GRefused (ArgOutOfSpace name (fst sg) (snd sg))));
+   ("requiredArgsUnbound", d_map (refused RequiredArgsUnbound) (str_list_f "names"));
+   ("uninvocableArg", d_map (refused UninvocableArg) (str_f "name"));
    ("bodyFailed", d_map (refused BodyFailed) (str_f "reason"));
-   ("nonTotalCapability", both (str_f "id") (str_list_f "addrs") (fun id addrs -> GRefused (NonTotalCapability id addrs)));
+   ("nonTotalCapability", both (str_f "id") (str_list_f "names") (fun id names -> GRefused (NonTotalCapability id names)));
    ("illFormedCapability", both (str_f "id") (field "fault" (fault_of_j cr)) (fun id f -> GRefused (IllFormedCapability id f)));
-   ("duplicateArg", d_map (refused DuplicateArg) (str_f "addr"));
+   ("duplicateArg", d_map (refused DuplicateArg) (str_f "name"));
    ("policyRefused",
     both (str_f "policy") (both (str_f "reason") (str_list_f "allowed") (fun r a -> (r, a)))
          (fun policy (ra:(string & list string)) -> GPolicyRefused policy (fst ra) (snd ra)));
@@ -5962,7 +6266,7 @@ let invoke_error_cases (cr:codec_readers) : list (string & decoder gated_error) 
    dropped). Each case reads its members in declaration order, the order the nested `both` does. *)
 let invoke_error_of_j (cr:codec_readers) : decoder gated_error = tag_dispatch (invoke_error_cases cr)
 
-#push-options "--fuel 7 --ifuel 1"
+#push-options "--fuel 9 --ifuel 1"
 let fault_roundtrip (cr:codec_readers) (f:decl_fault) : Lemma (fault_of_j cr (fault_json f) == Ok f) =
   match f with
   | EmptySpace _ sp -> space_roundtrip cr sp
@@ -5979,8 +6283,8 @@ let invoke_error_roundtrip (cr:codec_readers) (e:gated_error)
     | GRefused (NoSuchCapability _ known) -> strs_roundtrip 0 known
     | GRefused (UnknownArg _ declared) -> strs_roundtrip 0 declared
     | GRefused (ArgOutOfSpace _ sp _) -> space_roundtrip cr sp
-    | GRefused (RequiredArgsUnbound addrs) -> strs_roundtrip 0 addrs
-    | GRefused (NonTotalCapability _ addrs) -> strs_roundtrip 0 addrs
+    | GRefused (RequiredArgsUnbound names) -> strs_roundtrip 0 names
+    | GRefused (NonTotalCapability _ names) -> strs_roundtrip 0 names
     | GRefused (IllFormedCapability _ f) -> fault_roundtrip cr f
     | GPolicyRefused _ _ allowed -> strs_roundtrip 0 allowed
     | _ -> ()
@@ -5991,35 +6295,39 @@ let str_f_sound (name:string) : Lemma (sound (str_f name)) = str_sound (); field
 let str_list_f_sound (name:string) : Lemma (sound (str_list_f name)) =
   str_sound (); list_sound d_str; field_sound name (d_list d_str)
 
+#push-options "--fuel 9 --ifuel 1"
 let fault_refusals_resolve (cr:codec_readers) : Lemma (sound (fault_of_j cr)) =
-  str_f_sound "addr"; str_f_sound "node"; space_sound cr; field_sound "space" (space_of_j cr);
-  both_sound (str_f "addr") (field "space" (space_of_j cr)) (fun a sp -> EmptySpace a sp);
-  map_sound NonFiniteBound (str_f "addr");
+  str_f_sound "name"; str_f_sound "addr"; str_f_sound "node"; space_sound cr; field_sound "space" (space_of_j cr);
+  both_sound (str_f "name") (field "space" (space_of_j cr)) (fun n sp -> EmptySpace n sp);
+  map_sound NonFiniteBound (str_f "name");
   map_sound DuplicateHoleAddr (str_f "addr");
   map_sound HoleUnderSlot (str_f "node");
   map_sound EmptyResult (field "space" (space_of_j cr));
   succeed_sound NonFiniteResult;
+  map_sound IllFormedHoleName (str_f "name");
+  map_sound DuplicateHoleName (str_f "name");
   tag_dispatch_sound (fault_cases cr)
+#pop-options
 
 (* Every refusal the invoke-error reader answers resolves in the document it read. *)
 #push-options "--fuel 13 --ifuel 1"
 let invoke_error_refusals_resolve (cr:codec_readers) : Lemma (sound (invoke_error_of_j cr)) =
-  str_f_sound "id"; str_f_sound "addr"; str_f_sound "got"; str_f_sound "reason"; str_f_sound "policy";
-  str_list_f_sound "known"; str_list_f_sound "declared"; str_list_f_sound "addrs"; str_list_f_sound "allowed";
+  str_f_sound "id"; str_f_sound "name"; str_f_sound "got"; str_f_sound "reason"; str_f_sound "policy";
+  str_list_f_sound "known"; str_list_f_sound "declared"; str_list_f_sound "names"; str_list_f_sound "allowed";
   space_sound cr; field_sound "space" (space_of_j cr);
   fault_refusals_resolve cr; field_sound "fault" (fault_of_j cr);
   both_sound (str_f "id") (str_list_f "known") (fun id known -> GRefused (NoSuchCapability id known));
   map_sound (refused DuplicateCapability) (str_f "id");
-  both_sound (str_f "addr") (str_list_f "declared") (fun addr d -> GRefused (UnknownArg addr d));
+  both_sound (str_f "name") (str_list_f "declared") (fun name d -> GRefused (UnknownArg name d));
   both_sound (field "space" (space_of_j cr)) (str_f "got") (fun sp got -> (sp, got));
-  both_sound (str_f "addr") (both (field "space" (space_of_j cr)) (str_f "got") (fun sp got -> (sp, got)))
-             (fun addr (sg:(value_space & string)) -> GRefused (ArgOutOfSpace addr (fst sg) (snd sg)));
-  map_sound (refused RequiredArgsUnbound) (str_list_f "addrs");
-  map_sound (refused UninvocableArg) (str_f "addr");
+  both_sound (str_f "name") (both (field "space" (space_of_j cr)) (str_f "got") (fun sp got -> (sp, got)))
+             (fun name (sg:(value_space & string)) -> GRefused (ArgOutOfSpace name (fst sg) (snd sg)));
+  map_sound (refused RequiredArgsUnbound) (str_list_f "names");
+  map_sound (refused UninvocableArg) (str_f "name");
   map_sound (refused BodyFailed) (str_f "reason");
-  both_sound (str_f "id") (str_list_f "addrs") (fun id addrs -> GRefused (NonTotalCapability id addrs));
+  both_sound (str_f "id") (str_list_f "names") (fun id names -> GRefused (NonTotalCapability id names));
   both_sound (str_f "id") (field "fault" (fault_of_j cr)) (fun id f -> GRefused (IllFormedCapability id f));
-  map_sound (refused DuplicateArg) (str_f "addr");
+  map_sound (refused DuplicateArg) (str_f "name");
   both_sound (str_f "reason") (str_list_f "allowed") (fun r a -> (r, a));
   both_sound (str_f "policy") (both (str_f "reason") (str_list_f "allowed") (fun r a -> (r, a)))
              (fun policy (ra:(string & list string)) -> GPolicyRefused policy (fst ra) (snd ra));
