@@ -401,7 +401,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Column` | 127 | 50 | 51 | 3 | 0 | 0 | 0 | 23 |
 | `Fuaran.Core.Conformance` | 165 | 2 | 107 | 2 | 6 | 0 | 0 | 48 |
 | `Fuaran.Core.ContentAddress` | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 |
-| `Fuaran.Core.Function` | 200 | 53 | 91 | 5 | 0 | 0 | 0 | 51 |
+| `Fuaran.Core.Function` | 201 | 54 | 91 | 5 | 0 | 0 | 0 | 51 |
 | `Fuaran.Core.Idl` | 89 | 0 | 6 | 1 | 1 | 0 | 0 | 81 |
 | `Fuaran.Core.Idl.Cli` | 1 | 0 | 0 | 0 | 0 | 0 | 1 | 0 |
 | `Fuaran.Core.Idl.Codegen` | 55 | 8 | 0 | 0 | 0 | 0 | 0 | 47 |
@@ -418,7 +418,7 @@ families credit are credited over nested batches as well as flat ones.
 | `Fuaran.Core.Unit` | 9 | 8 | 0 | 1 | 0 | 0 | 0 | 0 |
 | `Fuaran.Core.Validator` | 65 | 0 | 25 | 3 | 0 | 0 | 0 | 37 |
 | `Fuaran.Core.Wire` | 193 | 116 | 11 | 3 | 4 | 0 | 0 | 59 |
-| **Total** | 1421 | 395 | 432 | 38 | 15 | 0 | 3 | 538 |
+| **Total** | 1422 | 396 | 432 | 38 | 15 | 0 | 3 | 538 |
 <!-- operation-coverage:end -->
 
 ## Exit criteria, with evidence

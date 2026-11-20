@@ -5340,6 +5340,7 @@
           "Capability.validateArgs",
           "Function.apply",
           "Function.toJsonSchema",
+          "FunctionRegistry.addressed",
           "Signature.validate"
         ]
       }
@@ -5356,7 +5357,7 @@
         "prover": "proofs/fstar-pin.json",
         "operations": [
           "Capability.invocationKey",
-          "Capability.repeatedAddrs",
+          "Capability.repeatedNames",
           "Capability.validateArgs"
         ]
       }
