@@ -67,7 +67,7 @@ point.
 | a node kind renamed (inferred, reported beside the add and the remove it explains) | `breaking-wire` | `no-generated-shape-change` — the add and the remove carry the consequence | `KindRenamed` |
 | a kind's category | `host-surface-only` | `no-generated-shape-change` | `KindCategoryChanged` |
 | a kind's or a tree-op's annotation set | `additive` on a first marking, `host-surface-only` otherwise | `no-generated-shape-change` — an `Obsolete` attribute moves, which changes which **warnings** a consumer sees, not a shape | `KindAnnotationsChanged` |
-| a tree-op added | `additive` | `no-generated-shape-change` — the F# type emitter leaves the op vocabulary unshipped (Phase 703). **This row changes the day that leg lands.** | `OpAdded` |
+| a tree-op added | `additive` | `no-generated-shape-change` — the F# type emitter leaves the op vocabulary unshipped (fuaran#703). **This row changes the day that leg lands.** | `OpAdded` |
 | a tree-op removed | `breaking-wire` | `no-generated-shape-change` — as for a tree-op added | `OpRemoved` |
 | a union added | `additive` | `no-generated-shape-change` — nothing could have referenced it | `UnionAdded` |
 | a union removed | `breaking-wire` | `type-name-reference` | `UnionRemoved` |
@@ -371,7 +371,7 @@ same table the usage above is rendered from — an unknown flag, a flag without 
 given twice and a non-integer `--seed` / `--vectors` are refused, never ignored — and every exit
 code is the one it was.
 
-The classification is **advisory**, as the classifier has been since Phase 700. Nothing here writes
+The classification is **advisory**, as the classifier has been since fuaran#700. Nothing here writes
 a file, bumps a version or gates a build on its own account; a gate that wants to stop is the one
 that reads the exit code. A classifier that applied itself would make the hand-declared
 classification unfalsifiable, which is what the retroactive validation

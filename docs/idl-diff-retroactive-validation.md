@@ -1,6 +1,6 @@
 # `idl-diff` retroactive validation
 
-Phase 700 asked for the classifier to be run against real vocabulary changes and its verdicts
+fuaran#700 asked for the classifier to be run against real vocabulary changes and its verdicts
 compared with what was hand-declared at the time — "disagreements are findings to report, not test
 failures to suppress". This is that run, and its findings.
 
@@ -17,7 +17,7 @@ The two artifacts are `idl.json` revisions extracted from the wire-format specif
 
 **The phase's listed candidates cannot be run.** It named 707's `liveRegion` re-model, 766's
 `Toggle`, 765's `Now` and 768's `Switch` widening. Only the first has an artifact pair: `idl.json`
-was itself introduced by Phase 696 (`0f37604`, 2026-08-01), and 765 / 766 / 768 all predate it. There
+was itself introduced by fuaran#696 (`0f37604`, 2026-08-01), and 765 / 766 / 768 all predate it. There
 is no committed "before" for them, and reconstructing one means checking out a `UiIdl.fs` revision
 whose surrounding test project no longer builds — which would validate the classifier against a
 hand-rebuilt input rather than against the published contract, defeating the exercise.
@@ -28,9 +28,9 @@ with a hand-declared classification to compare against:
 
 | # | Delta | Change | Hand-declared |
 |---|---|---|---|
-| 1 | `0f37604` → `854c4cd` | Phase 707 — `accessibility.liveRegion` stops being an opaque hosted slot and becomes a declared closed set | `additive`; STABILITY.md: "**Not a breaking change to any stable surface** … **No wire-format impact — the corpus and the generated-layer pins are byte-identical either side of the change**" |
-| 2 | `854c4cd` → `f795330` | Phase 703 — the `TreeOp` vocabulary published into the artifact | `additive` |
-| 3 | `f795330` → `89a9379` | Phase 801 — `StaticRows` gains `sortable` + `defaultSort` | `additive` |
+| 1 | `0f37604` → `854c4cd` | fuaran#707 — `accessibility.liveRegion` stops being an opaque hosted slot and becomes a declared closed set | `additive`; STABILITY.md: "**Not a breaking change to any stable surface** … **No wire-format impact — the corpus and the generated-layer pins are byte-identical either side of the change**" |
+| 2 | `854c4cd` → `f795330` | fuaran#703 — the `TreeOp` vocabulary published into the artifact | `additive` |
+| 3 | `f795330` → `89a9379` | fuaran#801 — `StaticRows` gains `sortable` + `defaultSort` | `additive` |
 
 This is a finding in its own right rather than an inconvenience: **the artifact is the classifier's
 memory, and it is one month old.** Everything before 2026-08-01 is outside what any mechanical
@@ -38,7 +38,7 @@ classifier can reach, and nothing will make it reachable retroactively. The coro
 looking — every future vocabulary change is checkable because 696 landed, and the value of that
 compounds with each revision committed.
 
-## Delta 2 — Phase 703, the op vocabulary. AGREES.
+## Delta 2 — fuaran#703, the op vocabulary. AGREES.
 
 11 changes, all additive: the eleven `TreeOp` cases (`Batch`, `EditNode`, `InsertChild`, `MoveNode`,
 `RemoveNode`, `ReorderChildren`, `ReplaceBinding`, `ReplaceRoot`, `UpdateProp`, `UpdateState`,
@@ -50,19 +50,19 @@ change. `Artifact.json` emits `ops` only when the domain declares any, precisely
 vocabulary's artifact stays byte-identical, and the reader treats an absent `ops` as an empty one.
 A diff that read the raw JSON keys would have reported an encoding change here and been wrong.
 
-## Delta 3 — Phase 801, declarative sort intent. AGREES.
+## Delta 3 — fuaran#801, declarative sort intent. AGREES.
 
 4 changes, all additive: the `SortDirection` closed set, the `DefaultSort` record, and the two
 `optional` fields on `StaticRows`. Verdict `additive`, `core@1.(x+1)`. Matches.
 
 The obligation set it emitted is the useful half. Both field additions land on a **record**, not a
 kind, so the report marks the C#/VB veneer row `CHECK` rather than `MUST` and cites the tension
-directly: Phase 801 itself recorded that a payload-field addition binds neither the C# `Coverage`
+directly: fuaran#801 itself recorded that a payload-field addition binds neither the C# `Coverage`
 reflection nor the VB analyzer's `Vocabulary.cs` (both pin `NodeKind`), while `WIRE_FORMAT.md` §11
 step 6 speaks of "attribute rows". The classifier does not pretend to settle that; it names it as the
 one row the phase author has to decide.
 
-## Delta 1 — Phase 707, `liveRegion`. DISAGREED, and the classifier was wrong.
+## Delta 1 — fuaran#707, `liveRegion`. DISAGREED, and the classifier was wrong.
 
 The classifier's first verdict was **BREAKING (wire)** on:
 
@@ -74,7 +74,7 @@ with the rationale "a value that decoded no longer does". The hand declaration s
 the hand declaration is right: the wire strings were `"polite"` / `"assertive"` / `"off"` before the
 change and after it, `WIRE_FORMAT.md` §3 already declared the closed set, and the corpus is
 byte-identical either side. Nothing on the wire moved. What moved was the IDL's *model* of the slot —
-from "opaque, the host codec handles it" to "a declared closed set" — which is the change Phase 707
+from "opaque, the host codec handles it" to "a declared closed set" — which is the change fuaran#707
 existed to make.
 
 **Why the classifier got it wrong, which is the part worth keeping.** A `THosted` slot's content is,
@@ -91,7 +91,7 @@ it cannot decide, and states the two checks that settle it — *does every value
 still decode, and does the corpus come back byte-identical?* The verdict line becomes `UNDECIDED`
 rather than a bump recommendation, and the draft front-matter says `additive` **only if** the checks
 pass. Re-run against the same delta, that is now what it prints, and applying the two checks to
-Phase 707 gives `additive` — agreeing with the hand declaration by the route that actually justifies
+fuaran#707 gives `additive` — agreeing with the hand declaration by the route that actually justifies
 it.
 
 This is the finding the phase was fishing for, and it is a finding about the *classifier*, not about
