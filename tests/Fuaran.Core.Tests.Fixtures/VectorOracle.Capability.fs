@@ -111,11 +111,30 @@ let capToModel (c: Capability) : ModelCap.capability =
       ModelCap.capability.c_determinism = detToModel c.Determinism
       ModelCap.capability.c_placement = placementToModel c.Placement }
 
-/// The readers premise made concrete: the six host functions `Space.validate` and
-/// `Space.wellFormed` reach for, exactly as production calls them (Phase 229 added `kind_of`,
+/// The segment grammar of a qualified name (Phase 712, D281): one or more ASCII letters, digits, `_`
+/// or `-`. Production's `Signature.wellFormedSegment` is internal to its package, so the bridge
+/// states the grammar D281 gives; the differential holds the two to one verdict through
+/// `Signature.validate` and `Function.validate`, which read it.
+let wellFormedSegment (s: string) : bool =
+    s.Length > 0
+    && s
+       |> Seq.forall (fun c ->
+           (c >= 'a' && c <= 'z')
+           || (c >= 'A' && c <= 'Z')
+           || (c >= '0' && c <= '9')
+           || c = '_'
+           || c = '-')
+
+/// Every `.`-separated part of a qualified name passes the segment grammar (D281).
+let wellFormedName (name: string) : bool =
+    name.Split '.' |> Array.forall wellFormedSegment
+
+/// The readers premise made concrete: the host functions `Space.validate`, `Space.wellFormed` and
+/// the name checks reach for, exactly as production calls them (Phase 229 added `kind_of`,
 /// production's `Space.slotKindOf`; Phase 644 `doc_ok`, production's `Space.documentOf`; Phase 307 `float_fault`, and restated `int_of` as production's
 /// own invariant reader — `Space.canonical` over the whole `int` range — where it was
-/// `Int32.TryParse` under the CURRENT culture, a reader production stopped using at Phase 295).
+/// `Int32.TryParse` under the CURRENT culture, a reader production stopped using at Phase 295;
+/// Phase 712 `seg_ok` and `name_ok`, the segment grammar above).
 let readers: ModelCap.readers =
     { ModelCap.readers.int_of =
         fun s ->
@@ -132,13 +151,16 @@ let readers: ModelCap.readers =
             match Space.wellFormed (FloatRange(System.Double.Parse(lo, inv), System.Double.Parse(hi, inv))) with
             | Ok() -> FStar_Pervasives_Native.None
             | Error SpaceFault.Empty -> FStar_Pervasives_Native.Some ModelCap.SEmpty
-            | Error SpaceFault.NonFinite -> FStar_Pervasives_Native.Some ModelCap.SNonFinite }
+            | Error SpaceFault.NonFinite -> FStar_Pervasives_Native.Some ModelCap.SNonFinite
+      ModelCap.readers.seg_ok = wellFormedSegment
+      ModelCap.readers.name_ok = wellFormedName }
 
-/// Production's own three calls, for the model's capture key (Phase 225): the hash, the address
-/// order and the field renderer, with a value canonicalised by its declared space.
+/// Production's own three calls, for the model's capture key (Phase 225): the hash, the name order
+/// (the qualified name since Phase 712) and the field renderer, with a value canonicalised by its
+/// declared space.
 let keyRenderers: ModelCap.key_renderers =
     { ModelCap.key_renderers.k_hash = Hash.fnv1a
-      ModelCap.key_renderers.k_addr_le = fun (a: string) (b: string) -> System.String.CompareOrdinal(a, b) <= 0
+      ModelCap.key_renderers.k_name_le = fun (a: string) (b: string) -> System.String.CompareOrdinal(a, b) <= 0
       ModelCap.key_renderers.k_field = Hash.canonicalField
       ModelCap.key_renderers.k_canonical =
         fun (sp: ModelCap.value_space) (v: string) ->

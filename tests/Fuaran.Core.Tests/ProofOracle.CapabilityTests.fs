@@ -37,7 +37,8 @@ let blindReaders: ModelCap.readers =
 let private holeDeclToModel (h: HoleDecl) : ModelCap.hole_decl =
     { ModelCap.hole_decl.h_addr = h.Addr
       ModelCap.hole_decl.h_name = h.Name
-      ModelCap.hole_decl.h_kind = holeKindToModel h.Kind }
+      ModelCap.hole_decl.h_kind = holeKindToModel h.Kind
+      ModelCap.hole_decl.h_slots = h.Slots }
 
 let private argToModel (a: Arg<RNode>) : ModelCap.arg<RNode> =
     match a with
@@ -72,8 +73,6 @@ let private prodFaultRender (f: DeclarationFault) : string =
     | HoleUnderSlot n -> sprintf "HoleUnderSlot(%s)" n
     | EmptyResult s -> sprintf "EmptyResult(%s)" (modelSpaceRender (spaceToModel s))
     | NonFiniteResult -> "NonFiniteResult"
-    // Phase 712: the extracted model predates the two name faults, so a production answer of either
-    // renders as itself and never equals a model answer.
     | IllFormedHoleName n -> sprintf "IllFormedHoleName(%s)" n
     | DuplicateHoleName n -> sprintf "DuplicateHoleName(%s)" n
 
@@ -85,6 +84,8 @@ let private modelFaultRender (f: ModelCap.decl_fault) : string =
     | ModelCap.HoleUnderSlot n -> sprintf "HoleUnderSlot(%s)" n
     | ModelCap.EmptyResult s -> sprintf "EmptyResult(%s)" (modelSpaceRender s)
     | ModelCap.NonFiniteResult -> "NonFiniteResult"
+    | ModelCap.IllFormedHoleName n -> sprintf "IllFormedHoleName(%s)" n
+    | ModelCap.DuplicateHoleName n -> sprintf "DuplicateHoleName(%s)" n
 
 let private prodApplyErrRender (e: ApplyError) : string =
     match e with
@@ -472,30 +473,34 @@ let capIdPool = [ "cap-a"; "cap-b"; "cap-c" ]
 
 /// A typed invocation: for each entry, three draws in four an arg (a value for its space — for a
 /// slot entry, since Phase 229, a tree of its kind, of another kind, or no tree — or, for a
-/// spaceless entry, a value it cannot take), plus one draw in five an unknown address.
+/// spaceless entry, a value it cannot take), plus one draw in five an unknown name. An argument is
+/// keyed by the entry's qualified name (Phase 712, D281); one invocation in eight keys its first
+/// argument by the entry's ADDRESS instead, which the seam no longer reads as a key.
 let private genInvocation (sg: Signature) (r: ConfRng.T) : (string * string) list * ConfRng.T =
-    let mutable rng = r
+    let byAddr, r0 = ConfRng.intBelow 8 r
+    let mutable rng = r0
     let args = System.Collections.Generic.List<string * string>()
 
     for e in sg.Holes do
         let roll, r1 = ConfRng.intBelow 4 rng
         rng <- r1
+        let key = if byAddr = 0 && args.Count = 0 then e.Addr else e.Name
 
         if roll < 3 then
             match e.Space with
             | Some s ->
                 let v, r2 = genValueFor s rng
                 rng <- r2
-                args.Add(e.Addr, v)
-            | None -> args.Add(e.Addr, "s")
+                args.Add(key, v)
+            | None -> args.Add(key, "s")
 
     let extra, r3 = ConfRng.intBelow 5 rng
     rng <- r3
 
     if extra = 0 then
-        args.Add("root/zz", "1")
+        args.Add("zz", "1")
 
-    // Phase 307 — one draw in ten repeats an address the list already binds.
+    // Phase 307 — one draw in ten repeats a name the list already binds.
     let dup, r4 = ConfRng.intBelow 10 rng
     rng <- r4
 
@@ -663,6 +668,13 @@ let private capProbe (rd: ModelCap.readers) (seedTag: int) (r: ConfRng.T) (acc: 
                         me
                         tally
                 | _ -> Tally.disagree (sprintf "seed %d: validateArgs verdict differs on %s" seedTag id) tally
+                // Phase 712 — the function registry's re-keying of the same arguments from qualified
+                // name to address, which `wf_holes` hands to `apply`.
+                |> Differential.check
+                    (FunctionRegistry.addressed (FunctionRegistry.entry c) args = ModelCap.addressed
+                        (sigToModel c.Signature).sg_holes
+                        args)
+                    (fun () -> sprintf "seed %d: addressed differs on %s over %A" seedTag id args)
             | None -> tally
 
         r8,
@@ -1108,8 +1120,11 @@ let tests =
               // The teeth. Under the blind reader every int-ranged value is out of space to the
               // model, so it refuses what production accepts. If this ever passes, the space
               // check has stopped reaching the comparison and the green runs above certify
-              // nothing about it.
-              let c = capDifferential blindReaders 1771 60
+              // nothing about it. Phase 712: the admission gate now refuses a signature whose
+              // qualified names repeat, which the generated artifacts often reuse, so fewer of the
+              // first sixty registries reach an accepted int-ranged argument; the draw is the
+              // agreeing run's own three hundred.
+              let c = capDifferential blindReaders 1771 300
               Differential.expectLoses "a blind int reader on the seam" c
 
               Expect.isTrue
@@ -1168,21 +1183,21 @@ let tests =
 
               // unregistered_refused
               Expect.equal
-                  (CapabilityRegistry.dispatch reg () None "cap-u" [ "tpl/t", "x" ] body)
+                  (CapabilityRegistry.dispatch reg () None "cap-u" [ "title", "x" ] body)
                   (Error(NoSuchCapability("cap-u", [ "cap-t" ])))
                   "an unregistered id is the typed refusal, naming what IS registered"
 
               Expect.equal
-                  (CapabilityRegistry.dispatch reg () None "cap-u" [ "tpl/t", "x" ] failing)
+                  (CapabilityRegistry.dispatch reg () None "cap-u" [ "title", "x" ] failing)
                   (Error(NoSuchCapability("cap-u", [ "cap-t" ])))
                   "and the same refusal under a failing body"
 
               // validate_before_invoke — out of space, unknown, slot-targeted, required-unbound
               for args in
-                  [ [ "tpl/t", "x"; "tpl/c", "99" ]
-                    [ "tpl/t", "x"; "tpl/c", "1"; "tpl/zz", "1" ]
-                    [ "tpl/t", "x"; "tpl/c", "1"; "tpl/s", "para" ]
-                    [ "tpl/t", "x" ] ] do
+                  [ [ "title", "x"; "count", "99" ]
+                    [ "title", "x"; "count", "1"; "zz", "1" ]
+                    [ "title", "x"; "count", "1"; "body", "para" ]
+                    [ "title", "x" ] ] do
                   let a = CapabilityRegistry.dispatch reg () None "cap-t" args body
                   let b = CapabilityRegistry.dispatch reg () None "cap-t" args failing
                   Expect.isTrue (Result.isError a) (sprintf "the set %A is refused" args)
@@ -1214,12 +1229,12 @@ let tests =
                   "the slot-bearing capability enumerates like any other"
 
               for args, expected in
-                  [ [], RequiredArgsUnbound [ "tpl/t"; "tpl/c"; "tpl/s" ]
-                    [ "tpl/t", "x"; "tpl/c", "3" ], RequiredArgsUnbound [ "tpl/s" ]
-                    [ "tpl/t", "x"; "tpl/c", "3"; "tpl/s", "para" ], UninvocableArg "tpl/s"
-                    [ "tpl/t", "x"; "tpl/c", "3"; "tpl/s", """{"kind":"field"}""" ],
-                    ArgOutOfSpace("tpl/s", SlotTree(Some "para"), """{"kind":"field"}""")
-                    [ "tpl/s", "" ], UninvocableArg "tpl/s" ] do
+                  [ [], RequiredArgsUnbound [ "title"; "count"; "body" ]
+                    [ "title", "x"; "count", "3" ], RequiredArgsUnbound [ "body" ]
+                    [ "title", "x"; "count", "3"; "body", "para" ], UninvocableArg "body"
+                    [ "title", "x"; "count", "3"; "body", """{"kind":"field"}""" ],
+                    ArgOutOfSpace("body", SlotTree(Some "para"), """{"kind":"field"}""")
+                    [ "body", "" ], UninvocableArg "body" ] do
                   Expect.equal
                       (CapabilityRegistry.dispatch reg2 () None "cap-slot" args body)
                       (Error expected)
@@ -1228,7 +1243,7 @@ let tests =
               Expect.equal ran.Value 0 "and no body ran on any of those either"
 
               // and the accepted set runs it, once
-              let accepted = [ "tpl/t", "x"; "tpl/c", "3" ]
+              let accepted = [ "title", "x"; "count", "3" ]
 
               Expect.equal
                   (CapabilityRegistry.dispatch reg () None "cap-t" accepted body)
@@ -1259,7 +1274,7 @@ let tests =
                       ()
                       None
                       "cap-slot"
-                      (accepted @ [ "tpl/s", """{"kind":"para"}""" ])
+                      (accepted @ [ "body", """{"kind":"para"}""" ])
                       body)
                   (Ok(Ready "ran"))
                   "a capability over a slotted artifact is invocable"
@@ -1273,7 +1288,7 @@ let tests =
                   | ModelCap.Error _ -> failtest "the model refused the registration"
 
               Expect.equal
-                  (ModelCap.dispatch readers mreg "cap-u" [ "tpl/t", "x" ] (fun _ () -> ModelCap.Ready "ran"))
+                  (ModelCap.dispatch readers mreg "cap-u" [ "title", "x" ] (fun _ () -> ModelCap.Ready "ran"))
                   (ModelCap.Error(ModelCap.NoSuchCapability("cap-u", [ "cap-t" ])))
                   "the model refuses the unregistered id the same way"
 

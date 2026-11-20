@@ -250,6 +250,7 @@ let private genPipeline (preg: CapabilityRegistry<unit>) (r: ConfRng.T) : Capabi
                 | Returns.Value s when own > 0 -> s
                 | _ -> drawn
 
+            // Each argument keyed by the hole's qualified name (Phase 712, D281).
             let args = System.Collections.Generic.List<string * ArgSource>()
 
             for e in cap.Signature.Holes do
@@ -259,20 +260,20 @@ let private genPipeline (preg: CapabilityRegistry<unit>) (r: ConfRng.T) : Capabi
                     rng <- r4
 
                     if how < 4 then
-                        args.Add(e.Addr, ArgSource.Literal(validValueFor sp))
+                        args.Add(e.Name, ArgSource.Literal(validValueFor sp))
                     elif how < 7 then
                         fresh <- fresh + 1
                         let sid = sprintf "s%d" fresh
                         nodes.Add(PipelineNode.Source(sid, "ref-" + sid, sp))
-                        args.Add(e.Addr, ArgSource.FromNode sid)
+                        args.Add(e.Name, ArgSource.FromNode sid)
                     elif how < 9 && nodes.Count > 0 then
                         let k, r5 = ConfRng.intBelow nodes.Count rng
                         rng <- r5
-                        args.Add(e.Addr, ArgSource.FromNode(CapabilityPipeline.nodeId nodes[k]))
+                        args.Add(e.Name, ArgSource.FromNode(CapabilityPipeline.nodeId nodes[k]))
                     else
                         let v, r5 = genValueFor sp rng
                         rng <- r5
-                        args.Add(e.Addr, ArgSource.Literal v)
+                        args.Add(e.Name, ArgSource.Literal v)
                 | _ -> ()
 
             nodes.Add(PipelineNode.Invoke(nid, cap.Id, outTy, List.ofSeq args))
@@ -325,8 +326,7 @@ let private genPipeline (preg: CapabilityRegistry<unit>) (r: ConfRng.T) : Capabi
                     | [] -> []))
         | 5, _ ->
             ns
-            |> rewriteFirst isInvokeWithArgs (fun n ->
-                withArgs n (fun args -> args @ [ "root/zz", ArgSource.Literal "1" ]))
+            |> rewriteFirst isInvokeWithArgs (fun n -> withArgs n (fun args -> args @ [ "zz", ArgSource.Literal "1" ]))
         | 6, _ ->
             ns
             |> rewriteFirst isInvokeWithArgs (fun n ->
@@ -1031,10 +1031,8 @@ let private faultToModel (f: DeclarationFault) : ModelCap.decl_fault =
     | HoleUnderSlot n -> ModelCap.HoleUnderSlot n
     | EmptyResult s -> ModelCap.EmptyResult(spaceToModel s)
     | NonFiniteResult -> ModelCap.NonFiniteResult
-    // Phase 712: the extracted model predates the two name faults; there is no model value to answer
-    // with, so reaching one is a failure that names it rather than a silent stand-in.
-    | IllFormedHoleName _
-    | DuplicateHoleName _ -> failwithf "the extracted model has no counterpart of %A" f
+    | IllFormedHoleName n -> ModelCap.IllFormedHoleName n
+    | DuplicateHoleName n -> ModelCap.DuplicateHoleName n
 
 /// Production's twelve-case `InvokeError` as the model's `gated_error`.
 let private invokeErrorToModel (e: InvokeError) : ModelCap.gated_error =
@@ -1067,7 +1065,7 @@ let private genNames (r: ConfRng.T) : string list * ConfRng.T =
     xs, rr
 
 let private genInvokeError (r: ConfRng.T) : InvokeError * ConfRng.T =
-    let k, r1 = ConfRng.intBelow 16 r
+    let k, r1 = ConfRng.intBelow 18 r
     let s, r2 = ConfRng.choose seamNames r1
     let xs, r3 = genNames r2
     let sp, r4 = genSpace r3
@@ -1088,12 +1086,15 @@ let private genInvokeError (r: ConfRng.T) : InvokeError * ConfRng.T =
         | 11 -> IllFormedCapability(s, HoleUnderSlot s)
         | 12 -> DuplicateArg s
         | 13 -> PolicyRefused(s, "no", xs)
+        // Phase 712 — the two name faults.
+        | 14 -> IllFormedCapability(s, IllFormedHoleName s)
+        | 15 -> IllFormedCapability(s, DuplicateHoleName s)
         | _ -> ApprovalRequired s
 
     e, r4
 
 /// The seam codec's tally: the documents read, the refusals of each codec (and of an unmutated
-/// invocation, where only a repeated address refuses it), the values encoded, and the refusal
+/// invocation, where only a repeated name refuses it), the values encoded, and the refusal
 /// codes the pool reached.
 let private seamCodecTally =
     Tally.empty
@@ -1130,7 +1131,7 @@ let private seamCodecDifferential
 
             out
 
-        // ---- the invocation: addresses drawn WITH replacement, so a repeat arises ----
+        // ---- the invocation: names drawn WITH replacement, so a repeat arises ----
         let cid, r1 = ConfRng.choose [ "cap-a"; "cap-b" ] rng.Value
         let n, r2 = ConfRng.intBelow 4 r1
         rng.Value <- r2
@@ -1523,7 +1524,7 @@ let tests =
               Expect.isGreaterThan
                   (n "RepeatRefused")
                   20
-                  (sprintf "a repeated address was refused on an UNMUTATED encoding (%d)" (n "RepeatRefused"))
+                  (sprintf "a repeated name was refused on an UNMUTATED encoding (%d)" (n "RepeatRefused"))
 
               Expect.isGreaterThan
                   (n "InvocationRefused")
