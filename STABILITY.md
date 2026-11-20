@@ -82,11 +82,10 @@ this order, because each step reads the one before it:
    <folder>`, green on both legs. A package this repository adds since the last release needs the
    host's candidate-only reference first, or the gate's membership check fails it by name.
 3. Pack again from the clean tree for publication, so the packed surface is the one the gate measured.
-4. In ONE commit: write the `**Release record` and `**Receiving gate run:**` paragraphs in the slot's ledger file, turn its heading to `released <date> as
-   `v<v>``, print its entries into it and re-render the index (both with `CORE_APPROVE_DOCS=ledger-index`, which removes the entry files it prints, D274),
-   and regenerate the README's version stamps (`dotnet run --project tests/Fuaran.Core.Tests -- --filter ReadmeClaims` with `CORE_APPROVE_README=1` set).
-   The stamps are derived from the tags, so the regeneration runs under a provisional LOCAL tag on the candidate commit (its `api/` is the release's);
-   delete that tag after the commit. By this commit `DECISIONS.md` holds no missing number, each one given up recorded `Never-minted` (D275).
+4. In ONE commit: write the `**Release record` and `**Receiving gate run:**` paragraphs in the slot's ledger file, turn its heading to `released <date> as `v<v>``, print its entries into it and re-render the index
+   (both with `CORE_APPROVE_DOCS=ledger-index`, which removes the entry files it prints, D274), and regenerate the README's version stamps (`dotnet run --project tests/Fuaran.Core.Tests -- --filter ReadmeClaims` with
+   `CORE_APPROVE_README=1` set). The stamps are derived from the tags, so the regeneration runs under a provisional LOCAL tag on the candidate commit (its `api/` is the release's); delete that tag after the commit. By
+   this commit `DECISIONS.md` holds no missing number, each one given up recorded `Never-minted` (D275).
    A repository's FIRST release, with no `vX.Y.Z` tag anywhere yet, also opens its slot's record with a paragraph starting `**First release.**` in step 4's commit: the `Release ledger` family then reads that commit as tagged `v<v>`, so steps 1–4 are gated green before the tag; unmarked, the tagless turned heading skips by name.
 5. Tag THAT commit `v<v>` locally and run the gate on it (`verify.ps1`, the corpus leg asked): the clauses that read the tag together with the
    turned heading first run complete here. Fix a red gate by amending the release commit and moving the tag, which has not left your machine.
