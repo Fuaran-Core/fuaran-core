@@ -320,7 +320,15 @@ let private revisionOf (v: JVal) : string =
 
     ContractsCorpus.revision idl (text "contracts" v)
 
-/// The names of the contract refusals the artifact reader gives a document, in order.
+/// Every contract refusal's name, as `ContractFault.name` spells it.
+let private contractRefusalNames: Set<string> =
+    Reflection.FSharpType.GetUnionCases typeof<ContractFault>
+    |> Array.map (fun c -> string (System.Char.ToLowerInvariant c.Name[0]) + c.Name.Substring 1)
+    |> Set.ofArray
+
+/// The names of the contract refusals the artifact reader gives a document, in order. The reader's
+/// other faults are not contract refusals: the empty-enumeration vector's enum, which declares no
+/// case, is refused at its own declaration as well (Phase 713).
 let private readerRefusals (input: string) : string list =
     match Artifact.parseDetailed input with
     | Ok _ -> []
@@ -332,7 +340,10 @@ let private readerRefusals (input: string) : string list =
 
             if e.Code = DecodeCode.SchemaFault && i >= 0 then
                 let rest = e.Message.Substring(i + marker.Length)
-                Some(rest.Substring(0, rest.IndexOf ':'))
+
+                match rest.IndexOf ':' with
+                | j when j > 0 && contractRefusalNames.Contains(rest.Substring(0, j)) -> Some(rest.Substring(0, j))
+                | _ -> None
             else
                 None)
 
@@ -354,14 +365,9 @@ let vectorTests =
                           | _ -> [])
                       |> Set.ofList
 
-                  let all =
-                      Reflection.FSharpType.GetUnionCases typeof<ContractFault>
-                      |> Array.map (fun c -> string (System.Char.ToLowerInvariant c.Name[0]) + c.Name.Substring 1)
-                      |> Set.ofArray
-
                   Expect.equal
                       named
-                      (Set.remove "illFormedDescription" all)
+                      (Set.remove "illFormedDescription" contractRefusalNames)
                       "every named refusal the artifact can spell has a vector"
 
                   Expect.equal

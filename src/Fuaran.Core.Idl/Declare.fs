@@ -654,6 +654,9 @@ module Declare =
     /// - **references** — every `TEnum` / `TRecord` / `TUnion` name resolves, every union is
     ///   applied to as many type arguments as it declares parameters, and a `TVar` names a
     ///   parameter of the union whose case declares it;
+    /// - **cases** (Phase 713) — an enum or a union declares at least one case: one with none has
+    ///   no value, so a slot of its type could never be written or read, and it is refused here,
+    ///   by its name, rather than where something first samples it;
     /// - **duplicates** — kind tags, op tags, type names (enums, unions and records share
     ///   one namespace in every generated host), case tags, type parameters, field names
     ///   within one owner, and default entries;
@@ -675,7 +678,8 @@ module Declare =
     ///   replacement, message and version are single-line text; and no declared string is
     ///   ill-formed UTF-16. A `Doc` (Phase 255) is free prose and may span lines.
     ///
-    /// A field-less kind or record is well-formed: a marker carries its meaning in its tag.
+    /// A field-less kind or record is well-formed: a marker carries its meaning in its tag. A
+    /// case-less enum or union is not: it has no tag to carry.
     let errors (idl: Idl) : VocabularyFault list =
         let unionOf (n: string) = IdlLookup.tryUnion idl n
 
@@ -1134,6 +1138,9 @@ module Declare =
               let owner = sprintf "union '%s'" u.Name
               let at = [ key "unions"; item i ]
 
+              if List.isEmpty u.Cases then
+                  fault (at @ [ key "cases" ]) (sprintf "%s declares no case, so it has no value" owner)
+
               yield!
                   nameErrors
                       (owner + ": type parameter")
@@ -1200,6 +1207,10 @@ module Declare =
           for i, e in List.indexed idl.Enums do
               let owner = sprintf "enum '%s'" e.Name
               let at = enumAt i
+
+              if List.isEmpty e.Cases then
+                  fault (at @ [ key "cases" ]) (sprintf "%s declares no case, so it has no value" owner)
+
               // A case NAME is the host identifier; its WIRE string is data, escaped where
               // it is spliced, and held only to well-formedness.
               for c, name in List.indexed e.Cases do

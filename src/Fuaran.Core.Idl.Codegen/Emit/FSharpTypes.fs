@@ -9,7 +9,10 @@ open Fuaran.Core.Idl.Emit.Annotations
 /// `RequireQualifiedAccess` enums and the recursion group every other declaration joins.
 module internal FSharpTypes =
 
-    let fsField (msg: Set<string>) (f: IdlField) : Result<string, CodegenError> =
+    /// A record or spec field under its comment block: the support doc `supportDoc` (printed at
+    /// the field's indent, [[supportAt]]) and the authored annotation lines in the mode it sets
+    /// ([[memberDocLines]], Phase 713).
+    let fsFieldUnder (supportDoc: string option) (msg: Set<string>) (f: IdlField) : Result<string, CodegenError> =
         let fsType = fsTypeIn msg
 
         let tyR =
@@ -25,7 +28,7 @@ module internal FSharpTypes =
 
         // Phase 113 — a record field's attribute sits on its own line above it.
         let prefix =
-            (annotationDocLines "      " f.Annotations
+            (memberDocLines "      " supportDoc f.Annotations
              @ (obsoleteAttr f.Annotations
                 |> Option.map (fun a -> "      " + a)
                 |> Option.toList))
@@ -34,15 +37,20 @@ module internal FSharpTypes =
 
         tyR |> Result.map (fun ty -> prefix + sprintf "      %s: %s" (pascal f.Name) ty)
 
+    /// A field with no support doc above it.
+    let fsField (msg: Set<string>) (f: IdlField) : Result<string, CodegenError> = fsFieldUnder None msg f
+
     /// Phase 119 — an enum case takes its annotations exactly where a UNION case takes
     /// them: the doc block above the bar, the single attribute INLINE after it, which is
     /// where F# accepts an attribute on a DU case. An unannotated enum emits the line it
-    /// always did.
-    let enumCaseDecl (e: IdlEnum) (case: string) =
+    /// always did. `supportDoc` is the case's support doc, printed at the case's indent.
+    let enumCaseDecl (supportDoc: string option) (e: IdlEnum) (case: string) =
         let a = e.AnnotationsOf case
 
         let docs =
-            annotationDocLines "    " a |> List.map (fun l -> l + "\n") |> String.concat ""
+            memberDocLines "    " supportDoc a
+            |> List.map (fun l -> l + "\n")
+            |> String.concat ""
 
         let attr =
             match obsoleteAttr a with
@@ -51,7 +59,9 @@ module internal FSharpTypes =
 
         docs + "    | " + attr + case
 
-    let unionCaseDecl (msg: Set<string>) (c: IdlUnionCase) : Result<string, CodegenError> =
+    /// A union case under its support doc `supportDoc` (printed at the case's indent) and its
+    /// authored annotation lines.
+    let unionCaseDecl (msg: Set<string>) (supportDoc: string option) (c: IdlUnionCase) : Result<string, CodegenError> =
         let fsType = fsTypeIn msg
 
         let fieldDecl (f: IdlField) =
@@ -80,7 +90,7 @@ module internal FSharpTypes =
             // (`| [<Obsolete(...)>] Tag of ...`), which is where F# accepts it; the doc
             // block sits above the bar, like any other.
             let docs =
-                annotationDocLines "    " c.Annotations
+                memberDocLines "    " supportDoc c.Annotations
                 |> List.map (fun l -> l + "\n")
                 |> String.concat ""
 
@@ -130,20 +140,19 @@ module internal FSharpTypes =
         // after it. An unannotated enum emits exactly the lines it always did.
         let cases =
             e.Cases
-            |> List.map (fun c -> doc ("case:" + e.Name + "." + c) "    " + enumCaseDecl e c)
+            |> List.map (fun c -> enumCaseDecl (supportAt (doc ("case:" + e.Name + "." + c) "    ")) e c)
             |> String.concat "\n"
 
         // Phase 542 — the enum's OWN annotations, after the support doc (the
         // [[memberDocLines]] precedence) and ahead of the attributes; empty for an enum
         // that says nothing, so its emission is the lines it always was.
         let annotated =
-            annotationDocLines "" e.Annotations
+            memberDocLines "" (supportAt (doc ("type:" + e.Name) "")) e.Annotations
             @ (obsoleteAttr e.Annotations |> Option.toList)
             |> List.map (fun l -> l + "\n")
             |> String.concat ""
 
-        doc ("type:" + e.Name) ""
-        + annotated
+        annotated
         + "[<RequireQualifiedAccess>]\n"
         + sprintf "type %s =\n%s" e.Name cases
 
@@ -174,9 +183,7 @@ module internal FSharpTypes =
 
         let unionBody (u: IdlUnion) =
             u.Cases
-            |> List.map (fun c ->
-                unionCaseDecl msg c
-                |> Result.map (fun d -> doc ("case:" + u.Name + "." + c.Tag) "    " + d))
+            |> List.map (fun c -> unionCaseDecl msg (supportAt (doc ("case:" + u.Name + "." + c.Tag) "    ")) c)
             |> concatR "\n"
             |> Result.map (fun cases ->
                 typeComment u.Name u.Annotations,
@@ -187,8 +194,7 @@ module internal FSharpTypes =
         let fieldDecls (owner: string) (fields: IdlField list) =
             fields
             |> List.map (fun f ->
-                fsField msg f
-                |> Result.map (fun d -> doc ("field:" + owner + "." + pascal f.Name) "      " + d))
+                fsFieldUnder (supportAt (doc ("field:" + owner + "." + pascal f.Name) "      ")) msg f)
             |> concatR "\n"
 
         // Phase 252 — the declarations that take wire equality, and the attribute + members

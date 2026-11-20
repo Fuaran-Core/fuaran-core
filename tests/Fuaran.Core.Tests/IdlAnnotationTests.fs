@@ -390,3 +390,118 @@ let tests =
                        | FieldHostSurfaceChanged _ -> true
                        | _ -> false))
                   "and none of it may be reported as a shape or signature move") ]
+
+// ---------------------------------------------------------------------------
+// Phase 713 — a type with no case is refused where it is declared. An enum or a union that
+// declares no case has no value, so no slot of its type can be written or read; it used to load,
+// emit and round-trip, and was refused only where something first sampled it. `Declare.errors`
+// names it now, beside the other declaration faults and in the order they are walked.
+// ---------------------------------------------------------------------------
+
+/// A union named `name` with `cases`, each a field-less tag.
+let private unionOf (name: string) (cases: string list) : IdlUnion =
+    { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+      Name = name
+      Params = []
+      Cases =
+        cases
+        |> List.map (fun tag ->
+            { Hosted = None
+              Tag = tag
+              Fields = []
+              Annotations = Annotations.Empty })
+      Annotations = Annotations.Empty
+      Discrimination = UnionDiscrimination.Tagged }
+
+/// One kind `K` with `fields`, beside `enums` and `unions`.
+let private vocabularyOf (fields: IdlField list) (enums: IdlEnum list) (unions: IdlUnion list) : Idl =
+    { plainIdl with
+        Kinds =
+            [ { Tag = "K"
+                Category = "leaf"
+                Annotations = Annotations.Empty
+                Fields = fields } ]
+        Enums = enums
+        Unions = unions }
+
+let private caseless (at: PathSegment list) (owner: string) : VocabularyFault =
+    { At = at
+      Detail = owner + " declares no case, so it has no value" }
+
+[<Tests>]
+let caselessTypeTests =
+    testList
+        "IDL: a type with no case is refused at declaration (Phase 713)"
+        [ testCase "an enum with no case is refused by its name, at its cases" (fun _ ->
+              let idl =
+                  vocabularyOf [ f "e" (TEnum "Nothing") Required ] [ Declare.enumOf "Nothing" [] ] []
+
+              Expect.equal
+                  (Declare.errors idl)
+                  [ caseless [ PathSegment.Key "enums"; PathSegment.Index 0; PathSegment.Key "cases" ] "enum 'Nothing'" ]
+                  "the one fault, naming the enum")
+
+          testCase "a union with no case is refused by its name, at its cases" (fun _ ->
+              let idl =
+                  vocabularyOf
+                      [ f "u" (TUnion("Void", [])) Required ]
+                      []
+                      [ unionOf "Some" [ "One" ]; unionOf "Void" [] ]
+
+              Expect.equal
+                  (Declare.errors idl)
+                  [ caseless [ PathSegment.Key "unions"; PathSegment.Index 1; PathSegment.Key "cases" ] "union 'Void'" ]
+                  "the one fault, naming the union")
+
+          testCase "the declaration is the fault, so an unused one is refused too" (fun _ ->
+              let idl =
+                  vocabularyOf [ f "s" TStr Required ] [ Declare.enumOf "Nothing" [] ] [ unionOf "Void" [] ]
+
+              Expect.equal
+                  (Declare.errors idl |> List.map _.Detail)
+                  [ "union 'Void' declares no case, so it has no value"
+                    "enum 'Nothing' declares no case, so it has no value" ]
+                  "both, unions before enums, as the walk visits them")
+
+          testCase "it is reported with the other declaration faults, in their order" (fun _ ->
+              let idl =
+                  vocabularyOf
+                      [ f "m" (TEnum "Missing") Required ]
+                      [ Declare.enumOf "Nothing" []; Declare.enumOf "Nothing" [ "A" ] ]
+                      [ unionOf "Void" [] ]
+
+              match Declare.errors idl |> List.map _.Detail with
+              | [ duplicate; dangling; union; enum ] ->
+                  Expect.stringContains duplicate "'Nothing'" "the type name declared twice first"
+                  Expect.stringContains dangling "names enum 'Missing'" "then the kind's dangling name"
+                  Expect.equal union "union 'Void' declares no case, so it has no value" "then the union"
+                  Expect.equal enum "enum 'Nothing' declares no case, so it has no value" "then the enum"
+              | other -> failtestf "expected four faults in walk order, got %A" other)
+
+          testCase "the artifact reader refuses it, naming the type at its path" (fun _ ->
+              let idl =
+                  vocabularyOf [ f "e" (TEnum "Nothing") Required ] [ Declare.enumOf "Nothing" [] ] []
+
+              match Artifact.parseDetailed (Artifact.render idl) with
+              | Ok _ -> failtest "a vocabulary with a case-less enum was read"
+              | Error errors ->
+                  match errors with
+                  | [ e ] ->
+                      Expect.equal e.Code DecodeCode.SchemaFault "a schema fault"
+
+                      Expect.equal
+                          e.Path
+                          [ PathSegment.Key "enums"; PathSegment.Index 0; PathSegment.Key "cases" ]
+                          "at the enum's cases"
+
+                      Expect.stringContains e.Message "enum 'Nothing' declares no case" "naming the enum"
+                  | other -> failtestf "expected one refusal, got %A" (other |> List.map _.Message))
+
+          testCase "one case is enough" (fun _ ->
+              let idl =
+                  vocabularyOf
+                      [ f "e" (TEnum "One") Required; f "u" (TUnion("Single", [])) Required ]
+                      [ Declare.enumOf "One" [ "Only" ] ]
+                      [ unionOf "Single" [ "Only" ] ]
+
+              Expect.isEmpty (Declare.errors idl) "a one-case enum and a one-case union are well-formed") ]
