@@ -4698,7 +4698,8 @@ nothing. Compared row by row, the two answers differ in four places, and only th
 4. **A wire break beside an undecided row.** Core: undecided (no profile). Reference: major. Nothing outranks a
    major, so the reference's answer is the more informative one — and Core's own `ProfileAdvice` prose already says
    major there. It is precedence, not the decode rule, and `bumpProfile`'s answers are held unchanged, so it is
-   recorded rather than changed: an open question for the operator, below.
+   recorded rather than changed: an open question for the operator, below. *Ruled by Phase 710: major, see the
+   amendment at the end of this entry.*
 
 *Decided: the rule is a closed type in `Wire`, and the bump takes it (D242.1).*
 `Versioning.DecodeRule = RefusesUnknownMembers | IgnoresUnknownMembers` names the one property that decides case 1:
@@ -4740,9 +4741,42 @@ non-absorbed sent the law, the agreement vectors and the absorption case red; it
 first on case 3 (Core's minor for a loosened member and a widened slot) and case 4. It is a phase on that host's
 side, filed when this ships; Core takes no dependency on it.
 
-*Open question for the operator (case 4).* Should `bumpProfile` answer major when a decided row breaks the wire
-beside an undecided one, as its own `ProfileAdvice` already does? It would change an existing caller's answer from
-`Undecided` to `Bumped`, so it is not done here.
+*Open question for the operator (case 4), closed by the amendment below.* Should `bumpProfile` answer major when a
+decided row breaks the wire beside an undecided one, as its own `ProfileAdvice` already does? It would change an
+existing caller's answer from `Undecided` to `Bumped`, so it is not done here.
+
+*Amended by Phase 710 (2026-11-20) — case 4 is ruled: a decided wire break is a major, whatever else is
+undecided.* The operator ruled it, and it rides the `0.45.0` draft as a breaking change
+(`docs/releases/0.45.0/breaking/phase-710.md`): an existing caller that received `Bump.Undecided` for a verdict
+holding a decided `BreakingWire` row beside an undecided one now receives `Bump.Bumped` with the major moved, under
+either decode rule. No signature moves.
+
+- *The premises, checked first.* On that verdict, under both rules, `bumpProfile` and `bumpProfileUnder` answered
+  `Undecided`; `ProfileAdvice` named the `/v2/` major; `StabilityImpact` was `breaking`; `verdictClass` was
+  `Undecided`. The last three read the one severity precedence (the drafts with their decided-headline fallback);
+  the two bumps did not read it at all, testing `Verdict.Undecided` for emptiness instead. That is how the advice
+  and the typed answer came to disagree.
+- *One decision.* The profile step's headline is the one precedence with a single exception, a decided wire break
+  heading it beside an undecided row, since nothing outranks a major and no check of the undecided row can lower
+  it. Both the advice and `bumpProfileUnder` (so `bumpProfile`) read that headline, so they cannot disagree again;
+  a wire break is never absorbed, so the decode rule does not enter it. With no decided wire break an undecided
+  row still heads it and yields no profile: a `/v2/` event is still never published as a minor, and an emitter
+  break beside an undecided row is undecided, as before.
+- *`stabilityImpact` keeps its rule*, which already answered `breaking` here: a decided wire or emitter break
+  stands whatever the check finds.
+- *`verdictClass` keeps its rule*: an undecided row heads the class beside a wire break, and the CLI exits 4. The
+  class answers whether every row was decided, which the profile step does not: the undecided rows are still
+  unchecked, the report lists them, and a gate branching on the class still owes them a hand check. Moving the
+  class would also move the CLI's exit code and the contracts corpus's recorded class, a wider break than the
+  ruling asks for.
+- *Held by.* `DecodeRuleBumpTests`, the Phase 710 list: the case, every surface's answer under both rules; every
+  pair of the decode-rule family laid beside an undecided row, a major under both rules wherever the pair breaks
+  the wire, and undecided otherwise (the undecided row alone, beside an emitter break, beside an addition); a wire
+  break alone; and the advice equal to the typed answer on every pair, with and without the undecided row. The
+  reference-rule vectors now count the case among the agreements. Run against the previous classifier, three of
+  those tests were red. A plant that let every undecided row answer major sent the two undecided guards and the
+  agreement test red, and was reverted before the commit; the wire-break-alone guard is green under both and is
+  held as well by the Phase 587 law.
 
 ## 2026-10-29 — D241: the tree algebra refuses a base carrying one id twice at every public entry, as `DuplicateId` naming the first repeated id; the refusal was chosen over a carrier type, and the ladder's last input hypothesis moves to `tested`
 

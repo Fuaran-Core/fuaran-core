@@ -332,7 +332,8 @@ type Verdict =
         /// `Versioning.bump` takes.
         Evolution: Versioning.Evolution
         /// The rows the artifact cannot decide. Non-empty means no profile
-        /// answer is available — NOT that the answer is "additive".
+        /// answer is available — NOT that the answer is "additive" — unless a
+        /// decided row breaks the wire, whose major no check of these can lower.
         Undecided: Classification list
         /// At least one row keeps every existing document valid AND stops a
         /// conformant emitter conforming. Carried separately because the profile
@@ -368,9 +369,10 @@ type VerdictClass =
 /// being named.
 [<RequireQualifiedAccess>]
 type Bump =
-    /// Every row was decided: the base profile under `Versioning.bump` of the verdict's
-    /// evolution (unchanged when nothing on the wire moved).
+    /// Every row was decided, or a decided row breaks the wire (Phase 710): the base profile
+    /// under `Versioning.bump` of the verdict's evolution (unchanged when nothing on the wire
+    /// moved). Beside a wire break the undecided rows stay in the verdict's `Undecided`.
     | Bumped of Versioning.Capability
-    /// At least one row crosses an erased slot; `rows` are those rows, to check by hand
-    /// before any profile can be named.
+    /// At least one row crosses an erased slot and no decided row breaks the wire; `rows`
+    /// are those rows, to check by hand before any profile can be named.
     | Undecided of rows: Classification list
