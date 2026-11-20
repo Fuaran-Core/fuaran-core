@@ -527,3 +527,153 @@ let twoChannelTests =
                   |> String.concat "\n"
 
               Expect.stringContains out expected "the case's support block, then the case" ]
+
+// ---------------------------------------------------------------------------
+// Phase 705 — the `NodeKind` union and the `Node` record carry their docs too. A kind's `doc`
+// annotation landed on its `<Kind>Spec` record and nowhere else, so the union case a reader meets
+// first was undocumented; and `Node`'s `Id` and `Kind` fields, which the IDL does not declare as
+// fields, had no doc hook at all. Each case now takes its kind's authored doc, under a support
+// block at `case:NodeKind.<Tag>`; each node field takes the support block at `field:Node.<Field>`
+// (`Id`, `Kind`, and every envelope field), beside its authored annotation lines.
+// ---------------------------------------------------------------------------
+
+/// `docIdl` with a node envelope: one field carrying an authored doc.
+let private enveloped: Idl =
+    { docIdl with
+        NodeFields = [ f "style" TStr Optional |> withDoc "How the node is styled." ] }
+
+/// A support doc block at each node member path, and nothing else.
+let private nodeSupport (entries: (string * string) list) : GenSupport =
+    { GenSupport.Empty with
+        Docs = entries |> List.map (fun (path, line) -> path, [ line ]) |> Map.ofList }
+
+[<Tests>]
+let nodeMemberTests =
+    testList
+        "IDL doc annotation: the node-kind cases and the node's fields (Phase 705)"
+        [ testCase "a kind's doc annotation is the doc of its NodeKind case"
+          <| fun _ ->
+              let expected =
+                  [ "and [<RequireQualifiedAccess>] NodeKind ="
+                    "    /// A short note."
+                    "    /// Renders as one paragraph & never wraps <'T>."
+                    "    | Note of NoteSpec" ]
+                  |> String.concat "\n"
+
+              Expect.stringContains (emit docIdl) expected "the case carries the kind's doc, as authored"
+
+          testCase "the case carries the kind's doc only: the notes and the attribute stay on the spec record"
+          <| fun _ ->
+              let noted =
+                  { docIdl with
+                      Kinds =
+                          docIdl.Kinds
+                          |> List.map (fun k ->
+                              { k with
+                                  Annotations =
+                                      { k.Annotations with
+                                          Since = Some "0.3.0"
+                                          Deprecated =
+                                              Some
+                                                  { Replacement = None
+                                                    Message = Some "fold into a paragraph." } } }) }
+
+              let out = emit noted
+
+              let caseBlock =
+                  [ "    /// A short note."
+                    "    /// Renders as one paragraph & never wraps <'T>."
+                    "    | Note of NoteSpec" ]
+                  |> String.concat "\n"
+
+              // The case line follows the doc lines directly, so no note and no attribute is on it.
+              Expect.stringContains out caseBlock "the doc lines, then the bare case"
+
+          testCase "the node's Id and Kind fields carry the support docs the vocabulary declares"
+          <| fun _ ->
+              let out =
+                  emitWith
+                      (nodeSupport
+                          [ "field:Node.Id", "/// The node's identity, unique in its tree."
+                            "field:Node.Kind", "/// What the node is, and its spec." ])
+                      docIdl
+
+              let expected =
+                  [ "and Node ="
+                    "    {"
+                    "      /// The node's identity, unique in its tree."
+                    "      Id: string"
+                    "      /// What the node is, and its spec."
+                    "      Kind: NodeKind"
+                    "    }" ]
+                  |> String.concat "\n"
+
+              Expect.stringContains out expected "each field under its own block"
+
+          testCase "an envelope field takes its support block ahead of its authored doc"
+          <| fun _ ->
+              let out =
+                  emitWith
+                      (nodeSupport
+                          [ "field:Node.Id", "/// The identity."
+                            "field:Node.Style", "/// Support says so." ])
+                      enveloped
+
+              let expected =
+                  [ "and Node ="
+                    "    {"
+                    "      /// The identity."
+                    "      Id: string"
+                    "      Kind: NodeKind"
+                    "      /// Support says so."
+                    "      /// How the node is styled."
+                    "      Style: string option"
+                    "    }" ]
+                  |> String.concat "\n"
+
+              Expect.stringContains out expected "support first, then the authored line"
+
+          testCase "under an XML support block, a NodeKind case's authored doc is an explicit, encoded <remarks>"
+          <| fun _ ->
+              let out =
+                  emitWith (nodeSupport [ "case:NodeKind.Note", "/// <summary>Support says so.</summary>" ]) docIdl
+
+              let expected =
+                  [ "    /// <summary>Support says so.</summary>"
+                    "    /// <remarks>"
+                    "    /// A short note."
+                    "    /// Renders as one paragraph &amp; never wraps &lt;'T>."
+                    "    /// </remarks>"
+                    "    | Note of NoteSpec" ]
+                  |> String.concat "\n"
+
+              Expect.stringContains out expected "the case's two channels, as XML the compiler accepts"
+              Expect.isEmpty (invalidXmlBlocks out) "every XML-mode block parses"
+
+          testCase "a vocabulary without docs emits the NodeKind union and the Node record it always did"
+          <| fun _ ->
+              // A guard that cannot be red against the old emission: it pins the bytes the change must
+              // not move, for a vocabulary with no envelope and for one with an undocumented envelope.
+              let expected =
+                  [ "and [<RequireQualifiedAccess>] NodeKind ="
+                    "    | Note of NoteSpec"
+                    ""
+                    "and Node = { Id: string; Kind: NodeKind }" ]
+                  |> String.concat "\n"
+
+              Expect.stringContains (emit undocumented) expected "the one-line node, the bare case"
+
+              let bareEnvelope =
+                  { undocumented with
+                      NodeFields = [ f "style" TStr Optional ] }
+
+              let expectedEnvelope =
+                  [ "and Node ="
+                    "    {"
+                    "      Id: string"
+                    "      Kind: NodeKind"
+                    "      Style: string option"
+                    "    }" ]
+                  |> String.concat "\n"
+
+              Expect.stringContains (emit bareEnvelope) expectedEnvelope "the envelope record, no doc line" ]
