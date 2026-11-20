@@ -67,7 +67,7 @@ point.
 | a node kind renamed (inferred, reported beside the add and the remove it explains) | `breaking-wire` | `no-generated-shape-change` — the add and the remove carry the consequence | `KindRenamed` |
 | a kind's category | `host-surface-only` | `no-generated-shape-change` | `KindCategoryChanged` |
 | a kind's or a tree-op's annotation set | `additive` on a first marking, `host-surface-only` otherwise | `no-generated-shape-change` — an `Obsolete` attribute moves, which changes which **warnings** a consumer sees, not a shape | `KindAnnotationsChanged` |
-| a tree-op added | `additive` | `no-generated-shape-change` — the F# type emitter leaves the op vocabulary unshipped (fuaran#703). **This row changes the day that leg lands.** | `OpAdded` |
+| a tree-op added | `additive` | `no-generated-shape-change` — the F# type emitter leaves the op vocabulary unshipped (Phase 703). **This row changes the day that leg lands.** | `OpAdded` |
 | a tree-op removed | `breaking-wire` | `no-generated-shape-change` — as for a tree-op added | `OpRemoved` |
 | a union added | `additive` | `no-generated-shape-change` — nothing could have referenced it | `UnionAdded` |
 | a union removed | `breaking-wire` | `type-name-reference` | `UnionRemoved` |
