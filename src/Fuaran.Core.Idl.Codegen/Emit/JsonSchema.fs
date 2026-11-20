@@ -33,6 +33,34 @@ module internal JsonSchema =
     let defName (t: IdlType) : string = Decl.instName t
 
     // -----------------------------------------------------------------------
+    // Phase 704 — a declaration's `doc` annotation (Phase 255) is the JSON-Schema `description`: a
+    // type's on its definition, a case's on its branch, a field's on its property. An absent doc
+    // writes nothing, so a vocabulary that documents nothing emits the bytes it always did.
+    //
+    // What has no object of its own has nowhere to carry one: an enum case is a string in the
+    // definition's `enum` array, and an inline record or a presence-keyed union lays its members
+    // out on the object holding it (their fields' docs still reach those members).
+    // -----------------------------------------------------------------------
+
+    /// `schema` carrying `doc` as its `description`. On a definition or a branch it leads, as the
+    /// schema of a method's arguments states its own; on a property it follows the keywords that
+    /// say what the slot holds, as an argument's does. "Any JSON" (`true`) with a description is
+    /// the object holding only the description, which admits exactly what `true` admits.
+    let private described (leading: bool) (doc: string option) (schema: JVal) : JVal =
+        match doc, schema with
+        | None, s -> s
+        | Some d, JObj fs when leading -> JObj(("description", JStr d) :: fs)
+        | Some d, JObj fs -> JObj(fs @ [ "description", JStr d ])
+        | Some d, _ -> JObj [ "description", JStr d ]
+
+    /// A definition's or a branch's schema, carrying the declaration's doc.
+    let private definitionDoc (ann: Annotations) (schema: JVal) : JVal = described true ann.Doc schema
+
+    /// A property's schema, carrying the field's doc.
+    let private propertyDoc (f: IdlField) (schema: JVal) : JVal =
+        described false f.Annotations.Doc schema
+
+    // -----------------------------------------------------------------------
     // Phase 639 (DECISIONS.md D251) — the string-borne scalars' canonical spellings as ECMA-262
     // patterns, each EXACT: a string matches exactly when every reader admits it, range included.
     // What JSON Schema cannot state is a set's and a keyed map's canonical ORDER (it has no
@@ -221,8 +249,8 @@ module internal JsonSchema =
                           f.Opt = Required
                           && u.Cases |> List.forall (fun c -> List.contains name (written c))
 
-                      yield name, schemaOf declared.Type, always
-              | None -> yield f.Name, schemaOf f.Type, f.Opt = Required ]
+                      yield name, propertyDoc declared (schemaOf declared.Type), always
+              | None -> yield f.Name, propertyDoc f (schemaOf f.Type), f.Opt = Required ]
 
     let objectBody (idl: Idl) (fields: IdlField list) =
         let wire = wireMembers idl fields
@@ -262,7 +290,8 @@ module internal JsonSchema =
 
         let enumDef (e: IdlEnum) =
             // The `enum` array is a WIRE contract — wire strings, not host case names.
-            e.Name, JObj [ "type", JStr "string"; "enum", JArr(e.WireCases |> List.map JStr) ]
+            e.Name,
+            definitionDoc e.Annotations (JObj [ "type", JStr "string"; "enum", JArr(e.WireCases |> List.map JStr) ])
 
         /// One union definition, under a substitution for its type parameters
         /// (empty for a non-generic union, so its emission is byte-identical to
@@ -276,7 +305,9 @@ module internal JsonSchema =
 
             let tagged =
                 u.Cases
-                |> List.map (fun c -> objectSchema idl idl.Wire.Discriminator (u.WireTagOf c.Tag) (fieldsOf c))
+                |> List.map (fun c ->
+                    objectSchema idl idl.Wire.Discriminator (u.WireTagOf c.Tag) (fieldsOf c)
+                    |> definitionDoc c.Annotations)
 
             // A transparent case is on the wire BARE — its single field's value with
             // no `$type` envelope (`TextSource.Literal`: `"x"`, not
@@ -287,9 +318,10 @@ module internal JsonSchema =
             let bare =
                 match Decl.transparentCase decl u with
                 | None -> []
-                | Some c -> fieldsOf c |> List.map (fun f -> schemaOf f.Type)
+                | Some c -> fieldsOf c |> List.map (fun f -> definitionDoc c.Annotations (schemaOf f.Type))
 
-            name, JObj [ "oneOf", JArr(bare @ tagged) ]
+            // A generic union's doc is every instantiation's: each is the union at one argument.
+            name, definitionDoc u.Annotations (JObj [ "oneOf", JArr(bare @ tagged) ])
 
         let unionDef (u: IdlUnion) = unionDefWith Map.empty u.Name u
 
@@ -300,14 +332,21 @@ module internal JsonSchema =
         // names, and never under its bare name. The instantiations are the resolution's
         // (`Decl.instantiations`, Phase 511), keyed by the same instance name `schemaOf`
         // references, so the two agree by construction.
+        //
+        // Phase 704 — those names (`Binding_float`, `Binding_list_SelectOption`) are already the
+        // ones a host's hand-written schema publishes for the same instantiations, so no second
+        // naming rule is declared beside them. A host definition that differs in SHAPE as well as
+        // name (one instantiation read two ways) is a second declaration, not a renaming.
         let genericDefsR =
             Decl.instantiations idl
             |> Result.map (List.map (fun i -> unionDefWith i.Subst i.Name i.Union))
 
-        let recordDef (r: IdlRecord) = r.Name, recordSchema idl r
+        let recordDef (r: IdlRecord) =
+            r.Name, definitionDoc r.Annotations (recordSchema idl r)
 
+        // A kind and an op are both an `IdlKind`, defined the same way.
         let kindDef (k: IdlKind) =
-            k.Tag, objectSchema idl idl.Wire.Discriminator k.Tag k.Fields
+            k.Tag, definitionDoc k.Annotations (objectSchema idl idl.Wire.Discriminator k.Tag k.Fields)
 
         // Phase 511 — the node envelope from its layout: one object carrying `id`, the kind under
         // its key when the kind is nested, and the declared envelope members (fuaran#690: optional by
@@ -333,7 +372,8 @@ module internal JsonSchema =
                       JObj(
                           ("id", JObj [ "type", JStr "string" ])
                           :: (kindKeys |> List.map (fun key -> key, JObj [ "$ref", JStr "#/$defs/NodeKind" ]))
-                          @ (wireFields decl.Envelope.Members |> List.map (fun f -> f.Name, schemaOf f.Type))
+                          @ (wireFields decl.Envelope.Members
+                             |> List.map (fun f -> f.Name, propertyDoc f (schemaOf f.Type)))
                       ) ]
 
             match decl.Envelope.Kind with
@@ -349,16 +389,13 @@ module internal JsonSchema =
             "NodeKind",
             JObj [ "oneOf", JArr(decl.Kinds |> List.map (fun k -> JObj [ "$ref", JStr("#/$defs/" + k.Tag) ])) ]
 
-        let opDef (o: IdlKind) =
-            o.Tag, objectSchema idl idl.Wire.Discriminator o.Tag o.Fields
-
         /// The op alternation. Absent when the domain declares no ops, so an
         /// op-free IDL's schema is exactly what it was.
         let treeOpDefs =
             if List.isEmpty idl.Ops then
                 []
             else
-                (idl.Ops |> List.map opDef)
+                (idl.Ops |> List.map kindDef)
                 @ [ "TreeOp",
                     JObj [ "oneOf", JArr(idl.Ops |> List.map (fun o -> JObj [ "$ref", JStr("#/$defs/" + o.Tag) ])) ] ]
 
