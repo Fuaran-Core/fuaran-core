@@ -19,9 +19,9 @@ module internal DiffVerdict =
           Citation = cite }
 
     /// Phase 293 — ONE precedence over the severities, read by `stabilityImpact`,
-    /// `profileBump` and `verdictClass` alike: an undecided row dominates, because
-    /// reporting the decidable remainder as the answer is how a `/v2/` event gets
-    /// published as a minor; then the wire break, the emitter break, the addition,
+    /// `verdictClass` and (through [[profileHeadline]]) the profile step alike: an undecided
+    /// row dominates, because reporting the decidable remainder as the answer is how a `/v2/`
+    /// event gets published as a minor; then the wire break, the emitter break, the addition,
     /// and last the host-surface move.
     let private precedence: Severity list =
         [ Unclassifiable; BreakingWire; BreakingForEmitters; Additive; HostSurfaceOnly ]
@@ -36,6 +36,16 @@ module internal DiffVerdict =
     /// undecided row has been checked and found absorbable.
     let private decidedHeadline (cs: Classification list) : Severity option =
         headline (cs |> List.filter (fun c -> c.Severity <> Unclassifiable))
+
+    /// Phase 710 — the severity the wire-profile STEP reads, and the one decision both the
+    /// prose advice ([[profileBump]]) and the typed answer ([[bumpProfileUnder]]) take it from:
+    /// the one precedence, except that a decided wire break heads it beside an undecided row.
+    /// Nothing outranks a major, so no check of the undecided row can lower the step. With no
+    /// decided wire break, an undecided row still heads it and stops the bump.
+    let private profileHeadline (cs: Classification list) : Severity option =
+        match headline cs with
+        | Some Unclassifiable when decidedHeadline cs = Some BreakingWire -> Some BreakingWire
+        | h -> h
 
     /// The draft `stability_impact:` value — the roadmap front-matter vocabulary
     /// is `additive` / `breaking` / `null`, so this emits one of the first two.
@@ -56,13 +66,10 @@ module internal DiffVerdict =
         let major =
             "`/v2/` MAJOR — the schema `$id` major segment moves. VOCABULARY.md §4.2 says avoid this after publication; do it pre-launch or not at all."
 
-        match headline cs with
+        match profileHeadline cs with
         | Some BreakingWire -> major
         | Some Unclassifiable ->
-            (match decidedHeadline cs with
-             | Some BreakingWire -> major
-             | _ ->
-                 "UNDECIDED — at least one change crosses an erased slot the artifact does not describe. `core@1.(x+1)` if the checks below pass; `/v2/` MAJOR if any of them fails.")
+            "UNDECIDED — at least one change crosses an erased slot the artifact does not describe. `core@1.(x+1)` if the checks below pass; `/v2/` MAJOR if any of them fails."
         | Some BreakingForEmitters ->
             "`core@1.(x+1)` profile MINOR on paper — but at least one change breaks EMITTERS, so the minor understates it. Treat every downstream emitter as needing a coordinated bump."
         | Some Additive -> "`core@1.(x+1)` profile minor — the `/v1/` major segment does not move (VOCABULARY.md §4.1)."
@@ -113,8 +120,8 @@ module internal DiffVerdict =
     ///    verdict carries `BreaksEmitters` separately instead of folding it in here
     ///    and calling the format broken.
     ///  - `HostSurfaceOnly` moves no profile at all.
-    ///  - `Unclassifiable` moves nothing here either, and stops the bump outright —
-    ///    see `bumpProfile`.
+    ///  - `Unclassifiable` moves nothing here either, and stops the bump unless a
+    ///    decided wire break stands beside it — see `bumpProfile`.
     let evolution (cs: Classification list) : Versioning.Evolution =
         let subjects pick =
             cs |> List.filter pick |> List.map (fun c -> summarise c.Change) |> Set.ofList
@@ -165,8 +172,12 @@ module internal DiffVerdict =
     /// The class of a verdict, by the one severity precedence the report's drafts also read:
     /// any undecided row makes it `Undecided`, then a wire or emitter break `Breaking`, then
     /// `Additive`, then `HostSurface`; no rows at all is `Unchanged`.
+    ///
+    /// Phase 710 kept it there beside a decided wire break, where the profile step answers
+    /// the major: the class answers whether every row is decided, and an unchecked row is
+    /// still unchecked whatever the step.
     let verdictClass (v: Verdict) : VerdictClass =
-        // Phase 293 — the ONE precedence `stabilityImpact` and `profileBump` read too.
+        // Phase 293 — the ONE precedence `stabilityImpact` and the profile step read too.
         match headline v.Changes with
         | Some Unclassifiable -> VerdictClass.Undecided
         | None -> VerdictClass.Unchanged
@@ -315,11 +326,13 @@ module internal DiffVerdict =
 
     /// Phase 587 — [[bumpProfile]] for a profile whose decoders follow `rule`. Under
     /// `RefusesUnknownMembers` it is `bumpProfile`, answer for answer; under `IgnoresUnknownMembers` an
-    /// absorbed row moves nothing. An undecided verdict yields no profile under either rule.
+    /// absorbed row moves nothing. Whether the undecided rows stop the bump is [[profileHeadline]]'s
+    /// decision under either rule (Phase 710): a decided wire break is never absorbed, so it names the
+    /// major beside them, and without one they yield no profile.
     let bumpProfileUnder (rule: Versioning.DecodeRule) (baseProfile: Versioning.Capability) (v: Verdict) : Bump =
-        match v.Undecided with
-        | [] -> Bump.Bumped(Versioning.bump baseProfile (evolutionUnder rule v))
-        | rows -> Bump.Undecided rows
+        match profileHeadline v.Changes with
+        | Some Unclassifiable -> Bump.Undecided v.Undecided
+        | _ -> Bump.Bumped(Versioning.bump baseProfile (evolutionUnder rule v))
 
     /// The profile a `baseProfile` bumps to under a verdict — `Versioning.bump`
     /// applied to `evolution`'s answer, which is the whole reason this module
@@ -328,5 +341,7 @@ module internal DiffVerdict =
     /// An UNDECIDED verdict yields no profile, and that is the load-bearing half: a
     /// function that returned `baseProfile` unchanged, or a minor bump, would hand a
     /// caller a number to publish for a revision whose class nobody has established.
+    /// A decided wire break beside the undecided rows is the one exception (Phase 710):
+    /// the major it names is the answer whatever their check finds, so it is published.
     let bumpProfile (baseProfile: Versioning.Capability) (v: Verdict) : Bump =
         bumpProfileUnder Versioning.DecodeRule.RefusesUnknownMembers baseProfile v

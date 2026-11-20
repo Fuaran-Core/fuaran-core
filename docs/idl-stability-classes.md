@@ -241,6 +241,9 @@ stops being read.
 - `host-surface-only` rows move no profile at all;
 - an **undecided** verdict yields **no profile**. Not the base profile unchanged, and not a minor:
   either would hand a caller a number to publish for a revision whose class nobody has established.
+  The one exception is a decided `breaking-wire` row beside the undecided ones: nothing outranks the
+  major it names, so no check of the undecided rows can lower it, and the bump is that major
+  (Phase 710). The verdict class stays `undecided` there, because the rows are still unchecked.
 
 ## The generated-artefact stamp
 

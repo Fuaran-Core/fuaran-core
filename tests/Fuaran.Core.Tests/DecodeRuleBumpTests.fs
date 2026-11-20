@@ -232,19 +232,19 @@ let private refused = Versioning.DecodeRule.RefusesUnknownMembers
 
 let private rowsOf (before: Idl) (after: Idl) = (Law.verdictOf before after).Changes
 
-/// An erased-slot re-model: a hosted field re-declared as an enum, which the artifact cannot decide.
-let private undecidedRows () =
-    let hostedField ty = Fixtures.fld "region" ty Optional
-
-    let withRegion ty =
-        { Law.oldIdl with
+/// An erased-slot re-model laid over a vocabulary pair: a hosted field re-declared as an enum, which the
+/// artifact cannot decide. The pair's own rows are kept, and one undecided row is added beside them.
+let private withUndecided (before: Idl, after: Idl) : Idl * Idl =
+    let withRegion (idl: Idl) ty =
+        { idl with
             Records =
-                [ { Name = "Access"
-                    Fields = [ hostedField ty ]
-                    Annotations = Fixtures.ann
-                    Inline = false } ]
+                idl.Records
+                @ [ { Name = "Access"
+                      Fields = [ Fixtures.fld "region" ty Optional ]
+                      Annotations = Fixtures.ann
+                      Inline = false } ]
             Enums =
-                Law.oldIdl.Enums
+                idl.Enums
                 @ [ { Law.oldIdl.Enums.Head with
                         Name = "Region"
                         Cases = [ "Polite" ] } ] }
@@ -258,7 +258,29 @@ let private undecidedRows () =
               Wire = None
               Format = None }
 
-    rowsOf (withRegion hosted) (withRegion (TEnum "Region"))
+    withRegion before hosted, withRegion after (TEnum "Region")
+
+/// The undecided row alone, over the unchanged vocabulary.
+let private undecidedRows () =
+    withUndecided (Law.oldIdl, Law.oldIdl) ||> rowsOf
+
+/// A named perturbation's vocabulary pair.
+let private pairOf (name: string) : Idl * Idl =
+    let _, before, after = Law.perturbations |> List.find (fun (n, _, _) -> n = name)
+    before, after
+
+/// The step `ProfileAdvice` names, read off its opening words.
+let private adviceStep (advice: string) : ReferenceRule.Answer =
+    if advice.StartsWith "`/v2/` MAJOR" then
+        ReferenceRule.Major
+    elif advice.StartsWith "UNDECIDED" then
+        ReferenceRule.Undecided
+    elif advice.StartsWith "`core@1.(x+1)`" then
+        ReferenceRule.Minor
+    elif advice.StartsWith "no wire-profile movement" then
+        ReferenceRule.NoStep
+    else
+        failtestf "the advice names no step: %s" advice
 
 [<Tests>]
 let tests =
@@ -374,7 +396,7 @@ let tests =
                       (sprintf "%s: Core under IgnoresUnknownMembers answers as the reference rule" name))
 
           testCase
-              "the reference rule's named vectors: the three cases it answers otherwise, each with its reason"
+              "the reference rule's named vectors: the two cases it answers otherwise, each with its reason"
               (fun _ ->
                   // 1-2. The reference rule exempts every non-tag addition. Two of them are not absorbed by a
                   // consumer that ignores unknown members: a loosened required member (a new document may omit
@@ -398,22 +420,22 @@ let tests =
                       Expect.equal
                           (ReferenceRule.ofBump (Diff.bumpProfileUnder ignored Versioning.Capability.coreV1 v))
                           ReferenceRule.Minor
-                          (name + ": Core names the minor the documents need")
+                          (name + ": Core names the minor the documents need"))
 
-                  // 3. A wire break beside an undecided row: the reference rule answers major (nothing outranks
-                  // it), Core answers undecided under every rule. That is precedence, not the decode rule, and
-                  // the default rule must keep 127's answer, so it is recorded here rather than changed.
-                  let _, before, removedKind =
-                      Law.perturbations |> List.find (fun (n, _, _) -> n = "removed kind")
-
-                  let mixed = verdictOfRows (rowsOf before removedKind @ undecidedRows ())
+          testCase
+              "the reference rule's named vectors: a wire break beside an undecided row is a major, and Core agrees (Phase 710)"
+              (fun _ ->
+                  // Phase 587 recorded this as a third disagreement and held Core's undecided; Phase 710 rules it:
+                  // nothing outranks a major, so no check of the undecided row can lower the answer.
+                  let mixed = verdictOfRows ((pairOf "removed kind" ||> rowsOf) @ undecidedRows ())
 
                   Expect.equal (ReferenceRule.step mixed.Changes) ReferenceRule.Major "the reference rule: major"
 
-                  Expect.equal
-                      (ReferenceRule.ofBump (Diff.bumpProfileUnder ignored Versioning.Capability.coreV1 mixed))
-                      ReferenceRule.Undecided
-                      "Core: undecided, under either rule")
+                  for rule in [ ignored; refused ] do
+                      Expect.equal
+                          (ReferenceRule.ofBump (Diff.bumpProfileUnder rule Versioning.Capability.coreV1 mixed))
+                          ReferenceRule.Major
+                          (sprintf "Core under %A: major" rule))
 
           testCase "absorbedWhenUnknownMembersIgnored reads the row, never a wire break" (fun _ ->
               let rowsOfPair name =
@@ -434,3 +456,129 @@ let tests =
                   Expect.isFalse
                       (rowsOfPair name |> List.exists Diff.absorbedWhenUnknownMembersIgnored)
                       (name + ": not absorbed")) ]
+
+// ---------------------------------------------------------------------------
+// Phase 710 — the profile bump answers major on a decided wire break, whatever else is undecided.
+//
+// Nothing outranks a major, so no check of an undecided row can lower the answer; `ProfileAdvice` already said
+// so, and the typed answer now reads the same decision. With no decided wire break, an undecided row still stops
+// the bump: reporting the decidable remainder is how a `/v2/` event gets published as a minor. The gate class
+// keeps its own precedence (D242, as amended).
+// ---------------------------------------------------------------------------
+
+/// The perturbation family, each pair also with an undecided row laid beside its own rows.
+let private withAndWithoutUndecided: (string * Idl * Idl) list =
+    Law.perturbations
+    @ (Law.perturbations
+       |> List.map (fun (n, b, a) ->
+           let b', a' = withUndecided (b, a)
+           n + ", beside an undecided row", b', a'))
+
+let private breaksWire (v: Verdict) =
+    v.Changes |> List.exists (fun c -> c.Severity = BreakingWire)
+
+let private answerUnder (rule: Versioning.DecodeRule) (v: Verdict) : ReferenceRule.Answer =
+    ReferenceRule.ofBump (Diff.bumpProfileUnder rule Versioning.Capability.coreV1 v)
+
+let private rules = [ ignored; refused ]
+
+[<Tests>]
+let wireBreakBesideUndecided =
+    testList
+        "Phase 710 — the profile bump answers major on a wire break, whatever else is undecided"
+        [ testCase "a wire break beside an undecided row: every surface's answer, under every decode rule" (fun _ ->
+              let v = Law.verdictOf <|| withUndecided (pairOf "removed kind")
+
+              Expect.isTrue (breaksWire v) "the pair breaks the wire"
+              Expect.isNonEmpty v.Undecided "and leaves a row undecided"
+
+              for rule in rules do
+                  Expect.equal (answerUnder rule v) ReferenceRule.Major (sprintf "the typed bump under %A" rule)
+
+              Expect.equal
+                  (ReferenceRule.ofBump (Diff.bumpProfile Versioning.Capability.coreV1 v))
+                  ReferenceRule.Major
+                  "bumpProfile"
+
+              Expect.equal (adviceStep v.ProfileAdvice) ReferenceRule.Major "the advice"
+              Expect.equal v.StabilityImpact "breaking" "the front-matter draft"
+
+              Expect.equal
+                  (Diff.verdictClass v)
+                  VerdictClass.Undecided
+                  "the gate class keeps its precedence: a row is still unchecked")
+
+          testCase "a decided wire break is a major under every decode rule, with or without an undecided row" (fun _ ->
+              let breaking =
+                  withAndWithoutUndecided
+                  |> List.filter (fun (_, b, a) -> breaksWire (Law.verdictOf b a))
+                  |> List.map (fun (n, _, _) -> n)
+
+              Expect.containsAll
+                  breaking
+                  [ "removed kind, beside an undecided row"
+                    "added required field, beside an undecided row"
+                    "removed kind"
+                    "added required field" ]
+                  "the family carries wire breaks on both sides of the undecided row"
+
+              for name, before, after in withAndWithoutUndecided do
+                  let v = Law.verdictOf before after
+
+                  if breaksWire v then
+                      for rule in rules do
+                          Expect.equal (answerUnder rule v) ReferenceRule.Major (sprintf "%s, under %A" name rule))
+
+          testCase "an undecided row with no decided wire break beside it still stops the bump" (fun _ ->
+              let stopped =
+                  withAndWithoutUndecided
+                  |> List.filter (fun (_, b, a) ->
+                      let v = Law.verdictOf b a
+                      not v.Undecided.IsEmpty && not (breaksWire v))
+
+              Expect.containsAll
+                  (stopped |> List.map (fun (n, _, _) -> n))
+                  [ "unchanged, beside an undecided row"
+                    "authoring default withdrawn (an emitter break), beside an undecided row"
+                    "added optional field, beside an undecided row" ]
+                  "the undecided row alone, beside an emitter break and beside an addition"
+
+              for name, before, after in stopped do
+                  let v = Law.verdictOf before after
+
+                  for rule in rules do
+                      Expect.equal (answerUnder rule v) ReferenceRule.Undecided (sprintf "%s, under %A" name rule)
+
+                      match Diff.bumpProfileUnder rule Versioning.Capability.coreV1 v with
+                      | Bump.Undecided rows -> Expect.equal rows v.Undecided (name + ": it names the rows to check")
+                      | Bump.Bumped p -> failtestf "%s: bumped to %A" name p)
+
+          testCase "an emitter break beside an undecided row is undecided, as before" (fun _ ->
+              let v =
+                  Law.verdictOf
+                  <|| withUndecided (pairOf "authoring default withdrawn (an emitter break)")
+
+              Expect.isTrue v.BreaksEmitters "the pair breaks emitters"
+              Expect.isFalse (breaksWire v) "and not the wire"
+
+              for rule in rules do
+                  Expect.equal (answerUnder rule v) ReferenceRule.Undecided (sprintf "under %A" rule)
+
+              Expect.equal (adviceStep v.ProfileAdvice) ReferenceRule.Undecided "the advice")
+
+          testCase "a wire break alone is a major under every decode rule" (fun _ ->
+              let v = Law.verdictOf <|| pairOf "removed kind"
+
+              Expect.isEmpty v.Undecided "nothing undecided"
+
+              for rule in rules do
+                  Expect.equal (answerUnder rule v) ReferenceRule.Major (sprintf "under %A" rule))
+
+          testCase "the advice and the typed answer agree on every case enumerated" (fun _ ->
+              for name, before, after in withAndWithoutUndecided do
+                  let v = Law.verdictOf before after
+
+                  Expect.equal
+                      (ReferenceRule.ofBump (Diff.bumpProfile Versioning.Capability.coreV1 v))
+                      (adviceStep v.ProfileAdvice)
+                      (sprintf "%s: bumpProfile names the step its own advice names" name)) ]

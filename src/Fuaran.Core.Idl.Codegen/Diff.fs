@@ -171,13 +171,16 @@ module Diff =
     /// An UNDECIDED verdict yields no profile, and that is the load-bearing half: a
     /// function that returned `baseProfile` unchanged, or a minor bump, would hand a
     /// caller a number to publish for a revision whose class nobody has established.
+    /// A decided wire break beside the undecided rows is the one exception (Phase 710):
+    /// nothing outranks the major it names, so that is the answer.
     let bumpProfile (baseProfile: Versioning.Capability) (v: Verdict) : Bump = DiffVerdict.bumpProfile baseProfile v
 
     /// Phase 587 — `bumpProfile` for a profile whose decoders follow `rule`. Under
     /// `Versioning.DecodeRule.RefusesUnknownMembers` it is `bumpProfile`, answer for answer. Under
     /// `IgnoresUnknownMembers` a row that a consumer behind it absorbs moves nothing — an optional member
     /// added above all — while a new tag, a loosened required member and a widened `int` slot still move
-    /// the minor, and a wire break the major. An undecided verdict yields no profile under either rule.
+    /// the minor, and a wire break the major. An undecided verdict yields no profile under either rule,
+    /// unless a decided row breaks the wire, which is the major under either rule (Phase 710).
     let bumpProfileUnder (rule: Versioning.DecodeRule) (baseProfile: Versioning.Capability) (v: Verdict) : Bump =
         DiffVerdict.bumpProfileUnder rule baseProfile v
 
