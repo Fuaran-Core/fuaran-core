@@ -116,11 +116,14 @@ let tests =
               let narrowed = Function.signatureExcluding (Set.ofList [ "tpl/t" ]) full
               Expect.equal (narrowed.Holes |> List.map _.Addr) [ "tpl/c"; "tpl/s" ] "tpl/t excluded"
 
-              // the JSON Schema lists only the still-open holes in both properties and required
+              // the JSON Schema lists only the still-open holes in both properties and required, by
+              // name (Phase 712)
               let json = Json.render (Function.toJsonSchema narrowed)
-              Expect.isFalse (json.Contains "tpl/t") "bound addr absent from the schema"
-              Expect.stringContains json "tpl/c" "open value hole present"
-              Expect.stringContains json "tpl/s" "open slot present"
+              Expect.isFalse (json.Contains "\"title\":{") "the bound hole is absent from the schema"
+              Expect.isFalse (json.Contains "tpl/") "no address keys the schema"
+              Expect.stringContains json "\"count\":{" "open value hole present"
+              Expect.stringContains json "\"body\":{" "open slot present"
+              Expect.stringContains json "\"required\":[\"count\",\"body\"]" "and both required"
 
           testCase "curry-then-apply equals full apply (narrowing is execution-consistent)"
           <| fun _ ->
@@ -182,6 +185,53 @@ let tests =
                   Expect.equal (valueOf "gx1" r) (Some "first") "first hole"
                   Expect.equal (valueOf "gx2" r) (Some "second") "second hole — no capture"
               | Error e -> failtestf "unexpected %A" e
+
+          // D281: a hole's QUALIFIED name (the slots it was composed through, then its own name) is
+          // unique in an admitted declaration. Two holes named `x` directly under one slot path are
+          // refused; the same fragment composed into two slots is admitted, its two holes named
+          // `slotA.x` and `slotB.x`, and `apply` still binds them by address (the case above).
+          testCase
+              "hygiene — two direct holes with one name are refused DuplicateHoleName; one fragment composed into two slots is admitted under qualified names (D281)"
+          <| fun _ ->
+              let art = twoSameName ()
+              let sg = Function.signature artw "two" art
+              Expect.equal (sg.Holes |> List.map _.Name) [ "x"; "x" ] "two holes share one qualified name"
+              Expect.equal (sg.Holes |> List.map _.Addr |> List.distinct |> List.length) 2 "at two addresses"
+
+              Expect.equal
+                  (Function.validate artw art)
+                  (Error(DuplicateHoleName "x"))
+                  "the artifact gate refuses the repeated name, at its second occurrence"
+
+              let frag (id: string) =
+                  RNode.node id "frag" [ RNode.hole (id + "x") "field" "x" (ValueHole AnyString) ]
+
+              let outer =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ RNode.hole "sa" "region" "slotA" (SlotHole(Some "frag"))
+                        RNode.hole "sb" "region" "slotB" (SlotHole(Some "frag")) ]
+
+              match
+                  Function.compose artw "root/sa" (frag "fa") outer
+                  |> Result.bind (Function.compose artw "root/sb" (frag "fb"))
+              with
+              | Error e -> failtestf "composing one fragment into two slots was refused: %A" e
+              | Ok composed ->
+                  let csg = Function.signature artw "two" composed
+
+                  Expect.equal
+                      (csg.Holes |> List.map (fun h -> h.Name, h.Addr))
+                      [ "slotA.x", "root/sa/fa/fax"; "slotB.x", "root/sb/fb/fbx" ]
+                      "each copy is named by the slot it was composed through"
+
+                  Expect.equal (Function.validate artw composed) (Ok()) "the artifact gate admits the composition"
+                  let cap = Capability.create "two" csg Server (Returns.Value AnyString)
+
+                  Expect.isOk
+                      (CapabilityRegistry.register cap CapabilityRegistry.empty<unit>)
+                      "the capability gate admits it, and its invocation is keyed by qualified name"
 
           testCase "totality — a bounded repeat is total, an unbounded one is not"
           <| fun _ ->
@@ -344,8 +394,8 @@ let tests =
               | Error(UnknownArg("zzz", _)) -> ()
               | other -> failtestf "expected UnknownArg, got %A" other
 
-              match Capability.validateArgs cap [ "slot", "x" ] with
-              | Error(UninvocableArg "slot") -> ()
+              match Capability.validateArgs cap [ "s", "x" ] with
+              | Error(UninvocableArg "s") -> ()
               | other -> failtestf "expected UninvocableArg, got %A" other
 
               match Capability.validateArgs cap [] with
@@ -375,7 +425,7 @@ let tests =
               let para = """{"kind":"para","text":"hi"}"""
 
               let args s =
-                  [ "tpl/t", "Hello"; "tpl/c", "5"; "tpl/s", s ]
+                  [ "title", "Hello"; "count", "5"; "body", s ]
 
               Expect.equal
                   (CapabilityRegistry.dispatch reg () None "tpl-cap" (args para) (fun _ () -> Ready "ran"))
@@ -389,13 +439,13 @@ let tests =
                       ran.Value <- true
                       Ready "ran")
               with
-              | Error(ArgOutOfSpace("tpl/s", SlotTree(Some "para"), """{"kind":"heading"}""")) ->
+              | Error(ArgOutOfSpace("body", SlotTree(Some "para"), """{"kind":"heading"}""")) ->
                   Expect.isFalse ran.Value "refused before the body"
               | other -> failtestf "expected ArgOutOfSpace naming the slot's constraint, got %A" other
 
               for notATree in [ "hi"; "42"; "[1,2]"; """{"text":"no kind"}"""; """{"kind":7}"""; "{" ] do
                   match Capability.validateArgs cap (args notATree) with
-                  | Error(UninvocableArg "tpl/s") -> ()
+                  | Error(UninvocableArg "body") -> ()
                   | other -> failtestf "a slot bound to %s: expected UninvocableArg, got %A" notATree other
 
               // an unconstrained slot takes a tree of any kind, and still no scalar
@@ -417,7 +467,7 @@ let tests =
 
               Expect.equal
                   schema
-                  """{"kind":"signature","name":"tpl","effect":{"host":"pure","determinism":"deterministic"},"holes":[{"addr":"tpl/t","name":"title","kind":"value","required":true,"space":{"kind":"stringLen","minLength":1,"maxLength":20}},{"addr":"tpl/c","name":"count","kind":"value","required":true,"space":{"kind":"intRange","min":0,"max":10}},{"addr":"tpl/s","name":"body","kind":"slot","required":true,"slotKind":"para"}],"required":["tpl/t","tpl/c","tpl/s"]}"""
+                  """{"kind":"signature","name":"tpl","effect":{"host":"pure","determinism":"deterministic"},"holes":[{"addr":"tpl/t","name":"title","kind":"value","required":true,"space":{"kind":"stringLen","minLength":1,"maxLength":20}},{"addr":"tpl/c","name":"count","kind":"value","required":true,"space":{"kind":"intRange","min":0,"max":10}},{"addr":"tpl/s","name":"body","kind":"slot","required":true,"slotKind":"para"}],"required":["title","count","body"]}"""
                   "the literal pre-229 tool schema"
 
               let enc sg =
@@ -631,10 +681,10 @@ let actionHoleTests =
               // the data hole is the only argument the AI fills
               Expect.stringContains
                   json
-                  "\"properties\":{\"btn/lbl\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":20}}"
+                  "\"properties\":{\"label\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":20}}"
                   "only the data hole is a property"
 
-              Expect.stringContains json "\"required\":[\"btn/lbl\"]" "action excluded from required"
+              Expect.stringContains json "\"required\":[\"label\"]" "action excluded from required"
               // the dispatch slot travels as the host's hole-binding surface
               Expect.stringContains
                   json
@@ -1453,7 +1503,7 @@ let memoTests =
                   { NewId = "g"
                     BaseId = "ghost"
                     BaseSignatureVersion = "x"
-                    BoundAddrs = Set.empty }
+                    BoundNames = Set.empty }
 
               let manifest =
                   { PackId = "pk"
@@ -1485,7 +1535,7 @@ let memoTests =
 
           testCase "the packaging contract carries no pack content (FGP 6 — content-free manifest)"
           <| fun _ ->
-              // A manifest is fully expressible from ids / addresses / version tags ALONE — no domain node,
+              // A manifest is fully expressible from ids / hole names / version tags ALONE — no domain node,
               // tree, or payload is constructible into it (PackManifest is non-generic: it has no 'Node type
               // parameter). Authoring the distribution surface never touches a domain type, so the Apache-2.0
               // abstractions package depends on no domain payload.
@@ -1497,10 +1547,10 @@ let memoTests =
                       [ { NewId = "swing-feel"
                           BaseId = "groove"
                           BaseSignatureVersion = "abc123"
-                          BoundAddrs = Set.ofList [ "groove/style" ] } ] }
+                          BoundNames = Set.ofList [ "style" ] } ] }
 
               Expect.equal manifest.Functions.Length 1 "a content pack is just typed partial-application declarations"
-              Expect.equal manifest.Domain "music" "carries only metadata — domain tag, ids, addresses, version" ]
+              Expect.equal manifest.Domain "music" "carries only metadata — domain tag, ids, hole names, version" ]
 
 // ---- Phase 295: the invocable seams converge ----
 
@@ -1722,7 +1772,7 @@ let convergenceTests =
                   (Ok(StringLen(1, 4)))
                   "the document spelling reads back"
 
-          testCase "a pack binding an address that is not a bindable hole is refused UnknownBoundAddr"
+          testCase "a pack binding a name that is not a bindable hole is refused UnknownBoundName"
           <| fun _ ->
               let pf = ContentPack.pack "doc-fn.typo" (Set.ofList [ "h9" ]) (packBaseEntry ())
 
@@ -1733,8 +1783,8 @@ let convergenceTests =
                     Functions = [ pf ] }
 
               match ContentPack.load manifest (packBaseReg ()) with
-              | Error(UnknownBoundAddr("p", "doc-fn.typo", "h9", [ "h0"; "h1" ])) -> ()
-              | other -> failtestf "expected UnknownBoundAddr, got %A" other
+              | Error(UnknownBoundName("p", "doc-fn.typo", "h9", [ "h0"; "h1" ])) -> ()
+              | other -> failtestf "expected UnknownBoundName, got %A" other
 
               match FunctionRegistry.narrow "x" (Set.ofList [ "h0" ]) (packBaseEntry ()) with
               | Ok e -> Expect.equal (e.Capability.Signature.Holes |> List.map _.Addr) [ "h1" ] "narrowed"
@@ -1866,8 +1916,20 @@ let private probes307: (string * SigEntry list * InvokeError) list =
       [ entry307 "x" (ValueHole(FloatRange(-infinity, 1.0))) ],
       IllFormedCapability("c", NonFiniteBound "x")
       "two holes at one address",
-      [ entry307 "a" (ValueHole AnyString); entry307 "a" (ValueHole AnyString) ],
-      IllFormedCapability("c", DuplicateHoleAddr "a") ]
+      [ entry307 "a" (ValueHole AnyString)
+        { entry307 "a" (ValueHole AnyString) with
+            Name = "b" } ],
+      IllFormedCapability("c", DuplicateHoleAddr "a")
+      // Phase 712 (D281): the qualified name is held to the segment grammar and to uniqueness
+      "a hole name holding a space",
+      [ { entry307 "a" (ValueHole AnyString) with
+            Name = "my a" } ],
+      IllFormedCapability("c", IllFormedHoleName "my a")
+      "two holes with one name",
+      [ entry307 "a" (ValueHole AnyString)
+        { entry307 "b" (ValueHole AnyString) with
+            Name = "a" } ],
+      IllFormedCapability("c", DuplicateHoleName "a") ]
 
 /// A capability over one integer hole, for the reader and duplicate checks.
 let private intCap307 =
@@ -2287,7 +2349,9 @@ let readerAdmissionTests =
                   [ "a count past the cap"
                     "a negative count"
                     "two holes at one address"
-                    "an empty enum" ]
+                    "an empty enum"
+                    "a hole name holding a space"
+                    "two holes with one name" ]
                   "both halves of the gate — totality and well-formedness — reach the reader"
 
           testCase "a non-total declaration is NonTotalCapability at the reader, not a well-formedness refusal"
@@ -2330,17 +2394,17 @@ let readerAdmissionTests =
 let internal invokeBaselines528: (InvokeError * string) list =
     [ NoSuchCapability("x", [ "a"; "b" ]), "{\"$type\":\"noSuchCapability\",\"id\":\"x\",\"known\":[\"a\",\"b\"]}"
       DuplicateCapability "x", "{\"$type\":\"duplicateCapability\",\"id\":\"x\"}"
-      UnknownArg("a", [ "b"; "c" ]), "{\"$type\":\"unknownArg\",\"addr\":\"a\",\"declared\":[\"b\",\"c\"]}"
+      UnknownArg("a", [ "b"; "c" ]), "{\"$type\":\"unknownArg\",\"declared\":[\"b\",\"c\"],\"name\":\"a\"}"
       ArgOutOfSpace("a", IntRange(-1, 1), "9"),
-      "{\"$type\":\"argOutOfSpace\",\"addr\":\"a\",\"got\":\"9\",\"space\":{\"$type\":\"intRange\",\"max\":1,\"min\":-1}}"
-      RequiredArgsUnbound [ "a"; "b" ], "{\"$type\":\"requiredArgsUnbound\",\"addrs\":[\"a\",\"b\"]}"
-      UninvocableArg "a", "{\"$type\":\"uninvocableArg\",\"addr\":\"a\"}"
+      "{\"$type\":\"argOutOfSpace\",\"got\":\"9\",\"name\":\"a\",\"space\":{\"$type\":\"intRange\",\"max\":1,\"min\":-1}}"
+      RequiredArgsUnbound [ "a"; "b" ], "{\"$type\":\"requiredArgsUnbound\",\"names\":[\"a\",\"b\"]}"
+      UninvocableArg "a", "{\"$type\":\"uninvocableArg\",\"name\":\"a\"}"
       BodyFailed "boom", "{\"$type\":\"bodyFailed\",\"reason\":\"boom\"}"
-      NonTotalCapability("x", [ "r" ]), "{\"$type\":\"nonTotalCapability\",\"addrs\":[\"r\"],\"id\":\"x\"}"
+      NonTotalCapability("x", [ "r" ]), "{\"$type\":\"nonTotalCapability\",\"id\":\"x\",\"names\":[\"r\"]}"
       IllFormedCapability("x", EmptySpace("a", Enum [])),
-      "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"emptySpace\",\"addr\":\"a\",\"space\":{\"$type\":\"enum\",\"values\":[]}},\"id\":\"x\"}"
+      "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"emptySpace\",\"name\":\"a\",\"space\":{\"$type\":\"enum\",\"values\":[]}},\"id\":\"x\"}"
       IllFormedCapability("x", NonFiniteBound "b"),
-      "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"nonFiniteBound\",\"addr\":\"b\"},\"id\":\"x\"}"
+      "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"nonFiniteBound\",\"name\":\"b\"},\"id\":\"x\"}"
       IllFormedCapability("x", DuplicateHoleAddr "c"),
       "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"duplicateHoleAddr\",\"addr\":\"c\"},\"id\":\"x\"}"
       IllFormedCapability("x", HoleUnderSlot "n"),
@@ -2349,7 +2413,11 @@ let internal invokeBaselines528: (InvokeError * string) list =
       "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"emptyResult\",\"space\":{\"$type\":\"enum\",\"values\":[]}},\"id\":\"x\"}"
       IllFormedCapability("x", NonFiniteResult),
       "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"nonFiniteResult\"},\"id\":\"x\"}"
-      DuplicateArg "a", "{\"$type\":\"duplicateArg\",\"addr\":\"a\"}"
+      IllFormedCapability("x", IllFormedHoleName "my a"),
+      "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"illFormedHoleName\",\"name\":\"my a\"},\"id\":\"x\"}"
+      IllFormedCapability("x", DuplicateHoleName "slotA.x"),
+      "{\"$type\":\"illFormedCapability\",\"fault\":{\"$type\":\"duplicateHoleName\",\"name\":\"slotA.x\"},\"id\":\"x\"}"
+      DuplicateArg "a", "{\"$type\":\"duplicateArg\",\"name\":\"a\"}"
       PolicyRefused("p", "r", [ "a" ]),
       "{\"$type\":\"policyRefused\",\"allowed\":[\"a\"],\"policy\":\"p\",\"reason\":\"r\"}"
       ApprovalRequired "p", "{\"$type\":\"approvalRequired\",\"policy\":\"p\"}" ]
@@ -2363,10 +2431,10 @@ let private invokeRefusals528: (string * string) list =
       "unknown $type 'nope'; expected one of 'noSuchCapability', 'duplicateCapability', 'unknownArg', 'argOutOfSpace', 'requiredArgsUnbound', 'uninvocableArg', 'bodyFailed', 'nonTotalCapability', 'illFormedCapability', 'duplicateArg', 'policyRefused', 'approvalRequired'"
       "{\"$type\":\"noSuchCapability\"}", "missing property: id"
       "{\"$type\":\"noSuchCapability\",\"id\":\"x\",\"known\":[1]}", "expected string, got int"
-      "{\"$type\":\"argOutOfSpace\",\"addr\":\"a\",\"got\":\"g\",\"space\":{\"$type\":\"intRange\",\"min\":\"x\",\"max\":1}}",
+      "{\"$type\":\"argOutOfSpace\",\"name\":\"a\",\"got\":\"g\",\"space\":{\"$type\":\"intRange\",\"min\":\"x\",\"max\":1}}",
       "expected int, got string"
       "{\"$type\":\"illFormedCapability\",\"id\":\"x\",\"fault\":{\"$type\":\"nope\"}}",
-      "unknown $type 'nope'; expected one of 'emptySpace', 'nonFiniteBound', 'duplicateHoleAddr', 'holeUnderSlot', 'emptyResult', 'nonFiniteResult'"
+      "unknown $type 'nope'; expected one of 'emptySpace', 'nonFiniteBound', 'duplicateHoleAddr', 'holeUnderSlot', 'emptyResult', 'nonFiniteResult', 'illFormedHoleName', 'duplicateHoleName'"
       "{\"$type\":\"illFormedCapability\",\"id\":\"x\",\"fault\":{\"$type\":\"holeUnderSlot\"}}",
       "missing property: node"
       "{\"$type\":\"policyRefused\",\"policy\":\"p\",\"reason\":\"r\"}", "missing property: allowed"
@@ -2440,7 +2508,7 @@ let private deferredRefusals528: (string * string * string) list =
 
 /// A pipeline holding both `PipelineNode` cases and both `ArgSource` cases, as `encode` writes it.
 let private pipelineBaseline528 =
-    "{\"nodes\":[{\"$type\":\"source\",\"dataRef\":\"ref\",\"id\":\"s\",\"outputType\":{\"$type\":\"intRange\",\"max\":9,\"min\":0}},{\"$type\":\"invoke\",\"args\":[{\"addr\":\"a\",\"source\":{\"$type\":\"literal\",\"value\":\"1\"}},{\"addr\":\"b\",\"source\":{\"$type\":\"fromNode\",\"node\":\"s\"}}],\"capabilityId\":\"cap\",\"id\":\"i\",\"outputType\":{\"$type\":\"anyString\"}}]}"
+    "{\"nodes\":[{\"$type\":\"source\",\"dataRef\":\"ref\",\"id\":\"s\",\"outputType\":{\"$type\":\"intRange\",\"max\":9,\"min\":0}},{\"$type\":\"invoke\",\"args\":[{\"name\":\"a\",\"source\":{\"$type\":\"literal\",\"value\":\"1\"}},{\"name\":\"b\",\"source\":{\"$type\":\"fromNode\",\"node\":\"s\"}}],\"capabilityId\":\"cap\",\"id\":\"i\",\"outputType\":{\"$type\":\"anyString\"}}]}"
 
 /// A pipeline document, then `decodeDetailed`'s refusal (code, path and sentence).
 let private pipelineRefusals528: (string * string) list =
@@ -2449,11 +2517,11 @@ let private pipelineRefusals528: (string * string) list =
       "UnknownTag at $[\"nodes\"][0][\"$type\"]: unknown $type 'sink'; expected one of 'source', 'invoke'"
       "{\"nodes\":[{\"$type\":\"source\",\"id\":\"s\",\"dataRef\":\"r\"}]}",
       "MissingField at $[\"nodes\"][0][\"outputType\"]: missing property: outputType"
-      "{\"nodes\":[{\"$type\":\"invoke\",\"id\":\"i\",\"capabilityId\":\"c\",\"outputType\":{\"$type\":\"anyString\"},\"args\":[{\"addr\":\"a\",\"source\":{\"$type\":\"constant\"}}]}]}",
+      "{\"nodes\":[{\"$type\":\"invoke\",\"id\":\"i\",\"capabilityId\":\"c\",\"outputType\":{\"$type\":\"anyString\"},\"args\":[{\"name\":\"a\",\"source\":{\"$type\":\"constant\"}}]}]}",
       "UnknownTag at $[\"nodes\"][0][\"args\"][0][\"source\"][\"$type\"]: unknown $type 'constant'; expected one of 'literal', 'fromNode'"
-      "{\"nodes\":[{\"$type\":\"invoke\",\"id\":\"i\",\"capabilityId\":\"c\",\"outputType\":{\"$type\":\"anyString\"},\"args\":[{\"addr\":\"a\",\"source\":{\"$type\":\"literal\"}}]}]}",
+      "{\"nodes\":[{\"$type\":\"invoke\",\"id\":\"i\",\"capabilityId\":\"c\",\"outputType\":{\"$type\":\"anyString\"},\"args\":[{\"name\":\"a\",\"source\":{\"$type\":\"literal\"}}]}]}",
       "MissingField at $[\"nodes\"][0][\"args\"][0][\"source\"][\"value\"]: missing property: value"
-      "{\"nodes\":[{\"$type\":\"invoke\",\"id\":\"i\",\"capabilityId\":\"c\",\"outputType\":{\"$type\":\"anyString\"},\"args\":[{\"addr\":\"a\",\"source\":{\"$type\":\"fromNode\",\"nodeId\":3}}]}]}",
+      "{\"nodes\":[{\"$type\":\"invoke\",\"id\":\"i\",\"capabilityId\":\"c\",\"outputType\":{\"$type\":\"anyString\"},\"args\":[{\"name\":\"a\",\"source\":{\"$type\":\"fromNode\",\"nodeId\":3}}]}]}",
       "MissingField at $[\"nodes\"][0][\"args\"][0][\"source\"][\"node\"]: missing property: node" ]
 
 /// A schema delta amending every `FieldChange` case, as `SchemaDeltaCodec.encode` writes it.
@@ -2734,3 +2802,399 @@ let seamBaselineTests528 =
                   (Error
                       "OutOfRange at $[\"determinism\"]: out of range: capability determinism disagrees with signature effect: wire 'network' vs signature 'deterministic'; expected 'deterministic', the signature's determinism")
                   "the earlier-read fault wins" ]
+
+// ---- Phase 712 (D281): a capability invocation binds by the hole's qualified name ----
+
+/// A fragment of kind `kind` holding one value hole named `name`; `id` keeps its node ids distinct
+/// from every other use of the fragment.
+let private fragOf (id: string) (kind: string) (name: string) (hk: HoleKind) : RNode =
+    RNode.node id kind [ RNode.hole (id + "h") "field" name hk ]
+
+/// A signature built from the composed tree, or the test fails naming the composition's refusal.
+let private composedSig (name: string) (r: Result<RNode, ApplyError>) : RNode * Signature =
+    match r with
+    | Ok n -> n, Function.signature artw name n
+    | Error e -> failtestf "the composition was refused: %A" e
+
+/// root [ sa: slot `slotA` (kind `frag`); act: action `onDone` ], with a fragment holding `amount`
+/// (an integer from 0 to 10) and `body` (a `para` slot) bound into `slotA`.
+let private ledger () : RNode * Signature =
+    let frag =
+        RNode.node
+            "fa"
+            "frag"
+            [ RNode.hole "faAmt" "field" "amount" (ValueHole(IntRange(0, 10)))
+              RNode.hole "faTree" "region" "body" (SlotHole(Some "para")) ]
+
+    let outer =
+        RNode.node
+            "root"
+            "doc"
+            [ RNode.hole "sa" "region" "slotA" (SlotHole(Some "frag"))
+              RNode.hole "act" "button" "onDone" (ActionHole Effect.pureDeterministic) ]
+
+    composedSig "ledger" (Function.compose artw "root/sa" frag outer)
+
+let private capOf (sg: Signature) : Capability =
+    Capability.create sg.Name sg Server (Returns.Value AnyString)
+
+let private memberOf (name: string) (j: JVal) : JVal =
+    match j with
+    | JObj ms ->
+        match List.tryFind (fst >> (=) name) ms with
+        | Some(_, v) -> v
+        | None -> failtestf "no member %s in %A" name j
+    | other -> failtestf "not an object: %A" other
+
+/// The names `toJsonSchema` keys a property by, and the names it lists as required.
+let private schemaNames (sg: Signature) : string list * string list =
+    let schema = Function.toJsonSchema sg
+
+    let props =
+        match memberOf "properties" schema with
+        | JObj ms -> ms |> List.map fst
+        | other -> failtestf "properties is not an object: %A" other
+
+    let required =
+        match memberOf "required" schema with
+        | JArr xs ->
+            xs
+            |> List.map (function
+                | JStr s -> s
+                | other -> failtestf "a required entry is not a string: %A" other)
+        | other -> failtestf "required is not an array: %A" other
+
+    props, required
+
+[<Tests>]
+let qualifiedNameTests =
+    testList
+        "Capability arguments by qualified name (Phase 712, D281)"
+        [ testCase "a hole composed through a slot is named by the slot, and its address is the artifact's"
+          <| fun _ ->
+              let _, sg = ledger ()
+
+              Expect.equal
+                  (sg.Holes |> List.map (fun h -> h.Name, h.Addr))
+                  [ "slotA.amount", "root/sa/fa/faAmt"
+                    "slotA.body", "root/sa/fa/faTree"
+                    "onDone", "root/act" ]
+                  "qualified names, addresses unchanged"
+
+          testCase "every argument refusal names the hole by its qualified name"
+          <| fun _ ->
+              let c = capOf (snd (ledger ()))
+              let declared = [ "slotA.amount"; "slotA.body"; "onDone" ]
+              let tree = """{"kind":"para"}"""
+
+              Expect.equal
+                  (Capability.validateArgs c [ "slotA.amount", "4"; "slotA.body", tree ])
+                  (Ok())
+                  "bound by name, admitted"
+
+              Expect.equal
+                  (Capability.validateArgs c [ "slotA.amout", "4" ])
+                  (Error(UnknownArg("slotA.amout", declared)))
+                  "UnknownArg names the stray and every declared name"
+
+              Expect.equal
+                  (Capability.validateArgs c [ "slotA.amount", "11"; "slotA.body", tree ])
+                  (Error(ArgOutOfSpace("slotA.amount", IntRange(0, 10), "11")))
+                  "ArgOutOfSpace names the hole"
+
+              Expect.equal
+                  (Capability.validateArgs c [])
+                  (Error(RequiredArgsUnbound [ "slotA.amount"; "slotA.body" ]))
+                  "RequiredArgsUnbound names the unbound holes"
+
+              Expect.equal
+                  (Capability.validateArgs c [ "onDone", "x" ])
+                  (Error(UninvocableArg "onDone"))
+                  "an action hole is UninvocableArg by name"
+
+              Expect.equal
+                  (Capability.validateArgs c [ "slotA.amount", "4"; "slotA.body", "3" ])
+                  (Error(UninvocableArg "slotA.body"))
+                  "a slot handed no tree is UninvocableArg by name"
+
+              Expect.equal
+                  (Capability.validateArgs c [ "slotA.amount", "4"; "slotA.amount", "5" ])
+                  (Error(DuplicateArg "slotA.amount"))
+                  "DuplicateArg names the repeated name"
+
+              Expect.equal
+                  (CapabilityRegistry.register
+                      (Capability.create
+                          "unbounded"
+                          { Name = "unbounded"
+                            Holes =
+                              [ { Addr = "u/r"
+                                  Name = "rows"
+                                  Kind = RepeatHole AnyString
+                                  Required = false } ]
+                            Effect = Effect.pureDeterministic }
+                          Server
+                          (Returns.Value AnyString))
+                      CapabilityRegistry.empty<unit>
+                   |> Result.map ignore)
+                  (Error(NonTotalCapability("unbounded", [ "rows" ])))
+                  "NonTotalCapability names the hole"
+
+          testCase "an invocation keyed by an address is refused UnknownArg naming the qualified names"
+          <| fun _ ->
+              let c = capOf (snd (ledger ()))
+
+              Expect.equal
+                  (Capability.validateArgs c [ "root/sa/fa/faAmt", "4"; "slotA.body", """{"kind":"para"}""" ])
+                  (Error(UnknownArg("root/sa/fa/faAmt", [ "slotA.amount"; "slotA.body"; "onDone" ])))
+                  "the address is not a key the seam binds by"
+
+          testCase "a repeat hole's count is bound by the repeat hole's qualified name"
+          <| fun _ ->
+              let outer =
+                  RNode.node "root" "doc" [ RNode.hole "sr" "region" "rows" (SlotHole(Some "frag")) ]
+
+              let _, sg =
+                  composedSig
+                      "rows"
+                      (Function.compose artw "root/sr" (fragOf "fr" "frag" "count" (RepeatHole(IntRange(0, 5)))) outer)
+
+              let c = capOf sg
+              Expect.equal (sg.Holes |> List.map _.Name) [ "rows.count" ] "one argument, the count"
+              Expect.equal (Capability.validateArgs c [ "rows.count", "3" ]) (Ok()) "the count binds by name"
+
+              Expect.equal
+                  (Capability.validateArgs c [ "rows.count", "9" ])
+                  (Error(ArgOutOfSpace("rows.count", IntRange(0, 5), "9")))
+                  "a count outside the space is refused by name"
+
+              Expect.equal
+                  (Capability.validateArgs c [])
+                  (Error(RequiredArgsUnbound [ "rows.count" ]))
+                  "a bounded repeat is required, by name"
+
+          testCase "a slot hole is bound by its name; once composed its holes are slot.inner, and invocable so"
+          <| fun _ ->
+              let tpl = template ()
+              let open' = capOf (Function.signature artw "tpl" tpl)
+
+              Expect.equal
+                  (Capability.validateArgs open' [ "title", "Hi"; "count", "3"; "body", """{"kind":"para"}""" ])
+                  (Ok())
+                  "the slot binds a tree by its name"
+
+              let composed, sg =
+                  composedSig "tpl" (Function.compose artw "tpl/s" (fragOf "p" "para" "x" (ValueHole AnyString)) tpl)
+
+              let c = capOf sg
+              Expect.equal (sg.Holes |> List.map _.Name) [ "title"; "count"; "body.x" ] "the inner hole is body.x"
+
+              Expect.equal
+                  (Capability.validateArgs c [ "title", "Hi"; "count", "3"; "body.x", "v" ])
+                  (Ok())
+                  "invocable by the qualified name"
+
+              Expect.equal
+                  (Capability.validateArgs c [ "title", "Hi"; "count", "3"; "x", "v" ])
+                  (Error(UnknownArg("x", [ "title"; "count"; "body.x" ])))
+                  "the bare inner name is not a key"
+
+              // a function registry maps each name to its address through the signature, then applies
+              let args = [ "title", "Hi"; "count", "3"; "body.x", "v" ]
+              let entry = FunctionRegistry.entry c
+              let addressed = FunctionRegistry.addressed entry args
+
+              Expect.equal
+                  addressed
+                  [ "tpl/t", "Hi"; "tpl/c", "3"; "tpl/s/p/ph", "v" ]
+                  "re-keyed to addresses in argument order"
+
+              match
+                  Function.apply artw (addressed |> List.map (fun (a, v) -> a, ValueArg v) |> Map.ofList) composed
+              with
+              | Ok r -> Expect.equal (valueOf "ph" r) (Some "v") "the inner hole bound by its address"
+              | Error e -> failtestf "apply refused the addressed arguments: %A" e
+
+          testCase "nested composition qualifies a hole by every slot outermost first"
+          <| fun _ ->
+              let mid =
+                  RNode.node "mid" "frag" [ RNode.hole "si" "region" "inner" (SlotHole(Some "leaf")) ]
+
+              let outer =
+                  RNode.node "root" "doc" [ RNode.hole "so" "region" "outer" (SlotHole(Some "frag")) ]
+
+              let _, sg =
+                  composedSig
+                      "nested"
+                      (Function.compose artw "mid/si" (fragOf "lf" "leaf" "x" (ValueHole AnyString)) mid
+                       |> Result.bind (fun m -> Function.compose artw "root/so" m outer))
+
+              Expect.equal
+                  (sg.Holes |> List.map (fun h -> h.Name, h.Addr))
+                  [ "outer.inner.x", "root/so/mid/si/lf/lfh" ]
+                  "outer.inner.x"
+
+              Expect.equal (Capability.validateArgs (capOf sg) [ "outer.inner.x", "v" ]) (Ok()) "invocable so"
+
+          testCase
+              "the admission gate refuses an ill-formed hole name: a space, an empty segment, a '.' a witness writes"
+          <| fun _ ->
+              let sigOf names =
+                  { Name = "s"
+                    Holes =
+                      names
+                      |> List.mapi (fun i n ->
+                          { Addr = sprintf "s/h%d" i
+                            Name = n
+                            Kind = ValueHole AnyString
+                            Required = true })
+                    Effect = Effect.pureDeterministic }
+
+              for bad in [ "my amount"; ""; ".x"; "x."; "slotA..x"; "amount!"; "naïve" ] do
+                  Expect.equal
+                      (Signature.validate (sigOf [ "ok"; bad ]))
+                      (Error(IllFormedHoleName bad))
+                      (sprintf "'%s' is ill-formed" bad)
+
+              Expect.equal (Signature.validate (sigOf [ "slotA.x"; "a_b-9" ])) (Ok()) "well-formed names are admitted"
+
+              Expect.equal
+                  (CapabilityRegistry.register (capOf (sigOf [ "my amount" ])) CapabilityRegistry.empty<unit>
+                   |> Result.map ignore)
+                  (Error(IllFormedCapability("s", IllFormedHoleName "my amount")))
+                  "the registry runs the gate"
+
+              // a witness writing a '.' INTO a hole's own name: the joined name reads `a.b`, but it is no
+              // slot's `b`, and the artifact gate (which sees the segments) refuses it
+              let dotted =
+                  RNode.node "root" "doc" [ RNode.hole "h" "field" "a.b" (ValueHole AnyString) ]
+
+              Expect.equal (Function.validate artw dotted) (Error(IllFormedHoleName "a.b")) "a '.' inside a segment"
+
+              let spaced =
+                  RNode.node "root" "doc" [ RNode.hole "h" "field" "my amount" (ValueHole AnyString) ]
+
+              Expect.equal (Function.validate artw spaced) (Error(IllFormedHoleName "my amount")) "a space"
+
+              let outer =
+                  RNode.node "root" "doc" [ RNode.hole "sa" "region" "slotA" (SlotHole(Some "frag")) ]
+
+              Expect.equal
+                  (Function.compose artw "root/sa" (fragOf "f" "frag" "a.b" (ValueHole AnyString)) outer)
+                  (Error(IllFormedResult(IllFormedHoleName "slotA.a.b")))
+                  "compose refuses a fragment whose hole name holds a '.'"
+
+          testCase "the admission gate refuses two holes with one qualified name, at the second"
+          <| fun _ ->
+              let sg =
+                  { Name = "dup"
+                    Holes =
+                      [ { Addr = "d/a"
+                          Name = "slotA.x"
+                          Kind = ValueHole AnyString
+                          Required = true }
+                        { Addr = "d/b"
+                          Name = "slotA.y"
+                          Kind = ValueHole AnyString
+                          Required = true }
+                        { Addr = "d/c"
+                          Name = "slotA.x"
+                          Kind = ValueHole AnyString
+                          Required = true } ]
+                    Effect = Effect.pureDeterministic }
+
+              Expect.equal (Signature.validate sg) (Error(DuplicateHoleName "slotA.x")) "DuplicateHoleName"
+
+              Expect.equal
+                  (CapabilityRegistry.register (capOf sg) CapabilityRegistry.empty<unit>
+                   |> Result.map ignore)
+                  (Error(IllFormedCapability("dup", DuplicateHoleName "slotA.x")))
+                  "the registry runs the gate"
+
+          testCase "the JSON Schema keys and requires exactly the names an invocation accepts and demands"
+          <| fun _ ->
+              let repeats =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ RNode.hole "r" "region" "rows" (RepeatHole(IntRange(0, 5)))
+                        RNode.hole "u" "region" "extra" (RepeatHole AnyString) ]
+
+              let withAction =
+                  RNode.node
+                      "root"
+                      "doc"
+                      [ RNode.hole "n" "field" "n" (ValueHole(IntRange(0, 3)))
+                        RNode.hole "go" "button" "onGo" (ActionHole Effect.pureDeterministic) ]
+
+              let signatures =
+                  [ Function.signature artw "tpl" (template ())
+                    snd (ledger ())
+                    Function.signature artw "rows" repeats
+                    Function.signature artw "act" withAction
+                    snd (
+                        composedSig
+                            "tpl"
+                            (Function.compose artw "tpl/s" (fragOf "p" "para" "x" (ValueHole AnyString)) (template ()))
+                    ) ]
+
+              for sg in signatures do
+                  let c = capOf sg
+                  let props, required = schemaNames sg
+
+                  // a name is ACCEPTED when some value bound to it is not refused as no argument of this
+                  // capability (UnknownArg) or as one no value can fill (UninvocableArg)
+                  let accepted (name: string) =
+                      [ "0"; """{"kind":"para"}""" ]
+                      |> List.exists (fun v ->
+                          match Capability.validateArgs c [ name, v ] with
+                          | Error(UnknownArg _)
+                          | Error(UninvocableArg _) -> false
+                          | _ -> true)
+
+                  let candidates =
+                      (sg.Holes |> List.collect (fun h -> [ h.Name; h.Addr ])) @ [ "nope" ]
+                      |> List.distinct
+
+                  Expect.equal
+                      (Set.ofList props)
+                      (candidates |> List.filter accepted |> Set.ofList)
+                      (sprintf "%s: the properties are the accepted names" sg.Name)
+
+                  let demanded =
+                      match Capability.validateArgs c [] with
+                      | Error(RequiredArgsUnbound names) -> names
+                      | Ok() -> []
+                      | other -> failtestf "%s: an empty invocation answered %A" sg.Name other
+
+                  Expect.equal required demanded (sprintf "%s: required is what an empty invocation demands" sg.Name)
+
+          testCase "an invocation document keyed by address is refused: no name, and strict names addr undeclared"
+          <| fun _ ->
+              let old =
+                  """{"$type":"invocation","capabilityId":"c","args":[{"addr":"h0","value":"1"}]}"""
+
+              match CapabilityCodec.decodeInvocationDetailedWith ReadPolicy.Lenient old with
+              | Error e ->
+                  Expect.equal
+                      (e.Code, e.Path)
+                      (DecodeCode.MissingField, [ PathSegment.Key "args"; PathSegment.Index 0; PathSegment.Key "name" ])
+                      "MissingField at args[0].name"
+              | Ok r -> failtestf "the old document was read as %A" r
+
+              Expect.isError (CapabilityCodec.decodeInvocation old) "the text reader refuses it too"
+
+              match CapabilityCodec.decodeInvocationDetailedWith ReadPolicy.Strict old with
+              | Error e ->
+                  Expect.equal
+                      (e.Code, e.Path)
+                      (DecodeCode.UndeclaredMember,
+                       [ PathSegment.Key "args"; PathSegment.Index 0; PathSegment.Key "addr" ])
+                      "strict names addr an undeclared member"
+              | Ok r -> failtestf "the old document was read as %A" r
+
+              Expect.equal
+                  (CapabilityCodec.decodeInvocation
+                      """{"$type":"invocation","capabilityId":"c","args":[{"name":"slotA.x","value":"1"}]}""")
+                  (Ok("c", [ "slotA.x", "1" ]))
+                  "the document keyed by name reads back" ]

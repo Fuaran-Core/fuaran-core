@@ -78,7 +78,9 @@ module internal FunctionLaws =
             // ---- hygiene holds under re-binding ----
             // Wire two same-named (distinct-id) inner holes into the two slots; each re-roots under
             // its slot's absolute address, so the composed function exposes two distinct copies.
-            // Binding one must leave the other open (Fork 2 — no capture).
+            // Binding one must leave the other open (Fork 2 — no capture). The copies share their own
+            // name and differ in the slots they were composed through (Phase 712, D281), so their
+            // qualified names differ too and the composed declaration is admitted.
             let twoCopies =
                 Function.composeAcross wa wb embed s.SlotA s.OpenInnerA s.Outer
                 |> Result.bind (Function.composeAcross wa wb embed s.SlotB s.OpenInnerB)
@@ -88,7 +90,7 @@ module internal FunctionLaws =
                  hygiene.Check(false, fun () -> at (sprintf "composing open inners into both slots failed: %A" e))
              | Ok composed ->
                  let copies =
-                     (Function.signature wa "comp" composed).Holes
+                     wa.Holes composed
                      |> List.filter (fun h -> h.Name = s.OpenHoleName)
                      |> List.map _.Addr
 

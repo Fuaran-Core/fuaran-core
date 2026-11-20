@@ -23,7 +23,7 @@ let tests =
                   + "{\"addr\":\"tpl/t\",\"name\":\"title\",\"kind\":\"value\",\"required\":true,\"space\":{\"kind\":\"stringLen\",\"minLength\":1,\"maxLength\":20}},"
                   + "{\"addr\":\"tpl/c\",\"name\":\"count\",\"kind\":\"value\",\"required\":true,\"space\":{\"kind\":\"intRange\",\"min\":0,\"max\":10}},"
                   + "{\"addr\":\"tpl/s\",\"name\":\"body\",\"kind\":\"slot\",\"required\":true,\"slotKind\":\"para\"}"
-                  + "],\"required\":[\"tpl/t\",\"tpl/c\",\"tpl/s\"]}"
+                  + "],\"required\":[\"title\",\"count\",\"body\"]}"
 
               Expect.equal json expected "canonical schema shape"
               Expect.equal (Json.render (Function.toSchema sg)) json "stable for a fixed signature"
@@ -58,7 +58,7 @@ let tests =
               let sg = Function.signature artw "r" repeatTree
               let json = Json.render (Function.toSchema sg)
               Expect.stringContains json "\"kind\":\"repeat\",\"required\":true" "a bounded repeat is required"
-              Expect.stringContains json "\"required\":[\"root/r\"]" "and listed among the required addresses" ]
+              Expect.stringContains json "\"required\":[\"rep\"]" "and listed among the required names (Phase 712)" ]
 
 // Phase 04 — standard JSON Schema projection: a saved artifact-function as a registerable tool.
 [<Tests>]
@@ -74,10 +74,10 @@ let jsonSchemaTests =
                   "{\"type\":\"object\",\"title\":\"tpl\","
                   + "\"x-effect\":{\"host\":\"pure\",\"determinism\":\"deterministic\"},"
                   + "\"properties\":{"
-                  + "\"tpl/t\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":20},"
-                  + "\"tpl/c\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":10},"
-                  + "\"tpl/s\":{\"type\":\"object\",\"description\":\"slot of kind: para\"}"
-                  + "},\"required\":[\"tpl/t\",\"tpl/c\",\"tpl/s\"]}"
+                  + "\"title\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":20},"
+                  + "\"count\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":10},"
+                  + "\"body\":{\"type\":\"object\",\"description\":\"slot of kind: para\"}"
+                  + "},\"required\":[\"title\",\"count\",\"body\"]}"
 
               Expect.equal json expected "standard JSON-Schema shape"
               Expect.equal (Json.render (Function.toJsonSchema sg)) json "stable for a fixed signature"

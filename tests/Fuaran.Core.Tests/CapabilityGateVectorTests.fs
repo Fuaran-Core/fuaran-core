@@ -29,7 +29,7 @@ let private items (name: string) (el: JVal) : JVal list =
     | other -> failwithf "`%s` is not an array: %A" name other
 
 let private argsOf (el: JVal) : (string * string) list =
-    items "args" el |> List.map (fun a -> text "addr" a, text "value" a)
+    items "args" el |> List.map (fun a -> text "name" a, text "value" a)
 
 let private grantOf (el: JVal) : Grant option =
     match field "grant" el with
@@ -66,7 +66,7 @@ let private refusalMembers (e: InvokeError) : (string * JVal) list =
         [ "error", JStr "noSuchCapability"
           "id", JStr id
           "known", JArr(known |> List.map JStr) ]
-    | ArgOutOfSpace(addr, _, _) -> [ "error", JStr "argOutOfSpace"; "addr", JStr addr ]
+    | ArgOutOfSpace(name, _, _) -> [ "error", JStr "argOutOfSpace"; "name", JStr name ]
     | PolicyRefused(policy, reason, allowed) ->
         [ "error", JStr "policyRefused"
           "policy", JStr policy

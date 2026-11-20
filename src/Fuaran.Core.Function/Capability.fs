@@ -78,29 +78,31 @@ type InvokeError =
     | NoSuchCapability of id: string * known: string list
     /// Registration under an id the registry already holds; the registry is left unchanged.
     | DuplicateCapability of id: string
-    /// An argument addresses no hole of the signature; `declared` lists every hole address.
-    | UnknownArg of addr: string * declared: string list
+    /// An argument names no hole of the signature; `declared` lists every hole's qualified name
+    /// (Phase 712, D281).
+    | UnknownArg of name: string * declared: string list
     /// An argument's value `got` is not in its hole's `space`; for a slot, a tree of the wrong kind.
-    | ArgOutOfSpace of addr: string * space: ValueSpace * got: string
-    /// These required holes received no argument, in declaration order.
-    | RequiredArgsUnbound of addrs: string list
+    | ArgOutOfSpace of name: string * space: ValueSpace * got: string
+    /// These required holes, by qualified name, received no argument, in declaration order.
+    | RequiredArgsUnbound of names: string list
     /// The hole cannot take a caller's value at all: an action hole, or a slot sent something that
     /// is not a `"kind"`-tagged object.
-    | UninvocableArg of addr: string
+    | UninvocableArg of name: string
     /// The arguments validated and the body ran, answering `Failed reason`.
     | BodyFailed of reason: string
     /// A registration refused because the capability's signature is not total (Phase 295): the
-    /// repeat holes it names range over an unbounded count space, or an entry projects to no hole
-    /// kind. Declared last, so every earlier case keeps its tag.
-    | NonTotalCapability of id: string * addrs: string list
+    /// repeat holes it names, by qualified name, range over an unbounded count space, or an entry
+    /// projects to no hole kind. Declared last, so every earlier case keeps its tag.
+    | NonTotalCapability of id: string * names: string list
     /// A registration refused because the capability's signature is not a well-formed declaration
-    /// (Phase 307): `Signature.validate`'s first fault — an empty or non-finite space, or two holes
-    /// at one address.
+    /// (Phase 307): `Signature.validate`'s first fault — an ill-formed or repeated qualified name,
+    /// two holes at one address, or an empty or non-finite space.
     | IllFormedCapability of id: string * fault: DeclarationFault
-    /// An invocation binds this address twice (Phase 307). Refused before anything else is read of
-    /// the second binding: one address takes one value, so which one was meant is not a question
-    /// the seam answers, and a capture key over the list would depend on its order.
-    | DuplicateArg of addr: string
+    /// An invocation binds this qualified name twice (Phase 307; by name since Phase 712). Refused
+    /// before anything else is read of the second binding: one name takes one value, so which one
+    /// was meant is not a question the seam answers, and a capture key over the list would depend
+    /// on its order.
+    | DuplicateArg of name: string
     /// The registry's policy DENIED the invocation (Phase 318): the gate named `policy` refused it,
     /// with `reason` and the `allowed` alternatives its guidance enumerates. Raised after the
     /// arguments validated and before the body: no body ran, and nothing was captured.
@@ -131,35 +133,35 @@ module InvokeError =
             + SeamCodec.quoteAll known
             + "."
         | DuplicateCapability id -> "Refused: the tool '" + id + "' is registered twice."
-        | UnknownArg(addr, []) ->
+        | UnknownArg(name, []) ->
             "Refused: '"
-            + addr
+            + name
             + "' is not an argument of this tool. It takes no arguments."
-        | UnknownArg(addr, declared) ->
+        | UnknownArg(name, declared) ->
             "Refused: '"
-            + addr
+            + name
             + "' is not an argument of this tool. Its arguments are "
             + SeamCodec.quoteAll declared
             + "."
-        | ArgOutOfSpace(addr, space, got) ->
+        | ArgOutOfSpace(name, space, got) ->
             "Refused: argument '"
-            + addr
+            + name
             + "' must be "
             + Space.describe space
             + "; you sent '"
             + got
             + "'."
-        | RequiredArgsUnbound addrs -> "Refused: required arguments missing: " + SeamCodec.quoteAll addrs + "."
-        | UninvocableArg addr ->
+        | RequiredArgsUnbound names -> "Refused: required arguments missing: " + SeamCodec.quoteAll names + "."
+        | UninvocableArg name ->
             "Refused: argument '"
-            + addr
+            + name
             + "' cannot take the value sent. A tree argument takes a JSON object with a \"kind\"; an action is bound by the host and never by a caller."
         | BodyFailed reason -> "Refused: the tool ran and failed: " + reason + "."
-        | NonTotalCapability(id, addrs) ->
+        | NonTotalCapability(id, names) ->
             "Refused: the tool '"
             + id
             + "' cannot be registered, because it is not total: "
-            + SeamCodec.quoteAll addrs
+            + SeamCodec.quoteAll names
             + " must each be a repeat over a bounded count, or a declared hole."
         | IllFormedCapability(id, fault) ->
             "Refused: the tool '"
@@ -167,9 +169,9 @@ module InvokeError =
             + "' cannot be registered, because its declaration is ill-formed: "
             + DeclarationFault.describe fault
             + "."
-        | DuplicateArg addr ->
+        | DuplicateArg name ->
             "Refused: argument '"
-            + addr
+            + name
             + "' is given more than once. Give each argument once."
         | PolicyRefused(policy, reason, []) ->
             "Refused: the policy '" + policy + "' does not allow this: " + reason + "."
@@ -240,11 +242,12 @@ module Capability =
           Placement = placement }
 
     /// The entries that make a signature non-total (Phase 295): a repeat over an unbounded count
-    /// space, or an entry that projects to no hole kind. Empty exactly when `Function.isTotal`.
-    let internal nonTotalAddrs (sg: Signature) : string list =
+    /// space, or an entry that projects to no hole kind, by qualified name (Phase 712). Empty exactly
+    /// when `Function.isTotal`.
+    let internal nonTotalNames (sg: Signature) : string list =
         sg.Holes
         |> List.filter (fun e -> not (Function.isTotalEntry e))
-        |> List.map _.Addr
+        |> List.map _.Name
 
     /// Why a declared result is not well-formed (Phase 642): a value space `Space.wellFormed`
     /// refuses, named as the hole faults are; `Returns.Nothing` is always well-formed.
@@ -265,8 +268,8 @@ module Capability =
     /// and result it has just read, so a reader never admits what a registry refuses and refuses it
     /// with the registry's own error.
     let internal admissionOf (id: string) (sg: Signature) (result: Returns) : InvokeError option =
-        match nonTotalAddrs sg with
-        | _ :: _ as addrs -> Some(NonTotalCapability(id, addrs))
+        match nonTotalNames sg with
+        | _ :: _ as names -> Some(NonTotalCapability(id, names))
         | [] ->
             match Signature.validate sg with
             | Error fault -> Some(IllFormedCapability(id, fault))
@@ -286,35 +289,40 @@ module Capability =
     /// spaceless slot is invocable exactly as a derived one is (Phase 307). An action entry has none.
     let private argSpace (h: SigEntry) : ValueSpace option = h.Space
 
-    /// Every address an argument list binds more than once, at each repeat, in list order (Phase
-    /// 307) — empty exactly when the addresses are distinct. The one duplicate check both seams and
-    /// the pipeline run (`DuplicateArg`, `DuplicateParam`).
-    let repeatedAddrs (args: (string * 'v) list) : string list =
+    /// The entry an argument binds: the one whose qualified name it carries (Phase 712, D281).
+    let private entryNamed (c: Capability) (name: string) : SigEntry option =
+        c.Signature.Holes |> List.tryFind (fun h -> h.Name = name)
+
+    /// Every name an argument list binds more than once, at each repeat, in list order (Phase 307;
+    /// `repeatedAddrs` until Phase 712, when the capability seam's arguments became keyed by qualified
+    /// name) — empty exactly when the names are distinct. The one duplicate check both seams and the
+    /// pipeline run (`DuplicateArg`, `DuplicateParam`).
+    let repeatedNames (args: (string * 'v) list) : string list =
         args
         |> List.fold
-            (fun (seen: Set<string>, acc) (addr, _) ->
-                if seen.Contains addr then
-                    seen, addr :: acc
+            (fun (seen: Set<string>, acc) (name, _) ->
+                if seen.Contains name then
+                    seen, name :: acc
                 else
-                    seen.Add addr, acc)
+                    seen.Add name, acc)
             (Set.empty, [])
         |> snd
         |> List.rev
 
-    /// The fields of an invocation's canonical pre-image: two per binding (address, then the value's
-    /// canonical spelling in its hole's space where it has one — Phase 295), address sorted. The
-    /// capability grammar (D173), with no shape prefix; `invocationKey` hashes them and
-    /// `invocationPreimage` keeps them.
+    /// The fields of an invocation's canonical pre-image: two per binding (the hole's qualified
+    /// name, then the value's canonical spelling in its hole's space where it has one — Phase 295),
+    /// name sorted. The capability grammar (D173), with no shape prefix; `invocationKey` hashes them
+    /// and `invocationPreimage` keeps them.
     let private bindingFields (c: Capability) (args: (string * string) list) : string list =
-        let spelled (a: string, v: string) =
-            match c.Signature.Holes |> List.tryFind (fun h -> h.Addr = a) |> Option.bind _.Space with
-            | Some space -> a, (Space.canonical space v |> Option.defaultValue v)
-            | None -> a, v
+        let spelled (n: string, v: string) =
+            match entryNamed c n |> Option.bind _.Space with
+            | Some space -> n, (Space.canonical space v |> Option.defaultValue v)
+            | None -> n, v
 
         args
         |> List.map spelled
         |> List.sortBy fst
-        |> List.collect (fun (a, v) -> [ a; v ])
+        |> List.collect (fun (n, v) -> [ n; v ])
 
     /// The Phase 27 determinism label this capability keys its captures on: `Effect.determinismTag` of its
     /// determinism set — `"deterministic"` for the empty set, else its factors joined by `+` in canonical
@@ -322,13 +330,13 @@ module Capability =
     let determinismTag (c: Capability) : string = Effect.determinismTag c.Determinism
 
     /// The effect-identity key the Phase 27 capture seam journals a non-deterministic invocation
-    /// under: the capability id + a hash of the canonical (addr-sorted) pre-image, built by
-    /// `Hash.keyedBy` (Phase 510) — two fields per binding (addr, value). So two invocations with the
-    /// same args replay the same captured value, and the pre-image is INJECTIVE (Phase 225,
-    /// `invocation_key_injective` in `proofs/Capability.fst`): distinct argument sets never share
-    /// one, whatever their values contain. That two distinct pre-images hash apart is a property
-    /// of `Hash.fnv1a` and is not claimed. A consumer threads this as `EffectCapture.captureEffect`'s
-    /// `eff` argument.
+    /// under: the capability id + a hash of the canonical (name-sorted) pre-image, built by
+    /// `Hash.keyedBy` (Phase 510) — two fields per binding (the hole's qualified name, the value).
+    /// So two invocations with the same args replay the same captured value, and the pre-image is
+    /// INJECTIVE (Phase 225, `invocation_key_injective` in `proofs/Capability.fst`): distinct
+    /// argument sets never share one, whatever their values contain. That two distinct pre-images
+    /// hash apart is a property of `Hash.fnv1a` and is not claimed. A consumer threads this as
+    /// `EffectCapture.captureEffect`'s `eff` argument.
     ///
     /// Since Phase 295 each argument is keyed by its CANONICAL spelling in its hole's space
     /// (`Space.canonical`) where it has one — `05` and `5` for an integer hole, `1.50` and `1.5`
@@ -338,7 +346,7 @@ module Capability =
         Hash.keyedBy c.Id (bindingFields c args)
 
     /// The IDENTITY of one invocation (Phase 638) — what a `Grant` is for: the capability id, then
-    /// the fields `invocationKey` hashes (each binding's address and canonical spelling, address
+    /// the fields `invocationKey` hashes (each binding's qualified name and canonical spelling, name
     /// sorted), as one canonical pre-image (`Hash.canonicalFields`). No hash is taken, so it is
     /// INJECTIVE outright: two invocations share an identity only when they name one capability id
     /// and carry the same canonical bindings (`invocation_identity_injective` in
@@ -352,53 +360,55 @@ module Capability =
     let grant (c: Capability) (args: (string * string) list) : Grant =
         Grant.ofInvocation (invocationPreimage c args)
 
-    /// Validate typed `args` (addr → string value) against the capability's signature *before*
-    /// dispatch: every arg must address a declared data hole, once (`DuplicateArg` otherwise, Phase
-    /// 307 — so the argument list `invocationKey` keys is one with distinct addresses, the hypothesis
-    /// its determinism rests on), and lie in its space; every required hole must be bound. A slot hole is invocable since Phase 229: its space is `SlotTree`, so its
-    /// argument is a wire document (a `"kind"`-tagged object) whose kind satisfies the constraint —
-    /// a tree of the wrong kind is `ArgOutOfSpace` naming the addr and the `SlotTree` constraint,
-    /// and an argument that is no tree at all (a scalar, a malformed document) is `UninvocableArg`.
-    /// A hole in a `Document` space (Phase 644) has no such second refusal: a string that is no document is
-    /// `ArgOutOfSpace` carrying the space, whose description says what would be accepted.
-    /// A spaceless entry (an action hole) stays `UninvocableArg` for every argument. The host validates this
-    /// before running any body (default-deny by shape, FGP 3). `Required` is checked as the hole's
-    /// PRESENCE among the args, which here is presence of a value: an arg is a string checked
-    /// against its space, and a value space has no absent marker, so a required hole cannot be
-    /// bound to "no value" the way a `Query` param bound to `Null` could before Phase 226.
+    /// Validate typed `args` (qualified name → string value; Phase 712, D281) against the
+    /// capability's signature *before* dispatch: every arg must name a declared data hole, once
+    /// (`DuplicateArg` otherwise, Phase 307 — so the argument list `invocationKey` keys is one with
+    /// distinct names, the hypothesis its determinism rests on), and lie in its space; every
+    /// required hole must be bound. A slot hole is invocable since Phase 229: its space is
+    /// `SlotTree`, so its argument is a wire document (a `"kind"`-tagged object) whose kind
+    /// satisfies the constraint — a tree of the wrong kind is `ArgOutOfSpace` naming the hole and
+    /// the `SlotTree` constraint, and an argument that is no tree at all (a scalar, a malformed
+    /// document) is `UninvocableArg`. A hole in a `Document` space (Phase 644) has no such second
+    /// refusal: a string that is no document is `ArgOutOfSpace` carrying the space, whose
+    /// description says what would be accepted. A spaceless entry (an action hole) stays
+    /// `UninvocableArg` for every argument. The host validates this before running any body
+    /// (default-deny by shape, FGP 3). `Required` is checked as the hole's PRESENCE among the args,
+    /// which here is presence of a value: an arg is a string checked against its space, and a value
+    /// space has no absent marker, so a required hole cannot be bound to "no value" the way a
+    /// `Query` param bound to `Null` could before Phase 226.
     let validateArgs (c: Capability) (args: (string * string) list) : Result<unit, InvokeError> =
         let holes = c.Signature.Holes
-        let declared = holes |> List.map _.Addr
+        let declared = holes |> List.map _.Name
         let argMap = Map.ofList args
 
-        // 0. every address is bound once (Phase 307): the first repeated address, at its second
+        // 0. every name is bound once (Phase 307): the first repeated name, at its second
         //    occurrence, is `DuplicateArg`, before any value is read.
-        // 1. every arg addresses a declared hole, and that hole takes a scalar value in-space.
+        // 1. every arg names a declared hole, and that hole takes a scalar value in-space.
         let rec checkArgs =
             function
             | [] -> Ok()
-            | (addr, value) :: rest ->
-                match holes |> List.tryFind (fun h -> h.Addr = addr) with
-                | None -> Error(UnknownArg(addr, declared))
+            | (name, value) :: rest ->
+                match entryNamed c name with
+                | None -> Error(UnknownArg(name, declared))
                 | Some h ->
                     match argSpace h with
-                    | None -> Error(UninvocableArg addr) // a spaceless (action) hole
-                    | Some(SlotTree _) when (Space.slotKindOf value).IsNone -> Error(UninvocableArg addr) // no tree
+                    | None -> Error(UninvocableArg name) // a spaceless (action) hole
+                    | Some(SlotTree _) when (Space.slotKindOf value).IsNone -> Error(UninvocableArg name) // no tree
                     | Some space ->
                         if Space.validate space value then
                             checkArgs rest
                         else
-                            Error(ArgOutOfSpace(addr, space, value))
+                            Error(ArgOutOfSpace(name, space, value))
 
-        match repeatedAddrs args with
+        match repeatedNames args with
         | dup :: _ -> Error(DuplicateArg dup)
         | [] -> checkArgs args
         |> Result.bind (fun () ->
             // 2. every required hole is bound.
             let unbound =
                 holes
-                |> List.filter (fun h -> h.Required && not (Map.containsKey h.Addr argMap))
-                |> List.map _.Addr
+                |> List.filter (fun h -> h.Required && not (Map.containsKey h.Name argMap))
+                |> List.map _.Name
 
             if List.isEmpty unbound then
                 Ok()
@@ -436,21 +446,21 @@ module Capability =
     // ---- every refusal at once, and the validated arguments handed on (Phase 251) ----
 
     /// The refusal one argument earns on its own, by the rules `validateArgs` applies to it.
-    let internal argFault (c: Capability) (declared: string list) (addr: string, value: string) : InvokeError option =
-        match c.Signature.Holes |> List.tryFind (fun h -> h.Addr = addr) with
-        | None -> Some(UnknownArg(addr, declared))
+    let internal argFault (c: Capability) (declared: string list) (name: string, value: string) : InvokeError option =
+        match entryNamed c name with
+        | None -> Some(UnknownArg(name, declared))
         | Some h ->
             match argSpace h with
-            | None -> Some(UninvocableArg addr)
-            | Some(SlotTree _) when (Space.slotKindOf value).IsNone -> Some(UninvocableArg addr)
+            | None -> Some(UninvocableArg name)
+            | Some(SlotTree _) when (Space.slotKindOf value).IsNone -> Some(UninvocableArg name)
             | Some space ->
                 if Space.validate space value then
                     None
                 else
-                    Some(ArgOutOfSpace(addr, space, value))
+                    Some(ArgOutOfSpace(name, space, value))
 
     /// Validate as `validateArgs` does, but answer with EVERY refusal rather than the first: a
-    /// `DuplicateArg` per repeated address (Phase 307), then one per refused argument, in argument
+    /// `DuplicateArg` per repeated name (Phase 307), then one per refused argument, in argument
     /// order, then `RequiredArgsUnbound` naming every required
     /// hole left out. So a call with two bad arguments is refused naming both, and a model needs one
     /// round trip, not two. The first-failure form is kept, and the two agree by construction of
@@ -458,19 +468,19 @@ module Capability =
     /// `Ok ()` there.
     let validateArgsAll (c: Capability) (args: (string * string) list) : Result<unit, InvokeError list> =
         let holes = c.Signature.Holes
-        let declared = holes |> List.map _.Addr
+        let declared = holes |> List.map _.Name
         let argMap = Map.ofList args
 
-        // Every repeated address first (Phase 307), as `validateArgs` checks it first; then one
+        // Every repeated name first (Phase 307), as `validateArgs` checks it first; then one
         // refusal per argument, in order.
         let faults =
-            (repeatedAddrs args |> List.map DuplicateArg)
+            (repeatedNames args |> List.map DuplicateArg)
             @ (args |> List.choose (argFault c declared))
 
         let unbound =
             holes
-            |> List.filter (fun h -> h.Required && not (Map.containsKey h.Addr argMap))
-            |> List.map _.Addr
+            |> List.filter (fun h -> h.Required && not (Map.containsKey h.Name argMap))
+            |> List.map _.Name
 
         let all =
             if List.isEmpty unbound then
@@ -499,27 +509,25 @@ module Capability =
         | None -> None
 
     /// Validate `args` (`validateArgs`), then type each one by the space it was checked against —
-    /// the list `invokeWithArgs` hands a body, in argument order. The parses are the ones
-    /// `Space.validate` made, so an argument that validated always types; were one ever not to, it
-    /// is refused as `ArgOutOfSpace` rather than handed on untyped.
+    /// the list `invokeWithArgs` hands a body, in argument order, each keyed by the qualified name
+    /// it was sent under. The parses are the ones `Space.validate` made, so an argument that
+    /// validated always types; were one ever not to, it is refused as `ArgOutOfSpace` rather than
+    /// handed on untyped.
     let typeArgs (c: Capability) (args: (string * string) list) : Result<(string * ArgValue) list, InvokeError> =
         validateArgs c args
         |> Result.bind (fun () ->
             let rec go (acc: (string * ArgValue) list) =
                 function
                 | [] -> Ok(List.rev acc)
-                | (addr, value) :: rest ->
-                    let space =
-                        c.Signature.Holes
-                        |> List.tryFind (fun h -> h.Addr = addr)
-                        |> Option.bind argSpace
+                | (name, value) :: rest ->
+                    let space = entryNamed c name |> Option.bind argSpace
 
                     match typedValue space value with
-                    | Some v -> go ((addr, v) :: acc) rest
+                    | Some v -> go ((name, v) :: acc) rest
                     | None ->
                         match space with
-                        | Some sp -> Error(ArgOutOfSpace(addr, sp, value))
-                        | None -> Error(UninvocableArg addr)
+                        | Some sp -> Error(ArgOutOfSpace(name, sp, value))
+                        | None -> Error(UninvocableArg name)
 
             go [] args)
 
@@ -598,7 +606,8 @@ module CapabilityRegistry =
     /// only a TOTAL one (Phase 295): a capability whose signature carries a repeat over no count
     /// space is refused `NonTotalCapability`, naming the holes, rather than dispatched. And only a
     /// WELL-FORMED one (Phase 307): a signature `Signature.validate` refuses — an empty or
-    /// non-finite space, two holes at one address — is `IllFormedCapability`.
+    /// non-finite space, an ill-formed or repeated qualified name, two holes at one address — is
+    /// `IllFormedCapability`.
     let register (c: Capability) (r: CapabilityRegistry<'Ctx>) : Result<CapabilityRegistry<'Ctx>, InvokeError> =
         Seam.register c r.Seam |> lift
 

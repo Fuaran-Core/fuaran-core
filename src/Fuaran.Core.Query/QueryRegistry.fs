@@ -57,7 +57,7 @@ module QueryRegistry =
         match sourceFault with
         | Some fault -> Some fault
         | None ->
-            match Capability.repeatedAddrs (q.Params |> List.map (fun p -> p.Name, ())) with
+            match Capability.repeatedNames (q.Params |> List.map (fun p -> p.Name, ())) with
             | dup :: _ -> Some([ PathSegment.Key "params" ], DuplicateParam dup)
             | [] ->
                 match QueryShape.whereFault q.ResultSchema q.Where with

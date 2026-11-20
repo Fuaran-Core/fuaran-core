@@ -250,34 +250,35 @@ module CapabilityCodec =
         Canonical.typed
             "invocation"
             [ "capabilityId", JStr capabilityId
-              "args", JArr(args |> List.map (fun (a, v) -> JObj [ "addr", JStr a; "value", JStr v ])) ]
+              "args", JArr(args |> List.map (fun (n, v) -> JObj [ "name", JStr n; "value", JStr v ])) ]
 
     /// A typed invocation as a canonical `"$type":"invocation"` document. The arguments keep the
-    /// order given, each an `{addr, value}` object; nothing is validated against a signature here.
+    /// order given, each a `{name, value}` object keyed by the hole's qualified name (Phase 712,
+    /// D281); nothing is validated against a signature here.
     let encodeInvocation (capabilityId: string) (args: (string * string) list) : string =
         Canonical.write Rendering.CrossHost (encodeInvocationJson capabilityId args)
 
     let private invocationOf: Decoder<string * (string * string) list> =
         let arg =
-            Decoder.pair (Decoder.field "addr" Decoder.str) (Decoder.field "value" Decoder.str) (fun addr v -> addr, v)
+            Decoder.pair (Decoder.field "name" Decoder.str) (Decoder.field "value" Decoder.str) (fun name v -> name, v)
 
-        // Phase 307: one address, one argument — a repeated address is refused here as it is by
+        // Phase 307: one name, one argument — a repeated name is refused here as it is by
         // `validateArgs` (`DuplicateArg`), at the second occurrence. The refusal is raised through
         // `at` (Phase 453), which walks `args[i]` in the document rather than trusting the index.
         let distinctArgs (cid: string, args: (string * string) list) : Decoder<string * (string * string) list> =
             let rec go (seen: Set<string>) (i: int) =
                 function
                 | [] -> Decoder.succeed (cid, args)
-                | (addr: string, _) :: rest ->
-                    if seen.Contains addr then
+                | (name: string, _) :: rest ->
+                    if seen.Contains name then
                         Decoder.at
                             [ PathSegment.Key "args"; PathSegment.Index i ]
                             (Decoder.fail
                                 RootDecodeCode.OutOfRange
-                                "each address once"
-                                ("argument '" + addr + "' is given more than once"))
+                                "each name once"
+                                ("argument '" + name + "' is given more than once"))
                     else
-                        go (seen.Add addr) (i + 1) rest
+                        go (seen.Add name) (i + 1) rest
 
             go Set.empty 0 args
 
@@ -288,8 +289,9 @@ module CapabilityCodec =
         |> Decoder.bind distinctArgs
 
     /// Read an invocation back as `(capabilityId, args)` in wire order, leniently; argument values are
-    /// read as strings and checked against nothing until `validateArgs`, but an address given twice
-    /// is refused (Phase 307).
+    /// read as strings and checked against nothing until `validateArgs`, but a name given twice is
+    /// refused (Phase 307). An argument keyed `addr` (the form before Phase 712) has no `name`, so it
+    /// is refused `MissingField` at `args[i].name`; no address is read as a name.
     let decodeInvocation (s: string) : Result<string * (string * string) list, string> =
         Json.parse s |> Result.bind (Decoder.describing invocationOf)
 
@@ -381,7 +383,7 @@ module CapabilityCodec =
 
     let private strictInvocation (el: JVal) =
         Decoder.members [ "$type"; "capabilityId"; "args" ] el
-        |> Result.bind (fun () -> within "args" (each (Decoder.members [ "addr"; "value" ])) el)
+        |> Result.bind (fun () -> within "args" (each (Decoder.members [ "name"; "value" ])) el)
 
     let private under (policy: ReadPolicy) (check: Decoder<unit>) (d: Decoder<'T>) : Decoder<'T> =
         match policy with

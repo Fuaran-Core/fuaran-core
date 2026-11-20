@@ -57,16 +57,23 @@ module HoleKind =
     let tags: string list = [ "value"; "slot"; "repeat"; "action" ]
 
 /// A declared hole. `Addr` is the absolute lexical address (id-path) — the hygiene
-/// surface: binding is by `Addr`, never by `Name`, so two same-named holes at
-/// different addresses cannot capture one another.
+/// surface of the artifact: `apply`, `curry`, `compose` and `bindHandlers` bind by `Addr`, never
+/// by `Name`, so two same-named holes at different addresses cannot capture one another. The
+/// capability seam binds by the hole's QUALIFIED name instead (Phase 712, DECISIONS.md D281):
+/// `Slots` then `Name`, joined by `.` (`SigEntry.ofHoleDecl`).
 type HoleDecl =
     {
-        /// The absolute id-path every binding keys on.
+        /// The absolute id-path the artifact's bindings key on.
         Addr: string
-        /// The human-facing label; display only, never used to bind.
+        /// The hole's own name, one segment: one or more ASCII letters, digits, `_` or `-`.
         Name: string
         /// What the hole accepts, and on which axis (data or behaviour) it is bound.
         Kind: HoleKind
+        /// The names of the slots the hole was composed through, outermost first; `[]` for a hole
+        /// declared directly in the artifact (Phase 712, D281). A witness's `Bind` of a slot argument
+        /// records the slot's name on the subtree it wires in, and its `Holes` reads the recorded
+        /// names of a hole's ancestors; a domain that never composes fills `[]`.
+        Slots: string list
     }
 
 /// A signature entry — the introspectable projection of a hole (the AiTools surface). `Kind` is the
@@ -82,9 +89,12 @@ type HoleDecl =
 /// made `Required` mean non-`Null` on the query seam, where they did not).
 type SigEntry =
     {
-        /// The hole's absolute address; the key an argument is bound by.
+        /// The hole's absolute address — the artifact's key (`Function.apply` binds by it), never
+        /// the capability seam's.
         Addr: string
-        /// The hole's display label; never used to bind.
+        /// The hole's QUALIFIED name (Phase 712, D281): the slots it was composed through, then its
+        /// own name, joined by `.`. The key an invocation's argument is bound by; `Signature.validate`
+        /// holds it to the segment grammar and to uniqueness.
         Name: string
         /// What the hole accepts, and on which axis it is bound; written as `HoleKind.tag`.
         Kind: HoleKind
@@ -108,9 +118,10 @@ module SigEntry =
 
     /// The signature entry of one declared hole — the mapping `Function.signature` maps over a
     /// witness's holes, public so a consumer that needs ONE hole's entry reads Core's instead of
-    /// writing its own. Four rules:
+    /// writing its own. Five rules:
     ///
-    ///  - `Addr` is the hole's address and `Name` its label, both as declared;
+    ///  - `Addr` is the hole's address, as declared, and `Name` its qualified name: `Slots` then
+    ///    `Name`, joined by `.` (Phase 712, D281), so a hole declared directly keeps its bare name;
     ///  - `Kind` is the hole's kind, so `Space` (derived from it) is a value or repeat hole's space,
     ///    the `SlotTree` of a slot's constraint, and `None` for an action hole;
     ///  - `Required` is `true` for a value hole and a slot hole, which strict `apply` demands bound;
@@ -127,7 +138,7 @@ module SigEntry =
             | ActionHole _ -> false
 
         { Addr = h.Addr
-          Name = h.Name
+          Name = String.concat "." (h.Slots @ [ h.Name ])
           Kind = h.Kind
           Required = required }
 
@@ -144,17 +155,20 @@ type Signature =
     }
 
 /// Why a declaration is refused at the seams' admission gate (Phase 307). `Signature.validate`
-/// answers the first three over a signature's entries; `Function.validate` adds the fourth, which
-/// only the witness can see; the last two are a capability's declared result (Phase 642), which the
-/// registries' admission gate checks beside its signature. The registries, the capability decoder
-/// and `Function.compose` all run the same check, so there is one gate and one vocabulary for what
-/// it refuses.
+/// answers the hole faults over a signature's entries (`EmptySpace`, `NonFiniteBound`,
+/// `DuplicateHoleAddr`, and since Phase 712 `IllFormedHoleName` and `DuplicateHoleName`);
+/// `Function.validate` adds `HoleUnderSlot`, which only the witness can see; `EmptyResult` and
+/// `NonFiniteResult` are a capability's declared result (Phase 642), which the registries' admission
+/// gate checks beside its signature. The registries, the capability decoder and `Function.compose`
+/// all run the same check, so there is one gate and one vocabulary for what it refuses.
 type DeclarationFault =
-    /// The hole's space admits no value (`Space.wellFormed` answered `SpaceFault.Empty`).
-    | EmptySpace of addr: string * space: ValueSpace
+    /// The hole's space admits no value (`Space.wellFormed` answered `SpaceFault.Empty`); `name` is
+    /// the hole's qualified name (Phase 712).
+    | EmptySpace of name: string * space: ValueSpace
     /// The hole's space has a NaN or infinite bound (`SpaceFault.NonFinite`), which no JSON number
-    /// spells — so the fault carries the address alone: the space it names could not travel in it.
-    | NonFiniteBound of addr: string
+    /// spells — so the fault carries the hole's qualified name alone: the space it names could not
+    /// travel in it.
+    | NonFiniteBound of name: string
     /// Two holes share this address, so a binding keyed by address cannot say which one it fills;
     /// the second occurrence in declaration order is the one named.
     | DuplicateHoleAddr of addr: string
@@ -170,6 +184,13 @@ type DeclarationFault =
     /// The capability's declared result has a NaN or infinite bound (Phase 642), which no JSON number
     /// spells, so the fault carries nothing: the space could not travel in it.
     | NonFiniteResult
+    /// The hole's qualified name has an empty segment, or a character outside the segment grammar
+    /// (one or more ASCII letters, digits, `_` or `-`; `.` only between segments) — Phase 712, D281.
+    /// Declared after the result faults, so every earlier case keeps its tag.
+    | IllFormedHoleName of name: string
+    /// Two holes share this qualified name, so an invocation keyed by name cannot say which one it
+    /// fills; the second occurrence in declaration order is the one named (Phase 712, D281).
+    | DuplicateHoleName of name: string
 
 /// The admission refusal in words (Phase 307).
 module DeclarationFault =
@@ -177,12 +198,17 @@ module DeclarationFault =
     /// One sentence naming the fault and, for a space, what the space says.
     let describe (f: DeclarationFault) : string =
         match f with
-        | EmptySpace(addr, space) -> "hole '" + addr + "' ranges over an empty space: " + Space.describe space
-        | NonFiniteBound addr -> "hole '" + addr + "' has a bound that is not a finite number"
+        | EmptySpace(name, space) -> "hole '" + name + "' ranges over an empty space: " + Space.describe space
+        | NonFiniteBound name -> "hole '" + name + "' has a bound that is not a finite number"
         | DuplicateHoleAddr addr -> "two holes share the address '" + addr + "'"
         | HoleUnderSlot node -> "the slot declared at node '" + node + "' has a hole beneath it"
         | EmptyResult space -> "the declared result ranges over an empty space: " + Space.describe space
         | NonFiniteResult -> "the declared result has a bound that is not a finite number"
+        | IllFormedHoleName name ->
+            "hole name '"
+            + name
+            + "' is ill-formed: each of its '.'-separated parts must be one or more ASCII letters, digits, '_' or '-'"
+        | DuplicateHoleName name -> "two holes share the name '" + name + "'"
 
 /// An argument bound into a hole: a leaf value, or a tree (for slots / composition).
 type Arg<'Node> =
@@ -486,28 +512,51 @@ module BoundedMemo =
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module Signature =
 
+    /// One segment of a qualified name: one or more ASCII letters, digits, `_` or `-` (D281).
+    let internal wellFormedSegment (s: string) : bool =
+        s.Length > 0
+        && s
+           |> Seq.forall (fun c ->
+               (c >= 'a' && c <= 'z')
+               || (c >= 'A' && c <= 'Z')
+               || (c >= '0' && c <= '9')
+               || c = '_'
+               || c = '-')
+
+    /// Is the qualified name well-formed (Phase 712, D281): every `.`-separated segment satisfies
+    /// the segment grammar, so no segment is empty and none holds a character outside it.
+    let internal wellFormedName (name: string) : bool =
+        name.Split '.' |> Array.forall wellFormedSegment
+
     /// The first reason the signature is not a well-formed declaration, in declaration order, or
-    /// `Ok ()`: an entry whose space `Space.wellFormed` refuses (`EmptySpace`, `NonFiniteBound`),
-    /// or an entry whose address an earlier entry already holds (`DuplicateHoleAddr`). Totality is
-    /// the registries' other admission check (`Function.isTotal`, refused `NonTotalCapability`);
-    /// the two together are the gate `CapabilityRegistry.register`, `FunctionRegistry.register`
-    /// and `CapabilityCodec`'s readers run, so a declaration a seam admits has distinct addresses
-    /// and spaces a value can lie in and JSON can spell — and `Function.toJsonSchema` over it has
-    /// distinct property keys and finite bounds.
+    /// `Ok ()`. Each entry is checked in one fixed order (Phase 712, D281): its qualified name
+    /// against the segment grammar (`IllFormedHoleName`), then against the names of the entries
+    /// before it (`DuplicateHoleName`), then its address against theirs (`DuplicateHoleAddr`), then
+    /// its space, which `Space.wellFormed` may refuse (`EmptySpace`, `NonFiniteBound`, each naming
+    /// the qualified name). Totality is the registries' other admission check (`Function.isTotal`,
+    /// refused `NonTotalCapability`); the two together are the gate `CapabilityRegistry.register`,
+    /// `FunctionRegistry.register` and `CapabilityCodec`'s readers run, so a declaration a seam
+    /// admits has distinct, well-formed qualified names, distinct addresses, and spaces a value can
+    /// lie in and JSON can spell — and `Function.toJsonSchema` over it has distinct property keys
+    /// and finite bounds.
     let validate (sg: Signature) : Result<unit, DeclarationFault> =
-        let rec go (seen: Set<string>) =
+        let rec go (names: Set<string>) (addrs: Set<string>) =
             function
             | [] -> Ok()
             | (e: SigEntry) :: rest ->
-                if seen.Contains e.Addr then
+                if not (wellFormedName e.Name) then
+                    Error(IllFormedHoleName e.Name)
+                elif names.Contains e.Name then
+                    Error(DuplicateHoleName e.Name)
+                elif addrs.Contains e.Addr then
                     Error(DuplicateHoleAddr e.Addr)
                 else
                     match e.Space |> Option.map (fun sp -> sp, Space.wellFormed sp) with
-                    | Some(sp, Error SpaceFault.Empty) -> Error(EmptySpace(e.Addr, sp))
-                    | Some(_, Error SpaceFault.NonFinite) -> Error(NonFiniteBound e.Addr)
-                    | _ -> go (seen.Add e.Addr) rest
+                    | Some(sp, Error SpaceFault.Empty) -> Error(EmptySpace(e.Name, sp))
+                    | Some(_, Error SpaceFault.NonFinite) -> Error(NonFiniteBound e.Name)
+                    | _ -> go (names.Add e.Name) (addrs.Add e.Addr) rest
 
-        go Set.empty sg.Holes
+        go Set.empty Set.empty sg.Holes
 
 /// The generic artifact-function operations — `signature` / `apply` / `curry` /
 /// `compose` — over the witness, under the three laws. UI's parameterised fragment and
@@ -587,11 +636,31 @@ module Function =
 
     /// The admission check over an ARTIFACT (Phase 307): `Signature.validate` over its derived
     /// signature, then the check only the witness can make — no hole lies beneath a slot hole
-    /// (`HoleUnderSlot`). `Ok ()` is a declaration whose holes have distinct addresses, spaces a
+    /// (`HoleUnderSlot`). `Ok ()` is a declaration whose holes have distinct, well-formed qualified
+    /// names (Phase 712), distinct addresses, spaces a
     /// value can lie in, and no binding that another binding erases. `compose` runs it over the
     /// tree it builds; a host runs it over an artifact before deriving the capability it registers.
+    ///
+    /// The witness also sees the SEGMENTS a qualified name is joined from (Phase 712, D281): a hole
+    /// whose own name, or the name of a slot it was composed through, holds a `.` or breaks the
+    /// segment grammar is `IllFormedHoleName`, at that hole's place in declaration order, even where
+    /// the joined name reads as well-formed (`a.b` written as one name is not the slot `a`'s `b`).
     let validate (w: ArtifactWitness<'Node, 'Id>) (node: 'Node) : Result<unit, DeclarationFault> =
-        Signature.validate (signature w "" node)
+        let holes = w.Holes node
+
+        let sg =
+            { Name = ""
+              Holes = holes |> List.map SigEntry.ofHoleDecl
+              Effect = w.Effect node }
+
+        match
+            holes
+            |> List.tryFindIndex (fun h -> not (List.forall Signature.wellFormedSegment (h.Slots @ [ h.Name ])))
+        with
+        | Some i ->
+            Signature.validate { sg with Holes = List.take i sg.Holes }
+            |> Result.bind (fun () -> Error(IllFormedHoleName sg.Holes[i].Name))
+        | None -> Signature.validate sg
         |> Result.bind (fun () ->
             match holeUnderSlot w node with
             | Some fault -> Error fault
@@ -974,7 +1043,8 @@ module Function =
     /// (fuaran#247) — the generic artifact-function-as-tool schema. Each hole becomes a
     /// typed property (value-space → min/max/enum/length constraints, slot → its
     /// kind-constraint), the two-axis effect class travels alongside, and the required
-    /// addresses are listed — so the orchestrator-facing tool descriptor is produced once
+    /// holes are listed by qualified name (Phase 712, D281 — the key an invocation binds by; each
+    /// hole still carries its `addr`) — so the orchestrator-facing tool descriptor is produced once
     /// in the core, not re-derived per domain. `Json.render` of the result is canonical +
     /// stable for a fixed signature.
     let toSchema (sg: Signature) : JVal =
@@ -983,7 +1053,7 @@ module Function =
             [ "name", JStr sg.Name
               "effect", EffectCodec.toJson sg.Effect
               "holes", JArr(sg.Holes |> List.map entryJson)
-              "required", JArr(sg.Holes |> List.filter _.Required |> List.map (fun h -> JStr h.Addr)) ]
+              "required", JArr(sg.Holes |> List.filter _.Required |> List.map (fun h -> JStr h.Name)) ]
 
     // ---- signature → standard JSON Schema projection ----
 
@@ -1031,9 +1101,11 @@ module Function =
     /// Project a derived signature into a STANDARD JSON Schema `object` — the shape
     /// LLM tool-use APIs consume, so a saved artifact-function is a directly-registerable tool
     /// without per-orchestrator translation of `toSchema`'s bespoke shape. Each *data* hole
-    /// (value / slot / repeat) becomes a property keyed by its absolute address (hygiene —
-    /// addresses, never bare names); the required ones (value + slot + bounded repeat — Phase 295) are
-    /// listed; the two-axis effect class travels alongside as `x-effect`, OUTSIDE the parameter
+    /// (value / slot / repeat) becomes a property keyed by its QUALIFIED name (Phase 712, D281: the
+    /// slots it was composed through, then its own name — unique in a signature `Signature.validate`
+    /// admits, so two same-named holes composed through two slots are two keys), so a model's
+    /// argument object is the invocation's argument list with no translation; the required ones
+    /// (value + slot + bounded repeat — Phase 295) are listed by the same name; the two-axis effect class travels alongside as `x-effect`, OUTSIDE the parameter
     /// schema so it never pollutes the argument properties. Action holes (fuaran#318) are NOT
     /// arguments the LLM fills — they are the *host's* hole-binding surface (a human binds a
     /// handler) — so they travel under `x-actions`, also OUTSIDE `properties`/`required`. This is
@@ -1056,8 +1128,8 @@ module Function =
             [ "type", JStr "object"
               "title", JStr sg.Name
               "x-effect", EffectCodec.toJson sg.Effect
-              "properties", JObj(dataHoles |> List.map (fun e -> e.Addr, propSchema e))
-              "required", JArr(dataHoles |> List.filter _.Required |> List.map (fun h -> JStr h.Addr)) ]
+              "properties", JObj(dataHoles |> List.map (fun e -> e.Name, propSchema e))
+              "required", JArr(dataHoles |> List.filter _.Required |> List.map (fun h -> JStr h.Name)) ]
             @ (match actionHoles with
                | [] -> []
                | _ -> [ "x-actions", JArr(actionHoles |> List.map actionEntryJson) ])

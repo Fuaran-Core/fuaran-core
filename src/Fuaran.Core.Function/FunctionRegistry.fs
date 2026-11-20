@@ -319,6 +319,8 @@ module FunctionRegistry =
     /// SAME trust posture as `CapabilityRegistry.dispatch`, no parallel path). The host supplies the body per the
     /// resolved entry's placement, and answers in the `Deferred` envelope. The gates decide under
     /// `ctx`, and `grant` lifts a `NeedsApproval` for exactly this invocation (Phase 638), as there.
+    /// The arguments are keyed by qualified name (Phase 712, D281) and validated so; a body that
+    /// applies the entry's artifact re-keys them to addresses with `addressed` first.
     ///
     /// It moved with `Capability.invoke` in Phase 210 because it IS `Capability.invoke` — there is no
     /// total projection from `Result<Deferred<'v>, InvokeError>` back to `Result<'v, InvokeError>`
@@ -345,23 +347,39 @@ module FunctionRegistry =
             (fun e -> InvokeError.settle (body e ()))
             r.Entries
 
+    /// The arguments of an invocation of `e`, re-keyed from the qualified names the seam binds by to
+    /// the addresses `Function.apply` binds by (Phase 712, D281), through `e`'s signature — a
+    /// bijection in a signature the admission gate admits. What a body `dispatch` runs hands to
+    /// `Function.apply` once the arguments validated; an argument naming no hole of `e`, which
+    /// validation refuses before any body runs, is dropped. The order is the arguments'.
+    let addressed (e: FunctionEntry) (args: (string * 'a) list) : (string * 'a) list =
+        let addrOf =
+            e.Capability.Signature.Holes |> List.map (fun h -> h.Name, h.Addr) |> Map.ofList
+
+        args
+        |> List.choose (fun (name, v) -> Map.tryFind name addrOf |> Option.map (fun a -> a, v))
+
     /// Narrow a registered function's signature under a new id (Phase 50; `partiallyApply` before
     /// `0.37.0`, renamed by Phase 391 because it binds no value: it narrows the signature and binds
     /// nothing) — the content-pack formalism. Produce a
-    /// NEW entry under `newId` whose signature is `Function.signatureExcluding boundAddrs` of the source's
-    /// (the bound holes drop out — a narrowed signature, fewer required holes), with the source's result
-    /// type + placement. Registering it makes the content pack a first-class registry entry findable by
-    /// its narrowed hole shape (a smaller available context now subsumes it, while the un-narrowed
-    /// original still demands the dropped holes). Hygiene: holes drop by absolute address. Does NOT
-    /// mutate the source entry.
+    /// NEW entry under `newId` whose signature is the source's with the bound holes dropped (a narrowed
+    /// signature, fewer required holes), with the source's result type + placement. Registering it
+    /// makes the content pack a first-class registry entry findable by its narrowed hole shape (a
+    /// smaller available context now subsumes it, while the un-narrowed original still demands the
+    /// dropped holes). Does NOT mutate the source entry.
     ///
-    /// Every bound address must be a BINDABLE hole of the source — a data hole (value, slot or
-    /// repeat), not an action hole and not an address the signature does not declare (Phase 295).
-    /// The first that is not is refused `UnknownArg(addr, bindable)`, naming the bindable holes, so a
+    /// The bound holes are named as the capability seam names them, by QUALIFIED name (Phase 712,
+    /// D281). Each is mapped to its address through the source's signature — a bijection in a
+    /// signature the admission gate admits — and the addresses drop out by
+    /// `Function.signatureExcluding`, so the artifact's hygiene (holes drop by address) is unchanged.
+    ///
+    /// Every bound name must be a BINDABLE hole of the source — a data hole (value, slot or
+    /// repeat), not an action hole and not a name the signature does not declare (Phase 295).
+    /// The first that is not is refused `UnknownArg(name, bindable)`, naming the bindable holes, so a
     /// typo cannot register an un-narrowed signature under the pack's name; `ContentPack.load`
-    /// reports it as `UnknownBoundAddr`.
-    let narrow (newId: string) (boundAddrs: Set<string>) (source: FunctionEntry) : Result<FunctionEntry, InvokeError> =
-        let bindable =
+    /// reports it as `UnknownBoundName`.
+    let narrow (newId: string) (boundNames: Set<string>) (source: FunctionEntry) : Result<FunctionEntry, InvokeError> =
+        let bindableEntries =
             source.Capability.Signature.Holes
             |> List.filter (fun h ->
                 match h.Kind with
@@ -369,15 +387,22 @@ module FunctionRegistry =
                 | ValueHole _
                 | SlotHole _
                 | RepeatHole _ -> true)
-            |> List.map _.Addr
+
+        let bindable = bindableEntries |> List.map _.Name
 
         match
-            boundAddrs
+            boundNames
             |> Set.toList
-            |> List.tryFind (fun a -> not (List.contains a bindable))
+            |> List.tryFind (fun n -> not (List.contains n bindable))
         with
         | Some stray -> Error(UnknownArg(stray, bindable))
         | None ->
+            let boundAddrs =
+                bindableEntries
+                |> List.filter (fun h -> boundNames.Contains h.Name)
+                |> List.map _.Addr
+                |> Set.ofList
+
             let narrowed = Function.signatureExcluding boundAddrs source.Capability.Signature
 
             Ok

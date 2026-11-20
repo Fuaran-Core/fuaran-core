@@ -100,7 +100,7 @@ let private banner (heading: string) (body: string list) : string =
 // ---------------------------------------------------------------------------
 //  Moved here from the UI tier, which rendered them against its own Core pin. Each vector is read
 //  back through the public codecs a host has — the capability declaration through
-//  `CapabilityCodec.decode`, the args as plain `{addr, value}` pairs — and its recorded answer is
+//  `CapabilityCodec.decode`, the args as plain `{name, value}` pairs (keyed by qualified hole name since Phase 712) — and its recorded answer is
 //  recomputed rather than trusted, so a perturbed `expected` is named by its id.
 
 let private jstrOf (v: JVal) : string option =
@@ -114,8 +114,8 @@ let private argsOf (v: JVal option) : (string * string) list option =
         let pairs =
             items
             |> List.map (fun a ->
-                match str "addr" a, str "value" a with
-                | Some addr, Some value -> Some(addr, value)
+                match str "name" a, str "value" a with
+                | Some name, Some value -> Some(name, value)
                 | _ -> None)
 
         if List.forall Option.isSome pairs then
@@ -128,8 +128,8 @@ let private argsOf (v: JVal option) : (string * string) list option =
 let private capabilityVerdict (r: Result<unit, InvokeError>) : (string * JVal) list =
     match r with
     | Ok() -> [ "verdict", JStr "accept" ]
-    | Error(ArgOutOfSpace(addr, _, _)) -> [ "verdict", JStr "reject"; "error", JStr "argOutOfSpace"; "addr", JStr addr ]
-    | Error(UnknownArg(addr, _)) -> [ "verdict", JStr "reject"; "error", JStr "unknownArg"; "addr", JStr addr ]
+    | Error(ArgOutOfSpace(name, _, _)) -> [ "verdict", JStr "reject"; "error", JStr "argOutOfSpace"; "name", JStr name ]
+    | Error(UnknownArg(name, _)) -> [ "verdict", JStr "reject"; "error", JStr "unknownArg"; "name", JStr name ]
     | Error _ -> [ "verdict", JStr "reject"; "error", JStr "unexpected" ]
 
 /// A vector's finding against a host whose `validateArgs` is `validate`; `None` when it agrees.
@@ -669,21 +669,21 @@ let tests =
               // through the renderer, so a renderer that recorded the wrong class could not pass.
               for d in LawVectorExport.Capabilities.draws () do
                   Expect.equal
-                      (Capability.validateArgs d.Cap [ "h0", string d.Lo ])
+                      (Capability.validateArgs d.Cap [ "x", string d.Lo ])
                       (Ok())
                       (sprintf "iteration %d: the in-space arg is accepted" d.Iteration)
 
-                  match Capability.validateArgs d.Cap [ "h0", string (d.Hi + 1) ] with
+                  match Capability.validateArgs d.Cap [ "x", string (d.Hi + 1) ] with
                   | Error(ArgOutOfSpace _) -> ()
                   | other -> failtestf "iteration %d: out-of-space was not ArgOutOfSpace (%A)" d.Iteration other
 
                   // Phase 568 — the other halves of each bound's pair: the range is inclusive at both ends.
                   Expect.equal
-                      (Capability.validateArgs d.Cap [ "h0", string d.Hi ])
+                      (Capability.validateArgs d.Cap [ "x", string d.Hi ])
                       (Ok())
                       (sprintf "iteration %d: the upper bound is accepted" d.Iteration)
 
-                  match Capability.validateArgs d.Cap [ "h0", string (d.Lo - 1) ] with
+                  match Capability.validateArgs d.Cap [ "x", string (d.Lo - 1) ] with
                   | Error(ArgOutOfSpace _) -> ()
                   | other -> failtestf "iteration %d: past the lower bound was not ArgOutOfSpace (%A)" d.Iteration other
 

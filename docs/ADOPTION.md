@@ -189,8 +189,8 @@ certified** — and [`samples/adoption`](../samples/adoption/Program.fs) section
 example, end to end.
 
 **An artifact with holes.** An `ArtifactWitness<'Node,'Id>` adds three things to your node witness:
-`Holes` (each hole your tree declares, with its value space and its ADDRESS — the absolute id-path,
-which your witness mints), `Effect` (the two-axis effect class) and `Bind` (lower one argument to
+`Holes` (each hole your tree declares, with its value space, its ADDRESS — the absolute id-path,
+which your witness mints — its name, and the names of the slots it was composed through), `Effect` (the two-axis effect class) and `Bind` (lower one argument to
 your own edit). `Function.signature w name tree` derives the signature a caller sees.
 
 ```fsharp
@@ -202,9 +202,9 @@ let fill =
 let capabilities = CapabilityRegistry.register fill CapabilityRegistry.empty       // Result: a duplicate id is refused
 ```
 
-Arguments are keyed by the hole's ADDRESS (`"report/temp"`), never its name (`"celsius"`): that is
-the hygiene law, and `Function.toJsonSchema`'s properties use the same keys, so a model sees the
-address. A capability declares what it answers — `Returns.Value` a space, or `Returns.Nothing` — and
+Arguments are keyed by the hole's QUALIFIED NAME (`"celsius"`, or `"slotA.celsius"` for a hole
+composed through slot `slotA`), never its address (`"report/temp"`), and `Function.toJsonSchema`'s
+properties use the same keys, so a model's argument object is the invocation (section 4b). A capability declares what it answers — `Returns.Value` a space, or `Returns.Nothing` — and
 the body's `'v` is yours, answering to that declaration.
 
 **A query registry.** A `Query` declares typed parameters (keyed by NAME — a query has no holes), a
@@ -243,6 +243,41 @@ Conformance.capabilityLawsAt capabilitySeam capabilityBody seed iters
 The family certifies the three outcomes, that a refusal runs no body, and that your host refuses
 exactly what the registry refuses — and it reports itself starved, not green, if your generator never
 reaches one of settled, pending or refused. Then dispatch through the very path you certified.
+
+## 4b. Key a capability's arguments by qualified hole name (from `0.45.0`)
+
+Until `0.45.0` an invocation bound each argument by the hole's address, and every refusal named
+addresses. From `0.45.0` (Phase 712, DECISIONS.md D281) it binds by the hole's **qualified name**: the
+names of the slots the hole was composed through, outermost first, then its own name, joined by `.`.
+A hole declared directly in the artifact is its bare name. Each segment is one or more ASCII letters,
+digits, `_` or `-`.
+
+**What your witness adds.** `HoleDecl` has a new field, `Slots: string list`. A full-literal
+construction fails with FS0764 until it sets it. A domain that never composes sets `Slots = []`. A
+domain that composes records the slot's name when its `Bind` wires a slot argument in, and reports
+the recorded names of a hole's ancestors in `Holes`. The reference witness in
+`tests/Fuaran.Core.Tests.Fixtures/Reference.fs` keeps the name on the slot node it filled.
+
+**What the gate refuses now.** A name with an empty segment or a character outside the grammar is
+`IllFormedHoleName`. Two holes with one qualified name are `DuplicateHoleName`. Composition never
+produces that pair, but a witness that declares two holes named `x` directly under one slot path does.
+`DuplicateHoleAddr` stays, because `Function.apply`, `curry`, `compose` and `bindHandlers` still bind
+the tree by address. A declaration written before `0.45.0` whose names repeat, or hold a space or a
+`.`, is refused where it was admitted.
+
+**What a caller and a host change.**
+- An invocation's argument is `{"name": …, "value": …}`. An old document keyed by `addr` is refused
+  `MissingField` at `args[i].name`.
+- A pipeline invoke node's argument is `{"name": …, "source": …}`.
+- The refusals carry `name` (`names` for `requiredArgsUnbound` and `nonTotalCapability`) where they
+  carried `addr` (`addrs`).
+- `Capability.repeatedAddrs` is `repeatedNames`.
+- `FunctionRegistry.narrow` takes names.
+- A content pack's bound holes are `BoundNames`, and its refusal is `UnknownBoundName`.
+- A body that applies the artifact re-keys the typed arguments to addresses with
+  `FunctionRegistry.addressed` before `Function.apply`.
+- `invocationKey` and `invocationPreimage` are computed over names. A capture journalled under a
+  key minted before `0.45.0` is not found by the same call after it.
 
 ## 5. If you want the theorems, not only the laws: pin the proof kit
 

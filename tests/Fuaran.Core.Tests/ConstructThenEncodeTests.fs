@@ -46,7 +46,8 @@ let rec private decodeNode el : Result<RNode, string> =
                       Hole = None
                       HoleName = ""
                       Eff = Effect.pureDeterministic
-                      Children = kids }))))
+                      Children = kids
+                      BoundSlot = None }))))
 
 let private decode (s: string) = Json.parse s |> Result.bind decodeNode
 

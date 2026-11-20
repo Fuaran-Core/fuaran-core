@@ -481,42 +481,54 @@ let uu___is_SNonFinite : space_fault  ->  Prims.bool = (fun ( projectee  :  spac
      false
      end))
 
-type readers = {int_of : Prims.string  ->  FStar_Pervasives_Native.option<Prims.int>; float_in : Prims.string  ->  Prims.string  ->  Prims.string  ->  Prims.bool; str_len : Prims.string  ->  Prims.nat; kind_of : Prims.string  ->  FStar_Pervasives_Native.option<Prims.string>; doc_ok : Prims.string  ->  Prims.bool; float_fault : Prims.string  ->  Prims.string  ->  FStar_Pervasives_Native.option<space_fault>}
+type readers = {int_of : Prims.string  ->  FStar_Pervasives_Native.option<Prims.int>; float_in : Prims.string  ->  Prims.string  ->  Prims.string  ->  Prims.bool; str_len : Prims.string  ->  Prims.nat; kind_of : Prims.string  ->  FStar_Pervasives_Native.option<Prims.string>; doc_ok : Prims.string  ->  Prims.bool; float_fault : Prims.string  ->  Prims.string  ->  FStar_Pervasives_Native.option<space_fault>; seg_ok : Prims.string  ->  Prims.bool; name_ok : Prims.string  ->  Prims.bool}
 
 
 let __proj__Mkreaders__item__int_of : readers  ->  Prims.string  ->  FStar_Pervasives_Native.option<Prims.int> = (fun ( projectee  :  readers ) -> (match (projectee) with
-| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of; doc_ok = doc_ok; float_fault = float_fault} -> begin
+| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of; doc_ok = doc_ok; float_fault = float_fault; seg_ok = seg_ok; name_ok = name_ok} -> begin
      int_of
      end))
 
 
 let __proj__Mkreaders__item__float_in : readers  ->  Prims.string  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( projectee  :  readers ) -> (match (projectee) with
-| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of; doc_ok = doc_ok; float_fault = float_fault} -> begin
+| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of; doc_ok = doc_ok; float_fault = float_fault; seg_ok = seg_ok; name_ok = name_ok} -> begin
      float_in
      end))
 
 
 let __proj__Mkreaders__item__str_len : readers  ->  Prims.string  ->  Prims.nat = (fun ( projectee  :  readers ) -> (match (projectee) with
-| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of; doc_ok = doc_ok; float_fault = float_fault} -> begin
+| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of; doc_ok = doc_ok; float_fault = float_fault; seg_ok = seg_ok; name_ok = name_ok} -> begin
      str_len
      end))
 
 
 let __proj__Mkreaders__item__kind_of : readers  ->  Prims.string  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( projectee  :  readers ) -> (match (projectee) with
-| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of; doc_ok = doc_ok; float_fault = float_fault} -> begin
+| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of; doc_ok = doc_ok; float_fault = float_fault; seg_ok = seg_ok; name_ok = name_ok} -> begin
      kind_of
      end))
 
 
 let __proj__Mkreaders__item__doc_ok : readers  ->  Prims.string  ->  Prims.bool = (fun ( projectee  :  readers ) -> (match (projectee) with
-| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of; doc_ok = doc_ok; float_fault = float_fault} -> begin
+| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of; doc_ok = doc_ok; float_fault = float_fault; seg_ok = seg_ok; name_ok = name_ok} -> begin
      doc_ok
      end))
 
 
 let __proj__Mkreaders__item__float_fault : readers  ->  Prims.string  ->  Prims.string  ->  FStar_Pervasives_Native.option<space_fault> = (fun ( projectee  :  readers ) -> (match (projectee) with
-| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of; doc_ok = doc_ok; float_fault = float_fault} -> begin
+| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of; doc_ok = doc_ok; float_fault = float_fault; seg_ok = seg_ok; name_ok = name_ok} -> begin
      float_fault
+     end))
+
+
+let __proj__Mkreaders__item__seg_ok : readers  ->  Prims.string  ->  Prims.bool = (fun ( projectee  :  readers ) -> (match (projectee) with
+| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of; doc_ok = doc_ok; float_fault = float_fault; seg_ok = seg_ok; name_ok = name_ok} -> begin
+     seg_ok
+     end))
+
+
+let __proj__Mkreaders__item__name_ok : readers  ->  Prims.string  ->  Prims.bool = (fun ( projectee  :  readers ) -> (match (projectee) with
+| {int_of = int_of; float_in = float_in; str_len = str_len; kind_of = kind_of; doc_ok = doc_ok; float_fault = float_fault; seg_ok = seg_ok; name_ok = name_ok} -> begin
+     name_ok
      end))
 
 
@@ -667,24 +679,30 @@ let __proj__ActionHole__item___0 : hole_kind  ->  effect_class = (fun ( projecte
      _0
      end))
 
-type hole_decl = {h_addr : Prims.string; h_name : Prims.string; h_kind : hole_kind}
+type hole_decl = {h_addr : Prims.string; h_name : Prims.string; h_kind : hole_kind; h_slots : Prims.list<Prims.string>}
 
 
 let __proj__Mkhole_decl__item__h_addr : hole_decl  ->  Prims.string = (fun ( projectee  :  hole_decl ) -> (match (projectee) with
-| {h_addr = h_addr; h_name = h_name; h_kind = h_kind} -> begin
+| {h_addr = h_addr; h_name = h_name; h_kind = h_kind; h_slots = h_slots} -> begin
      h_addr
      end))
 
 
 let __proj__Mkhole_decl__item__h_name : hole_decl  ->  Prims.string = (fun ( projectee  :  hole_decl ) -> (match (projectee) with
-| {h_addr = h_addr; h_name = h_name; h_kind = h_kind} -> begin
+| {h_addr = h_addr; h_name = h_name; h_kind = h_kind; h_slots = h_slots} -> begin
      h_name
      end))
 
 
 let __proj__Mkhole_decl__item__h_kind : hole_decl  ->  hole_kind = (fun ( projectee  :  hole_decl ) -> (match (projectee) with
-| {h_addr = h_addr; h_name = h_name; h_kind = h_kind} -> begin
+| {h_addr = h_addr; h_name = h_name; h_kind = h_kind; h_slots = h_slots} -> begin
      h_kind
+     end))
+
+
+let __proj__Mkhole_decl__item__h_slots : hole_decl  ->  Prims.list<Prims.string> = (fun ( projectee  :  hole_decl ) -> (match (projectee) with
+| {h_addr = h_addr; h_name = h_name; h_kind = h_kind; h_slots = h_slots} -> begin
+     h_slots
      end))
 
 type sig_entry = {s_addr : Prims.string; s_name : Prims.string; s_kind : hole_kind; s_required : Prims.bool}
@@ -789,10 +807,12 @@ type decl_fault =
 | HoleUnderSlot of Prims.string
 | EmptyResult of value_space
 | NonFiniteResult
+| IllFormedHoleName of Prims.string
+| DuplicateHoleName of Prims.string
 
 
 let uu___is_EmptySpace : decl_fault  ->  Prims.bool = (fun ( projectee  :  decl_fault ) -> (match (projectee) with
-| EmptySpace (addr, space) -> begin
+| EmptySpace (name, space) -> begin
      true
      end
 | uu___ -> begin
@@ -800,20 +820,20 @@ let uu___is_EmptySpace : decl_fault  ->  Prims.bool = (fun ( projectee  :  decl_
      end))
 
 
-let __proj__EmptySpace__item__addr : decl_fault  ->  Prims.string = (fun ( projectee  :  decl_fault ) -> (match (projectee) with
-| EmptySpace (addr, space) -> begin
-     addr
+let __proj__EmptySpace__item__name : decl_fault  ->  Prims.string = (fun ( projectee  :  decl_fault ) -> (match (projectee) with
+| EmptySpace (name, space) -> begin
+     name
      end))
 
 
 let __proj__EmptySpace__item__space : decl_fault  ->  value_space = (fun ( projectee  :  decl_fault ) -> (match (projectee) with
-| EmptySpace (addr, space) -> begin
+| EmptySpace (name, space) -> begin
      space
      end))
 
 
 let uu___is_NonFiniteBound : decl_fault  ->  Prims.bool = (fun ( projectee  :  decl_fault ) -> (match (projectee) with
-| NonFiniteBound (addr) -> begin
+| NonFiniteBound (name) -> begin
      true
      end
 | uu___ -> begin
@@ -821,9 +841,9 @@ let uu___is_NonFiniteBound : decl_fault  ->  Prims.bool = (fun ( projectee  :  d
      end))
 
 
-let __proj__NonFiniteBound__item__addr : decl_fault  ->  Prims.string = (fun ( projectee  :  decl_fault ) -> (match (projectee) with
-| NonFiniteBound (addr) -> begin
-     addr
+let __proj__NonFiniteBound__item__name : decl_fault  ->  Prims.string = (fun ( projectee  :  decl_fault ) -> (match (projectee) with
+| NonFiniteBound (name) -> begin
+     name
      end))
 
 
@@ -878,6 +898,36 @@ let uu___is_NonFiniteResult : decl_fault  ->  Prims.bool = (fun ( projectee  :  
      end
 | uu___ -> begin
      false
+     end))
+
+
+let uu___is_IllFormedHoleName : decl_fault  ->  Prims.bool = (fun ( projectee  :  decl_fault ) -> (match (projectee) with
+| IllFormedHoleName (name) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__IllFormedHoleName__item__name : decl_fault  ->  Prims.string = (fun ( projectee  :  decl_fault ) -> (match (projectee) with
+| IllFormedHoleName (name) -> begin
+     name
+     end))
+
+
+let uu___is_DuplicateHoleName : decl_fault  ->  Prims.bool = (fun ( projectee  :  decl_fault ) -> (match (projectee) with
+| DuplicateHoleName (name) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end))
+
+
+let __proj__DuplicateHoleName__item__name : decl_fault  ->  Prims.string = (fun ( projectee  :  decl_fault ) -> (match (projectee) with
+| DuplicateHoleName (name) -> begin
+     name
      end))
 
 type apply_error =
@@ -1118,7 +1168,7 @@ let __proj__DuplicateCapability__item__id : invoke_error  ->  Prims.string = (fu
 
 
 let uu___is_UnknownArg : invoke_error  ->  Prims.bool = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| UnknownArg (addr, declared) -> begin
+| UnknownArg (name, declared) -> begin
      true
      end
 | uu___ -> begin
@@ -1126,20 +1176,20 @@ let uu___is_UnknownArg : invoke_error  ->  Prims.bool = (fun ( projectee  :  inv
      end))
 
 
-let __proj__UnknownArg__item__addr : invoke_error  ->  Prims.string = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| UnknownArg (addr, declared) -> begin
-     addr
+let __proj__UnknownArg__item__name : invoke_error  ->  Prims.string = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
+| UnknownArg (name, declared) -> begin
+     name
      end))
 
 
 let __proj__UnknownArg__item__declared : invoke_error  ->  Prims.list<Prims.string> = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| UnknownArg (addr, declared) -> begin
+| UnknownArg (name, declared) -> begin
      declared
      end))
 
 
 let uu___is_ArgOutOfSpace : invoke_error  ->  Prims.bool = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| ArgOutOfSpace (addr, space, got) -> begin
+| ArgOutOfSpace (name, space, got) -> begin
      true
      end
 | uu___ -> begin
@@ -1147,26 +1197,26 @@ let uu___is_ArgOutOfSpace : invoke_error  ->  Prims.bool = (fun ( projectee  :  
      end))
 
 
-let __proj__ArgOutOfSpace__item__addr : invoke_error  ->  Prims.string = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| ArgOutOfSpace (addr, space, got) -> begin
-     addr
+let __proj__ArgOutOfSpace__item__name : invoke_error  ->  Prims.string = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
+| ArgOutOfSpace (name, space, got) -> begin
+     name
      end))
 
 
 let __proj__ArgOutOfSpace__item__space : invoke_error  ->  value_space = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| ArgOutOfSpace (addr, space, got) -> begin
+| ArgOutOfSpace (name, space, got) -> begin
      space
      end))
 
 
 let __proj__ArgOutOfSpace__item__got : invoke_error  ->  Prims.string = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| ArgOutOfSpace (addr, space, got) -> begin
+| ArgOutOfSpace (name, space, got) -> begin
      got
      end))
 
 
 let uu___is_RequiredArgsUnbound : invoke_error  ->  Prims.bool = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| RequiredArgsUnbound (addrs) -> begin
+| RequiredArgsUnbound (names) -> begin
      true
      end
 | uu___ -> begin
@@ -1174,14 +1224,14 @@ let uu___is_RequiredArgsUnbound : invoke_error  ->  Prims.bool = (fun ( projecte
      end))
 
 
-let __proj__RequiredArgsUnbound__item__addrs : invoke_error  ->  Prims.list<Prims.string> = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| RequiredArgsUnbound (addrs) -> begin
-     addrs
+let __proj__RequiredArgsUnbound__item__names : invoke_error  ->  Prims.list<Prims.string> = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
+| RequiredArgsUnbound (names) -> begin
+     names
      end))
 
 
 let uu___is_UninvocableArg : invoke_error  ->  Prims.bool = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| UninvocableArg (addr) -> begin
+| UninvocableArg (name) -> begin
      true
      end
 | uu___ -> begin
@@ -1189,9 +1239,9 @@ let uu___is_UninvocableArg : invoke_error  ->  Prims.bool = (fun ( projectee  : 
      end))
 
 
-let __proj__UninvocableArg__item__addr : invoke_error  ->  Prims.string = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| UninvocableArg (addr) -> begin
-     addr
+let __proj__UninvocableArg__item__name : invoke_error  ->  Prims.string = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
+| UninvocableArg (name) -> begin
+     name
      end))
 
 
@@ -1211,7 +1261,7 @@ let __proj__BodyFailed__item__reason : invoke_error  ->  Prims.string = (fun ( p
 
 
 let uu___is_NonTotalCapability : invoke_error  ->  Prims.bool = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| NonTotalCapability (id, addrs) -> begin
+| NonTotalCapability (id, names) -> begin
      true
      end
 | uu___ -> begin
@@ -1220,14 +1270,14 @@ let uu___is_NonTotalCapability : invoke_error  ->  Prims.bool = (fun ( projectee
 
 
 let __proj__NonTotalCapability__item__id : invoke_error  ->  Prims.string = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| NonTotalCapability (id, addrs) -> begin
+| NonTotalCapability (id, names) -> begin
      id
      end))
 
 
-let __proj__NonTotalCapability__item__addrs : invoke_error  ->  Prims.list<Prims.string> = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| NonTotalCapability (id, addrs) -> begin
-     addrs
+let __proj__NonTotalCapability__item__names : invoke_error  ->  Prims.list<Prims.string> = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
+| NonTotalCapability (id, names) -> begin
+     names
      end))
 
 
@@ -1253,7 +1303,7 @@ let __proj__IllFormedCapability__item__fault : invoke_error  ->  decl_fault = (f
 
 
 let uu___is_DuplicateArg : invoke_error  ->  Prims.bool = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| DuplicateArg (addr) -> begin
+| DuplicateArg (name) -> begin
      true
      end
 | uu___ -> begin
@@ -1261,9 +1311,9 @@ let uu___is_DuplicateArg : invoke_error  ->  Prims.bool = (fun ( projectee  :  i
      end))
 
 
-let __proj__DuplicateArg__item__addr : invoke_error  ->  Prims.string = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
-| DuplicateArg (addr) -> begin
-     addr
+let __proj__DuplicateArg__item__name : invoke_error  ->  Prims.string = (fun ( projectee  :  invoke_error ) -> (match (projectee) with
+| DuplicateArg (name) -> begin
+     name
      end))
 
 
@@ -1287,7 +1337,7 @@ let rec find_entry : Prims.string  ->  Prims.list<sig_entry>  ->  FStar_Pervasiv
      end
 | (h)::t -> begin
       
-if (Prims.op_Equals h.s_addr k) then begin
+if (Prims.op_Equals h.s_name k) then begin
      FStar_Pervasives_Native.Some (h)
      end else begin
      (find_entry k t)
@@ -1295,7 +1345,30 @@ if (Prims.op_Equals h.s_addr k) then begin
      end))
 
 
+let rec find_at : Prims.string  ->  Prims.list<sig_entry>  ->  FStar_Pervasives_Native.option<sig_entry> = (fun ( k  :  Prims.string ) ( holes  :  Prims.list<sig_entry> ) -> (match (holes) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| (h)::t -> begin
+      
+if (Prims.op_Equals h.s_addr k) then begin
+     FStar_Pervasives_Native.Some (h)
+     end else begin
+     (find_at k t)
+     end
+     end))
+
+
 let addr_of : hole_decl  ->  Prims.string = (fun ( h  :  hole_decl ) -> h.h_addr)
+
+
+let rec entry_names : Prims.list<sig_entry>  ->  Prims.list<Prims.string> = (fun ( holes  :  Prims.list<sig_entry> ) -> (match (holes) with
+| [] -> begin
+     []
+     end
+| (h)::t -> begin
+     (h.s_name)::(entry_names t)
+     end))
 
 
 let rec entry_addrs : Prims.list<sig_entry>  ->  Prims.list<Prims.string> = (fun ( holes  :  Prims.list<sig_entry> ) -> (match (holes) with
@@ -1379,7 +1452,25 @@ let __proj__Mkwitness__item__node_id = (fun ( projectee  :  witness<'node> ) -> 
      end))
 
 
-let entry_of : hole_decl  ->  sig_entry = (fun ( h  :  hole_decl ) -> {s_addr = h.h_addr; s_name = h.h_name; s_kind = h.h_kind; s_required = (match (h.h_kind) with
+let rec join_dot : Prims.list<Prims.string>  ->  Prims.string = (fun ( l  :  Prims.list<Prims.string> ) -> (match (l) with
+| [] -> begin
+     ""
+     end
+| (x)::[] -> begin
+     x
+     end
+| (x)::t -> begin
+     (Prims.strcat x (Prims.strcat "." (join_dot t)))
+     end))
+
+
+let segments : hole_decl  ->  Prims.list<Prims.string> = (fun ( h  :  hole_decl ) -> (ListAlgebra.app h.h_slots ((h.h_name)::[])))
+
+
+let qualified : hole_decl  ->  Prims.string = (fun ( h  :  hole_decl ) -> (join_dot (segments h)))
+
+
+let entry_of : hole_decl  ->  sig_entry = (fun ( h  :  hole_decl ) -> {s_addr = h.h_addr; s_name = (qualified h); s_kind = h.h_kind; s_required = (match (h.h_kind) with
 | ValueHole (uu___) -> begin
      true
      end
@@ -1425,10 +1516,10 @@ let entry_space_fault : readers  ->  sig_entry  ->  FStar_Pervasives_Native.opti
 | FStar_Pervasives_Native.Some (sp) -> begin
      (match ((space_wf rd sp)) with
 | FStar_Pervasives_Native.Some (SEmpty) -> begin
-     FStar_Pervasives_Native.Some (EmptySpace (e.s_addr, sp))
+     FStar_Pervasives_Native.Some (EmptySpace (e.s_name, sp))
      end
 | FStar_Pervasives_Native.Some (SNonFinite) -> begin
-     FStar_Pervasives_Native.Some (NonFiniteBound (e.s_addr))
+     FStar_Pervasives_Native.Some (NonFiniteBound (e.s_name))
      end
 | FStar_Pervasives_Native.None -> begin
      FStar_Pervasives_Native.None
@@ -1436,27 +1527,63 @@ let entry_space_fault : readers  ->  sig_entry  ->  FStar_Pervasives_Native.opti
      end))
 
 
-let rec validate_entries : readers  ->  Prims.list<Prims.string>  ->  Prims.list<sig_entry>  ->  FStar_Pervasives_Native.option<decl_fault> = (fun ( rd  :  readers ) ( seen  :  Prims.list<Prims.string> ) ( holes  :  Prims.list<sig_entry> ) -> (match (holes) with
+let entry_fault : readers  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  sig_entry  ->  FStar_Pervasives_Native.option<decl_fault> = (fun ( rd  :  readers ) ( names  :  Prims.list<Prims.string> ) ( addrs  :  Prims.list<Prims.string> ) ( e  :  sig_entry ) ->  
+if (not ((rd.name_ok e.s_name))) then begin
+     FStar_Pervasives_Native.Some (IllFormedHoleName (e.s_name))
+     end else begin
+      
+if (ListAlgebra.mem e.s_name names) then begin
+     FStar_Pervasives_Native.Some (DuplicateHoleName (e.s_name))
+     end else begin
+      
+if (ListAlgebra.mem e.s_addr addrs) then begin
+     FStar_Pervasives_Native.Some (DuplicateHoleAddr (e.s_addr))
+     end else begin
+     (entry_space_fault rd e)
+     end
+     end
+     end)
+
+
+let rec validate_entries : readers  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<sig_entry>  ->  FStar_Pervasives_Native.option<decl_fault> = (fun ( rd  :  readers ) ( names  :  Prims.list<Prims.string> ) ( addrs  :  Prims.list<Prims.string> ) ( holes  :  Prims.list<sig_entry> ) -> (match (holes) with
 | [] -> begin
      FStar_Pervasives_Native.None
      end
 | (e)::rest -> begin
-      
-if (ListAlgebra.mem e.s_addr seen) then begin
-     FStar_Pervasives_Native.Some (DuplicateHoleAddr (e.s_addr))
-     end else begin
-     (match ((entry_space_fault rd e)) with
+     (match ((entry_fault rd names addrs e)) with
 | FStar_Pervasives_Native.Some (f) -> begin
      FStar_Pervasives_Native.Some (f)
      end
 | FStar_Pervasives_Native.None -> begin
-     (validate_entries rd ((e.s_addr)::seen) rest)
+     (validate_entries rd ((e.s_name)::names) ((e.s_addr)::addrs) rest)
      end)
-     end
      end))
 
 
-let validate_signature : readers  ->  signature  ->  FStar_Pervasives_Native.option<decl_fault> = (fun ( rd  :  readers ) ( sg  :  signature ) -> (validate_entries rd [] sg.sg_holes))
+let validate_signature : readers  ->  signature  ->  FStar_Pervasives_Native.option<decl_fault> = (fun ( rd  :  readers ) ( sg  :  signature ) -> (validate_entries rd [] [] sg.sg_holes))
+
+
+let segments_ok : readers  ->  hole_decl  ->  Prims.bool = (fun ( rd  :  readers ) ( h  :  hole_decl ) -> (for_all rd.seg_ok (segments h)))
+
+
+let rec validate_holes : readers  ->  Prims.list<Prims.string>  ->  Prims.list<Prims.string>  ->  Prims.list<hole_decl>  ->  FStar_Pervasives_Native.option<decl_fault> = (fun ( rd  :  readers ) ( names  :  Prims.list<Prims.string> ) ( addrs  :  Prims.list<Prims.string> ) ( holes  :  Prims.list<hole_decl> ) -> (match (holes) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| (h)::rest -> begin
+      
+if (not ((segments_ok rd h))) then begin
+     FStar_Pervasives_Native.Some (IllFormedHoleName ((qualified h)))
+     end else begin
+     (match ((entry_fault rd names addrs (entry_of h))) with
+| FStar_Pervasives_Native.Some (f) -> begin
+     FStar_Pervasives_Native.Some (f)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (validate_holes rd (((qualified h))::names) ((h.h_addr)::addrs) rest)
+     end)
+     end
+     end))
 
 
 let rec slot_count : Prims.list<hole_decl>  ->  Prims.nat = (fun ( hs  :  Prims.list<hole_decl> ) -> (match (hs) with
@@ -1514,7 +1641,7 @@ if ((any_holes w cs) && ((slot_count (w.holes n)) > (sum_slots w cs))) then begi
      end))
 
 
-let validate_decl = (fun ( rd  :  readers ) ( w  :  witness<'node> ) ( n  :  'node ) -> (match ((validate_signature rd (signature_of w "" n))) with
+let validate_decl = (fun ( rd  :  readers ) ( w  :  witness<'node> ) ( n  :  'node ) -> (match ((validate_holes rd [] [] (w.holes n))) with
 | FStar_Pervasives_Native.Some (f) -> begin
      FStar_Pervasives_Native.Some (f)
      end
@@ -1952,15 +2079,15 @@ let rec check_args : readers  ->  Prims.list<sig_entry>  ->  Prims.list<Prims.st
 | [] -> begin
      Ok (())
      end
-| ((addr, value))::rest -> begin
-     (match ((find_entry addr holes)) with
+| ((name, value))::rest -> begin
+     (match ((find_entry name holes)) with
 | FStar_Pervasives_Native.None -> begin
-     Error (UnknownArg (addr, declared))
+     Error (UnknownArg (name, declared))
      end
 | FStar_Pervasives_Native.Some (h) -> begin
      (match ((arg_space h)) with
 | FStar_Pervasives_Native.None -> begin
-     Error (UninvocableArg (addr))
+     Error (UninvocableArg (name))
      end
 | FStar_Pervasives_Native.Some (space) -> begin
       
@@ -1977,13 +2104,13 @@ if ((match (space) with
 | uu___ -> begin
      false
      end)) then begin
-     Error (UninvocableArg (addr))
+     Error (UninvocableArg (name))
      end else begin
       
 if (validate rd space value) then begin
      (check_args rd holes declared rest)
      end else begin
-     Error (ArgOutOfSpace (addr, space, value))
+     Error (ArgOutOfSpace (name, space, value))
      end
      end
      end)
@@ -1997,8 +2124,8 @@ let rec unbound_required : Prims.list<sig_entry>  ->  invocation  ->  Prims.list
      end
 | (h)::t -> begin
       
-if (h.s_required && (not ((has_key h.s_addr a)))) then begin
-     (h.s_addr)::(unbound_required t a)
+if (h.s_required && (not ((has_key h.s_name a)))) then begin
+     (h.s_name)::(unbound_required t a)
      end else begin
      (unbound_required t a)
      end
@@ -2010,7 +2137,7 @@ let validate_args : readers  ->  capability  ->  invocation  ->  outcome<unit, i
 let holes = c.c_signature.sg_holes
 in (
 
-let declared = (entry_addrs holes)
+let declared = (entry_names holes)
 in (match ((repeated [] (keys a))) with
 | (d)::uu___ -> begin
      Error (DuplicateArg (d))
@@ -2128,16 +2255,16 @@ let rec ids : Prims.list<capability>  ->  Prims.list<Prims.string> = (fun ( cs  
      end))
 
 
-let rec non_total_addrs : Prims.list<sig_entry>  ->  Prims.list<Prims.string> = (fun ( holes  :  Prims.list<sig_entry> ) -> (match (holes) with
+let rec non_total_names : Prims.list<sig_entry>  ->  Prims.list<Prims.string> = (fun ( holes  :  Prims.list<sig_entry> ) -> (match (holes) with
 | [] -> begin
      []
      end
 | (e)::t -> begin
       
 if (entry_total e) then begin
-     (non_total_addrs t)
+     (non_total_names t)
      end else begin
-     (e.s_addr)::(non_total_addrs t)
+     (e.s_name)::(non_total_names t)
      end
      end))
 
@@ -2167,7 +2294,7 @@ let register : readers  ->  capability  ->  registry  ->  outcome<registry, invo
 | FStar_Pervasives_Native.None -> begin
       
 if (not ((is_total c.c_signature))) then begin
-     Error (NonTotalCapability (c.c_id, (non_total_addrs c.c_signature.sg_holes)))
+     Error (NonTotalCapability (c.c_id, (non_total_names c.c_signature.sg_holes)))
      end else begin
      (match ((validate_signature rd c.c_signature)) with
 | FStar_Pervasives_Native.Some (f) -> begin
@@ -2220,8 +2347,8 @@ let rec args_in_space : readers  ->  Prims.list<sig_entry>  ->  invocation  ->  
 | [] -> begin
      true
      end
-| ((addr, value))::rest -> begin
-     ((match ((find_entry addr holes)) with
+| ((name, value))::rest -> begin
+     ((match ((find_entry name holes)) with
 | FStar_Pervasives_Native.Some (h) -> begin
      (match ((arg_space h)) with
 | FStar_Pervasives_Native.Some (sp) -> begin
@@ -2246,10 +2373,58 @@ let hole_total : hole_decl  ->  Prims.bool = (fun ( h  :  hole_decl ) -> (match 
      end))
 
 
-let rename : (Prims.string  ->  Prims.string)  ->  hole_decl  ->  hole_decl = (fun ( f  :  Prims.string  ->  Prims.string ) ( h  :  hole_decl ) -> {h_addr = h.h_addr; h_name = (f h.h_name); h_kind = h.h_kind})
+let rename : (Prims.string  ->  Prims.string)  ->  hole_decl  ->  hole_decl = (fun ( f  :  Prims.string  ->  Prims.string ) ( h  :  hole_decl ) -> {h_addr = h.h_addr; h_name = (f h.h_name); h_kind = h.h_kind; h_slots = (map f h.h_slots)})
 
 
 let renamed = (fun ( f  :  Prims.string  ->  Prims.string ) ( w  :  witness<'node> ) -> {holes = (fun ( m  :  'node ) -> (map (rename f) (w.holes m))); eff = w.eff; bind_hole = w.bind_hole; kind_tag = w.kind_tag; preorder = w.preorder; children = w.children; node_id = w.node_id})
+
+
+let name_fault : decl_fault  ->  Prims.bool = (fun ( f  :  decl_fault ) -> ((match (f) with
+| IllFormedHoleName (name) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end) || (match (f) with
+| DuplicateHoleName (name) -> begin
+     true
+     end
+| uu___ -> begin
+     false
+     end)))
+
+
+let names_refused : FStar_Pervasives_Native.option<decl_fault>  ->  Prims.bool = (fun ( r  :  FStar_Pervasives_Native.option<decl_fault> ) -> (match (r) with
+| FStar_Pervasives_Native.Some (f) -> begin
+     (name_fault f)
+     end
+| FStar_Pervasives_Native.None -> begin
+     false
+     end))
+
+
+let fault_shape : decl_fault  ->  decl_fault = (fun ( f  :  decl_fault ) -> (match (f) with
+| EmptySpace (uu___, sp) -> begin
+     EmptySpace ("", sp)
+     end
+| NonFiniteBound (uu___) -> begin
+     NonFiniteBound ("")
+     end
+| uu___ -> begin
+     f
+     end))
+
+
+let shape_of : FStar_Pervasives_Native.option<decl_fault>  ->  FStar_Pervasives_Native.option<decl_fault> = (fun ( r  :  FStar_Pervasives_Native.option<decl_fault> ) -> (match (r) with
+| FStar_Pervasives_Native.Some (f) -> begin
+     FStar_Pervasives_Native.Some ((fault_shape f))
+     end
+| FStar_Pervasives_Native.None -> begin
+     FStar_Pervasives_Native.None
+     end))
+
+
+let agree_but_names : FStar_Pervasives_Native.option<decl_fault>  ->  FStar_Pervasives_Native.option<decl_fault>  ->  Prims.bool = (fun ( r1  :  FStar_Pervasives_Native.option<decl_fault> ) ( r2  :  FStar_Pervasives_Native.option<decl_fault> ) -> (((names_refused r1) || (names_refused r2)) || (Prims.op_Equals (shape_of r1) (shape_of r2))))
 
 
 let rec none_keyed = (fun ( a  :  args<'node> ) ( holes  :  Prims.list<hole_decl> ) -> (match (holes) with
@@ -2298,29 +2473,29 @@ let rec all_covered : effect_class  ->  Prims.list<effect_class>  ->  Prims.bool
      ((covers c x) && (all_covered c t))
      end))
 
-type key_renderers = {k_hash : Prims.string  ->  Prims.string; k_addr_le : Prims.string  ->  Prims.string  ->  Prims.bool; k_field : Prims.string  ->  Prims.string; k_canonical : value_space  ->  Prims.string  ->  FStar_Pervasives_Native.option<Prims.string>}
+type key_renderers = {k_hash : Prims.string  ->  Prims.string; k_name_le : Prims.string  ->  Prims.string  ->  Prims.bool; k_field : Prims.string  ->  Prims.string; k_canonical : value_space  ->  Prims.string  ->  FStar_Pervasives_Native.option<Prims.string>}
 
 
 let __proj__Mkkey_renderers__item__k_hash : key_renderers  ->  Prims.string  ->  Prims.string = (fun ( projectee  :  key_renderers ) -> (match (projectee) with
-| {k_hash = k_hash; k_addr_le = k_addr_le; k_field = k_field; k_canonical = k_canonical} -> begin
+| {k_hash = k_hash; k_name_le = k_name_le; k_field = k_field; k_canonical = k_canonical} -> begin
      k_hash
      end))
 
 
-let __proj__Mkkey_renderers__item__k_addr_le : key_renderers  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( projectee  :  key_renderers ) -> (match (projectee) with
-| {k_hash = k_hash; k_addr_le = k_addr_le; k_field = k_field; k_canonical = k_canonical} -> begin
-     k_addr_le
+let __proj__Mkkey_renderers__item__k_name_le : key_renderers  ->  Prims.string  ->  Prims.string  ->  Prims.bool = (fun ( projectee  :  key_renderers ) -> (match (projectee) with
+| {k_hash = k_hash; k_name_le = k_name_le; k_field = k_field; k_canonical = k_canonical} -> begin
+     k_name_le
      end))
 
 
 let __proj__Mkkey_renderers__item__k_field : key_renderers  ->  Prims.string  ->  Prims.string = (fun ( projectee  :  key_renderers ) -> (match (projectee) with
-| {k_hash = k_hash; k_addr_le = k_addr_le; k_field = k_field; k_canonical = k_canonical} -> begin
+| {k_hash = k_hash; k_name_le = k_name_le; k_field = k_field; k_canonical = k_canonical} -> begin
      k_field
      end))
 
 
 let __proj__Mkkey_renderers__item__k_canonical : key_renderers  ->  value_space  ->  Prims.string  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( projectee  :  key_renderers ) -> (match (projectee) with
-| {k_hash = k_hash; k_addr_le = k_addr_le; k_field = k_field; k_canonical = k_canonical} -> begin
+| {k_hash = k_hash; k_name_le = k_name_le; k_field = k_field; k_canonical = k_canonical} -> begin
      k_canonical
      end))
 
@@ -2341,7 +2516,7 @@ let uu___2 = y
 in (match (uu___2) with
 | (ya, uu___3) -> begin
       
-if (kr.k_addr_le xa ya) then begin
+if (kr.k_name_le xa ya) then begin
      (x)::l
      end else begin
      (y)::(insert_binding kr x t)
@@ -2438,12 +2613,56 @@ let rec sorted_b : (Prims.string  ->  Prims.string  ->  Prims.bool)  ->  invocat
      end))
 
 
+let rec name_addrs : Prims.list<sig_entry>  ->  Prims.list<(Prims.string * Prims.string)> = (fun ( holes  :  Prims.list<sig_entry> ) -> (match (holes) with
+| [] -> begin
+     []
+     end
+| (e)::t -> begin
+     (((e.s_name), (e.s_addr)))::(name_addrs t)
+     end))
+
+
+let rec assoc_last : Prims.string  ->  Prims.list<(Prims.string * Prims.string)>  ->  FStar_Pervasives_Native.option<Prims.string> = (fun ( k  :  Prims.string ) ( l  :  Prims.list<(Prims.string * Prims.string)> ) -> (match (l) with
+| [] -> begin
+     FStar_Pervasives_Native.None
+     end
+| ((k', v))::t -> begin
+     (match ((assoc_last k t)) with
+| FStar_Pervasives_Native.Some (x) -> begin
+     FStar_Pervasives_Native.Some (x)
+     end
+| FStar_Pervasives_Native.None -> begin
+      
+if (Prims.op_Equals k k') then begin
+     FStar_Pervasives_Native.Some (v)
+     end else begin
+     FStar_Pervasives_Native.None
+     end
+     end)
+     end))
+
+
+let rec addressed = (fun ( holes  :  Prims.list<sig_entry> ) ( l  :  Prims.list<(Prims.string * 'a)> ) -> (match (l) with
+| [] -> begin
+     []
+     end
+| ((k, v))::t -> begin
+     (match ((assoc_last k (name_addrs holes))) with
+| FStar_Pervasives_Native.Some (ad) -> begin
+     (((ad), (v)))::(addressed holes t)
+     end
+| FStar_Pervasives_Native.None -> begin
+     (addressed holes t)
+     end)
+     end))
+
+
 let lift = (fun ( tree  :  Prims.string  ->  'node ) ( holes  :  Prims.list<sig_entry> ) ( b  :  (Prims.string * Prims.string) ) -> (
 
 let uu___ = b
 in (match (uu___) with
 | (k, v) -> begin
-     (match ((find_entry k holes)) with
+     (match ((find_at k holes)) with
 | FStar_Pervasives_Native.Some (e) -> begin
       
 if (match (e.s_kind) with
@@ -2961,7 +3180,7 @@ let __proj__PipelineCycle__item__cycle : pipeline_error  ->  Prims.list<Prims.st
 
 
 let uu___is_EdgeTypeMismatch : pipeline_error  ->  Prims.bool = (fun ( projectee  :  pipeline_error ) -> (match (projectee) with
-| EdgeTypeMismatch (at, addr, producer, consumer) -> begin
+| EdgeTypeMismatch (at, arg1, producer, consumer) -> begin
      true
      end
 | uu___ -> begin
@@ -2970,31 +3189,31 @@ let uu___is_EdgeTypeMismatch : pipeline_error  ->  Prims.bool = (fun ( projectee
 
 
 let __proj__EdgeTypeMismatch__item__at : pipeline_error  ->  Prims.string = (fun ( projectee  :  pipeline_error ) -> (match (projectee) with
-| EdgeTypeMismatch (at, addr, producer, consumer) -> begin
+| EdgeTypeMismatch (at, arg1, producer, consumer) -> begin
      at
      end))
 
 
-let __proj__EdgeTypeMismatch__item__addr : pipeline_error  ->  Prims.string = (fun ( projectee  :  pipeline_error ) -> (match (projectee) with
-| EdgeTypeMismatch (at, addr, producer, consumer) -> begin
-     addr
+let __proj__EdgeTypeMismatch__item__arg : pipeline_error  ->  Prims.string = (fun ( projectee  :  pipeline_error ) -> (match (projectee) with
+| EdgeTypeMismatch (at, arg1, producer, consumer) -> begin
+     arg1
      end))
 
 
 let __proj__EdgeTypeMismatch__item__producer : pipeline_error  ->  Prims.string = (fun ( projectee  :  pipeline_error ) -> (match (projectee) with
-| EdgeTypeMismatch (at, addr, producer, consumer) -> begin
+| EdgeTypeMismatch (at, arg1, producer, consumer) -> begin
      producer
      end))
 
 
 let __proj__EdgeTypeMismatch__item__consumer : pipeline_error  ->  Prims.string = (fun ( projectee  :  pipeline_error ) -> (match (projectee) with
-| EdgeTypeMismatch (at, addr, producer, consumer) -> begin
+| EdgeTypeMismatch (at, arg1, producer, consumer) -> begin
      consumer
      end))
 
 
 let uu___is_PipelineForwardEdge : pipeline_error  ->  Prims.bool = (fun ( projectee  :  pipeline_error ) -> (match (projectee) with
-| PipelineForwardEdge (at, addr, upstream) -> begin
+| PipelineForwardEdge (at, arg1, upstream) -> begin
      true
      end
 | uu___ -> begin
@@ -3003,19 +3222,19 @@ let uu___is_PipelineForwardEdge : pipeline_error  ->  Prims.bool = (fun ( projec
 
 
 let __proj__PipelineForwardEdge__item__at : pipeline_error  ->  Prims.string = (fun ( projectee  :  pipeline_error ) -> (match (projectee) with
-| PipelineForwardEdge (at, addr, upstream) -> begin
+| PipelineForwardEdge (at, arg1, upstream) -> begin
      at
      end))
 
 
-let __proj__PipelineForwardEdge__item__addr : pipeline_error  ->  Prims.string = (fun ( projectee  :  pipeline_error ) -> (match (projectee) with
-| PipelineForwardEdge (at, addr, upstream) -> begin
-     addr
+let __proj__PipelineForwardEdge__item__arg : pipeline_error  ->  Prims.string = (fun ( projectee  :  pipeline_error ) -> (match (projectee) with
+| PipelineForwardEdge (at, arg1, upstream) -> begin
+     arg1
      end))
 
 
 let __proj__PipelineForwardEdge__item__upstream : pipeline_error  ->  Prims.string = (fun ( projectee  :  pipeline_error ) -> (match (projectee) with
-| PipelineForwardEdge (at, addr, upstream) -> begin
+| PipelineForwardEdge (at, arg1, upstream) -> begin
      upstream
      end))
 
@@ -3398,7 +3617,7 @@ in (match ((FStar_Pervasives_Native.snd r)) with
 let path_to : Prims.list<pipeline_node>  ->  Prims.string  ->  Prims.string  ->  FStar_Pervasives_Native.option<Prims.list<Prims.string>> = (fun ( ns  :  Prims.list<pipeline_node> ) ( target  :  Prims.string ) ( start  :  Prims.string ) -> (FStar_Pervasives_Native.snd (walk ns target [] start)))
 
 
-let edge_fault : feed_readers  ->  readers  ->  Prims.list<pipeline_node>  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.string  ->  Prims.string  ->  value_space  ->  FStar_Pervasives_Native.option<pipeline_error> = (fun ( fr  :  feed_readers ) ( rd  :  readers ) ( ns  :  Prims.list<pipeline_node> ) ( all_ids  :  Prims.list<Prims.string> ) ( nid  :  Prims.string ) ( addr  :  Prims.string ) ( up  :  Prims.string ) ( arg_sp  :  value_space ) -> (match ((find_node up ns)) with
+let edge_fault : feed_readers  ->  readers  ->  Prims.list<pipeline_node>  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.string  ->  Prims.string  ->  value_space  ->  FStar_Pervasives_Native.option<pipeline_error> = (fun ( fr  :  feed_readers ) ( rd  :  readers ) ( ns  :  Prims.list<pipeline_node> ) ( all_ids  :  Prims.list<Prims.string> ) ( nid  :  Prims.string ) ( name  :  Prims.string ) ( up  :  Prims.string ) ( arg_sp  :  value_space ) -> (match ((find_node up ns)) with
 | FStar_Pervasives_Native.None -> begin
      FStar_Pervasives_Native.Some (UnknownNode (up))
      end
@@ -3414,28 +3633,28 @@ if ((index_of up all_ids) > (index_of nid all_ids)) then begin
      FStar_Pervasives_Native.Some (PipelineCycle (nid, (nid)::path))
      end
 | FStar_Pervasives_Native.None -> begin
-     FStar_Pervasives_Native.Some (PipelineForwardEdge (nid, addr, up))
+     FStar_Pervasives_Native.Some (PipelineForwardEdge (nid, name, up))
      end)
      end else begin
       
 if (subsumes fr rd arg_sp (node_output up_node)) then begin
      FStar_Pervasives_Native.None
      end else begin
-     FStar_Pervasives_Native.Some (EdgeTypeMismatch (nid, addr, (space_tag (node_output up_node)), (space_tag arg_sp)))
+     FStar_Pervasives_Native.Some (EdgeTypeMismatch (nid, name, (space_tag (node_output up_node)), (space_tag arg_sp)))
      end
      end
      end
      end))
 
 
-let arg_fault : readers  ->  capability  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.string  ->  FStar_Pervasives_Native.option<invoke_error> = (fun ( rd  :  readers ) ( c  :  capability ) ( declared  :  Prims.list<Prims.string> ) ( addr  :  Prims.string ) ( value  :  Prims.string ) -> (match ((find_entry addr c.c_signature.sg_holes)) with
+let arg_fault : readers  ->  capability  ->  Prims.list<Prims.string>  ->  Prims.string  ->  Prims.string  ->  FStar_Pervasives_Native.option<invoke_error> = (fun ( rd  :  readers ) ( c  :  capability ) ( declared  :  Prims.list<Prims.string> ) ( name  :  Prims.string ) ( value  :  Prims.string ) -> (match ((find_entry name c.c_signature.sg_holes)) with
 | FStar_Pervasives_Native.None -> begin
-     FStar_Pervasives_Native.Some (UnknownArg (addr, declared))
+     FStar_Pervasives_Native.Some (UnknownArg (name, declared))
      end
 | FStar_Pervasives_Native.Some (h) -> begin
      (match ((arg_space h)) with
 | FStar_Pervasives_Native.None -> begin
-     FStar_Pervasives_Native.Some (UninvocableArg (addr))
+     FStar_Pervasives_Native.Some (UninvocableArg (name))
      end
 | FStar_Pervasives_Native.Some (space) -> begin
       
@@ -3452,13 +3671,13 @@ if ((match (space) with
 | uu___ -> begin
      false
      end)) then begin
-     FStar_Pervasives_Native.Some (UninvocableArg (addr))
+     FStar_Pervasives_Native.Some (UninvocableArg (name))
      end else begin
       
 if (validate rd space value) then begin
      FStar_Pervasives_Native.None
      end else begin
-     FStar_Pervasives_Native.Some (ArgOutOfSpace (addr, space, value))
+     FStar_Pervasives_Native.Some (ArgOutOfSpace (name, space, value))
      end
      end
      end)
@@ -3469,10 +3688,10 @@ let pipe_arg_fault : feed_readers  ->  readers  ->  Prims.list<pipeline_node>  -
 
 let uu___ = b
 in (match (uu___) with
-| (addr, src) -> begin
+| (name, src) -> begin
      (match (src) with
 | Literal (v) -> begin
-     (match ((arg_fault rd cap declared addr v)) with
+     (match ((arg_fault rd cap declared name v)) with
 | FStar_Pervasives_Native.Some (e) -> begin
      FStar_Pervasives_Native.Some (PipelineArgRefused (nid, e))
      end
@@ -3481,17 +3700,17 @@ in (match (uu___) with
      end)
      end
 | FromNode (up) -> begin
-     (match ((find_entry addr cap.c_signature.sg_holes)) with
+     (match ((find_entry name cap.c_signature.sg_holes)) with
 | FStar_Pervasives_Native.None -> begin
-     FStar_Pervasives_Native.Some (PipelineArgRefused (nid, UnknownArg (addr, declared)))
+     FStar_Pervasives_Native.Some (PipelineArgRefused (nid, UnknownArg (name, declared)))
      end
 | FStar_Pervasives_Native.Some (h) -> begin
      (match ((entry_space h)) with
 | FStar_Pervasives_Native.None -> begin
-     FStar_Pervasives_Native.Some (PipelineArgRefused (nid, UninvocableArg (addr)))
+     FStar_Pervasives_Native.Some (PipelineArgRefused (nid, UninvocableArg (name)))
      end
 | FStar_Pervasives_Native.Some (sp) -> begin
-     (edge_fault fr rd ns all_ids nid addr up sp)
+     (edge_fault fr rd ns all_ids nid name up sp)
      end)
      end)
      end)
@@ -3504,8 +3723,8 @@ let rec unbound_keys : Prims.list<sig_entry>  ->  Prims.list<Prims.string>  ->  
      end
 | (h)::t -> begin
       
-if (h.s_required && (not ((ListAlgebra.mem h.s_addr ks)))) then begin
-     (h.s_addr)::(unbound_keys t ks)
+if (h.s_required && (not ((ListAlgebra.mem h.s_name ks)))) then begin
+     (h.s_name)::(unbound_keys t ks)
      end else begin
      (unbound_keys t ks)
      end
@@ -3540,7 +3759,7 @@ if (not ((output_states fr rd out cap.c_result))) then begin
 let holes = cap.c_signature.sg_holes
 in (
 
-let declared = (entry_addrs holes)
+let declared = (entry_names holes)
 in (match ((repeated [] (keys a))) with
 | (d)::uu___ -> begin
      FStar_Pervasives_Native.Some (PipelineArgRefused (nid, DuplicateArg (d)))
@@ -3595,29 +3814,29 @@ in (match ((first_dup all_ids)) with
 type node_body<'v> = pipeline_node  ->  Prims.list<(Prims.string * pipeline_arg<'v>)>  ->  outcome<'v, Prims.string>
 
 
-let rec space_of : Prims.string  ->  Prims.list<sig_entry>  ->  FStar_Pervasives_Native.option<value_space> = (fun ( addr  :  Prims.string ) ( holes  :  Prims.list<sig_entry> ) -> (match (holes) with
+let rec space_of : Prims.string  ->  Prims.list<sig_entry>  ->  FStar_Pervasives_Native.option<value_space> = (fun ( name  :  Prims.string ) ( holes  :  Prims.list<sig_entry> ) -> (match (holes) with
 | [] -> begin
      FStar_Pervasives_Native.None
      end
 | (h)::t -> begin
       
-if (Prims.op_Equals h.s_addr addr) then begin
+if (Prims.op_Equals h.s_name name) then begin
      (match ((entry_space h)) with
 | FStar_Pervasives_Native.Some (s) -> begin
      FStar_Pervasives_Native.Some (s)
      end
 | FStar_Pervasives_Native.None -> begin
-     (space_of addr t)
+     (space_of name t)
      end)
      end else begin
-     (space_of addr t)
+     (space_of name t)
      end
      end))
 
 
-let arg_space_of : capability_lookup  ->  Prims.string  ->  Prims.string  ->  FStar_Pervasives_Native.option<value_space> = (fun ( lk  :  capability_lookup ) ( cap_id  :  Prims.string ) ( addr  :  Prims.string ) -> (match ((lk.lk_find cap_id)) with
+let arg_space_of : capability_lookup  ->  Prims.string  ->  Prims.string  ->  FStar_Pervasives_Native.option<value_space> = (fun ( lk  :  capability_lookup ) ( cap_id  :  Prims.string ) ( name  :  Prims.string ) -> (match ((lk.lk_find cap_id)) with
 | FStar_Pervasives_Native.Some (c) -> begin
-     (space_of addr c.c_signature.sg_holes)
+     (space_of name c.c_signature.sg_holes)
      end
 | FStar_Pervasives_Native.None -> begin
      FStar_Pervasives_Native.None
@@ -3628,20 +3847,20 @@ let rec resolve_args = (fun ( rd  :  readers ) ( lk  :  capability_lookup ) ( sp
 | [] -> begin
      Ok (acc)
      end
-| ((addr, src))::rest -> begin
+| ((name, src))::rest -> begin
      (match (src) with
 | Literal (s) -> begin
-     (resolve_args rd lk spell1 results nid cap_id rest ((((addr), (LiteralArg (s))))::acc))
+     (resolve_args rd lk spell1 results nid cap_id rest ((((name), (LiteralArg (s))))::acc))
      end
 | FromNode (up) -> begin
      (match ((assoc up results)) with
 | FStar_Pervasives_Native.None -> begin
-     Error (EvalIllTyped (PipelineForwardEdge (nid, addr, up)))
+     Error (EvalIllTyped (PipelineForwardEdge (nid, name, up)))
      end
 | FStar_Pervasives_Native.Some (x) -> begin
-     (match ((arg_space_of lk cap_id addr)) with
+     (match ((arg_space_of lk cap_id name)) with
 | FStar_Pervasives_Native.None -> begin
-     Error (EvalIllTyped (PipelineArgRefused (nid, UninvocableArg (addr))))
+     Error (EvalIllTyped (PipelineArgRefused (nid, UninvocableArg (name))))
      end
 | FStar_Pervasives_Native.Some (space) -> begin
      (
@@ -3649,9 +3868,9 @@ let rec resolve_args = (fun ( rd  :  readers ) ( lk  :  capability_lookup ) ( sp
 let spelled = (spell1 x)
 in  
 if (validate rd space spelled) then begin
-     (resolve_args rd lk spell1 results nid cap_id rest ((((addr), (FromUpstream (x))))::acc))
+     (resolve_args rd lk spell1 results nid cap_id rest ((((name), (FromUpstream (x))))::acc))
      end else begin
-     Error (EvalArgRefused (nid, ArgOutOfSpace (addr, space, spelled)))
+     Error (EvalArgRefused (nid, ArgOutOfSpace (name, space, spelled)))
      end)
      end)
      end)
@@ -4868,20 +5087,20 @@ if (Prims.op_Equals t "fromNode") then begin
      end))
 
 
-let arg_json : (Prims.string * arg_source)  ->  jval = (fun ( b  :  (Prims.string * arg_source) ) -> JObj (((("addr"), (JStr ((FStar_Pervasives_Native.fst b)))))::((("source"), ((arg_source_json (FStar_Pervasives_Native.snd b)))))::[]))
+let arg_json : (Prims.string * arg_source)  ->  jval = (fun ( b  :  (Prims.string * arg_source) ) -> JObj (((("name"), (JStr ((FStar_Pervasives_Native.fst b)))))::((("source"), ((arg_source_json (FStar_Pervasives_Native.snd b)))))::[]))
 
 
-let arg_of_j : jval  ->  outcome<(Prims.string * arg_source), decode_error> = (fun ( el  :  jval ) -> (match ((field "addr" d_str el)) with
+let arg_of_j : jval  ->  outcome<(Prims.string * arg_source), decode_error> = (fun ( el  :  jval ) -> (match ((field "name" d_str el)) with
 | Error (e) -> begin
      Error (e)
      end
-| Ok (addr) -> begin
+| Ok (name) -> begin
      (match ((field "source" arg_source_of_j el)) with
 | Error (e) -> begin
      Error (e)
      end
 | Ok (s) -> begin
-     Ok (((addr), (s)))
+     Ok (((name), (s)))
      end)
      end))
 
@@ -5039,7 +5258,7 @@ if (match ((space_wf rd (node_output n))) with
      end))
 
 
-let twins : Prims.list<Twin.twin> = ({Twin.tname = "a-tree-result-names-its-kind"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (result_kind (RValue (SlotTree (FStar_Pervasives_Native.Some ("doc"))))) (FStar_Pervasives_Native.Some ("doc"))))})::({Twin.tname = "a-result-of-nothing-names-no-kind"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (result_kind RNothing) FStar_Pervasives_Native.None) && (Prims.op_Equals (result_kind (RValue (AnyString))) FStar_Pervasives_Native.None)))})::({Twin.tname = "determinism-tag-of-clock-and-network"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (determinism_tag {has_clock = true; has_random = false; has_network = true}) "clock+network"))})::({Twin.tname = "det-of-tag-reads-its-canonical-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "random+network") (FStar_Pervasives_Native.Some ({has_clock = false; has_random = true; has_network = true}))))})::({Twin.tname = "det-of-tag-refuses-another-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "network+random") FStar_Pervasives_Native.None))})::({Twin.tname = "a-bounded-repeat-is-required"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (IntRange ((Prims.parse_int "0"), (Prims.parse_int "3")))}).s_required true))})::({Twin.tname = "an-unbounded-repeat-is-not-required"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (AnyString)}).s_required false))})::({Twin.tname = "a-repeat-over-no-count-is-not-total"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_total {s_addr = "r"; s_name = "r"; s_kind = RepeatHole (AnyString); s_required = false}) false))})::({Twin.tname = "a-repeat-over-a-float-range-is-not-required"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (FloatRange ("0", "1"))}).s_required false))})::({Twin.tname = "a-repeat-past-the-cap-is-not-a-count"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (is_count (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1000001")))) false) && (Prims.op_Equals (is_count (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1000000")))) true)))})::({Twin.tname = "repeated-names-each-repeat-in-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (repeated [] (("a")::("b")::("a")::("b")::("a")::[])) (("a")::("b")::("a")::[])))})::({Twin.tname = "a-second-address-is-the-duplicate"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_entries {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); doc_ok = (fun ( uu___1  :  Prims.string ) -> false); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} [] (({s_addr = "a"; s_name = "a"; s_kind = ValueHole (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1"))); s_required = true})::({s_addr = "a"; s_name = "b"; s_kind = ValueHole (IntRange ((Prims.parse_int "5"), (Prims.parse_int "1"))); s_required = true})::[])) (FStar_Pervasives_Native.Some (DuplicateHoleAddr ("a")))))})::({Twin.tname = "map-of-list-keeps-the-later-binding-of-a-repeated-key"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (map_of_list (fun ( a  :  Prims.string ) ( b  :  Prims.string ) -> ((Prims.op_Equals a "a") || (Prims.op_Equals b "b"))) (((("b"), ((Prims.parse_int "1"))))::((("a"), ((Prims.parse_int "2"))))::((("b"), ((Prims.parse_int "3"))))::[])) (((("a"), ((Prims.parse_int "2"))))::((("b"), ((Prims.parse_int "3"))))::[])))})::({Twin.tname = "a-handler-key-that-is-no-hole-is-refused-naming-the-declared-actions"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_keys (("go")::[]) (("go")::("title")::[]) (((("stop"), ({hb_handler = (Prims.parse_int "0"); hb_effect = pure_deterministic})))::[])) (Error (UnknownActionAddr ("stop", ("go")::[])))))})::({Twin.tname = "a-handler-on-a-data-hole-is-not-an-action-hole"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_keys (("go")::[]) (("go")::("title")::[]) (((("title"), ({hb_handler = (Prims.parse_int "0"); hb_effect = pure_deterministic})))::[])) (Error (NotAnActionHole ("title")))))})::({Twin.tname = "a-handler-past-its-ceiling-is-refused-naming-both-effects"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_effects (((("go"), ({hb_handler = (Prims.parse_int "0"); hb_effect = {host = WritesHost; determinism = deterministic}})))::[]) (((("go"), (pure_deterministic)))::[])) (Error (HandlerEffectExceedsCeiling ("go", pure_deterministic, {host = WritesHost; determinism = deterministic})))))})::({Twin.tname = "first-dup-is-the-first-id-seen-again"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_dup (("a")::("b")::("c")::("b")::("a")::[])) (FStar_Pervasives_Native.Some ("a"))))})::({Twin.tname = "an-edge-that-closes-a-cycle-is-named-from-the-node"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge_fault {float_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) ( uu___4  :  Prims.string ) -> false); int_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.int ) ( uu___4  :  Prims.int ) -> false)} {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); doc_ok = (fun ( uu___1  :  Prims.string ) -> false); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} ((Invoke ("a", "c", AnyString, ((("x"), (FromNode ("b"))))::[]))::(Invoke ("b", "c", AnyString, ((("x"), (FromNode ("a"))))::[]))::[]) (("a")::("b")::[]) "a" "x" "b" AnyString) (FStar_Pervasives_Native.Some (PipelineCycle ("a", ("a")::("b")::[])))))})::({Twin.tname = "a-later-upstream-that-closes-no-cycle-is-a-forward-edge"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge_fault {float_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) ( uu___4  :  Prims.string ) -> false); int_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.int ) ( uu___4  :  Prims.int ) -> false)} {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); doc_ok = (fun ( uu___1  :  Prims.string ) -> false); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} ((Invoke ("a", "c", AnyString, ((("x"), (FromNode ("b"))))::[]))::(Source ("b", "ref", AnyString))::[]) (("a")::("b")::[]) "a" "x" "b" AnyString) (FStar_Pervasives_Native.Some (PipelineForwardEdge ("a", "x", "b")))))})::({Twin.tname = "the-dirty-set-is-the-change-and-everything-downstream"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (Propagation.dirty_from_changed_ids (deps_of ((Source ("s", "ref", AnyString))::(Invoke ("a", "c", AnyString, ((("x"), (FromNode ("s"))))::[]))::(Invoke ("b", "c", AnyString, ((("x"), (FromNode ("a"))))::[]))::(Source ("t", "ref", AnyString))::[])) (("s")::[])) (("s")::("a")::("b")::[])))})::({Twin.tname = "an-entry-kind-outside-the-tags-is-refused-at-kind"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("x"))))::((("name"), (JStr ("x"))))::((("kind"), (JStr ("int"))))::((("required"), (JBool (true))))::((("space"), ((space_json AnyString))))::[]))) (Error ({d_code = UnknownTag; d_path = (Key ("kind"))::[]}))))})::({Twin.tname = "a-value-entry-without-a-space-is-refused-at-space"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("v"))))::((("name"), (JStr ("v"))))::((("kind"), (JStr ("value"))))::((("required"), (JBool (true))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("space"))::[]}))))})::({Twin.tname = "an-action-entry-without-its-effect-is-refused-at-actionEffect"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("a"))))::((("name"), (JStr ("a"))))::((("kind"), (JStr ("action"))))::((("required"), (JBool (false))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("actionEffect"))::[]}))))})::({Twin.tname = "a-slot-entry-reads-back-as-its-constraint"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (entry_json {s_addr = "s"; s_name = "s"; s_kind = SlotHole (FStar_Pervasives_Native.Some ("card")); s_required = true})) (Ok ({s_addr = "s"; s_name = "s"; s_kind = SlotHole (FStar_Pervasives_Native.Some ("card")); s_required = true}))))})::({Twin.tname = "the-descriptor-spelling-of-a-space-is-refused-at-type"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (space_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("kind"), (JStr ("stringLen"))))::((("minLength"), (JInt ((Prims.parse_int "1")))))::((("maxLength"), (JInt ((Prims.parse_int "3")))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("$type"))::[]}))))})::({Twin.tname = "a-node-with-an-empty-output-space-is-refused-at-outputType"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (node_of_j {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); doc_ok = (fun ( uu___1  :  Prims.string ) -> false); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None)} {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (node_json (Source ("s", "ref", IntRange ((Prims.parse_int "5"), (Prims.parse_int "1")))))) (Error ({d_code = OutOfRange; d_path = (Key ("outputType"))::[]}))))})::[]
+let twins : Prims.list<Twin.twin> = ({Twin.tname = "a-tree-result-names-its-kind"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (result_kind (RValue (SlotTree (FStar_Pervasives_Native.Some ("doc"))))) (FStar_Pervasives_Native.Some ("doc"))))})::({Twin.tname = "a-result-of-nothing-names-no-kind"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (result_kind RNothing) FStar_Pervasives_Native.None) && (Prims.op_Equals (result_kind (RValue (AnyString))) FStar_Pervasives_Native.None)))})::({Twin.tname = "determinism-tag-of-clock-and-network"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (determinism_tag {has_clock = true; has_random = false; has_network = true}) "clock+network"))})::({Twin.tname = "det-of-tag-reads-its-canonical-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "random+network") (FStar_Pervasives_Native.Some ({has_clock = false; has_random = true; has_network = true}))))})::({Twin.tname = "det-of-tag-refuses-another-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (det_of_tag "network+random") FStar_Pervasives_Native.None))})::({Twin.tname = "a-bounded-repeat-is-required"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (IntRange ((Prims.parse_int "0"), (Prims.parse_int "3"))); h_slots = []}).s_required true))})::({Twin.tname = "an-unbounded-repeat-is-not-required"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (AnyString); h_slots = []}).s_required false))})::({Twin.tname = "a-repeat-over-no-count-is-not-total"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_total {s_addr = "r"; s_name = "r"; s_kind = RepeatHole (AnyString); s_required = false}) false))})::({Twin.tname = "a-repeat-over-a-float-range-is-not-required"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of {h_addr = "r"; h_name = "r"; h_kind = RepeatHole (FloatRange ("0", "1")); h_slots = []}).s_required false))})::({Twin.tname = "a-repeat-past-the-cap-is-not-a-count"; Twin.tholds = (fun ( uu___  :  unit ) -> ((Prims.op_Equals (is_count (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1000001")))) false) && (Prims.op_Equals (is_count (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1000000")))) true)))})::({Twin.tname = "repeated-names-each-repeat-in-order"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (repeated [] (("a")::("b")::("a")::("b")::("a")::[])) (("a")::("b")::("a")::[])))})::({Twin.tname = "a-second-address-is-the-duplicate"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_entries {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); doc_ok = (fun ( uu___1  :  Prims.string ) -> false); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None); seg_ok = (fun ( uu___1  :  Prims.string ) -> true); name_ok = (fun ( uu___1  :  Prims.string ) -> true)} [] [] (({s_addr = "a"; s_name = "a"; s_kind = ValueHole (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1"))); s_required = true})::({s_addr = "a"; s_name = "b"; s_kind = ValueHole (IntRange ((Prims.parse_int "5"), (Prims.parse_int "1"))); s_required = true})::[])) (FStar_Pervasives_Native.Some (DuplicateHoleAddr ("a")))))})::({Twin.tname = "a-qualified-name-is-the-slots-then-the-name"; Twin.tholds = (fun ( uu___  :  unit ) -> (((Prims.op_Equals (qualified {h_addr = "r/s/x"; h_name = "amount"; h_kind = ValueHole (AnyString); h_slots = ("slotA")::[]}) "slotA.amount") && (Prims.op_Equals (qualified {h_addr = "r/s/t/x"; h_name = "amount"; h_kind = ValueHole (AnyString); h_slots = ("a")::("b")::[]}) "a.b.amount")) && (Prims.op_Equals (qualified {h_addr = "r/x"; h_name = "amount"; h_kind = ValueHole (AnyString); h_slots = []}) "amount")))})::({Twin.tname = "a-second-name-is-the-duplicate-before-its-address"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_entries {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); doc_ok = (fun ( uu___1  :  Prims.string ) -> false); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None); seg_ok = (fun ( uu___1  :  Prims.string ) -> true); name_ok = (fun ( uu___1  :  Prims.string ) -> true)} [] [] (({s_addr = "a"; s_name = "x"; s_kind = ValueHole (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1"))); s_required = true})::({s_addr = "a"; s_name = "x"; s_kind = ValueHole (IntRange ((Prims.parse_int "0"), (Prims.parse_int "1"))); s_required = true})::[])) (FStar_Pervasives_Native.Some (DuplicateHoleName ("x")))))})::({Twin.tname = "an-ill-formed-name-is-refused-before-its-space"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_entries {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); doc_ok = (fun ( uu___1  :  Prims.string ) -> false); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None); seg_ok = (fun ( uu___1  :  Prims.string ) -> true); name_ok = (fun ( s  :  Prims.string ) -> (Prims.op_Less_Greater s "a b"))} [] [] (({s_addr = "a"; s_name = "a b"; s_kind = ValueHole (IntRange ((Prims.parse_int "5"), (Prims.parse_int "1"))); s_required = true})::[])) (FStar_Pervasives_Native.Some (IllFormedHoleName ("a b")))))})::({Twin.tname = "a-space-fault-names-the-qualified-name"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (validate_entries {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); doc_ok = (fun ( uu___1  :  Prims.string ) -> false); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None); seg_ok = (fun ( uu___1  :  Prims.string ) -> true); name_ok = (fun ( uu___1  :  Prims.string ) -> true)} [] [] (({s_addr = "r/s/x"; s_name = "s.x"; s_kind = ValueHole (IntRange ((Prims.parse_int "5"), (Prims.parse_int "1"))); s_required = true})::[])) (FStar_Pervasives_Native.Some (EmptySpace ("s.x", IntRange ((Prims.parse_int "5"), (Prims.parse_int "1")))))))})::({Twin.tname = "addressed-keys-each-argument-by-its-hole-and-drops-a-stranger"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (addressed (({s_addr = "r/1"; s_name = "a"; s_kind = ValueHole (AnyString); s_required = true})::({s_addr = "r/2"; s_name = "b"; s_kind = ValueHole (AnyString); s_required = true})::[]) (((("b"), ("x")))::((("zz"), ("y")))::((("a"), ("z")))::[])) (((("r/2"), ("x")))::((("r/1"), ("z")))::[])))})::({Twin.tname = "map-of-list-keeps-the-later-binding-of-a-repeated-key"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (map_of_list (fun ( a  :  Prims.string ) ( b  :  Prims.string ) -> ((Prims.op_Equals a "a") || (Prims.op_Equals b "b"))) (((("b"), ((Prims.parse_int "1"))))::((("a"), ((Prims.parse_int "2"))))::((("b"), ((Prims.parse_int "3"))))::[])) (((("a"), ((Prims.parse_int "2"))))::((("b"), ((Prims.parse_int "3"))))::[])))})::({Twin.tname = "a-handler-key-that-is-no-hole-is-refused-naming-the-declared-actions"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_keys (("go")::[]) (("go")::("title")::[]) (((("stop"), ({hb_handler = (Prims.parse_int "0"); hb_effect = pure_deterministic})))::[])) (Error (UnknownActionAddr ("stop", ("go")::[])))))})::({Twin.tname = "a-handler-on-a-data-hole-is-not-an-action-hole"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_keys (("go")::[]) (("go")::("title")::[]) (((("title"), ({hb_handler = (Prims.parse_int "0"); hb_effect = pure_deterministic})))::[])) (Error (NotAnActionHole ("title")))))})::({Twin.tname = "a-handler-past-its-ceiling-is-refused-naming-both-effects"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (check_effects (((("go"), ({hb_handler = (Prims.parse_int "0"); hb_effect = {host = WritesHost; determinism = deterministic}})))::[]) (((("go"), (pure_deterministic)))::[])) (Error (HandlerEffectExceedsCeiling ("go", pure_deterministic, {host = WritesHost; determinism = deterministic})))))})::({Twin.tname = "first-dup-is-the-first-id-seen-again"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (first_dup (("a")::("b")::("c")::("b")::("a")::[])) (FStar_Pervasives_Native.Some ("a"))))})::({Twin.tname = "an-edge-that-closes-a-cycle-is-named-from-the-node"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge_fault {float_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) ( uu___4  :  Prims.string ) -> false); int_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.int ) ( uu___4  :  Prims.int ) -> false)} {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); doc_ok = (fun ( uu___1  :  Prims.string ) -> false); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None); seg_ok = (fun ( uu___1  :  Prims.string ) -> true); name_ok = (fun ( uu___1  :  Prims.string ) -> true)} ((Invoke ("a", "c", AnyString, ((("x"), (FromNode ("b"))))::[]))::(Invoke ("b", "c", AnyString, ((("x"), (FromNode ("a"))))::[]))::[]) (("a")::("b")::[]) "a" "x" "b" AnyString) (FStar_Pervasives_Native.Some (PipelineCycle ("a", ("a")::("b")::[])))))})::({Twin.tname = "a-later-upstream-that-closes-no-cycle-is-a-forward-edge"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (edge_fault {float_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) ( uu___4  :  Prims.string ) -> false); int_within = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.int ) ( uu___4  :  Prims.int ) -> false)} {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); doc_ok = (fun ( uu___1  :  Prims.string ) -> false); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None); seg_ok = (fun ( uu___1  :  Prims.string ) -> true); name_ok = (fun ( uu___1  :  Prims.string ) -> true)} ((Invoke ("a", "c", AnyString, ((("x"), (FromNode ("b"))))::[]))::(Source ("b", "ref", AnyString))::[]) (("a")::("b")::[]) "a" "x" "b" AnyString) (FStar_Pervasives_Native.Some (PipelineForwardEdge ("a", "x", "b")))))})::({Twin.tname = "the-dirty-set-is-the-change-and-everything-downstream"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (Propagation.dirty_from_changed_ids (deps_of ((Source ("s", "ref", AnyString))::(Invoke ("a", "c", AnyString, ((("x"), (FromNode ("s"))))::[]))::(Invoke ("b", "c", AnyString, ((("x"), (FromNode ("a"))))::[]))::(Source ("t", "ref", AnyString))::[])) (("s")::[])) (("s")::("a")::("b")::[])))})::({Twin.tname = "an-entry-kind-outside-the-tags-is-refused-at-kind"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("x"))))::((("name"), (JStr ("x"))))::((("kind"), (JStr ("int"))))::((("required"), (JBool (true))))::((("space"), ((space_json AnyString))))::[]))) (Error ({d_code = UnknownTag; d_path = (Key ("kind"))::[]}))))})::({Twin.tname = "a-value-entry-without-a-space-is-refused-at-space"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("v"))))::((("name"), (JStr ("v"))))::((("kind"), (JStr ("value"))))::((("required"), (JBool (true))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("space"))::[]}))))})::({Twin.tname = "an-action-entry-without-its-effect-is-refused-at-actionEffect"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("addr"), (JStr ("a"))))::((("name"), (JStr ("a"))))::((("kind"), (JStr ("action"))))::((("required"), (JBool (false))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("actionEffect"))::[]}))))})::({Twin.tname = "a-slot-entry-reads-back-as-its-constraint"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (entry_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (entry_json {s_addr = "s"; s_name = "s"; s_kind = SlotHole (FStar_Pervasives_Native.Some ("card")); s_required = true})) (Ok ({s_addr = "s"; s_name = "s"; s_kind = SlotHole (FStar_Pervasives_Native.Some ("card")); s_required = true}))))})::({Twin.tname = "the-descriptor-spelling-of-a-space-is-refused-at-type"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (space_of_j {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (JObj (((("kind"), (JStr ("stringLen"))))::((("minLength"), (JInt ((Prims.parse_int "1")))))::((("maxLength"), (JInt ((Prims.parse_int "3")))))::[]))) (Error ({d_code = MissingField; d_path = (Key ("$type"))::[]}))))})::({Twin.tname = "a-node-with-an-empty-output-space-is-refused-at-outputType"; Twin.tholds = (fun ( uu___  :  unit ) -> (Prims.op_Equals (node_of_j {int_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); float_in = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) ( uu___3  :  Prims.string ) -> false); str_len = (fun ( uu___1  :  Prims.string ) -> (Prims.parse_int "0")); kind_of = (fun ( uu___1  :  Prims.string ) -> FStar_Pervasives_Native.None); doc_ok = (fun ( uu___1  :  Prims.string ) -> false); float_fault = (fun ( uu___1  :  Prims.string ) ( uu___2  :  Prims.string ) -> FStar_Pervasives_Native.None); seg_ok = (fun ( uu___1  :  Prims.string ) -> true); name_ok = (fun ( uu___1  :  Prims.string ) -> true)} {float_of_int = (fun ( uu___1  :  Prims.int ) -> "0")} (node_json (Source ("s", "ref", IntRange ((Prims.parse_int "5"), (Prims.parse_int "1")))))) (Error ({d_code = OutOfRange; d_path = (Key ("outputType"))::[]}))))})::[]
 
 
 let invocation_identity : key_renderers  ->  capability  ->  invocation  ->  Prims.string = (fun ( kr  :  key_renderers ) ( c  :  capability ) ( a  :  invocation ) -> (key_fields kr ((c.c_id)::(binding_fields (sort_bindings kr (keyed kr c a))))))
@@ -5318,7 +5537,7 @@ let tag_dispatch = (fun ( cases  :  Prims.list<(Prims.string * decoder<'a>)> ) (
      end))
 
 
-let inv_arg_json : (Prims.string * Prims.string)  ->  jval = (fun ( b  :  (Prims.string * Prims.string) ) -> JObj (((("addr"), (JStr ((FStar_Pervasives_Native.fst b)))))::((("value"), (JStr ((FStar_Pervasives_Native.snd b)))))::[]))
+let inv_arg_json : (Prims.string * Prims.string)  ->  jval = (fun ( b  :  (Prims.string * Prims.string) ) -> JObj (((("name"), (JStr ((FStar_Pervasives_Native.fst b)))))::((("value"), (JStr ((FStar_Pervasives_Native.snd b)))))::[]))
 
 
 let rec inv_args_json : invocation  ->  Prims.list<jval> = (fun ( a  :  invocation ) -> (match (a) with
@@ -5333,19 +5552,19 @@ let rec inv_args_json : invocation  ->  Prims.list<jval> = (fun ( a  :  invocati
 let invocation_json : Prims.string  ->  invocation  ->  jval = (fun ( cid  :  Prims.string ) ( a  :  invocation ) -> JObj (((("$type"), (JStr ("invocation"))))::((("capabilityId"), (JStr (cid))))::((("args"), (JArr ((inv_args_json a)))))::[]))
 
 
-let inv_arg_of_j : decoder<(Prims.string * Prims.string)> = (both (field "addr" d_str) (field "value" d_str) (fun ( a  :  Prims.string ) ( v  :  Prims.string ) -> ((a), (v))))
+let inv_arg_of_j : decoder<(Prims.string * Prims.string)> = (both (field "name" d_str) (field "value" d_str) (fun ( n  :  Prims.string ) ( v  :  Prims.string ) -> ((n), (v))))
 
 
 let rec distinct_go : Prims.string  ->  invocation  ->  Prims.list<Prims.string>  ->  Prims.nat  ->  invocation  ->  decoder<(Prims.string * invocation)> = (fun ( cid  :  Prims.string ) ( whole  :  invocation ) ( seen  :  Prims.list<Prims.string> ) ( i  :  Prims.nat ) ( rest  :  invocation ) -> (match (rest) with
 | [] -> begin
      (d_succeed ((cid), (whole)))
      end
-| ((addr, uu___))::t -> begin
+| ((name, uu___))::t -> begin
       
-if (ListAlgebra.mem addr seen) then begin
+if (ListAlgebra.mem name seen) then begin
      (d_at ((Key ("args"))::(Index (i))::[]) (d_fail OutOfRange))
      end else begin
-     (distinct_go cid whole ((addr)::seen) (i + (Prims.parse_int "1")) t)
+     (distinct_go cid whole ((name)::seen) (i + (Prims.parse_int "1")) t)
      end
      end))
 
@@ -5363,12 +5582,12 @@ let rec first_repeat : Prims.list<Prims.string>  ->  Prims.nat  ->  invocation  
 | [] -> begin
      FStar_Pervasives_Native.None
      end
-| ((addr, uu___))::t -> begin
+| ((name, uu___))::t -> begin
       
-if (ListAlgebra.mem addr seen) then begin
+if (ListAlgebra.mem name seen) then begin
      FStar_Pervasives_Native.Some (i)
      end else begin
-     (first_repeat ((addr)::seen) (i + (Prims.parse_int "1")) t)
+     (first_repeat ((name)::seen) (i + (Prims.parse_int "1")) t)
      end
      end))
 
@@ -5401,11 +5620,11 @@ let deferred_of_j = (fun ( dec  :  jval  ->  outcome<'a, Prims.string> ) -> (def
 
 
 let fault_json : decl_fault  ->  jval = (fun ( f  :  decl_fault ) -> (match (f) with
-| EmptySpace (addr, sp) -> begin
-     JObj (((("$type"), (JStr ("emptySpace"))))::((("addr"), (JStr (addr))))::((("space"), ((space_json sp))))::[])
+| EmptySpace (name, sp) -> begin
+     JObj (((("$type"), (JStr ("emptySpace"))))::((("name"), (JStr (name))))::((("space"), ((space_json sp))))::[])
      end
-| NonFiniteBound (addr) -> begin
-     JObj (((("$type"), (JStr ("nonFiniteBound"))))::((("addr"), (JStr (addr))))::[])
+| NonFiniteBound (name) -> begin
+     JObj (((("$type"), (JStr ("nonFiniteBound"))))::((("name"), (JStr (name))))::[])
      end
 | DuplicateHoleAddr (addr) -> begin
      JObj (((("$type"), (JStr ("duplicateHoleAddr"))))::((("addr"), (JStr (addr))))::[])
@@ -5418,6 +5637,12 @@ let fault_json : decl_fault  ->  jval = (fun ( f  :  decl_fault ) -> (match (f) 
      end
 | NonFiniteResult -> begin
      JObj (((("$type"), (JStr ("nonFiniteResult"))))::[])
+     end
+| IllFormedHoleName (name) -> begin
+     JObj (((("$type"), (JStr ("illFormedHoleName"))))::((("name"), (JStr (name))))::[])
+     end
+| DuplicateHoleName (name) -> begin
+     JObj (((("$type"), (JStr ("duplicateHoleName"))))::((("name"), (JStr (name))))::[])
      end))
 
 
@@ -5427,7 +5652,7 @@ let str_f : Prims.string  ->  decoder<Prims.string> = (fun ( name  :  Prims.stri
 let str_list_f : Prims.string  ->  decoder<Prims.list<Prims.string>> = (fun ( name  :  Prims.string ) -> (field name (d_list d_str)))
 
 
-let fault_cases : codec_readers  ->  Prims.list<(Prims.string * decoder<decl_fault>)> = (fun ( cr  :  codec_readers ) -> ((("emptySpace"), ((both (str_f "addr") (field "space" (space_of_j cr)) (fun ( a  :  Prims.string ) ( sp  :  value_space ) -> EmptySpace (a, sp))))))::((("nonFiniteBound"), ((d_map (fun ( uu___  :  Prims.string ) -> NonFiniteBound (uu___)) (str_f "addr")))))::((("duplicateHoleAddr"), ((d_map (fun ( uu___  :  Prims.string ) -> DuplicateHoleAddr (uu___)) (str_f "addr")))))::((("holeUnderSlot"), ((d_map (fun ( uu___  :  Prims.string ) -> HoleUnderSlot (uu___)) (str_f "node")))))::((("emptyResult"), ((d_map (fun ( uu___  :  value_space ) -> EmptyResult (uu___)) (field "space" (space_of_j cr))))))::((("nonFiniteResult"), ((d_succeed NonFiniteResult))))::[])
+let fault_cases : codec_readers  ->  Prims.list<(Prims.string * decoder<decl_fault>)> = (fun ( cr  :  codec_readers ) -> ((("emptySpace"), ((both (str_f "name") (field "space" (space_of_j cr)) (fun ( n  :  Prims.string ) ( sp  :  value_space ) -> EmptySpace (n, sp))))))::((("nonFiniteBound"), ((d_map (fun ( uu___  :  Prims.string ) -> NonFiniteBound (uu___)) (str_f "name")))))::((("duplicateHoleAddr"), ((d_map (fun ( uu___  :  Prims.string ) -> DuplicateHoleAddr (uu___)) (str_f "addr")))))::((("holeUnderSlot"), ((d_map (fun ( uu___  :  Prims.string ) -> HoleUnderSlot (uu___)) (str_f "node")))))::((("emptyResult"), ((d_map (fun ( uu___  :  value_space ) -> EmptyResult (uu___)) (field "space" (space_of_j cr))))))::((("nonFiniteResult"), ((d_succeed NonFiniteResult))))::((("illFormedHoleName"), ((d_map (fun ( uu___  :  Prims.string ) -> IllFormedHoleName (uu___)) (str_f "name")))))::((("duplicateHoleName"), ((d_map (fun ( uu___  :  Prims.string ) -> DuplicateHoleName (uu___)) (str_f "name")))))::[])
 
 
 let fault_of_j : codec_readers  ->  decoder<decl_fault> = (fun ( cr  :  codec_readers ) -> (tag_dispatch (fault_cases cr)))
@@ -5440,29 +5665,29 @@ let invoke_error_json : gated_error  ->  jval = (fun ( e  :  gated_error ) -> (m
 | GRefused (DuplicateCapability (id)) -> begin
      JObj (((("$type"), (JStr ("duplicateCapability"))))::((("id"), (JStr (id))))::[])
      end
-| GRefused (UnknownArg (addr, declared)) -> begin
-     JObj (((("$type"), (JStr ("unknownArg"))))::((("addr"), (JStr (addr))))::((("declared"), (JArr ((strs declared)))))::[])
+| GRefused (UnknownArg (name, declared)) -> begin
+     JObj (((("$type"), (JStr ("unknownArg"))))::((("name"), (JStr (name))))::((("declared"), (JArr ((strs declared)))))::[])
      end
-| GRefused (ArgOutOfSpace (addr, sp, got)) -> begin
-     JObj (((("$type"), (JStr ("argOutOfSpace"))))::((("addr"), (JStr (addr))))::((("space"), ((space_json sp))))::((("got"), (JStr (got))))::[])
+| GRefused (ArgOutOfSpace (name, sp, got)) -> begin
+     JObj (((("$type"), (JStr ("argOutOfSpace"))))::((("name"), (JStr (name))))::((("space"), ((space_json sp))))::((("got"), (JStr (got))))::[])
      end
-| GRefused (RequiredArgsUnbound (addrs)) -> begin
-     JObj (((("$type"), (JStr ("requiredArgsUnbound"))))::((("addrs"), (JArr ((strs addrs)))))::[])
+| GRefused (RequiredArgsUnbound (names)) -> begin
+     JObj (((("$type"), (JStr ("requiredArgsUnbound"))))::((("names"), (JArr ((strs names)))))::[])
      end
-| GRefused (UninvocableArg (addr)) -> begin
-     JObj (((("$type"), (JStr ("uninvocableArg"))))::((("addr"), (JStr (addr))))::[])
+| GRefused (UninvocableArg (name)) -> begin
+     JObj (((("$type"), (JStr ("uninvocableArg"))))::((("name"), (JStr (name))))::[])
      end
 | GRefused (BodyFailed (reason)) -> begin
      JObj (((("$type"), (JStr ("bodyFailed"))))::((("reason"), (JStr (reason))))::[])
      end
-| GRefused (NonTotalCapability (id, addrs)) -> begin
-     JObj (((("$type"), (JStr ("nonTotalCapability"))))::((("id"), (JStr (id))))::((("addrs"), (JArr ((strs addrs)))))::[])
+| GRefused (NonTotalCapability (id, names)) -> begin
+     JObj (((("$type"), (JStr ("nonTotalCapability"))))::((("id"), (JStr (id))))::((("names"), (JArr ((strs names)))))::[])
      end
 | GRefused (IllFormedCapability (id, f)) -> begin
      JObj (((("$type"), (JStr ("illFormedCapability"))))::((("id"), (JStr (id))))::((("fault"), ((fault_json f))))::[])
      end
-| GRefused (DuplicateArg (addr)) -> begin
-     JObj (((("$type"), (JStr ("duplicateArg"))))::((("addr"), (JStr (addr))))::[])
+| GRefused (DuplicateArg (name)) -> begin
+     JObj (((("$type"), (JStr ("duplicateArg"))))::((("name"), (JStr (name))))::[])
      end
 | GPolicyRefused (policy, reason, allowed) -> begin
      JObj (((("$type"), (JStr ("policyRefused"))))::((("policy"), (JStr (policy))))::((("reason"), (JStr (reason))))::((("allowed"), (JArr ((strs allowed)))))::[])
@@ -5475,7 +5700,7 @@ let invoke_error_json : gated_error  ->  jval = (fun ( e  :  gated_error ) -> (m
 let refused = (fun ( f  :  'a  ->  invoke_error ) ( x  :  'a ) -> GRefused ((f x)))
 
 
-let invoke_error_cases : codec_readers  ->  Prims.list<(Prims.string * decoder<gated_error>)> = (fun ( cr  :  codec_readers ) -> ((("noSuchCapability"), ((both (str_f "id") (str_list_f "known") (fun ( id  :  Prims.string ) ( known  :  Prims.list<Prims.string> ) -> GRefused (NoSuchCapability (id, known)))))))::((("duplicateCapability"), ((d_map (refused (fun ( uu___  :  Prims.string ) -> DuplicateCapability (uu___))) (str_f "id")))))::((("unknownArg"), ((both (str_f "addr") (str_list_f "declared") (fun ( addr  :  Prims.string ) ( d  :  Prims.list<Prims.string> ) -> GRefused (UnknownArg (addr, d)))))))::((("argOutOfSpace"), ((both (str_f "addr") (both (field "space" (space_of_j cr)) (str_f "got") (fun ( sp  :  value_space ) ( got  :  Prims.string ) -> ((sp), (got)))) (fun ( addr  :  Prims.string ) ( sg  :  (value_space * Prims.string) ) -> GRefused (ArgOutOfSpace (addr, (FStar_Pervasives_Native.fst sg), (FStar_Pervasives_Native.snd sg))))))))::((("requiredArgsUnbound"), ((d_map (refused (fun ( uu___  :  Prims.list<Prims.string> ) -> RequiredArgsUnbound (uu___))) (str_list_f "addrs")))))::((("uninvocableArg"), ((d_map (refused (fun ( uu___  :  Prims.string ) -> UninvocableArg (uu___))) (str_f "addr")))))::((("bodyFailed"), ((d_map (refused (fun ( uu___  :  Prims.string ) -> BodyFailed (uu___))) (str_f "reason")))))::((("nonTotalCapability"), ((both (str_f "id") (str_list_f "addrs") (fun ( id  :  Prims.string ) ( addrs  :  Prims.list<Prims.string> ) -> GRefused (NonTotalCapability (id, addrs)))))))::((("illFormedCapability"), ((both (str_f "id") (field "fault" (fault_of_j cr)) (fun ( id  :  Prims.string ) ( f  :  decl_fault ) -> GRefused (IllFormedCapability (id, f)))))))::((("duplicateArg"), ((d_map (refused (fun ( uu___  :  Prims.string ) -> DuplicateArg (uu___))) (str_f "addr")))))::((("policyRefused"), ((both (str_f "policy") (both (str_f "reason") (str_list_f "allowed") (fun ( r  :  Prims.string ) ( a  :  Prims.list<Prims.string> ) -> ((r), (a)))) (fun ( policy  :  Prims.string ) ( ra  :  (Prims.string * Prims.list<Prims.string>) ) -> GPolicyRefused (policy, (FStar_Pervasives_Native.fst ra), (FStar_Pervasives_Native.snd ra)))))))::((("approvalRequired"), ((d_map (fun ( uu___  :  Prims.string ) -> GApprovalRequired (uu___)) (str_f "policy")))))::[])
+let invoke_error_cases : codec_readers  ->  Prims.list<(Prims.string * decoder<gated_error>)> = (fun ( cr  :  codec_readers ) -> ((("noSuchCapability"), ((both (str_f "id") (str_list_f "known") (fun ( id  :  Prims.string ) ( known  :  Prims.list<Prims.string> ) -> GRefused (NoSuchCapability (id, known)))))))::((("duplicateCapability"), ((d_map (refused (fun ( uu___  :  Prims.string ) -> DuplicateCapability (uu___))) (str_f "id")))))::((("unknownArg"), ((both (str_f "name") (str_list_f "declared") (fun ( name  :  Prims.string ) ( d  :  Prims.list<Prims.string> ) -> GRefused (UnknownArg (name, d)))))))::((("argOutOfSpace"), ((both (str_f "name") (both (field "space" (space_of_j cr)) (str_f "got") (fun ( sp  :  value_space ) ( got  :  Prims.string ) -> ((sp), (got)))) (fun ( name  :  Prims.string ) ( sg  :  (value_space * Prims.string) ) -> GRefused (ArgOutOfSpace (name, (FStar_Pervasives_Native.fst sg), (FStar_Pervasives_Native.snd sg))))))))::((("requiredArgsUnbound"), ((d_map (refused (fun ( uu___  :  Prims.list<Prims.string> ) -> RequiredArgsUnbound (uu___))) (str_list_f "names")))))::((("uninvocableArg"), ((d_map (refused (fun ( uu___  :  Prims.string ) -> UninvocableArg (uu___))) (str_f "name")))))::((("bodyFailed"), ((d_map (refused (fun ( uu___  :  Prims.string ) -> BodyFailed (uu___))) (str_f "reason")))))::((("nonTotalCapability"), ((both (str_f "id") (str_list_f "names") (fun ( id  :  Prims.string ) ( names  :  Prims.list<Prims.string> ) -> GRefused (NonTotalCapability (id, names)))))))::((("illFormedCapability"), ((both (str_f "id") (field "fault" (fault_of_j cr)) (fun ( id  :  Prims.string ) ( f  :  decl_fault ) -> GRefused (IllFormedCapability (id, f)))))))::((("duplicateArg"), ((d_map (refused (fun ( uu___  :  Prims.string ) -> DuplicateArg (uu___))) (str_f "name")))))::((("policyRefused"), ((both (str_f "policy") (both (str_f "reason") (str_list_f "allowed") (fun ( r  :  Prims.string ) ( a  :  Prims.list<Prims.string> ) -> ((r), (a)))) (fun ( policy  :  Prims.string ) ( ra  :  (Prims.string * Prims.list<Prims.string>) ) -> GPolicyRefused (policy, (FStar_Pervasives_Native.fst ra), (FStar_Pervasives_Native.snd ra)))))))::((("approvalRequired"), ((d_map (fun ( uu___  :  Prims.string ) -> GApprovalRequired (uu___)) (str_f "policy")))))::[])
 
 
 let invoke_error_of_j : codec_readers  ->  decoder<gated_error> = (fun ( cr  :  codec_readers ) -> (tag_dispatch (invoke_error_cases cr)))

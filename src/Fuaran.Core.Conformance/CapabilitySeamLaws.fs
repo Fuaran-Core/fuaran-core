@@ -132,11 +132,11 @@ module internal CapabilitySeamLaws =
             // arg-validation: in-space accepts; out-of-space + unknown-arg reject.
             let inSpace = string lo
 
-            match Capability.validateArgs cap [ "h0", inSpace ] with
+            match Capability.validateArgs cap [ "x", inSpace ] with
             | Ok() -> validation.Saw()
             | Error e -> validation.Check(false, fun () -> at (sprintf "rejected a valid arg: %A" e))
 
-            (match Capability.validateArgs cap [ "h0", string (hi + 1) ] with
+            (match Capability.validateArgs cap [ "x", string (hi + 1) ] with
              | Error(ArgOutOfSpace _) -> validation.Saw()
              | other -> validation.Check(false, fun () -> at (sprintf "out-of-space not rejected: %A" other)))
 
@@ -146,7 +146,7 @@ module internal CapabilitySeamLaws =
 
             // byte-identical replay through the Phase 27 seam.
             let realized = rng.IntBelow 1000
-            let args = [ "h0", inSpace ]
+            let args = [ "x", inSpace ]
             let key = Capability.invocationKey cap args
             let det = Capability.determinismTag cap
 
@@ -292,7 +292,7 @@ module internal CapabilitySeamLaws =
                 let ran = ref false
 
                 (match
-                    CapabilityRegistry.dispatch creg () None cap.Id [ "h0", string (hi + 1) ] (fun _ () ->
+                    CapabilityRegistry.dispatch creg () None cap.Id [ "x", string (hi + 1) ] (fun _ () ->
                         ran.Value <- true
                         Ready realized)
                  with
@@ -339,7 +339,10 @@ module internal CapabilitySeamLaws =
                 // and a value hole; its signature is derived by `Function.signature`, never written by
                 // hand, so the law is about what the seam is actually given.
                 let kind = "k" + string (lo % 7)
+                // Phase 712 (D281): the seam binds by the hole's qualified name; these holes are
+                // declared directly, so each name is its bare name.
                 let slotAddr, anyAddr, valueAddr = "tpl/body", "tpl/any", "tpl/n"
+                let slotName, anyName, valueName = "body", "any", "n"
 
                 let slottedWitness: ArtifactWitness<unit, string> =
                     { Tree =
@@ -354,14 +357,17 @@ module internal CapabilitySeamLaws =
                       Holes =
                         fun () ->
                             [ { Addr = slotAddr
-                                Name = "body"
-                                Kind = SlotHole(Some kind) }
+                                Name = slotName
+                                Kind = SlotHole(Some kind)
+                                Slots = [] }
                               { Addr = anyAddr
-                                Name = "any"
-                                Kind = SlotHole None }
+                                Name = anyName
+                                Kind = SlotHole None
+                                Slots = [] }
                               { Addr = valueAddr
-                                Name = "n"
-                                Kind = ValueHole(IntRange(lo, hi)) } ]
+                                Name = valueName
+                                Kind = ValueHole(IntRange(lo, hi))
+                                Slots = [] } ]
                       Effect = fun () -> sg.Effect
                       Bind = fun _ _ () -> Ok() }
 
@@ -376,12 +382,12 @@ module internal CapabilitySeamLaws =
                     Json.render (Json.kindObj k [ "n", JInt i ])
 
                 let conforming =
-                    [ slotAddr, tree kind; anyAddr, tree ("free" + string i); valueAddr, string lo ]
+                    [ slotName, tree kind; anyName, tree ("free" + string i); valueName, string lo ]
 
                 let wrongKind =
-                    [ slotAddr, tree (kind + "x"); anyAddr, tree kind; valueAddr, string lo ]
+                    [ slotName, tree (kind + "x"); anyName, tree kind; valueName, string lo ]
 
-                let scalar = [ slotAddr, tree kind; anyAddr, string lo; valueAddr, string lo ]
+                let scalar = [ slotName, tree kind; anyName, string lo; valueName, string lo ]
 
                 let failSlotted msg = slotted.Check(false, fun () -> at msg)
 
@@ -407,7 +413,7 @@ module internal CapabilitySeamLaws =
                      | other -> failSlotted (sprintf "a conforming slot argument did not dispatch: %A" other))
 
                     (match run wrongKind with
-                     | Error(ArgOutOfSpace(a, SlotTree(Some c), _)) when a = slotAddr && c = kind && not ran.Value ->
+                     | Error(ArgOutOfSpace(a, SlotTree(Some c), _)) when a = slotName && c = kind && not ran.Value ->
                          slotted.Saw()
                      | other ->
                          failSlotted (
@@ -415,7 +421,7 @@ module internal CapabilitySeamLaws =
                          ))
 
                     (match run scalar with
-                     | Error(UninvocableArg a) when a = anyAddr && not ran.Value -> slotted.Saw()
+                     | Error(UninvocableArg a) when a = anyName && not ran.Value -> slotted.Saw()
                      | other ->
                          failSlotted (sprintf "a scalar bound to a slot was not refused as uninvocable: %A" other)))
 

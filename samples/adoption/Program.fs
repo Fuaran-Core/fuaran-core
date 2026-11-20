@@ -158,7 +158,9 @@ let genDomainOp (rng: ConfRng.T) : DomainOp * ConfRng.T =
 // body, then use exactly the dispatch path you certified.
 
 /// A Note whose text is `?name` is a hole: an integer reading from 0 to 100. Its ADDRESS is the
-/// id-path from the root (`report/temp`), which this witness mints; arguments are keyed by it.
+/// id-path from the root (`report/temp`), which this witness mints and `Function.apply` binds by; a
+/// caller's arguments are keyed by its NAME (`celsius`). This domain composes nothing, so no hole
+/// carries a slot name.
 let private holesOf (tree: Item) : HoleDecl list =
     let rec walk (prefix: string) (i: Item) : HoleDecl list =
         let addr = if prefix = "" then i.Id else prefix + "/" + i.Id
@@ -167,7 +169,8 @@ let private holesOf (tree: Item) : HoleDecl list =
             if i.Kind = Note && i.Text.StartsWith "?" then
                 [ { Addr = addr
                     Name = i.Text.Substring 1
-                    Kind = ValueHole(IntRange(0, 100)) } ]
+                    Kind = ValueHole(IntRange(0, 100))
+                    Slots = [] } ]
             else
                 []
 
@@ -202,6 +205,7 @@ let template =
             Children = [] } ] }
 
 let celsiusAddr = "report/temp"
+let celsiusName = "celsius"
 let fillId = "outline.fill"
 
 /// The capability: the template's signature (its holes, their spaces, its effect), placed on a server,
@@ -218,7 +222,7 @@ let capabilities =
 /// slower checker that has not answered yet — the PENDING outcome; anything else settles with the
 /// filled note.
 let fillBody (args: (string * string) list) : Deferred<string> =
-    match args |> List.tryFind (fun (a, _) -> a = celsiusAddr) with
+    match args |> List.tryFind (fun (n, _) -> n = celsiusName) with
     | Some(_, v) when
         (match System.Int32.TryParse v with
          | true, n -> n > 90
@@ -226,26 +230,36 @@ let fillBody (args: (string * string) list) : Deferred<string> =
         ->
         Pending
     | _ ->
-        let bound = args |> List.map (fun (a, v) -> a, ValueArg v) |> Map.ofList
+        // The seam validated the arguments by name; the artifact binds by address, so each name is
+        // mapped to its hole's address through the signature before applying.
+        let addrOf =
+            fillCapability.Signature.Holes
+            |> List.map (fun h -> h.Name, h.Addr)
+            |> Map.ofList
+
+        let bound =
+            args
+            |> List.choose (fun (n, v) -> Map.tryFind n addrOf |> Option.map (fun a -> a, ValueArg v))
+            |> Map.ofList
 
         match Function.apply artifactW bound template with
         | Ok filled -> Ready(filled.Children |> List.map _.Text |> String.concat " ")
         | Error e -> Failed(sprintf "%A" e)
 
-/// The calls a model could make — settled, pending and every refusal, including a hole's NAME
-/// where its address belongs.
+/// The calls a model could make — settled, pending and every refusal, including a hole's ADDRESS
+/// where its name belongs.
 let genCall (rng: ConfRng.T) : (string * (string * string) list) * ConfRng.T =
     let pick, r1 = ConfRng.intBelow 6 rng
     let v, r2 = ConfRng.intBelow 91 r1
 
     let call =
         match pick with
-        | 0 -> fillId, [ celsiusAddr, string v ] // settles
-        | 1 -> fillId, [ celsiusAddr, string (91 + v % 10) ] // pending
-        | 2 -> fillId, [ celsiusAddr, "500" ] // refused: out of the hole's space
-        | 3 -> fillId, [ "celsius", "20" ] // refused: a hole's NAME is not its address
+        | 0 -> fillId, [ celsiusName, string v ] // settles
+        | 1 -> fillId, [ celsiusName, string (91 + v % 10) ] // pending
+        | 2 -> fillId, [ celsiusName, "500" ] // refused: out of the hole's space
+        | 3 -> fillId, [ celsiusAddr, "20" ] // refused: a hole's ADDRESS is not its name
         | 4 -> fillId, [] // refused: the required hole is unbound
-        | _ -> "outline.delete", [ celsiusAddr, "20" ] // refused: not registered
+        | _ -> "outline.delete", [ celsiusName, "20" ] // refused: not registered
 
     call, r2
 
@@ -379,19 +393,19 @@ let main _ =
         printfn "  [%s] %s" (if r.Passed then "PASS" else "FAIL") r.Law
 
     printfn
-        "\n  the capability's arguments are keyed by hole address: %s"
+        "\n  the capability's arguments are keyed by hole name: %s"
         (Json.render (Function.toJsonSchema fillCapability.Signature))
 
-    printfn "  its invocation key for 20 degrees: %s" (Capability.invocationKey fillCapability [ celsiusAddr, "20" ])
+    printfn "  its invocation key for 20 degrees: %s" (Capability.invocationKey fillCapability [ celsiusName, "20" ])
 
     let call id args =
         CapabilityRegistry.dispatch capabilities () None id args (fun _ () -> fillBody args)
         |> Result.mapError InvokeError.describe
         |> outcome
 
-    printfn "  fill 20      -> %s" (call fillId [ celsiusAddr, "20" ])
-    printfn "  fill 95      -> %s" (call fillId [ celsiusAddr, "95" ])
-    printfn "  fill by name -> %s" (call fillId [ "celsius", "20" ])
+    printfn "  fill 20      -> %s" (call fillId [ celsiusName, "20" ])
+    printfn "  fill 95      -> %s" (call fillId [ celsiusName, "95" ])
+    printfn "  fill by addr -> %s" (call fillId [ celsiusAddr, "20" ])
 
     // a result column is read through its TYPED reader: the `Vector<string>` the resolver built,
     // with no conversion to cells, and the validity consulted for each row (Phase 424)

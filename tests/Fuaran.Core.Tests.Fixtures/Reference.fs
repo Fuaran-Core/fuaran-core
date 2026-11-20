@@ -8,6 +8,9 @@ open Fuaran.Core
 
 /// A tiny reference node: string ids (the string-id side of the identity axis), a kind
 /// tag, an optional leaf value, an optional declared hole, an effect class, and children.
+/// `BoundSlot` is the name of the slot this node's subtree was bound into (Phase 712, D281):
+/// `bind` records it on the slot node when it wires a `SlotArg`, and `holesOf` reads the recorded
+/// names of a hole's ancestors into its `Slots`.
 type RNode =
     { Id: string
       Kind: string
@@ -15,7 +18,8 @@ type RNode =
       Hole: HoleKind option
       HoleName: string
       Eff: EffectClass
-      Children: RNode list }
+      Children: RNode list
+      BoundSlot: string option }
 
 module RNode =
 
@@ -26,7 +30,8 @@ module RNode =
           Hole = None
           HoleName = ""
           Eff = Effect.pureDeterministic
-          Children = children }
+          Children = children
+          BoundSlot = None }
 
     let leaf id kind value =
         { Id = id
@@ -35,7 +40,8 @@ module RNode =
           Hole = None
           HoleName = ""
           Eff = Effect.pureDeterministic
-          Children = [] }
+          Children = []
+          BoundSlot = None }
 
     let hole id kind holeName hk =
         { Id = id
@@ -44,7 +50,8 @@ module RNode =
           Hole = Some hk
           HoleName = holeName
           Eff = Effect.pureDeterministic
-          Children = [] }
+          Children = []
+          BoundSlot = None }
 
 // ---- the witnesses ----
 
@@ -60,22 +67,37 @@ let nodew: NodeWitness<RNode, string> =
       ReplaceChildren = fun n cs -> { n with Children = cs } }
 
 /// Enumerate declared holes with their absolute lexical address (id-path) — the hygiene
-/// surface. Two same-named holes get distinct addresses by construction.
+/// surface. Two same-named holes get distinct addresses by construction. Each hole's `Slots` are
+/// the slot names its ancestors recorded when they were bound (`BoundSlot`), outermost first, so
+/// two same-named holes composed through two slots have distinct qualified names (Phase 712).
 let holesOf (root: RNode) : HoleDecl list =
-    Tree.preorder nodew root
-    |> List.filter _.Hole.IsSome
-    |> List.map (fun n ->
-        let addr =
-            match Tree.path nodew idw n.Id root with
-            | Some ids -> String.concat "/" ids
-            | None -> n.Id
+    let rec walk (slots: string list) (n: RNode) : HoleDecl list =
+        let own =
+            match n.Hole with
+            | Some hk ->
+                let addr =
+                    match Tree.path nodew idw n.Id root with
+                    | Some ids -> String.concat "/" ids
+                    | None -> n.Id
 
-        { Addr = addr
-          Name = n.HoleName
-          Kind = n.Hole.Value })
+                [ { Addr = addr
+                    Name = n.HoleName
+                    Kind = hk
+                    Slots = slots } ]
+            | None -> []
+
+        let below =
+            match n.BoundSlot with
+            | Some s -> slots @ [ s ]
+            | None -> slots
+
+        own @ List.collect (walk below) n.Children
+
+    walk [] root
 
 /// Lower a hole binding to the reference domain's "op": a value sets the node's leaf
-/// value; a slot wires the inner tree under the slot node. Clears the hole (bound).
+/// value; a slot wires the inner tree under the slot node and records the slot's name on it
+/// (`BoundSlot`, Phase 712). Clears the hole (bound).
 let bind (addr: string) (arg: Arg<RNode>) (root: RNode) : Result<RNode, string> =
     let targetId = addr.Split('/') |> Array.last
 
@@ -85,7 +107,8 @@ let bind (addr: string) (arg: Arg<RNode>) (root: RNode) : Result<RNode, string> 
         | SlotArg sub ->
             { n with
                 Children = [ sub ]
-                Hole = None }
+                Hole = None
+                BoundSlot = Some n.HoleName }
 
     match Tree.updateNode nodew idw targetId upd root with
     | Some r -> Ok r
@@ -102,7 +125,12 @@ let artw: ArtifactWitness<RNode, string> =
 /// value, hole, effect), NOT its children (encodeHash walks preorder, applying this per node). The
 /// `'Node -> string` parameter `Function.applyMemo` (Phase 49) takes for its content-addressed key.
 let encNode (n: RNode) : string =
-    String.concat "|" [ n.Id; n.Kind; n.Value; n.HoleName; sprintf "%A" n.Hole; sprintf "%A" n.Eff ]
+    // A recorded slot name is local content too (it moves the holes' `Slots`); a node with none
+    // encodes as it did before Phase 712.
+    String.concat
+        "|"
+        ([ n.Id; n.Kind; n.Value; n.HoleName; sprintf "%A" n.Hole; sprintf "%A" n.Eff ]
+         @ (n.BoundSlot |> Option.map (fun s -> "slot:" + s) |> Option.toList))
 
 // ---- sample trees ----
 

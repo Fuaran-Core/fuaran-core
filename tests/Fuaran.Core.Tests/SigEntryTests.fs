@@ -13,7 +13,8 @@ open Fuaran.Core.Tests.Reference
 let private hole addr kind : HoleDecl =
     { Addr = addr
       Name = "n-" + addr
-      Kind = kind }
+      Kind = kind
+      Slots = [] }
 
 /// A witness over the reference tree whose holes are exactly `holes`, so `signature` reads them as given.
 let private witnessOf (holes: HoleDecl list) : ArtifactWitness<RNode, string> = { artw with Holes = fun _ -> holes }

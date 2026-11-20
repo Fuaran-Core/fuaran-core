@@ -188,7 +188,7 @@ module LawVectorExport =
 
         let private argsJson (args: (string * string) list) : CorpusCell =
             args
-            |> List.map (fun (addr, value) -> jobj [ "addr", jstr addr; "value", jstr value ])
+            |> List.map (fun (name, value) -> jobj [ "name", jstr name; "value", jstr value ])
             |> jarr
 
         /// A verdict in host-neutral words — the reference's or the model's, through the one shape
@@ -197,10 +197,10 @@ module LawVectorExport =
         let private verdictCells (v: CapabilityOracle.Verdict) : (string * CorpusCell) list =
             match v with
             | CapabilityOracle.Verdict.Accept -> [ "verdict", jstr "accept" ]
-            | CapabilityOracle.Verdict.OutOfSpace addr ->
-                [ "verdict", jstr "reject"; "error", jstr "argOutOfSpace"; "addr", jstr addr ]
-            | CapabilityOracle.Verdict.UnknownArg addr ->
-                [ "verdict", jstr "reject"; "error", jstr "unknownArg"; "addr", jstr addr ]
+            | CapabilityOracle.Verdict.OutOfSpace name ->
+                [ "verdict", jstr "reject"; "error", jstr "argOutOfSpace"; "name", jstr name ]
+            | CapabilityOracle.Verdict.UnknownArg name ->
+                [ "verdict", jstr "reject"; "error", jstr "unknownArg"; "name", jstr name ]
             | CapabilityOracle.Verdict.Unexpected -> [ "verdict", jstr "reject"; "error", jstr "unexpected" ]
 
         /// One `validateArgs` vector: the reference's verdict, and the model's on the same input.
@@ -222,7 +222,7 @@ module LawVectorExport =
             let inSpace = string d.Lo
             let outOfSpace = string (d.Hi + 1)
             let declaration = CapabilityCodec.encode d.Cap
-            let acceptArgs = [ "h0", inSpace ]
+            let acceptArgs = [ "x", inSpace ]
 
             let registryIds =
                 match
@@ -234,16 +234,16 @@ module LawVectorExport =
                 | Error _ -> []
 
             [ validates (sprintf "capability-%d-accept" d.Iteration) d.Cap declaration acceptArgs
-              validates (sprintf "capability-%d-out-of-space" d.Iteration) d.Cap declaration [ "h0", outOfSpace ]
+              validates (sprintf "capability-%d-out-of-space" d.Iteration) d.Cap declaration [ "x", outOfSpace ]
               // Phase 568 — each bound of the range is pinned by a pair, one at it and one past it (the
               // D226 shape): `accept` sits at the lower bound and `out-of-space` past the upper, and these
               // two are the other halves, so a host one unit off either bound, early or late, fails one.
-              validates (sprintf "capability-%d-at-upper-bound" d.Iteration) d.Cap declaration [ "h0", string d.Hi ]
+              validates (sprintf "capability-%d-at-upper-bound" d.Iteration) d.Cap declaration [ "x", string d.Hi ]
               validates
                   (sprintf "capability-%d-past-lower-bound" d.Iteration)
                   d.Cap
                   declaration
-                  [ "h0", string (d.Lo - 1) ]
+                  [ "x", string (d.Lo - 1) ]
               validates (sprintf "capability-%d-unknown-arg" d.Iteration) d.Cap declaration [ "nope", inSpace ]
 
               // The captured value is the draw itself: neither side computes it, and both carry it.
@@ -365,17 +365,17 @@ module LawVectorExport =
         /// The Phase 642 vectors for one draw: the two new refusals, each beside its acceptance.
         let internal resultVectorsFor (d: Draw) : Vector list =
             let declaration = CapabilityCodec.encode d.Cap
-            let h0 (d: Draw) = [ "h0", Literal(string d.Lo) ]
+            let x (d: Draw) = [ "x", Literal(string d.Lo) ]
 
             [ refusedDeclaration (sprintf "capability-%d-without-result" d.Iteration) (reResulted declaration None)
               refusedDeclaration
                   (sprintf "capability-%d-empty-result" d.Iteration)
                   (reResulted declaration (Some(SpaceCodec.toJson (Enum []))))
-              pipelineCheck (sprintf "capability-%d-pipeline-output-admits" d.Iteration) d.Cap (h0 d) AnyString
+              pipelineCheck (sprintf "capability-%d-pipeline-output-admits" d.Iteration) d.Cap (x d) AnyString
               pipelineCheck
                   (sprintf "capability-%d-pipeline-output-narrower" d.Iteration)
                   d.Cap
-                  (h0 d)
+                  (x d)
                   (IntRange(d.Lo, d.Hi)) ]
 
         /// The capability the document vectors are stated over (Phase 644): one required hole in the
@@ -413,7 +413,7 @@ module LawVectorExport =
         let internal documentVectors () : Vector list =
             let cap = documentCap
             let declaration = CapabilityCodec.encode cap
-            let d0 (value: string) = [ "d0", value ]
+            let order (value: string) = [ "order", value ]
 
             let key (id: string) (args: (string * string) list) : Vector =
                 { Id = id
@@ -446,19 +446,19 @@ module LawVectorExport =
                           | Error m -> "DECODE FAILED: " + m
                       ) ] }
 
-            let call = [ "d0", Literal documentCanonical ]
+            let call = [ "order", Literal documentCanonical ]
 
-            [ validates "document-accept-canonical" cap declaration (d0 documentCanonical)
-              validates "document-accept-respelled" cap declaration (d0 documentRespelled)
-              validates "document-accept-list" cap declaration (d0 "[1,2,3]")
-              validates "document-accept-scalar" cap declaration (d0 "\"text\"")
-              validates "document-reject-cut-short" cap declaration (d0 "{\"a\":1")
-              validates "document-reject-repeated-member" cap declaration (d0 "{\"a\":1,\"a\":2}")
-              validates "document-reject-null" cap declaration (d0 "null")
-              validates "document-reject-bare-word" cap declaration (d0 "order")
+            [ validates "document-accept-canonical" cap declaration (order documentCanonical)
+              validates "document-accept-respelled" cap declaration (order documentRespelled)
+              validates "document-accept-list" cap declaration (order "[1,2,3]")
+              validates "document-accept-scalar" cap declaration (order "\"text\"")
+              validates "document-reject-cut-short" cap declaration (order "{\"a\":1")
+              validates "document-reject-repeated-member" cap declaration (order "{\"a\":1,\"a\":2}")
+              validates "document-reject-null" cap declaration (order "null")
+              validates "document-reject-bare-word" cap declaration (order "order")
               validates "document-unknown-arg" cap declaration [ "nope", documentCanonical ]
-              key "document-key-canonical" (d0 documentCanonical)
-              key "document-key-respelled" (d0 documentRespelled)
+              key "document-key-canonical" (order documentCanonical)
+              key "document-key-respelled" (order documentRespelled)
               roundTrip "document-declaration-round-trip" declaration
               roundTrip "document-declaration-round-trip-unconstrained" unconstrained
               pipelineCheck "document-pipeline-output-same-type" cap call (Document(Some "Receipt"))
@@ -474,10 +474,12 @@ module LawVectorExport =
             "The (input, expected) pairs Fuaran.Core.Conformance.capabilityLaws draws from `seed` over "
             + "`iterations` iterations, computed by calling the pinned kit. A host reproduces the sample with its own "
             + "ConfRng: per iteration draw intBelow(50) = lo, intBelow(50) = span (hi = lo + span + 1), intBelow(1000) = "
-            + "the captured value, and build one capability per iteration over a single required value hole `h0` in "
+            + "the captured value, and build one capability per iteration over a single required value hole at address `h0` named `x` in "
             + "IntRange(lo, hi) with effect readsHost and the determinism set of the (i mod 7)th non-empty subset of {clock, random, network} in mask order (mask 1..7, bit 0 clock, bit 1 random, bit 2 network; the label names the members in that order joined by `+`). `capability` and `declaration` members carry a canonical "
-            + "capability declaration as a JSON STRING — decode it with the host's capability codec. `validateArgs` "
-            + "vectors expect accept, or reject with a named error class and the offending address; each bound of the range is pinned at it and one past it (`accept` at lo, `at-upper-bound` at hi, `past-lower-bound` at lo - 1, `out-of-space` at hi + 1: the range is inclusive at both ends). `invocationKey` "
+            + "capability declaration as a JSON STRING — decode it with the host's capability codec. Each argument is `{\"name\", \"value\"}`, keyed by the "
+            + "qualified name of the hole it binds (Phase 712, DECISIONS.md D281), never by the hole's address: the vectors bind `x`, and the address `h0` "
+            + "binds nothing. `validateArgs` "
+            + "vectors expect accept, or reject with a named error class and the `name` of the offending argument; each bound of the range is pinned at it and one past it (`accept` at lo, `at-upper-bound` at hi, `past-lower-bound` at lo - 1, `out-of-space` at hi + 1: the range is inclusive at both ends). `invocationKey` "
             + "vectors expect the effect-identity key a non-deterministic invocation is journalled under, its "
             + "determinism tag, and the value the replay must return byte-identically. `declarationRoundTrip` expects "
             + "decode-then-encode to return the input bytes. `registryEnumerate` expects id-sorted enumeration "
@@ -524,11 +526,11 @@ module LawVectorExport =
         let private description =
             "The document value space (Phase 644, DECISIONS.md D260), through the cases of capability-laws.json: `validateArgs`, `invocationKey`, "
             + "`declarationRoundTrip` and `pipelineTypeCheck`, each read exactly as that file describes it. Authored inputs, each `expected` computed by calling "
-            + "the pinned kit; no seed. Every vector is stated over one capability, `cap-document`: a single required hole `d0` in the document space of type "
+            + "the pinned kit; no seed. Every vector is stated over one capability, `cap-document`: a single required hole at address `d0` named `order` in the document space of type "
             + "`Order`, answering a document of type `Receipt`. `capability` and `declaration` members carry a canonical capability declaration as a JSON STRING, "
             + "in which a document space is `{\"$type\":\"document\"}` with an optional `documentType`. A document argument is a member exactly when it is "
             + "well-formed JSON with a canonical rendering of its own: it parses with no `null`, and holds no repeated member, no ill-formed string and no number a "
-            + "finite float cannot spell. The type name is carried and never read. An argument that is no document is `argOutOfSpace` at its address. The two "
+            + "finite float cannot spell. The type name is carried and never read. An argument is keyed by its hole's qualified name, `order`, never by the address `d0` (Phase 712, DECISIONS.md D281). An argument that is no document is `argOutOfSpace` naming it. The two "
             + "`document-key-*` vectors present ONE document in two spellings (members out of order, white space, a float with a trailing zero, a control character "
             + "by its short escape) and expect one key: an argument in a document space is keyed by its cross-host canonical text (members sorted, no white space, "
             + "the canonical float layout, every control character as `\\u00xx`). They carry no `capturedValue`. The `document-pipeline-output-*` vectors pin the "
@@ -661,7 +663,7 @@ module LawVectorExport =
 
         let private argsJson (args: (string * string) list) : CorpusCell =
             args
-            |> List.map (fun (addr, value) -> jobj [ "addr", jstr addr; "value", jstr value ])
+            |> List.map (fun (name, value) -> jobj [ "name", jstr name; "value", jstr value ])
             |> jarr
 
         /// The `grant` member: the identity a presented grant carries, and no member when none is
@@ -678,7 +680,7 @@ module LawVectorExport =
                 [ "error", jstr "noSuchCapability"
                   "id", jstr id
                   "known", jarr (known |> List.map jstr) ]
-            | ArgOutOfSpace(addr, _, _) -> [ "error", jstr "argOutOfSpace"; "addr", jstr addr ]
+            | ArgOutOfSpace(name, _, _) -> [ "error", jstr "argOutOfSpace"; "name", jstr name ]
             | PolicyRefused(policy, reason, allowed) ->
                 [ "error", jstr "policyRefused"
                   "policy", jstr policy
@@ -716,7 +718,7 @@ module LawVectorExport =
             [ identity "gate-identity-write" "write" w
               identity "gate-identity-integer-spelling" "write" [ "n", "07"; "x", "1.5"; "s", "a" ]
               identity "gate-identity-number-spelling" "write" [ "n", "7"; "x", "1.50"; "s", "a" ]
-              identity "gate-identity-out-of-address-order" "write" [ "s", "a"; "x", "1.5"; "n", "7" ]
+              identity "gate-identity-out-of-name-order" "write" [ "s", "a"; "x", "1.5"; "n", "7" ]
               identity "gate-identity-holds-the-separator" "write" [ "n", "7"; "x", "1.5"; "s", "a\u0001b" ]
               identity "gate-identity-holds-the-escape" "write" [ "n", "7"; "x", "1.5"; "s", "a\u0010\u0001" ]
               identity "gate-identity-one-binding-differs" "write" (otherArgsFor "write")
@@ -877,17 +879,18 @@ module LawVectorExport =
         let private description =
             "The capability registry's gate, decision context and grant (Phase 638, DECISIONS.md D249), as data a port decides from (Phase 650, D255). "
             + "Authored inputs, each `expected` computed by calling the pinned kit; no seed. `registry` holds the three capability declarations, each a canonical "
-            + "declaration as a JSON string. `contexts` names the two decision contexts, opaque labels. `gates` is the gate table in the order the registry runs it: "
+            + "declaration as a JSON string. `contexts` names the two decision contexts, opaque labels. Each argument is `{\"name\", \"value\"}`, keyed by the "
+            + "qualified name of the hole it binds (Phase 712, DECISIONS.md D281); each hole here is named as it is addressed. `gates` is the gate table in the order the registry runs it: "
             + "a gate answers the `decision` of its rule for the (context, capability) pair, and `allow` for any pair it has no rule for. The registry's decision is "
             + "the join over every gate in order (allow < needsApproval < deny, a deny keeping its message and alternatives), and the gate that made it is the FIRST "
             + "gate whose decision has the greatest rank; `policy` is \"\" when every gate allows. `invocationIdentity` vectors expect the identity a grant is bound "
-            + "to: the fields id, then for each binding its address and its value's canonical spelling in its hole's space (an integer without sign or leading zeros, "
-            + "a number in its shortest round-trip form, a string as given), the bindings sorted by address (ordinal), each field written with every U+0010 and U+0001 "
+            + "to: the fields id, then for each binding its hole's qualified name and its value's canonical spelling in its hole's space (an integer without sign or leading zeros, "
+            + "a number in its shortest round-trip form, a string as given), the bindings sorted by name (ordinal), each field written with every U+0010 and U+0001 "
             + "it holds preceded by U+0010, then terminated by U+0001; no hash is taken. `grantCovers` vectors expect whether a presented grant (the `grant` member, an identity; "
             + "absent when none is presented) is for exactly this invocation: it is when the two identities are equal as strings. `decideNamed` vectors expect the registry's named decision for "
             + "an invocation under a context with a grant presented: `decided` with the deciding gate and the decision, where a needsApproval a covering grant lifts "
             + "is `allow` and keeps the gate's name, and no grant lifts a deny; or, where no gate decided, `refused` with the refusal a dispatch gives (an unregistered "
-            + "id is `noSuchCapability` with the registered ids, an argument out of its space `argOutOfSpace`). `dispatch` vectors expect `performed` when the performer "
+            + "id is `noSuchCapability` with the registered ids, an argument out of its space `argOutOfSpace` with its `name`). `dispatch` vectors expect `performed` when the performer "
             + "ran, exactly once, or `refused` with the refusal: `policyRefused` naming the gate with its reason and alternatives for a deny, `approvalRequired` naming "
             + "the gate for a needsApproval no grant lifts, `noSuchCapability` for an unregistered id whatever is presented; a refused dispatch never runs the performer. "
             + "`referenceOnly` names the cases no extracted model answers, with the reason."

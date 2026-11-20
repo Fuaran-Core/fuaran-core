@@ -9,16 +9,17 @@ namespace Fuaran.Core
 //  regulatory packs, …) rather than a per-domain bespoke format.
 //
 //  The contract carries NO pack CONTENT (FGP 6, open-core boundary): a
-//  `PackedFunction` names a base function by id, the holes it binds (by absolute
-//  address — hygiene), and the base signature VERSION it was curried against. The
-//  curried bodies + rules + payload stay registry-side / domain-side — none of it
-//  rides on the manifest, which is just ids, addresses, and version tags. The
+//  `PackedFunction` names a base function by id, the holes it binds (by qualified
+//  name, as the capability seam names them — Phase 712), and the base signature
+//  VERSION it was curried against. The curried bodies + rules + payload stay
+//  registry-side / domain-side — none of it rides on the manifest, which is just
+//  ids, hole names, and version tags. The
 //  abstractions package therefore depends on no domain payload.
 //
 //  A pack pins the base signature's FINGERPRINT (its canonical tool-schema shape).
 //  Loading recomputes the live fingerprint and refuses a mismatch, so a pack
 //  authored against a base signature that has since changed shape fails the load
-//  LOUDLY rather than binding against addresses that no longer mean what the pack
+//  LOUDLY rather than binding against holes that no longer mean what the pack
 //  assumed ("never a silent stale binding" — the Fork-2 hygiene contract at the
 //  distribution boundary).
 //
@@ -29,7 +30,7 @@ namespace Fuaran.Core
 // ============================================================================
 
 /// One curried artifact-function in a content pack: curry the base function `BaseId` (a registered
-/// `FunctionEntry`) by binding `BoundAddrs` (absolute addresses — hygiene), registering the narrowed
+/// `FunctionEntry`) by binding `BoundNames` (qualified names, Phase 712), registering the narrowed
 /// result under `NewId` (its nominal tag in the catalogue). `BaseSignatureVersion` is the fingerprint of
 /// the base signature the pack was authored against (canonically `ContentPack.signatureFingerprint`);
 /// loading recomputes the live fingerprint and refuses a mismatch. Carries NO node / body — content-free
@@ -43,13 +44,14 @@ type PackedFunction =
         BaseId: string
         /// The base signature's fingerprint at authoring time; it must equal the live one at load.
         BaseSignatureVersion: string
-        /// The data-hole addresses bound away; an action hole or an undeclared address refuses the load.
-        BoundAddrs: Set<string>
+        /// The data holes bound away, by qualified name (Phase 712, D281; `BoundAddrs` before); an
+        /// action hole or an undeclared name refuses the load.
+        BoundNames: Set<string>
     }
 
 /// A content-pack manifest (Phase 57): a set of curried artifact-functions + metadata (`Domain`,
 /// `PackId`, `PackVersion`). The whole distribution surface a domain ships — and it carries no pack
-/// CONTENT (FGP 6): only ids, addresses, version tags. Loadable into any `FunctionRegistry` that holds
+/// CONTENT (FGP 6): only ids, hole names, version tags. Loadable into any `FunctionRegistry` that holds
 /// the pack's base functions, through one mechanism shared across every domain.
 type PackManifest =
     {
@@ -76,12 +78,12 @@ type PackLoadError =
     /// Currying or registering `newId` failed with the registry's own refusal — typically a
     /// `DuplicateCapability`, or a `NonTotalCapability` inherited from the base.
     | PackRegisterFailed of packId: string * newId: string * reason: InvokeError
-    /// A `BoundAddrs` entry that is not a bindable hole of the base (Phase 295) — an address the
-    /// base does not declare, or an action hole — naming the pack, the curried id, the address and
-    /// the base's bindable holes. Until Phase 295 such an address was ignored and the pack
-    /// registered an UN-narrowed signature under its new id: the silent stale binding this contract
-    /// exists to refuse.
-    | UnknownBoundAddr of packId: string * newId: string * addr: string * declared: string list
+    /// A `BoundNames` entry that is not a bindable hole of the base (Phase 295) — a name the
+    /// base does not declare, or an action hole — naming the pack, the curried id, the name and
+    /// the base's bindable holes, by qualified name (`UnknownBoundAddr` before Phase 712). Until
+    /// Phase 295 such a hole was ignored and the pack registered an UN-narrowed signature under its
+    /// new id: the silent stale binding this contract exists to refuse.
+    | UnknownBoundName of packId: string * newId: string * name: string * declared: string list
     /// An unload refused (Phase 316): the pack's function `newId` is not registered, so the pack is
     /// not (or no longer wholly) loaded; `known` lists the ids the registry holds. Declared last, so
     /// every earlier case keeps its tag.
@@ -98,7 +100,7 @@ module ContentPack =
     /// collision (the hash is not collision-resistant, so equal fingerprints are evidence, not proof,
     /// of an equal shape). A pack curried against an old shape therefore fails the load-time
     /// version check (a renamed / re-typed / dropped hole shifts the fingerprint) rather than binding
-    /// against addresses that no longer mean what the pack assumed. Deterministic + Fable-clean (the
+    /// against holes that no longer mean what the pack assumed. Deterministic + Fable-clean (the
     /// same FNV-1a arithmetic class as the rest of the substrate's portable hashing).
     let signatureFingerprint (sg: Signature) : string =
         Function.toSchema sg |> Json.render |> Hash.fnv1a
@@ -107,11 +109,11 @@ module ContentPack =
     /// authoring helper, so a pack pins the live shape it was actually curried from (the honest path; a
     /// hand-written `BaseSignatureVersion` is still accepted by the `PackedFunction` literal, and a wrong
     /// one is exactly what the load-time check catches).
-    let pack (newId: string) (boundAddrs: Set<string>) (baseEntry: FunctionEntry) : PackedFunction =
+    let pack (newId: string) (boundNames: Set<string>) (baseEntry: FunctionEntry) : PackedFunction =
         { NewId = newId
           BaseId = baseEntry.Capability.Id
           BaseSignatureVersion = signatureFingerprint baseEntry.Capability.Signature
-          BoundAddrs = boundAddrs }
+          BoundNames = boundNames }
 
     /// Load a content pack into a signature-typed registry (Phase 57). Each `PackedFunction` curries its
     /// base function (`FunctionRegistry.narrow` — the content-pack formalism) and registers the
@@ -122,7 +124,7 @@ module ContentPack =
     ///   2. the pack's declared base signature version must equal the registry's LIVE fingerprint for
     ///      that base (a mismatch is `SignatureVersionMismatch`, naming both declared + actual) — a pack
     ///      authored against a since-changed signature fails loudly, never binds stale;
-    ///   3. every bound address must be a bindable hole of the base (`UnknownBoundAddr`, naming the
+    ///   3. every bound name must be a bindable hole of the base (`UnknownBoundName`, naming the
     ///      bindable holes — Phase 295);
     ///   4. the narrowed entry must register without collision (a duplicate `NewId` surfaces the
     ///      registry's own `DuplicateCapability` wrapped as `PackRegisterFailed`).
@@ -142,9 +144,9 @@ module ContentPack =
                     if actual <> pf.BaseSignatureVersion then
                         Error(SignatureVersionMismatch(manifest.PackId, pf.BaseId, pf.BaseSignatureVersion, actual))
                     else
-                        match FunctionRegistry.narrow pf.NewId pf.BoundAddrs baseEntry with
-                        | Error(UnknownArg(addr, declared)) ->
-                            Error(UnknownBoundAddr(manifest.PackId, pf.NewId, addr, declared))
+                        match FunctionRegistry.narrow pf.NewId pf.BoundNames baseEntry with
+                        | Error(UnknownArg(name, declared)) ->
+                            Error(UnknownBoundName(manifest.PackId, pf.NewId, name, declared))
                         | Error e -> Error(PackRegisterFailed(manifest.PackId, pf.NewId, e))
                         | Ok curried ->
                             match FunctionRegistry.register curried acc with

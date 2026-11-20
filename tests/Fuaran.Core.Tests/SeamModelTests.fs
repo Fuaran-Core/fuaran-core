@@ -43,8 +43,10 @@ let private fmtTemp =
         "fmt-temp"
         (sigOf
             "fmt-temp"
-            [ valueHole "fmt-temp/celsius" (IntRange(-60, 60)) true
-              valueHole "fmt-temp/station" (Enum [ "harbour"; "ridge" ]) true ])
+            [ { valueHole "fmt-temp/celsius" (IntRange(-60, 60)) true with
+                  Name = "celsius" }
+              { valueHole "fmt-temp/station" (Enum [ "harbour"; "ridge" ]) true with
+                  Name = "station" } ])
         (ClientIsland Fable)
         (Returns.Value AnyString)
 
@@ -174,7 +176,7 @@ let private invokeErrors: InvokeError list =
     [ NoSuchCapability("purge-station", toolIds)
       NoSuchCapability("x", [])
       DuplicateCapability "fmt-temp"
-      UnknownArg("celsius", [ "fmt-temp/celsius"; "fmt-temp/station" ])
+      UnknownArg("celcius", [ "celsius"; "station" ])
       UnknownArg("y", [])
       ArgOutOfSpace("n", IntRange(-60, 60), "hot")
       ArgOutOfSpace("x", FloatRange(-0.5, 1e21), "2")
@@ -193,7 +195,7 @@ let private invokeErrors: InvokeError list =
       IllFormedCapability("span", NonFiniteBound "span/x")
       IllFormedCapability("span", DuplicateHoleAddr "span/n")
       IllFormedCapability("span", HoleUnderSlot "body")
-      DuplicateArg "fmt-temp/celsius"
+      DuplicateArg "celsius"
       // Phase 318 — the policy gate's two refusals.
       PolicyRefused("operators-only", "only an operator may purge a station", [ "fmt-temp"; "read-station" ])
       PolicyRefused("quiet-hours", "no writes between 22:00 and 06:00", [])
@@ -298,13 +300,11 @@ let tests =
                         | Ok v -> failtestf "expected a refusal, got %A" v
 
                     let outOfSpace =
-                        refusalOf (
-                            Capability.validateArgs fmtTemp [ "fmt-temp/celsius", "hot"; "fmt-temp/station", "ridge" ]
-                        )
+                        refusalOf (Capability.validateArgs fmtTemp [ "celsius", "hot"; "station", "ridge" ])
 
                     Expect.equal
                         (InvokeError.describe outOfSpace)
-                        "Refused: argument 'fmt-temp/celsius' must be an integer from -60 to 60; you sent 'hot'."
+                        "Refused: argument 'celsius' must be an integer from -60 to 60; you sent 'hot'."
                         "ArgOutOfSpace"
 
                     let denied =
@@ -319,10 +319,8 @@ let tests =
 
                     let bodyFailed =
                         refusalOf (
-                            Capability.invoke
-                                fmtTemp
-                                [ "fmt-temp/celsius", "4"; "fmt-temp/station", "ridge" ]
-                                (fun () -> Failed "station offline: no reading in the last 24 hours")
+                            Capability.invoke fmtTemp [ "celsius", "4"; "station", "ridge" ] (fun () ->
+                                Failed "station offline: no reading in the last 24 hours")
                         )
 
                     Expect.equal
@@ -462,8 +460,8 @@ let tests =
                 testCase "the out-of-space refusal carries its space in codec form"
                 <| fun _ ->
                     Expect.equal
-                        (CapabilityCodec.encodeInvokeError (ArgOutOfSpace("fmt-temp/celsius", IntRange(-60, 60), "hot")))
-                        "{\"$type\":\"argOutOfSpace\",\"addr\":\"fmt-temp/celsius\",\"got\":\"hot\",\"space\":{\"$type\":\"intRange\",\"max\":60,\"min\":-60}}"
+                        (CapabilityCodec.encodeInvokeError (ArgOutOfSpace("celsius", IntRange(-60, 60), "hot")))
+                        "{\"$type\":\"argOutOfSpace\",\"got\":\"hot\",\"name\":\"celsius\",\"space\":{\"$type\":\"intRange\",\"max\":60,\"min\":-60}}"
                         "bytes"
 
                     Expect.equal
@@ -601,17 +599,12 @@ let tests =
                             ()
                             None
                             "fmt-temp"
-                            [ "fmt-temp/celsius", "-4"; "fmt-temp/station", "ridge" ]
+                            [ "celsius", "-4"; "station", "ridge" ]
                             (fun c typed -> Ready(c.Id, typed))
 
                     Expect.equal
                         r
-                        (Ok(
-                            Ready(
-                                "fmt-temp",
-                                [ "fmt-temp/celsius", IntValue -4; "fmt-temp/station", TextValue "ridge" ]
-                            )
-                        ))
+                        (Ok(Ready("fmt-temp", [ "celsius", IntValue -4; "station", TextValue "ridge" ])))
                         "the capability and its typed arguments"
 
                 testCase "a resolver receives the validated argument list"
@@ -657,17 +650,15 @@ let tests =
               "every violation at once"
               [ testCase "a two-argument violation is refused naming both"
                 <| fun _ ->
-                    match
-                        Capability.validateArgsAll fmtTemp [ "fmt-temp/celsius", "hot"; "fmt-temp/station", "moon" ]
-                    with
-                    | Error [ ArgOutOfSpace("fmt-temp/celsius", _, "hot"); ArgOutOfSpace("fmt-temp/station", _, "moon") ] as r ->
+                    match Capability.validateArgsAll fmtTemp [ "celsius", "hot"; "station", "moon" ] with
+                    | Error [ ArgOutOfSpace("celsius", _, "hot"); ArgOutOfSpace("station", _, "moon") ] as r ->
                         let text =
                             match r with
                             | Error es -> InvokeError.describeAll es
                             | Ok() -> ""
 
-                        Expect.stringContains text "'fmt-temp/celsius'" "names the first"
-                        Expect.stringContains text "'fmt-temp/station'" "names the second"
+                        Expect.stringContains text "'celsius'" "names the first"
+                        Expect.stringContains text "'station'" "names the second"
                     | other -> failtestf "expected both refusals, got %A" other
 
                     match Query.validateParamsAll readings [ "stn", Str "harbour"; "limit", Str "3" ] with
@@ -780,8 +771,7 @@ let tests =
 
                 testCase "an unknown member anywhere a capability codec reads is refused under Strict"
                 <| fun _ ->
-                    let invocation =
-                        CapabilityCodec.encodeInvocation "fmt-temp" [ "fmt-temp/celsius", "4" ]
+                    let invocation = CapabilityCodec.encodeInvocation "fmt-temp" [ "celsius", "4" ]
 
                     Expect.isError
                         (CapabilityCodec.decodeInvocationWith ReadPolicy.Strict (injectInto [ "args"; "0" ] invocation))
