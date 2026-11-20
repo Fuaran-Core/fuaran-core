@@ -14,7 +14,7 @@ namespace Fuaran.Core.Tests
 //
 //  Until Phase 258 this module also exported `Conformance.transformLaws`'
 //  reference answers (`laws/transform-laws.json`, fuaran#1479). Those answers
-//  are what `Fuaran.Core.DataFrame.evalPipeline` says, and that evaluator left
+//  are what the dataframe reference evaluator says, and that evaluator left
 //  this repository with the rest of the compute strand (DECISIONS.md D66), so
 //  the file is now emitted, stamped and published by the repository that
 //  produces the evaluator — https://github.com/Fuaran-Core/fuaran-core-compute

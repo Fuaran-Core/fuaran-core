@@ -69,7 +69,7 @@ not adopted, never as passed. See [`construct-then-encode.md`](construct-then-en
 There is no C# facade from `0.33.0`. `Fuaran.Core.CSharp` (Phase 128) — a C#-shaped surface over the
 column layer, the artifact-function declaration family and the wire JSON model — was published up to
 `0.32.0` and removed by Phase 231, because the consumer it was shipped for kept its rule another way
-and never adopted it; its dataframe half, `Fuaran.Core.DataFrame.CSharp`, is removed by the compute
+and never adopted it; its dataframe half, the compute repository's C# facade, is removed by that
 repository in the release that raises its pin to `0.33.0`. The versions already published stay on
 nuget.org. A C# or VB tier constructs Core's values through the F# surface, wrapping only what it
 authors, and a generated C# veneer over Core's closed unions is the route by which a facade returns

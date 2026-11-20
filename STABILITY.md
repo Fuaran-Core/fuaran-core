@@ -428,8 +428,8 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
 
 ### The Column and Query strand (first-class)
 
-> **Since `0.33.0` (Phase 258, DECISIONS.md D66) `Fuaran.Core.DataFrame` and `Fuaran.Core.Column.Ops`
-> are produced by [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute),
+> **Since `0.33.0` (Phase 258, DECISIONS.md D66) the dataframe and column-operation packages
+> (`Fuaran.Compute.DataFrame` and `Fuaran.Compute.ColumnOps` from that repository's `0.36.0`) are produced by [`Fuaran-Core/fuaran-core-compute`](https://github.com/Fuaran-Core/fuaran-core-compute),
 > and every change to them from `0.33.0` on is recorded in that repository's `STABILITY.md`.** The
 > promises this repository made about those two packages while it produced them (up to `0.32.0`)
 > are in the release ledger, [`docs/releases/0.32.0.md`](docs/releases/0.32.0.md#the-compute-strand-contracts-this-document-carried-until-phase-397),
@@ -441,7 +441,7 @@ its public surface carries the same stability commitment as the witness spine, a
 are **conformance-certified**, not asserted. Stable surfaces:
 
 - **The columnar model + wire codec** — the fixed Arrow scalar set (`int` / `float` / `bool` / `string`
-  / `date` / `timestamp`, and from `0.33.0` the exact `decimal`), the validity-mask null model, and `ColumnCodec`'s six-code decode envelope
+  / `date` / `timestamp`, and from `0.33.0` the exact `decimal`), the validity-mask null model, and `ColumnCodec`'s decode envelope (`ColumnError`, whose cases are stated in the type alone)
   are the cross-host contract: two hosts encode a column to byte-identical wire (same null / coercion /
   ordering / **canonical-float** semantics — floats route through `Wire.FloatLayout.canonical`, certified
   by `Conformance.canonicalFloatLaws`). Changing the scalar set, the null model, the codec envelope, or

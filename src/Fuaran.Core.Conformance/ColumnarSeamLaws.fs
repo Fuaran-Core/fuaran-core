@@ -7,7 +7,7 @@ module internal ColumnarSeamLaws =
     // ---- aggregate null-skip (Phase 36; split by Phase 257) ----
     // The `Column.aggregate` half of what was `aggregateParityLaws`. The parity half compares the
     // aggregate against a single-group `GroupBy`, which is the dataframe layer's, so it ships from
-    // `Fuaran.Core.DataFrame.Conformance` under the old name (D68), produced by the compute
+    // `Fuaran.Compute.Conformance` under the old name (D68), produced by the compute
     // repository since Phase 258 (D66). What stays here reads `Column`
     // alone: the pinned NA-skip semantics every consumer of the aggregate relies on.
 
