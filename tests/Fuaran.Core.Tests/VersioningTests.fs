@@ -44,7 +44,8 @@ let rec private decodeNode (el: JVal) : Result<RNode, string> =
                       Hole = None
                       HoleName = ""
                       Eff = Effect.pureDeterministic
-                      Children = kids }))))
+                      Children = kids
+                      BoundSlot = None }))))
 
 // The consumer in these tests is *behind*: it understands only these two kinds. A newer
 // producer authoring `hologram` / `quantumField` exercises the unknown-kind tolerance path.

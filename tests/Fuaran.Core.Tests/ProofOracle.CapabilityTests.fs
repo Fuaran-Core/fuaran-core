@@ -72,6 +72,10 @@ let private prodFaultRender (f: DeclarationFault) : string =
     | HoleUnderSlot n -> sprintf "HoleUnderSlot(%s)" n
     | EmptyResult s -> sprintf "EmptyResult(%s)" (modelSpaceRender (spaceToModel s))
     | NonFiniteResult -> "NonFiniteResult"
+    // Phase 712: the extracted model predates the two name faults, so a production answer of either
+    // renders as itself and never equals a model answer.
+    | IllFormedHoleName n -> sprintf "IllFormedHoleName(%s)" n
+    | DuplicateHoleName n -> sprintf "DuplicateHoleName(%s)" n
 
 let private modelFaultRender (f: ModelCap.decl_fault) : string =
     match f with

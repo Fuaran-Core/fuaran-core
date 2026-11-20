@@ -40,11 +40,11 @@ let private capability (id: string) (holes: SigEntry list) : Capability =
         Server
         (Returns.Value(IntRange(0, 10)))
 
-/// `echo` settles with its argument, `later` stays pending, `flaky` fails for `flaky/k = 0`.
+/// `echo` settles with its argument, `later` stays pending, `flaky` fails for `flaky-k = 0`.
 let capabilityRegistry: CapabilityRegistry<unit> =
-    [ capability "echo" [ hole "echo/n" (IntRange(0, 10)) ]
-      capability "later" [ hole "later/x" (Enum [ "a"; "b" ]) ]
-      capability "flaky" [ hole "flaky/k" (IntRange(0, 3)) ] ]
+    [ capability "echo" [ hole "echo-n" (IntRange(0, 10)) ]
+      capability "later" [ hole "later-x" (Enum [ "a"; "b" ]) ]
+      capability "flaky" [ hole "flaky-k" (IntRange(0, 3)) ] ]
     |> List.fold (fun r c -> r |> Result.bind (CapabilityRegistry.register c)) (Ok CapabilityRegistry.empty)
     |> Result.defaultWith (fun e -> failwithf "the reference registry did not build: %A" e)
 
@@ -53,10 +53,10 @@ let private argOf (args: (string * string) list) (addr: string) =
 
 let capabilityBody (args: (string * string) list) (c: Capability) : Deferred<string> =
     match c.Id with
-    | "echo" -> Ready(argOf args "echo/n" |> Option.defaultValue "?")
+    | "echo" -> Ready(argOf args "echo-n" |> Option.defaultValue "?")
     | "later" -> Pending
     | _ ->
-        match argOf args "flaky/k" with
+        match argOf args "flaky-k" with
         | Some "0" -> Failed "flaky refused k=0"
         | k -> Ready(sprintf "flaky %A" k)
 
@@ -78,13 +78,13 @@ let genCapabilityCall (rng: ConfRng.T) : (string * (string * string) list) * Con
 
                 match k, h.Space with
                 | 0, _ -> acc, r'
-                | 1, _ -> acc @ [ h.Addr, "out-of-space" ], r'
+                | 1, _ -> acc @ [ h.Name, "out-of-space" ], r'
                 | _, Some(Enum vs) ->
                     let v, r'' = ConfRng.choose vs r'
-                    acc @ [ h.Addr, v ], r''
+                    acc @ [ h.Name, v ], r''
                 | _, Some(IntRange(lo, hi)) ->
                     let v, r'' = ConfRng.intBelow (hi - lo + 1) r'
-                    acc @ [ h.Addr, string (lo + v) ], r''
+                    acc @ [ h.Name, string (lo + v) ], r''
                 | _ -> acc, r')
             ([], r1)
 
@@ -195,8 +195,8 @@ let genPipeline (rng: ConfRng.T) : CapabilityPipeline * ConfRng.T =
 
     { Nodes =
         [ Source("s", "reading", IntRange(0, 10))
-          Invoke("a", "echo", IntRange(0, 10), [ "echo/n", FromNode "s" ])
-          Invoke("b", "echo", IntRange(0, 10), [ "echo/n", Literal(string v) ]) ] },
+          Invoke("a", "echo", IntRange(0, 10), [ "echo-n", FromNode "s" ])
+          Invoke("b", "echo", IntRange(0, 10), [ "echo-n", Literal(string v) ]) ] },
     r1
 
 let pipelineWitness: CapabilityPipelineWitness =
@@ -274,7 +274,7 @@ let tests =
                   let (id, args), r = genCapabilityCall rng
 
                   (if id = "later" then
-                       ("echo", [ "echo/n", "3" ])
+                       ("echo", [ "echo-n", "3" ])
                    else
                        (id, args)),
                   r
@@ -321,7 +321,7 @@ let tests =
               let broken (rng: ConfRng.T) =
                   let p, r = genPipeline rng
 
-                  { Nodes = p.Nodes @ [ Invoke("c", "echo", IntRange(0, 10), [ "echo/n", Literal "99" ]) ] }, r
+                  { Nodes = p.Nodes @ [ Invoke("c", "echo", IntRange(0, 10), [ "echo-n", Literal "99" ]) ] }, r
 
               let rs =
                   Conformance.capabilityPipelineLawsAt

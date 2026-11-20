@@ -1031,6 +1031,10 @@ let private faultToModel (f: DeclarationFault) : ModelCap.decl_fault =
     | HoleUnderSlot n -> ModelCap.HoleUnderSlot n
     | EmptyResult s -> ModelCap.EmptyResult(spaceToModel s)
     | NonFiniteResult -> ModelCap.NonFiniteResult
+    // Phase 712: the extracted model predates the two name faults; there is no model value to answer
+    // with, so reaching one is a failure that names it rather than a silent stand-in.
+    | IllFormedHoleName _
+    | DuplicateHoleName _ -> failwithf "the extracted model has no counterpart of %A" f
 
 /// Production's twelve-case `InvokeError` as the model's `gated_error`.
 let private invokeErrorToModel (e: InvokeError) : ModelCap.gated_error =

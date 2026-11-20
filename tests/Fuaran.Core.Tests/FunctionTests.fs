@@ -1469,7 +1469,7 @@ let memoTests =
                   { NewId = "g"
                     BaseId = "ghost"
                     BaseSignatureVersion = "x"
-                    BoundAddrs = Set.empty }
+                    BoundNames = Set.empty }
 
               let manifest =
                   { PackId = "pk"
@@ -1501,7 +1501,7 @@ let memoTests =
 
           testCase "the packaging contract carries no pack content (FGP 6 — content-free manifest)"
           <| fun _ ->
-              // A manifest is fully expressible from ids / addresses / version tags ALONE — no domain node,
+              // A manifest is fully expressible from ids / hole names / version tags ALONE — no domain node,
               // tree, or payload is constructible into it (PackManifest is non-generic: it has no 'Node type
               // parameter). Authoring the distribution surface never touches a domain type, so the Apache-2.0
               // abstractions package depends on no domain payload.
@@ -1513,10 +1513,10 @@ let memoTests =
                       [ { NewId = "swing-feel"
                           BaseId = "groove"
                           BaseSignatureVersion = "abc123"
-                          BoundAddrs = Set.ofList [ "groove/style" ] } ] }
+                          BoundNames = Set.ofList [ "style" ] } ] }
 
               Expect.equal manifest.Functions.Length 1 "a content pack is just typed partial-application declarations"
-              Expect.equal manifest.Domain "music" "carries only metadata — domain tag, ids, addresses, version" ]
+              Expect.equal manifest.Domain "music" "carries only metadata — domain tag, ids, hole names, version" ]
 
 // ---- Phase 295: the invocable seams converge ----
 
@@ -1738,7 +1738,7 @@ let convergenceTests =
                   (Ok(StringLen(1, 4)))
                   "the document spelling reads back"
 
-          testCase "a pack binding an address that is not a bindable hole is refused UnknownBoundAddr"
+          testCase "a pack binding a name that is not a bindable hole is refused UnknownBoundName"
           <| fun _ ->
               let pf = ContentPack.pack "doc-fn.typo" (Set.ofList [ "h9" ]) (packBaseEntry ())
 
@@ -1749,8 +1749,8 @@ let convergenceTests =
                     Functions = [ pf ] }
 
               match ContentPack.load manifest (packBaseReg ()) with
-              | Error(UnknownBoundAddr("p", "doc-fn.typo", "h9", [ "h0"; "h1" ])) -> ()
-              | other -> failtestf "expected UnknownBoundAddr, got %A" other
+              | Error(UnknownBoundName("p", "doc-fn.typo", "h9", [ "h0"; "h1" ])) -> ()
+              | other -> failtestf "expected UnknownBoundName, got %A" other
 
               match FunctionRegistry.narrow "x" (Set.ofList [ "h0" ]) (packBaseEntry ()) with
               | Ok e -> Expect.equal (e.Capability.Signature.Holes |> List.map _.Addr) [ "h1" ] "narrowed"
