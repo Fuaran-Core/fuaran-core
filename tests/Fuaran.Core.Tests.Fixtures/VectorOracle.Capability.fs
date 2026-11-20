@@ -210,24 +210,24 @@ let modelCodeOf (c: ModelCap.decode_code) : DecodeCode =
 [<RequireQualifiedAccess>]
 type Verdict =
     | Accept
-    | OutOfSpace of addr: string
-    | UnknownArg of addr: string
+    | OutOfSpace of name: string
+    | UnknownArg of name: string
     | Unexpected
 
 /// Production's `validateArgs` result as a verdict.
 let verdictOf (r: Result<unit, InvokeError>) : Verdict =
     match r with
     | Ok() -> Verdict.Accept
-    | Error(ArgOutOfSpace(addr, _, _)) -> Verdict.OutOfSpace addr
-    | Error(InvokeError.UnknownArg(addr, _)) -> Verdict.UnknownArg addr
+    | Error(ArgOutOfSpace(name, _, _)) -> Verdict.OutOfSpace name
+    | Error(InvokeError.UnknownArg(name, _)) -> Verdict.UnknownArg name
     | Error _ -> Verdict.Unexpected
 
 /// `validate_args`, over the readers premise, as a verdict.
 let validateArgs (c: Capability) (args: (string * string) list) : Verdict =
     match ModelCap.validate_args readers (capToModel c) args with
     | ModelCap.Ok() -> Verdict.Accept
-    | ModelCap.Error(ModelCap.ArgOutOfSpace(addr, _, _)) -> Verdict.OutOfSpace addr
-    | ModelCap.Error(ModelCap.UnknownArg(addr, _)) -> Verdict.UnknownArg addr
+    | ModelCap.Error(ModelCap.ArgOutOfSpace(name, _, _)) -> Verdict.OutOfSpace name
+    | ModelCap.Error(ModelCap.UnknownArg(name, _)) -> Verdict.UnknownArg name
     | ModelCap.Error _ -> Verdict.Unexpected
 
 /// `invocation_key`, over production's key renderers.
