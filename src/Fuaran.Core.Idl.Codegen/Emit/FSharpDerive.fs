@@ -938,9 +938,163 @@ module internal FSharpDerive =
           "    " + mapLit c.OpFields ]
         |> String.concat "\n"
 
+    // -----------------------------------------------------------------------
+    // Emission 9 — Phase 689 (DECISIONS.md D278): the per-kind tables, each a total lookup.
+    // -----------------------------------------------------------------------
+
+    /// A name the lookup can be declared under without escaping: an ASCII letter or `_`, then letters, digits
+    /// and `_`. A keyword is escaped by [[ident]].
+    let private identShaped (s: string) =
+        let letter (c: char) =
+            (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c = '_'
+
+        s.Length > 0
+        && letter s[0]
+        && s |> Seq.forall (fun c -> letter c || (c >= '0' && c <= '9'))
+
+    /// One requested table, checked against the vocabulary and the selection, then printed as one exhaustive
+    /// match over the module's kinds in selection order. Every row of a kind the vocabulary declares is
+    /// checked, selected or not, so a table reads alike under every selection.
+    let private kindTableDecl
+        (ctx: Decl)
+        (tables: Map<string, KindTable>)
+        (name: string)
+        : Result<string, CodegenError> =
+        let construct = sprintf "the kind table `%s`" name
+
+        let atKind kind =
+            sprintf "the kind `%s` in the kind table `%s`" kind name
+
+        let total =
+            "a per-kind table is total: one row for each kind the module emits, and rows only for kinds the vocabulary declares"
+
+        let declared = ctx.Idl.Kinds |> List.map (fun k -> k.Tag, k) |> Map.ofList
+
+        let strings (xs: string list) =
+            match xs with
+            | [] -> "[]"
+            | _ -> "[ " + (xs |> List.map SourceLit.fsString |> String.concat "; ") + " ]"
+
+        // The column's type, and each row's kind with its literal, a row's own defect refused at its kind.
+        let column: Result<string * (string * Result<string, CodegenError>) list, CodegenError> =
+            match tables.TryFind name with
+            | None ->
+                refuse
+                    construct
+                    "a derivation emits what the support record declares, and it declares no table of that name"
+                    (sprintf "declare `%s` in the support record's KindTables, or drop the request" name)
+            | Some _ when not (identShaped name) ->
+                refuse
+                    construct
+                    "a table is emitted as a function of its name, so the name is an identifier"
+                    "name the table with an ASCII letter or `_`, then letters, digits and `_`"
+            | Some _ when List.isEmpty ctx.Kinds ->
+                refuse
+                    construct
+                    "a per-kind table is a match over the module's kinds, and this selection emits none"
+                    "select at least one kind"
+            | Some(KindTable.Text rows) -> Ok("string", rows |> List.map (fun (k, v) -> k, Ok(SourceLit.fsString v)))
+            | Some(KindTable.Bool rows) ->
+                Ok("bool", rows |> List.map (fun (k, v) -> k, Ok(if v then "true" else "false")))
+            | Some(KindTable.Texts rows) -> Ok("string list", rows |> List.map (fun (k, v) -> k, Ok(strings v)))
+            | Some(KindTable.OptionalField rows) ->
+                let literal (kind: string) (field: string option) =
+                    match field, declared.TryFind kind with
+                    | None, _ -> Ok "None"
+                    | Some f, Some k when k.Fields |> List.exists (fun x -> x.Name = f) ->
+                        Ok("Some " + SourceLit.fsString f)
+                    | Some f, _ ->
+                        refuse
+                            (atKind kind)
+                            (sprintf
+                                "an optional-field table names a wire field of its row's kind, and `%s` is not one"
+                                f)
+                            (sprintf "name a wire field `%s` declares, or none" kind)
+
+                Ok("string option", rows |> List.map (fun (k, v) -> k, literal k v))
+            | Some(KindTable.Enum(enumName, rows)) ->
+                match ctx.Enums |> List.tryFind (fun e -> e.Name = enumName) with
+                | None ->
+                    refuse
+                        (sprintf "the enum `%s` of the kind table `%s`" enumName name)
+                        (if ctx.Idl.Enums |> List.exists (fun e -> e.Name = enumName) then
+                             "an enum table answers the module's own enum type, and this selection does not reach it"
+                         else
+                             "an enum table answers a declared enum, and the vocabulary declares none of that name")
+                        "name an enum the selected kinds reach, or declare the column as text"
+                | Some e ->
+                    let literal (kind: string) (case: string) =
+                        if List.contains case e.Cases then
+                            Ok(e.Name + "." + case)
+                        else
+                            refuse
+                                (atKind kind)
+                                (sprintf "an enum table's value is a case of `%s`, and `%s` is not one" e.Name case)
+                                (sprintf "name one of `%s`'s cases by its host name" e.Name)
+
+                    Ok(e.Name, rows |> List.map (fun (k, v) -> k, literal k v))
+
+        let rowsChecked (rows: (string * Result<string, CodegenError>) list) =
+            let kinds = rows |> List.map fst
+
+            match kinds |> List.tryFind (fun k -> not (declared.ContainsKey k)) with
+            | Some k -> refuse (atKind k) (total + "; the vocabulary declares no such kind") "remove the row"
+            | None ->
+                match kinds |> List.countBy id |> List.tryFind (fun (_, n) -> n > 1) with
+                | Some(k, n) ->
+                    refuse (atKind k) (sprintf "%s; the kind has %d rows" total n) "keep one row for the kind"
+                | None ->
+                    match ctx.Kinds |> List.tryFind (fun k -> not (List.contains k.Tag kinds)) with
+                    | Some k -> refuse (atKind k.Tag) (total + "; the kind has no row") "add a row for the kind"
+                    | None ->
+                        rows
+                        |> List.map (fun (k, lit) -> lit |> Result.map (fun l -> k, l))
+                        |> sequenceR
+                        |> Result.map Map.ofList
+
+        column
+        |> Result.bind (fun (ty, rows) -> rowsChecked rows |> Result.map (fun lits -> ty, lits))
+        |> Result.map (fun (ty, lits) ->
+            [ sprintf "    /// The `%s` table: one value for each kind, declared in the support record." name
+              sprintf "    let %s (k: NodeKind%s) : %s =" (ident name) (declParams ctx.Msg "Node" []) ty
+              "        match k with" ]
+            @ (ctx.Kinds
+               |> List.map (fun k -> sprintf "        | NodeKind.%s _ -> %s" k.Tag lits[k.Tag]))
+            |> String.concat "\n")
+
+    /// The requested per-kind tables, in request order and each once, as one `KindTables` module; nothing when
+    /// none is requested.
+    let kindTablesDecl
+        (ctx: Decl)
+        (tables: Map<string, KindTable>)
+        (requests: Derivation list)
+        : Result<string list, CodegenError> =
+        let names =
+            requests
+            |> List.choose (fun r ->
+                match r with
+                | Derivation.KindTable n -> Some n
+                | _ -> None)
+            |> List.distinct
+
+        match names with
+        | [] -> Ok []
+        | _ ->
+            names
+            |> List.map (kindTableDecl ctx tables)
+            |> sequenceR
+            |> Result.map (fun members ->
+                [ "/// The per-kind tables the support record declares, each a total lookup over the module's kinds.\nmodule KindTables =\n"
+                  + String.concat "\n\n" members ])
+
     /// Every requested derivation after the module's existing members, in a fixed order: keyed
-    /// walk, slot enumerators, message map, default records, constants, then the union modules.
-    let derivedDecl (ctx: Decl) (requests: Derivation list) : Result<string list, CodegenError> =
+    /// walk, slot enumerators, message map, default records, constants, the union modules, then the
+    /// per-kind tables (Phase 689), read from `tables`, the support record's.
+    let derivedDecl
+        (ctx: Decl)
+        (tables: Map<string, KindTable>)
+        (requests: Derivation list)
+        : Result<string list, CodegenError> =
         let has r = List.contains r requests
 
         let slots =
@@ -969,10 +1123,11 @@ module internal FSharpDerive =
             |> List.concat
             |> sequenceR
 
-        match parts, unionModulesDecl ctx requests with
-        | Ok ps, Ok ms -> Ok(ps @ ms)
-        | Error e, _
-        | _, Error e -> Error e
+        match parts, unionModulesDecl ctx requests, kindTablesDecl ctx tables requests with
+        | Ok ps, Ok ms, Ok ts -> Ok(ps @ ms @ ts)
+        | Error e, _, _
+        | _, Error e, _
+        | _, _, Error e -> Error e
 
 /// Phase 541 / 562 (DECISIONS.md D175, D230) — the RECORD of overridable collecting decoders, from
 /// the declarations a selection reaches: its type (one field per node, non-generic union, record,

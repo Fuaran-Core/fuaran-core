@@ -34,8 +34,8 @@ module Gen =
 
     /// `fsharpModuleWith` plus the requested structural derivations (Phase 374) and, under
     /// `Derivation.SpecDecoders`, the collecting decoders and public per-spec entries (Phase 377),
-    /// appended after the module's existing members. The empty list emits exactly what
-    /// `fsharpModuleWith` does.
+    /// appended after the module's existing members. A `Derivation.KindTable` reads the support's
+    /// `KindTables` (Phase 689). The empty list emits exactly what `fsharpModuleWith` does.
     let fsharpModuleDerived
         (sup: GenSupport)
         (derivations: Derivation list)
@@ -149,6 +149,26 @@ module Gen =
                 )
             )
 
+    /// Phase 689 (DECISIONS.md D278) — the per-kind table lookup is emitted by the F# backend only, so the
+    /// TypeScript backend refuses a `Derivation.KindTable` request by name rather than export nothing for it.
+    let private tsDerives (derivations: Derivation list) : Result<unit, CodegenError> =
+        match
+            derivations
+            |> List.tryPick (fun d ->
+                match d with
+                | Derivation.KindTable n -> Some n
+                | _ -> None)
+        with
+        | None -> Ok()
+        | Some n ->
+            Error(
+                CodegenError.UnsupportedConstruct(
+                    sprintf "the kind table `%s`" n,
+                    "GP5: a backend applies a derivation or refuses it by name, never ignores it",
+                    "emit the table's lookup with the F# backend (`fsharpModuleDerived`)"
+                )
+            )
+
     /// The TypeScript structural encoder/decoder module for the named kinds.
     let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
         tsCodecAdmits idl
@@ -167,7 +187,8 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        tsCodecAdmits idl
+        tsDerives derivations
+        |> Result.bind (fun () -> tsCodecAdmits idl)
         |> Result.bind (fun () -> tsLaysOut (Decl.resolve idl Map.empty kindTags))
         |> Result.bind (TypeScriptDerived.typescriptModuleDerived derivations)
 
@@ -192,7 +213,8 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        tsLaysOut (Decl.resolve idl Map.empty kindTags)
+        tsDerives derivations
+        |> Result.bind (fun () -> tsLaysOut (Decl.resolve idl Map.empty kindTags))
         |> Result.bind (TypeScriptDerived.typescriptDeclarationsDerived derivations)
 
     /// An authored value as compilable F# source — the scaffold leg: an expression of type

@@ -3302,3 +3302,286 @@ let instantiationWitnessTests =
                                               (TUnion("Binding", [ TRecord "FloatList" ]))
                                               Required ] }) }
                   "Instantiation.FloatList") ]
+
+// ---------------------------------------------------------------------------
+// Phase 689 (DECISIONS.md D278) — a per-kind table declared in the support record, emitted as a total
+// lookup. Four kinds of evidence: the emission (one exhaustive match a table, no wildcard arm, nothing
+// without the request); each refusal, naming the table and the kind; the module compiled under the
+// nullness checking a strict consumer builds with, with an arm deleted from the same emission refused by
+// that compiler (FS0025), so the probe can tell a total match from a partial one; and the tables through
+// `support.json`, both ways.
+// ---------------------------------------------------------------------------
+
+module private KindTables =
+    /// The projected vocabulary's kinds over its own wire, plus an enum the leaf reaches: `Gate` carries a
+    /// handler, so the lookups take `NodeKind<'Msg>`. The handler's decode placeholder is upcast rather than
+    /// boxed, as a vocabulary a strict consumer compiles must spell it (Phase 540).
+    let idl: Idl =
+        { Projected.idl with
+            Enums = [ Declare.enumOf "Tone" [ "Info"; "Warn" ] ]
+            Unions =
+                Projected.idl.Unions
+                |> List.map (fun u ->
+                    { u with
+                        Cases =
+                            u.Cases
+                            |> List.map (fun c ->
+                                { c with
+                                    Fields =
+                                        c.Fields
+                                        |> List.map (fun f ->
+                                            match f.Type with
+                                            | TFn fn ->
+                                                { f with
+                                                    Type =
+                                                        TFn
+                                                            { fn with
+                                                                Placeholder =
+                                                                    "(fun (_: int) -> (\"<closure>\" :> obj))" } }
+                                            | _ -> f) }) })
+            Kinds =
+                Projected.idl.Kinds
+                |> List.map (fun k ->
+                    if k.Tag = "Leaf" then
+                        { k with
+                            Fields = k.Fields @ [ Projected.opt "tone" (TEnum "Tone") ] }
+                    else
+                        k) }
+
+    let tags = [ "Gate"; "Leaf" ]
+
+    let tables: Map<string, KindTable> =
+        Map.ofList
+            [ "kindClass", KindTable.Text [ "Gate", "fuaran-kind-gate"; "Leaf", "fuaran-kind-leaf" ]
+              "isFlow", KindTable.Bool [ "Gate", true; "Leaf", false ]
+              "childField", KindTable.OptionalField [ "Gate", Some "body"; "Leaf", None ]
+              "updatable", KindTable.Texts [ "Gate", [ "Body"; "Steps" ]; "Leaf", [] ]
+              "tone", KindTable.Enum("Tone", [ "Gate", "Info"; "Leaf", "Warn" ]) ]
+
+    let supportWith (ts: Map<string, KindTable>) =
+        { GenSupport.Empty with
+            KindTables = ts }
+
+    let requests =
+        [ "kindClass"; "isFlow"; "childField"; "updatable"; "tone" ]
+        |> List.map Derivation.KindTable
+
+    let deriveWith (ts: Map<string, KindTable>) (ds: Derivation list) =
+        Gen.fsharpModuleDerived (supportWith ts) ds "KindTabled" idl tags
+
+    /// One table replaced, the others as declared, every table requested.
+    let withTable (name: string) (t: KindTable) =
+        deriveWith (Map.add name t tables) requests
+
+    let construct (r: Result<string, CodegenError>) = fst (Projected.refusal r)
+
+    let probe =
+        String.concat
+            "\n"
+            [ "let leaf: Node<string> = { Id = \"l\"; Kind = NodeKind.Leaf { Text = \"s\"; Tone = None } }"
+              "let gate: Node<string> ="
+              "    { Id = \"g\""
+              "      Kind = NodeKind.Gate { Body = leaf; Steps = []; Rule = None; Trigger = Trigger.Manual \"m\" } }"
+              "for n in [ gate; leaf ] do"
+              "    let field = match KindTables.childField n.Kind with Some f -> f | None -> \"-\""
+              "    let updatable = String.concat \",\" (KindTables.updatable n.Kind)"
+              "    let tone = sprintf \"%A\" (KindTables.tone n.Kind)"
+              "    printfn \"row\\t%s\\t%s\\t%b\\t%s\\t%s\\t%s\" n.Id (KindTables.kindClass n.Kind) (KindTables.isFlow n.Kind) field updatable tone" ]
+
+    let compile (moduleText: string) =
+        Projected.runFsiWith "--checknulls+ --warnaserror+ " (Projected.scriptOf "KindTabled" moduleText probe)
+
+    let document (ts: Map<string, KindTable>) : SupportDocument =
+        { SupportDocument.Empty with
+            Support = supportWith ts }
+
+    let count (s: string) (sub: string) =
+        (s.Length - s.Replace(sub, "").Length) / sub.Length
+
+[<Tests>]
+let kindTableTests =
+    testList
+        "Phase 689 - a per-kind table declared in the support record, emitted as a total lookup"
+        [ testCase "each table is one exhaustive match over the module's kinds, with no wildcard arm" (fun _ ->
+              let src =
+                  Projected.emitted (KindTables.deriveWith KindTables.tables KindTables.requests)
+
+              let at = src.IndexOf "module KindTables ="
+              Expect.isGreaterThanOrEqual at 0 "the tables module"
+              let tables = src.Substring at
+
+              for line in
+                  [ "    let kindClass (k: NodeKind<'Msg>) : string ="
+                    "        | NodeKind.Gate _ -> \"fuaran-kind-gate\""
+                    "        | NodeKind.Leaf _ -> \"fuaran-kind-leaf\""
+                    "    let isFlow (k: NodeKind<'Msg>) : bool ="
+                    "        | NodeKind.Leaf _ -> false"
+                    "    let childField (k: NodeKind<'Msg>) : string option ="
+                    "        | NodeKind.Gate _ -> Some \"body\""
+                    "        | NodeKind.Leaf _ -> None"
+                    "    let updatable (k: NodeKind<'Msg>) : string list ="
+                    "        | NodeKind.Gate _ -> [ \"Body\"; \"Steps\" ]"
+                    "        | NodeKind.Leaf _ -> []"
+                    "    let tone (k: NodeKind<'Msg>) : Tone ="
+                    "        | NodeKind.Gate _ -> Tone.Info" ] do
+                  Expect.stringContains tables line line
+
+              Expect.isFalse (tables.Contains "| _ ->") "no wildcard arm"
+              Expect.equal (KindTables.count tables "        | NodeKind.") 10 "two arms in each of five tables")
+
+          testCase "a table no request names emits nothing, and a request emits each table once" (fun _ ->
+              let none = Projected.emitted (KindTables.deriveWith Map.empty [])
+              let unrequested = Projected.emitted (KindTables.deriveWith KindTables.tables [])
+              Expect.equal unrequested none "declared and not requested is the module without tables"
+
+              let twice =
+                  Projected.emitted (
+                      KindTables.deriveWith
+                          KindTables.tables
+                          [ Derivation.KindTable "isFlow"; Derivation.KindTable "isFlow" ]
+                  )
+
+              Expect.equal (KindTables.count twice "let isFlow ") 1 "one lookup"
+              Expect.isFalse (twice.Contains "let kindClass ") "only the requested table")
+
+          testCase "each refusal names the table, and the kind where a row is at fault" (fun _ ->
+              let refusals =
+                  [ "an undeclared table",
+                    KindTables.deriveWith KindTables.tables [ Derivation.KindTable "ghost" ],
+                    "the kind table `ghost`"
+                    "a missing kind",
+                    KindTables.withTable "kindClass" (KindTable.Text [ "Gate", "g" ]),
+                    "the kind `Leaf` in the kind table `kindClass`"
+                    "an unknown kind",
+                    KindTables.withTable "isFlow" (KindTable.Bool [ "Gate", true; "Leaf", false; "Ghost", true ]),
+                    "the kind `Ghost` in the kind table `isFlow`"
+                    "a duplicate row",
+                    KindTables.withTable "isFlow" (KindTable.Bool [ "Gate", true; "Leaf", false; "Gate", false ]),
+                    "the kind `Gate` in the kind table `isFlow`"
+                    "a field the kind does not declare",
+                    KindTables.withTable
+                        "childField"
+                        (KindTable.OptionalField [ "Gate", Some "body"; "Leaf", Some "body" ]),
+                    "the kind `Leaf` in the kind table `childField`"
+                    "a case the enum does not declare",
+                    KindTables.withTable "tone" (KindTable.Enum("Tone", [ "Gate", "Info"; "Leaf", "Loud" ])),
+                    "the kind `Leaf` in the kind table `tone`"
+                    "an enum the vocabulary does not declare",
+                    KindTables.withTable "tone" (KindTable.Enum("Colour", [ "Gate", "Red"; "Leaf", "Red" ])),
+                    "the enum `Colour` of the kind table `tone`"
+                    "a name that is not an identifier",
+                    KindTables.deriveWith
+                        (Map.add "kind-class" (KindTable.Text [ "Gate", "g"; "Leaf", "l" ]) KindTables.tables)
+                        [ Derivation.KindTable "kind-class" ],
+                    "the kind table `kind-class`" ]
+
+              for (what, result, construct) in refusals do
+                  Expect.equal (KindTables.construct result) construct what
+
+              // A row for a kind the vocabulary declares and the selection does not emit is not read; a selection
+              // that emits a kind the table has no row for is refused.
+              let leafOnly =
+                  Gen.fsharpModuleDerived
+                      (KindTables.supportWith KindTables.tables)
+                      [ Derivation.KindTable "kindClass" ]
+                      "KindTabled"
+                      KindTables.idl
+                      [ "Leaf" ]
+
+              Expect.isOk leafOnly "the Gate row is declared and not emitted"
+
+              let construct, principle =
+                  Projected.refusal (
+                      Gen.fsharpModuleDerived
+                          (KindTables.supportWith (Map.ofList [ "kindClass", KindTable.Text [ "Leaf", "l" ] ]))
+                          [ Derivation.KindTable "kindClass" ]
+                          "KindTabled"
+                          KindTables.idl
+                          KindTables.tags
+                  )
+
+              Expect.equal construct "the kind `Gate` in the kind table `kindClass`" "the missing kind"
+              Expect.stringContains principle "total" "the principle names totality")
+
+          testCase "the TypeScript backend refuses a table request by name" (fun _ ->
+              let request = [ Derivation.KindTable "kindClass" ]
+
+              for result in
+                  [ Gen.typescriptModuleDerived request KindTables.idl KindTables.tags
+                    Gen.typescriptDeclarationsDerived request KindTables.idl KindTables.tags ] do
+                  Expect.equal (KindTables.construct result) "the kind table `kindClass`" "refused by name")
+
+          testCase
+              "compiled with nullness checking and warnings as errors, it answers every row; with an arm deleted it does not compile"
+              (fun _ ->
+                  let src =
+                      Projected.emitted (KindTables.deriveWith KindTables.tables KindTables.requests)
+
+                  match KindTables.compile src with
+                  | None -> skiptest "dotnet not on PATH - the nullness-checked compile is skipped"
+                  | Some(code, out, err) ->
+                      Expect.equal code 0 (sprintf "the emission compiles: %s" err)
+
+                      Expect.stringContains
+                          out
+                          "row\tg\tfuaran-kind-gate\ttrue\tbody\tBody,Steps\tInfo"
+                          "the gate's row"
+
+                      Expect.stringContains out "row\tl\tfuaran-kind-leaf\tfalse\t-\t\tWarn" "the leaf's row"
+
+                  // The same emission with one arm deleted: the compiler refuses the incomplete match, so the probe
+                  // can tell a total lookup from a partial one.
+                  let arm = "        | NodeKind.Leaf _ -> \"fuaran-kind-leaf\"\n"
+                  Expect.stringContains src arm "the arm to delete"
+
+                  match KindTables.compile (src.Replace(arm, "")) with
+                  | None -> skiptest "dotnet not on PATH"
+                  | Some(code, _, err) ->
+                      Expect.notEqual code 0 "a lookup missing an arm"
+                      Expect.stringContains err "FS0025" "the incomplete-match refusal")
+
+          testCase "support.json carries the tables both ways, and a document without them is unchanged" (fun _ ->
+              let text = SupportArtifact.render (KindTables.document KindTables.tables)
+
+              match SupportArtifact.parse text with
+              | Error e -> failtestf "the rendered document reads back: %s" e
+              | Ok back ->
+                  Expect.equal back.Support.KindTables KindTables.tables "the same tables"
+                  Expect.equal (SupportArtifact.render back) text "and the same bytes"
+
+              Expect.stringContains text "\"column\": \"optionalField\"" "the column is named"
+
+              Expect.isFalse
+                  ((SupportArtifact.render SupportDocument.Empty).Contains "kindTables")
+                  "no key without tables")
+
+          testCase "the support reader refuses an unknown column, a value of another type and a repeated name" (fun _ ->
+              let read (tables: string) =
+                  SupportArtifact.parse ("{ \"version\": 1, \"kindTables\": [ " + tables + " ] }")
+
+              let refused (what: string) (tables: string) (fragment: string) =
+                  match read tables with
+                  | Ok _ -> failtestf "%s: read" what
+                  | Error e -> Expect.stringContains e fragment what
+
+              refused "an unknown column" "{ \"name\": \"t\", \"column\": \"number\", \"rows\": [] }" "UnknownTag"
+
+              refused
+                  "a bool row holding a string"
+                  "{ \"name\": \"t\", \"column\": \"bool\", \"rows\": [ { \"kind\": \"Gate\", \"value\": \"yes\" } ] }"
+                  "WrongKind"
+
+              refused
+                  "two tables of one name"
+                  "{ \"name\": \"t\", \"column\": \"text\", \"rows\": [] }, { \"name\": \"t\", \"column\": \"bool\", \"rows\": [] }"
+                  "a second table named t"
+
+              match
+                  read "{ \"name\": \"t\", \"column\": \"optionalField\", \"rows\": [ { \"kind\": \"Leaf\" } ] }"
+              with
+              | Ok doc ->
+                  Expect.equal
+                      doc.Support.KindTables
+                      (Map.ofList [ "t", KindTable.OptionalField [ "Leaf", None ] ])
+                      "a row with no value names no field"
+              | Error e -> failtestf "an optional-field row without a value reads: %s" e) ]

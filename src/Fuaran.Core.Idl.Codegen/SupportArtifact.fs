@@ -107,6 +107,27 @@ module SupportArtifact =
         | Some s -> [ name, JStr s ]
         | None -> []
 
+    /// Phase 689 — one per-kind table: its name, its column (`text`, `bool`, `optionalField`, `texts`, or
+    /// `enum` with the enum's name beside it) and its rows in authored order, each `{ "kind", "value" }`. An
+    /// optional-field row that names no field carries no `value`, the `optKey` posture.
+    let private kindTableJson (name: string) (table: KindTable) : JVal =
+        let row (kind: string) (value: JVal option) =
+            JObj(
+                [ "kind", JStr kind ]
+                @ (value |> Option.map (fun v -> "value", v) |> Option.toList)
+            )
+
+        let column, enumKey, rows =
+            match table with
+            | KindTable.Text rs -> "text", [], rs |> List.map (fun (k, v) -> row k (Some(JStr v)))
+            | KindTable.Bool rs -> "bool", [], rs |> List.map (fun (k, v) -> row k (Some(JBool v)))
+            | KindTable.OptionalField rs ->
+                "optionalField", [], rs |> List.map (fun (k, v) -> row k (Option.map JStr v))
+            | KindTable.Texts rs -> "texts", [], rs |> List.map (fun (k, v) -> row k (Some(lines v)))
+            | KindTable.Enum(e, rs) -> "enum", [ "enum", JStr e ], rs |> List.map (fun (k, v) -> row k (Some(JStr v)))
+
+        JObj([ "name", JStr name; "column", JStr column ] @ enumKey @ [ "rows", JArr rows ])
+
     /// The document as a `JVal`.
     let json (doc: SupportDocument) : JVal =
         let s = doc.Support
@@ -170,6 +191,20 @@ module SupportArtifact =
                       |> List.map (fun (case, expr) -> JObj [ "case", JStr case; "expression", JStr expr ])
                   ) ]
 
+        // Phase 689 — absent from a document that declares no table, so a document written before them renders
+        // byte for byte as it did.
+        let tables =
+            if Map.isEmpty s.KindTables then
+                []
+            else
+                [ "kindTables",
+                  JArr(
+                      s.KindTables
+                      |> Map.toList
+                      |> List.sortWith (fun (a, _) (b, _) -> ordinal a b)
+                      |> List.map (fun (name, t) -> kindTableJson name t)
+                  ) ]
+
         let prelude =
             match doc.HostPrelude with
             | None -> []
@@ -190,6 +225,7 @@ module SupportArtifact =
             @ splices
             @ refines
             @ projections
+            @ tables
             @ prelude
         )
 
@@ -246,6 +282,35 @@ module SupportArtifact =
         <*> optStr "mapMsg"
         <*> Decoder.optField "recordFields" (Decoder.list CodegenLookup.readField)
 
+    /// Phase 689 — a per-kind table, dispatched on its `column`: an unknown column is `UnknownTag` there, naming
+    /// every known one, and a row's value is read at the column's type, so a value of another type is refused at
+    /// its row.
+    let private kindTable: Decoder<string * KindTable> =
+        let rows (value: Decoder<'v>) : Decoder<(string * 'v) list> =
+            Decoder.field "rows" (Decoder.list (Decoder.succeed (fun k v -> k, v) <*> str "kind" <*> value))
+
+        let table =
+            Decoder.tagDispatch
+                "column"
+                [ "text", rows (Decoder.field "value" Decoder.str) |> Decoder.map KindTable.Text
+                  "bool", rows (Decoder.field "value" Decoder.bool) |> Decoder.map KindTable.Bool
+                  "optionalField", rows (optStr "value") |> Decoder.map KindTable.OptionalField
+                  "texts", rows (Decoder.field "value" Decoder.strings) |> Decoder.map KindTable.Texts
+                  "enum",
+                  Decoder.pair (str "enum") (rows (Decoder.field "value" Decoder.str)) (fun e rs ->
+                      KindTable.Enum(e, rs)) ]
+
+        Decoder.succeed (fun name t -> name, t) <*> str "name" <*> table
+
+    /// The tables by name; a name declared twice is refused (`OutOfRange`), where the other keyed entries keep
+    /// the last, because a second table under one name would silently replace a lookup a consumer compiles.
+    let private kindTables: Decoder<Map<string, KindTable>> =
+        Decoder.fieldOr "kindTables" [] (Decoder.list kindTable)
+        |> Decoder.andThen (fun ts ->
+            match ts |> List.map fst |> List.countBy id |> List.tryFind (fun (_, n) -> n > 1) with
+            | Some(name, _) -> Error(RootDecodeCode.OutOfRange, "one table per name", "a second table named " + name)
+            | None -> Ok(Map.ofList ts))
+
     let private splices: Decoder<string option * string option * string option * string option> =
         Decoder.succeed (fun t e d a -> t, e, d, a)
         <*> optStr "type"
@@ -270,7 +335,7 @@ module SupportArtifact =
                 Error(RootDecodeCode.OutOfRange, "encoding version " + string version, "encoding version " + string v))
 
     let private body: Decoder<SupportDocument> =
-        Decoder.succeed (fun docs refines projections (ts, es, ds, accs) prelude ->
+        Decoder.succeed (fun docs refines projections tables (ts, es, ds, accs) prelude ->
             { Support =
                 { Docs = docs
                   TypeSplice = ts
@@ -278,11 +343,13 @@ module SupportArtifact =
                   DecodeSplice = ds
                   AccessorSplice = accs
                   CaseRefines = refines
-                  KindProjections = projections }
+                  KindProjections = projections
+                  KindTables = tables }
               HostPrelude = prelude })
         <*> entries "docs" docEntry
         <*> entries "caseRefines" refine
         <*> entries "kindProjections" projection
+        <*> kindTables
         <*> Decoder.fieldOr "splices" (None, None, None, None) splices
         <*> Decoder.optField "hostPrelude" prelude
 
