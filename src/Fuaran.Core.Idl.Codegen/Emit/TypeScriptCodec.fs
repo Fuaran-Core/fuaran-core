@@ -10,12 +10,12 @@ open Fuaran.Core.Idl.Emit.FSharpDefaults
 /// along its banners).
 module internal TypeScriptCodec =
     // -----------------------------------------------------------------------
-    // Phase 317 increment 8 — the SECOND BACKEND (TypeScript). The same IDL now
+    // fuaran#317 increment 8 — the SECOND BACKEND (TypeScript). The same IDL now
     // generates an *independent* host's structural encoder (no FSharp.Core /
     // .NET dependency — plain JS string-building). A node run of it over the
     // corpus is byte-identical to the F# generated encoder, establishing the
     // cross-host byte-identity that is the precondition for cross-host
-    // attestation (Phase 320). Encode-only, mirroring the F# encoder leg.
+    // attestation (fuaran#320). Encode-only, mirroring the F# encoder leg.
     // -----------------------------------------------------------------------
 
     let invariantFloat (f: float) : string =
@@ -132,10 +132,10 @@ module internal TypeScriptCodec =
                    |> List.map (fun (n, fv) -> ", " + SourceLit.tsKey n + ": " + go fv)
                    |> String.concat "")
                 + " }"
-        // Phase 698 — the envelope sits BESIDE `kind` on the emitted object, which is
+        // fuaran#698 — the envelope sits BESIDE `kind` on the emitted object, which is
         // where the generated `encodeNode` reads it from (`n.style`, `n.state`, …).
         // Nothing else changes: the generated TS node encoder has read the envelope
-        // since Phase 690; only the VALUE emitter could not express one.
+        // since fuaran#690; only the VALUE emitter could not express one.
         | VNodeEnv(id, envelope, kindTag, fields) ->
             match shape.NodeEnvelope with
             | NodeEnvelopeShape.NestedKind ->
@@ -180,7 +180,7 @@ module internal TypeScriptCodec =
         // presence test honest without giving the codec anything to read.
         | VClosure
         | VOpaque -> "(() => undefined)"
-        // Phase 676 — a JSON value emits as its canonical literal.
+        // fuaran#676 — a JSON value emits as its canonical literal.
         | VJson j -> Canonical.write Rendering.CrossHost j
 
     /// Emit a TypeScript value literal for an authored `IdlValue` under the vocabulary's DECLARED wire
@@ -307,7 +307,7 @@ module internal TypeScriptCodec =
           Bool = fun src b -> src + " === " + (if b then "true" else "false")
           // A `VEnum` carries the WIRE string, which is what this host holds.
           Enum = fun src _ _ wire -> src + " === " + SourceLit.tsString wire
-          // Phase 1080 — an omitted-when-empty repeated slot.
+          // fuaran#1080 — an omitted-when-empty repeated slot.
           EmptyList = fun src -> src + ".length === 0"
           // Phase 539 — the empty-map default, and a JSON default compared by canonical bytes, as the
           // F# backend and the interpreter compare it.
@@ -352,7 +352,7 @@ module internal TypeScriptCodec =
     /// Phase 524 — the TypeScript printer of a member WRITTEN under its presence
     /// ([[MemberEncTraversal.encMember]]): a `[key, enc]` pair, or `null` (filtered) where the
     /// member is absent. `src` is the JS expression the value is read from (`s.f` in a spec or
-    /// record encoder, `n.f` on the node envelope, `v.f` in a union case). Phase 317's generative
+    /// record encoder, `n.f` on the node envelope, `v.f` in a union case). fuaran#317's generative
     /// conformance once caught the union-case copy ignoring presence entirely; one rule is what
     /// keeps that from recurring.
     let tsMemberEncPrinter (idl: Idl) (disc: string) : MemberEncPrinter =
@@ -535,7 +535,7 @@ module internal TypeScriptCodec =
             u
 
     /// A non-discriminated *record* encoder — a plain object, no discriminator,
-    /// mirroring `recordEncoder` on the F# side. Added by Phase 690: the TS backend
+    /// mirroring `recordEncoder` on the F# side. Added by fuaran#690: the TS backend
     /// decoded records but could not ENCODE them, so `tsEncFn`'s `TRecord n -> "enc" + n`
     /// named a function that was never emitted. Harmless while the only IDL the TS
     /// backend ran on had no records, and a `ReferenceError` waiting for the first
@@ -571,7 +571,7 @@ module internal TypeScriptCodec =
                 + pieces
                 + "]);\n}")
 
-    // ---- Phase 672 task 4: the TS decoder backend ----
+    // ---- fuaran#672 task 4: the TS decoder backend ----
     // The JS host's in-memory shape IS the wire shape (plain objects), so decoding
     // is validation plus rebuilding the positions the encoder writes implicitly:
     // omit-when-default fields (refilled so the encoder omits them again),
@@ -601,7 +601,7 @@ module internal TypeScriptCodec =
           Closure = "dSentinel('<closure>')"
           Fn = fun _ -> "dSentinel('<closure>')"
           Opaque = "dSentinel('<opaque>')"
-          // Phase 676 — keep the parsed JSON as-is. Hosted slots identically.
+          // fuaran#676 — keep the parsed JSON as-is. Hosted slots identically.
           Json = "((x) => x)"
           // Phase 252 — a hosted slot that declares its wire form is CHECKED against it (its
           // type, then its format), which is what makes this host refuse what the F# host's
@@ -669,7 +669,7 @@ module internal TypeScriptCodec =
     /// build one by hand, and it already handles the payload-carrying case.
     let tsDefaultLit (idl: Idl) (disc: string) (t: IdlType) (d: IdlValue) : Result<string, CodegenError> =
         tsIsDefault idl disc "__probe" t d
-        // Phase 1080 — an absent repeated slot decodes to the EMPTY ARRAY, never to
+        // fuaran#1080 — an absent repeated slot decodes to the EMPTY ARRAY, never to
         // `undefined` or `null`: the missing-list-field decode class, pinned here
         // rather than left to each host's own reading of an absent key.
         |> Result.map (fun _ -> tsLiteralValue idl t d)
@@ -1015,7 +1015,7 @@ const encFloat = (n) => {
   if (n === -Infinity) return '"-Infinity"';
   return formatFiniteDouble(n);
 };
-// Phase 676 — arbitrary JSON rendered CANONICALLY: keys Ordinal-sorted, strings
+// fuaran#676 — arbitrary JSON rendered CANONICALLY: keys Ordinal-sorted, strings
 // through the same escaper, numbers through the same float layout. Reusing those
 // three is what stops a passthrough drifting from the rest of the wire.
 const encJson = (v) => {
@@ -1030,7 +1030,7 @@ const encJson = (v) => {
   const keys = Object.keys(v).sort();
   return '{' + keys.map((k) => encStr(k) + ':' + encJson(v[k])).join(',') + '}';
 };
-// Phase 698 — the Ordinal key sort is done HERE, at emission, not left to the
+// fuaran#698 — the Ordinal key sort is done HERE, at emission, not left to the
 // caller's declaration order. `Canonical.write Rendering.CrossHost` sorts every object's keys Ordinal on
 // the F# side unconditionally, and JS `<` on strings compares UTF-16 code units,
 // which is the same order — so sorting here is what makes the two hosts agree by
@@ -1097,7 +1097,7 @@ const plain = (pairs) =>
                     |> List.map (fun k -> "    case " + SourceLit.tsString k.Tag + ": return enc" + k.Tag + "Spec(k);")
                     |> String.concat "\n"
 
-                // Phase 690 — `id` / `kind` / the envelope, merged and sorted Ordinal so
+                // fuaran#690 — `id` / `kind` / the envelope, merged and sorted Ordinal so
                 // the TS emission order matches F#'s canonical key sort. With no envelope
                 // this is `id` then `kind`, i.e. exactly the previous hand-built literal.
                 // Phase 111 — declared order keeps the construction order instead:

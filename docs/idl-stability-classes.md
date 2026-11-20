@@ -371,7 +371,7 @@ same table the usage above is rendered from — an unknown flag, a flag without 
 given twice and a non-integer `--seed` / `--vectors` are refused, never ignored — and every exit
 code is the one it was.
 
-The classification is **advisory**, as the classifier has been since Phase 700. Nothing here writes
+The classification is **advisory**, as the classifier has been since fuaran#700. Nothing here writes
 a file, bumps a version or gates a build on its own account; a gate that wants to stop is the one
 that reads the exit code. A classifier that applied itself would make the hand-declared
 classification unfalsifiable, which is what the retroactive validation

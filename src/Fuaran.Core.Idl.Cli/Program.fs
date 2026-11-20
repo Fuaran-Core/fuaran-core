@@ -299,7 +299,7 @@ let private defaultSeed = 20260826
 
 let private defaultVectors = 200
 
-/// Phase 702 — price a vocabulary-change proposal against a vocabulary without cutting a
+/// fuaran#702 — price a vocabulary-change proposal against a vocabulary without cutting a
 /// branch or writing a declaration. Phase 230 moved it here from the repository's own test
 /// runner (where it was the `--spike-proposal` flag).
 ///

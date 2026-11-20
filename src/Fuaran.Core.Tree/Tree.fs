@@ -612,7 +612,7 @@ module Tree =
               Removed = aKeys |> List.filter (not << inB)
               Changed = changed
               Unchanged = unchanged }
-    // ---- convenience combinators (Phase 249) ----
+    // ---- convenience combinators (fuaran#249) ----
     // The everyday traversals every domain otherwise re-derives atop `preorder` + the
     // witness accessors. Purely additive, structurally recursive — no new types.
 

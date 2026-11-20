@@ -29,7 +29,7 @@ module VocabularyFault =
 module Declare =
 
     /// An enum whose wire strings ARE its case names — the common case, and the
-    /// shape every declaration had before Phase 707.
+    /// shape every declaration had before fuaran#707.
     let enumOf (name: string) (cases: string list) : IdlEnum =
         { Name = name
           Cases = cases

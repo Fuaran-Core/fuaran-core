@@ -1,7 +1,7 @@
 namespace Fuaran.Core
 
 // ============================================================================
-//  Fuaran.Core.Conformance (Phase 243) — a property-based law kit a domain runs
+//  Fuaran.Core.Conformance (fuaran#243) — a property-based law kit a domain runs
 //  against its own witness to certify it conforms to the Fuaran.Core op algebra
 //  and op-stream. It generalises the `Core.Wire.Corpus` "methodology-is-the-asset"
 //  posture from the wire codec to the op algebra: supply a generator, get a

@@ -5,7 +5,7 @@ namespace Fuaran.Core
 /// `NodeKind` is ever in scope.
 module Ops =
 
-    // ---- validation (Phase 246) ----
+    // ---- validation (fuaran#246) ----
     // One check per op, shared by the dry-run `canApply` and the mutating `apply`, so the two can
     // never diverge; only a `Batch` is order-dependent and simulates through `apply`. The witnesses
     // the checks read are an `OpScope` (Phase 512): `Edit` is what a node's children are for an
@@ -505,7 +505,7 @@ module Ops =
                   Rejection = e
                   Tree = r.Tree }
 
-    /// The shared apply engine (Phase 251) over the walks (Phase 512) and a container capability:
+    /// The shared apply engine (fuaran#251) over the walks (Phase 512) and a container capability:
     /// every public entry derives both from its `OpScope` (Phase 517). A `Batch` is the runner's
     /// all-or-nothing form.
     let rec private applyWith
@@ -806,7 +806,7 @@ module Ops =
             | None -> Tree.Index.build w idw post
 
     /// Derive the inverse of an op from the **pre-state** tree (the tree the op applied to)
-    /// — Phase 242. Every skeleton op's inverse is recoverable from the pre-state:
+    /// — fuaran#242. Every skeleton op's inverse is recoverable from the pre-state:
     /// insert↔remove, remove↔insert (capturing the removed subtree, its parent and its sibling order),
     /// move↔move-back (prior parent and sibling order), reorder↔reorder (prior order), update↔update (the
     /// pre-state node, whose content the undo restores — Phase 250). `Batch` inverts to its
@@ -1688,7 +1688,7 @@ module Ops =
             | None -> Ok())
 
     /// The dry run of one step: the engine's checks and the grammar read the view and the tree
-    /// before it, so no tree is built (Phase 246, Phase 298) unless the policy carries references,
+    /// before it, so no tree is built (fuaran#246, Phase 298) unless the policy carries references,
     /// whose clause reads the tree after the step, or the op is a `Batch`, which is order-dependent.
     let private checkWith
         (policy: Policy<'Node, 'Id>)
@@ -1715,7 +1715,7 @@ module Ops =
     /// `Rejection`, never an exception (GP4).
     ///
     /// **The scope.** `OpScope.plain` treats every node as able to hold children. Under
-    /// `OpScope.contained canHold` (Phase 251) a step that would leave children under a node
+    /// `OpScope.contained canHold` (fuaran#251) a step that would leave children under a node
     /// `canHold` refuses is `NotAContainer` — an insert's parent, a move's destination, a reorder's
     /// parent (Phase 517), an update's rewritten node, and, since Phase 161 (D38), every interior
     /// node of an inserted graft; containment LEGALITY (which kinds may parent which) is the policy's
@@ -1760,7 +1760,7 @@ module Ops =
         | Some d -> Error(DuplicateId d)
         | None -> stepWith policy (canHoldOf scope) s op root
 
-    /// Dry-run validation (Phase 246): would `op` be accepted against `root` under `policy` and
+    /// Dry-run validation (fuaran#246): would `op` be accepted against `root` under `policy` and
     /// `scope`? The exact `Rejection` `apply` would return, and no new tree built for a non-batch op
     /// unless the policy carries references (their clause reads the tree after the step). A `Batch`
     /// is order-dependent, so its check simulates through `apply` and discards the result. The AI
@@ -1804,7 +1804,7 @@ module Ops =
                   Tree = root }
         | None -> script (fun node o -> stepWith policy canHold s o node) ops root
 
-    /// Dry-run a sequence (Phase 246): the 0-based index of the first refused op and its envelope,
+    /// Dry-run a sequence (fuaran#246): the 0-based index of the first refused op and its envelope,
     /// exactly as `applyAll` under the same policy and scope would report them, and no tree returned.
     /// Each step is checked against the tree the earlier steps leave. It is the `canApply` a domain
     /// hands `Arbitration.arbitrateWith`; `Arbitration.arbitrate` composes it with `footprint` under

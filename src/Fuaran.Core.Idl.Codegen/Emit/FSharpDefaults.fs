@@ -131,7 +131,7 @@ module internal FSharpDefaults =
     ///
     /// **The admissible set is decided by a constraint that is easy to miss: the string is used in
     /// both an EXPRESSION and a PATTERN position.** The generated encoder tests a union default by
-    /// `match s.X with | <lit> -> None | _ -> …` (Phase 691 — an element type that reaches a
+    /// `match s.X with | <lit> -> None | _ -> …` (fuaran#691 — an element type that reaches a
     /// closure carries no equality, so the union arm cannot use `=`), while the decoder's `dDef`
     /// restore and the smart constructors use the very same string as an expression. Constants,
     /// a union-case application over constants, `Some`/`None`, a record literal and `[]` are all
@@ -150,7 +150,7 @@ module internal FSharpDefaults =
         LiteralTraversal.print fsLiteralPrinter idl "" t v
 
     // -----------------------------------------------------------------------
-    // Phase 317 increment 7 — the IDL-declared-defaults leg. Emit a smart
+    // fuaran#317 increment 7 — the IDL-declared-defaults leg. Emit a smart
     // constructor per kind: required fields *without* a declared default are
     // parameters; IDL-declared defaults are filled (the Phase 307 ARIA / variant
     // case — a field the author shouldn't have to repeat), and other optionals
@@ -193,7 +193,7 @@ module internal FSharpDefaults =
                 else
                     None)
 
-        // Phase 690 — a smart constructor fills the envelope with its identity value, so the
+        // fuaran#690 — a smart constructor fills the envelope with its identity value, so the
         // common case stays `mkHeading "h" 2 text`. An envelope field that is neither optional
         // nor defaulted would have to become a parameter; none is, and the generator says so
         // rather than guessing.
@@ -283,7 +283,7 @@ module internal FSharpDefaults =
 
         kinds
         |> List.map (fun k ->
-            // Phase 945 — a projected kind's ctor is the projection's own (or absent):
+            // fuaran#945 — a projected kind's ctor is the projection's own (or absent):
             // the generated one would construct the IDL-derived record, which under a
             // projection is not the record that exists.
             match projections.TryFind k.Tag with

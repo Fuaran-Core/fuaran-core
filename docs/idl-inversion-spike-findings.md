@@ -1,7 +1,7 @@
-# IDL inversion spike — findings + go/no-go (Phase 316)
+# IDL inversion spike — findings + go/no-go (fuaran#316)
 
 **Status:** spike complete — **GO**. Advisory findings note for the schema-driven codegen capability
-(Phase 317) and the IDL-canonical direction (substrate-as-asset brief). Amends no shipped contract.
+(fuaran#317) and the IDL-canonical direction (substrate-as-asset brief). Amends no shipped contract.
 
 > **This document describes the inversion spike — the `Fuaran.Core.Idl.Spike` project, deleted from
 > `src/` by Phase 230 — not the production engine** (Phase 201). Every gap it
@@ -26,7 +26,7 @@ A ~150-line IDL covering **five kinds** — `Card` (layout, children + optional 
 schema-driven codec that produces canonical wire JSON **byte-identical to the committed corpus** for all
 five fixtures (`heading-1`, `badge-1`, `btn-1`, `metric-1`, `card-1`), and proves it **in both directions**:
 the authoring leg (authored `IdlValue` → encode → wire) and the round-trip leg (wire → decode → re-encode →
-wire). Verified, at the time of the spike (Phase 316), by an Expecto gate that then ran green; the counts it reported then are not restated here, because nothing holds them to a suite that has since grown. The gate
+wire). Verified, at the time of the spike (fuaran#316), by an Expecto gate that then ran green; the counts it reported then are not restated here, because nothing holds them to a suite that has since grown. The gate
 is **self-contained** — the expected bytes are a vendored snapshot, so it is never vacuous — with a **drift
 guard** that confirms the snapshot still matches the live `Fuaran-UI/wire-format-fixtures/nodes/` corpus when
 checked out alongside (it ran, not skipped). A negative control diverges; the encoder rejects authored fields
@@ -36,7 +36,7 @@ absent from the IDL; the type-generation leg emits F# source for every kind/unio
 walk the IDL at runtime — so the spike proves the IDL carries enough to *round-trip the canonical wire*
 (schema-sufficiency). It does **not** yet prove *compiled code emission* from the IDL (the actual generator,
 with the structural-emission-not-string-templating discipline Phase 314 depends on); `Gen` here emits an
-illustrative, uncompiled source string only. That is Phase 317 work.
+illustrative, uncompiled source string only. That is fuaran#317 work.
 
 **The decisive de-risk:** the codec **reuses `Fuaran.Core.Wire.Canon.render` + `Json.parse`** (the renderer
 documented byte-identical to the UI host's `CanonicalJson` — Ordinal-sorted keys, pinned float layout,
@@ -55,7 +55,7 @@ ergonomic sugar — stays hand-written per host and is out of the IDL's scope by
 
 ## 3. Known gaps the spike bounded (the full inversion must close)
 
-1. **Generic element types — resolved (Phase 317 increment 1, `fuaran-core@c625e78`…).** `Binding<'T>` is now
+1. **Generic element types — resolved (fuaran#317 increment 1, `fuaran-core@c625e78`…).** `Binding<'T>` is now
    a single **parameterised union** (`TUnion of name * args`, `TVar`), instantiated at `float`
    (Metric.source/trend) and `bool` (Button.disabled) — both round-trip byte-identical, an element-type
    mismatch (`Binding<bool>` given a float) is rejected, and the type-gen leg emits a generic `type
@@ -75,7 +75,7 @@ ergonomic sugar — stays hand-written per host and is out of the IDL's scope by
    **not** fill on decode. A `Required` member is always emitted, so filling one on decode would re-encode it
    PRESENT and `decode >> encode` would stop being the identity on the wire. The type's own doc comment carries
    the argument.
-3. **The full node envelope — done (Phases 690 / 691 / 698, held to the five-slot shape by Phase 201).**
+3. **The full node envelope — done (fuaran#690 / fuaran#691 / fuaran#698, held to the five-slot shape by Phase 201).**
    `Idl.NodeFields` is the declaration — what a node carries beside `id` and `kind` — and every emitter derives
    from it rather than hard-coding it, because "what a node carries" is a property of the DOMAIN's tree and
    another domain has a different envelope or none. All five slots are expressible: `state` / `style` /
@@ -86,11 +86,11 @@ ergonomic sugar — stays hand-written per host and is out of the IDL's scope by
    member, fixed at *absence* — so a map-valued or closure-valued host-only member needs no widening of the
    type model. `IdlEnvelopeTests` declares an envelope carrying all five, generates it on both backends and in
    the schema, and holds a host-only member to being on neither side of the wire.
-4. **`schema.json` emission — done (Phase 317 increment 4, `fuaran-core@7a93718`).** `Gen.jsonSchema` emits a
+4. **`schema.json` emission — done (fuaran#317 increment 4, `fuaran-core@7a93718`).** `Gen.jsonSchema` emits a
    Draft 2020-12 JSON Schema from the IDL (`$defs` per enum/union/kind, `oneOf` by `$type`, required +
    `additionalProperties:false`). So **one IDL now drives all three §11 mirrors** — encoder + decoder +
    schema. (JSON Schema has no type parameters; a generic union's `'T` fields emit as permissive `{}`.)
-5. **Generated F# compiles — done, feature-complete (Phase 317 increments 2–3, `fuaran-core@6ffbfa6`).**
+5. **Generated F# compiles — done, feature-complete (fuaran#317 increments 2–3, `fuaran-core@6ffbfa6`).**
    `Gen.fsharpModule` emits a self-contained F# module (`Generated.fs`) for **all 8 kinds**, handling every
    feature class — **optionals** (omit-on-absence via `List.choose`), **generics** (`Binding<'T>` by
    codec-passing), **lists**, and **node nesting** (recursive `encNode`; specs + `NodeKind` + `Node` emitted
@@ -113,7 +113,7 @@ mechanical, not novel.
 
 ## 5. Status — capability proven; instantiation remains
 
-**Phase 317's codegen *capability* is proven end-to-end at slice scale (increments 1–4).** From one IDL:
+**fuaran#317's codegen *capability* is proven end-to-end at slice scale (increments 1–4).** From one IDL:
 typed F# (incl. a generic `Binding<'T>`), a runtime codec (encoder + decoder, both directions), a
 **compiled, feature-complete generated encoder** (optionals + generics + lists + nesting, all 8 kinds,
 byte-correct), and a **JSON Schema** — all green under `run.ps1`. The central uncertainties are retired: a
@@ -127,8 +127,8 @@ NOT claimed complete:
    and run the migration loop — generate → byte-diff vs the hand-written tier → switch. The migration target
    lives in the **Fuaran-UI** repo, so this is downstream consumer work, not Fuaran-Core spike work.
 2. **A second, independent backend** (C# or TS) — proves host-independence and **cross-host byte-identical
-   hashing** (the precondition for Phase 320 attestation). A whole second emitter.
+   hashing** (the precondition for fuaran#320 attestation). A whole second emitter.
 3. ~~**Defaults-fill + the full node envelope**~~ — both closed; see items 2–3 of §3. What remains of this
-   entry is the **syntax-tree-API** emission form (vs source-string) the Phase 321 trust boundary may want.
+   entry is the **syntax-tree-API** emission form (vs source-string) the fuaran#321 trust boundary may want.
 
 These are the right shape for follow-on increments; the capability they instantiate is built and verified.

@@ -1,6 +1,6 @@
 namespace Fuaran.Core
 
-/// Wire versioning + the forward/backward-compatibility contract (Phase 319). A versioned
+/// Wire versioning + the forward/backward-compatibility contract (fuaran#319). A versioned
 /// wire format lets an *older* consumer meet a *newer* artifact and **detect → preserve →
 /// degrade** instead of crashing — while the authoring/generation surface stays closed and
 /// exhaustive (no host can *emit* an unknown kind). Everything here is FSharp.Core-only and
@@ -206,7 +206,7 @@ module Versioning =
         /// `$payload` absent — the decode refusal, with its code and its path (a host's
         /// `MISSING_FIELD` / `WRONG_TYPE` at `$.$profile`, WIRE_FORMAT §15.2).
         | Malformed of DecodeError
-        /// `$profile` is a string that names no capability (WIRE_FORMAT §15.2, Phase 1938): it is
+        /// `$profile` is a string that names no capability (WIRE_FORMAT §15.2, fuaran#1938): it is
         /// `Foreign`, at `$.$profile`, exactly as a parseable foreign capability is refused at
         /// negotiation — one fact to a consumer (it cannot read the payload under any capability it
         /// holds) and one repair to an author. Carries the text and why it does not parse.

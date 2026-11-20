@@ -105,7 +105,7 @@ type OpScope<'Node, 'Id> =
         Nodes: NodeWitness<'Node, 'Id>
         /// The id witness every address is keyed by.
         Ids: IdWitness<'Id>
-        /// Which nodes can hold children at all (Phase 251). `None` admits every node, which is
+        /// Which nodes can hold children at all (fuaran#251). `None` admits every node, which is
         /// what the plain scope means. Asked of every parent an op writes: an insert's parent, a
         /// move's destination, a reorder's parent (Phase 517), an update's rewritten node, and every
         /// interior node of an inserted graft (Phase 161, D38).
@@ -128,7 +128,7 @@ module OpScope =
           CanHold = None
           Keyed = None }
 
-    /// Only the nodes `canHold` accepts can hold children (Phase 251); no keyed position.
+    /// Only the nodes `canHold` accepts can hold children (fuaran#251); no keyed position.
     let contained (canHold: 'Node -> bool) (w: NodeWitness<'Node, 'Id>) (idw: IdWitness<'Id>) : OpScope<'Node, 'Id> =
         { plain w idw with
             CanHold = Some canHold }

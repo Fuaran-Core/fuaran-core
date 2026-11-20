@@ -374,7 +374,7 @@ see [`docs/ADOPTION.md`](docs/ADOPTION.md)):
   the recoverable-envelope discipline; `fromJsonl`/`Snapshots.ofJsonl` return
   `Result` (migration notes shipped with that release).
 - **`Actor`** (`Human of id | Agent of model * version * id`) + the `OpRecord` / `DagNode` /
-  `StreamConfig` / `append` / `merge` actor field+parameter (typed since Phase 320, `0.0.1-alpha.13`).
+  `StreamConfig` / `append` / `merge` actor field+parameter (typed since fuaran#320, `0.0.1-alpha.13`).
   The typed actor is **folded into the chain hash** — a breaking hash-format bump.
   See "Typed, attested provenance" below (migration notes shipped with that release).
 - **`Hash.fnv1a` / `Hash.sha256Hex` / `Hash.sha256Bytes`** (`Core.Tree`) — the two hashing
@@ -731,7 +731,7 @@ but a domain that *persists* a digest as a content-address should note one-time 
   `Tree.Index.fingerprintOf`, `Projection.digestOf`, `ContentPack.signatureFingerprint`,
   `Function.Memo` keys, `OpStream.defaultHash`, `Schema.fingerprint`, and both `invocationKey`s.
 
-## Typed, attested provenance (Phase 320, `0.0.1-alpha.13`)
+## Typed, attested provenance (fuaran#320, `0.0.1-alpha.13`)
 
 The actor is a typed `Actor` (`Human of id | Agent of model * version * id`) **folded into the chain
 hash** — a one-shot breaking hash-format bump (the canonical payload now encodes the actor as a JSON
@@ -739,10 +739,10 @@ object, not a bare string). Attribution is therefore part of the integrity chain
 op breaks `verifyChain` / `verifyDag` exactly as op-tampering does. The `Human` / `Agent` distinction
 is the load-bearing accountability fact; an `Agent`'s `model` / `version` is a neutral attribution axis
 a consumer may use for its own analytics or provenance reporting. A pre-320 bare-string stream migrates via `fromJsonlLegacyActor` + `rehash` under
-`legacyActorConfig` (the Phase-255 migration seam) — see the migration doc. **Cross-host break:** the
+`legacyActorConfig` (the fuaran#255 migration seam) — see the migration doc. **Cross-host break:** the
 hash pre-image is a wire contract; the TS / Python / Fuaran.UI hosts must adopt the same typed-actor
 object + field ordering in the same release or chains diverge (the Fuaran.UI op-record fold is
-coordinated with the Phase-319 wire-versioning work).
+coordinated with the fuaran#319 wire-versioning work).
 
 An optional **`IAttestationSink`** signs chain checkpoints — the head at a commit / publish boundary
 (O(commits), not O(ops); the hash-chain attests the whole prefix). The default `noAttestation` is a
@@ -770,7 +770,7 @@ camelCase `{"actor":…,"session":…,"turn":…,"at":…,"op":<inner>}` envelop
   never reads a clock**; `""` means unstamped.
 - **Identity is host-side vocabulary.** `Actor` / `Session` are opaque strings — Core owns no identity
   model and stores exactly what the host supplies. This is a **distinct axis** from the chain-level typed
-  `Actor` DU folded into `OpRecord` (Phase 320, `0.0.1-alpha.13`): that names the *appender* in the chain payload; the
+  `Actor` DU folded into `OpRecord` (fuaran#320, `0.0.1-alpha.13`): that names the *appender* in the chain payload; the
   `Attributed` envelope carries per-op session/turn provenance *inside the op* via the lift. Both end up
   hash-covered.
 - **Additive + Fable-clean (GP2/GP3).** No new witness field; unattributed streams and their codecs are
@@ -796,7 +796,7 @@ self-proves green in-repo against the reference witness with a keyed FNV/HMAC-st
 ## Hash-chain integrity posture
 
 The op-stream (`OpRecord`) and op-DAG (`DagNode`) chains are **tamper-evident against accidental
-corruption**, not against a motivated adversary, *with the default hash*. Since Phase 320 (`0.0.1-alpha.13`) the
+corruption**, not against a motivated adversary, *with the default hash*. Since fuaran#320 (`0.0.1-alpha.13`) the
 typed actor is inside the hash, so attribution tampering is detected on the same footing as op tampering. `OpStream.defaultHash` is
 FNV-1a — fast, portable, Fable-clean, and **not cryptographic**: anyone who edits a record can
 recompute the whole chain. `verifyChain` / `verifyDag` detect reordering, a dropped link, or a bit
@@ -908,7 +908,7 @@ across such a stream. (The pre-Phase-296 entry points this paragraph named — `
 ### Chain pre-image portability
 
 The chain pre-image is pluggable via `StreamConfig.Payload` (`int -> Actor -> string -> string`,
-Phase 255) so a domain on a legacy chain format can verify its persisted streams and `rehash` to the
+fuaran#255) so a domain on a legacy chain format can verify its persisted streams and `rehash` to the
 canonical form without a flag-day. That flexibility is a **migration seam, not an interchange
 format**: a stream hash-chained under a bespoke `Payload` verifies only for a reader who knows that
 config, so it is **not** portable across independently built hosts. **Cross-host conformance is
@@ -1127,7 +1127,7 @@ into a `Fuaran.Core.*` package (FGP 6).
 ## Fable cleanliness
 
 Public surfaces are FSharp.Core-only and Fable-clean on **both** the encode and the decode
-path. Decode is portable as of Phase 241: `Fuaran.Core.Wire.Json.parse` is a hand-rolled
+path. Decode is portable as of fuaran#241: `Fuaran.Core.Wire.Json.parse` is a hand-rolled
 recursive-descent JSON parser (no System.Text.Json), `Fuaran.Core.Wire.Decoder`'s combinators
 operate over the resulting `JVal`, and `Fuaran.Core.OpStream.fromJsonl` ships its own
 self-contained line scanner — so a Fable-compiled host can decode, `verifyChain`, and replay

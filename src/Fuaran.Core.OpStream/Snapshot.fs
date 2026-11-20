@@ -1,6 +1,6 @@
 namespace Fuaran.Core
 
-/// How a snapshot's hash binds its checkpoint (Phase 258, carried as a value since Phase 296).
+/// How a snapshot's hash binds its checkpoint (fuaran#258, carried as a value since Phase 296).
 /// `Strict` folds the canonical encoding of the `'State` into the hash, so a swapped state is caught;
 /// `ChainOnly` binds the prefix link and the boundary position only, and the stored `'State` is
 /// trusted — the trade-off a domain whose state has no canonical encoder chooses. The mode travels ON
@@ -14,7 +14,7 @@ type SnapshotMode =
     /// checked. Serialised as `"stateHashed":false`.
     | ChainOnly
 
-/// A checkpoint of the folded `'State` at a sequence boundary (Phase 244). `PrevHash` is
+/// A checkpoint of the folded `'State` at a sequence boundary (fuaran#244). `PrevHash` is
 /// the boundary record's hash (the config's genesis at sequence zero); `Hash` chains the snapshot
 /// into the stream so the checkpoint and the truncated prefix are tamper-evident. Replay can resume
 /// from a snapshot instead of from the origin — bounded replay for unbounded histories (FGP 5).
@@ -193,7 +193,7 @@ module Sealed =
           Hash = sv.Seal
           Mode = sv.Mode }
 
-/// The snapshot family (Phase 244; one family since Phase 296; over `Sealed` since Phase 530; the public
+/// The snapshot family (fuaran#244; one family since Phase 296; over `Sealed` since Phase 530; the public
 /// module itself since Phase 516): take a snapshot of a stream's state at a boundary, compact a stream to
 /// it, verify the boundary and the tail above it, replay from it, and its one JSONL line. Every verb that
 /// reads the chain takes the stream's one `Stream` value, so the boundary is sealed and verified under
@@ -321,7 +321,7 @@ module Snapshots =
             snap.Hash
 
     /// One snapshot line, by the snapshot's mode: a `Strict` line carries no `stateHashed` member
-    /// (byte-identical to the pre-Phase-258 format); a `ChainOnly` line carries
+    /// (byte-identical to the pre-fuaran#258 format); a `ChainOnly` line carries
     /// `"stateHashed":false`. The `state` member is `stateEncode`'s output embedded raw.
     let toJsonl (stateEncode: 'State -> string) (snap: Snapshot<'State>) : string = lineOf snap (stateEncode snap.State)
 
@@ -340,7 +340,7 @@ module Snapshots =
 
     /// Parse a snapshot line through the one scanner, the mode read from the line: `ChainOnly`
     /// when it carries `"stateHashed":false`, `Strict` when the member is absent or `true`
-    /// (every pre-Phase-258 line is strict), a refusal for any other value. The `state` span is
+    /// (every pre-fuaran#258 line is strict), a refusal for any other value. The `state` span is
     /// handed to `stateDecode`, whose `Error` is threaded through.
     let ofJsonl (stateDecode: string -> Result<'State, string>) (line: string) : Result<Snapshot<'State>, string> =
         Jsonl.parseLine 1 line

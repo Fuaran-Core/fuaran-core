@@ -9,12 +9,12 @@ open Fuaran.Core.Idl.Emit.Core
 module internal JsonSchema =
 
     // -----------------------------------------------------------------------
-    // Phase 317 increment 4 — the `schema.json` leg: emit a Draft 2020-12 JSON
+    // fuaran#317 increment 4 — the `schema.json` leg: emit a Draft 2020-12 JSON
     // Schema describing the canonical wire, from the same IDL. The third of the
     // §11 "triple mirror" (encoder + decoder already IDL-driven), so one IDL now
     // drives all three.
     //
-    // Phase 1068 — a GENERIC union is emitted once per INSTANTIATED type argument
+    // fuaran#1068 — a GENERIC union is emitted once per INSTANTIATED type argument
     // rather than once, type-erased. JSON Schema has no type parameters, which is
     // why the leg originally emitted a generic union's `'T`-typed fields as the
     // permissive `{}`; but a schema needs no type parameters to state the
@@ -146,7 +146,7 @@ module internal JsonSchema =
                       [ JObj [ "type", JStr "number" ]
                         JObj [ "enum", JArr [ JStr "NaN"; JStr "Infinity"; JStr "-Infinity" ] ] ] ]
         | TEnum n -> JObj [ "$ref", JStr("#/$defs/" + n) ]
-        // Phase 1068 — an instantiated generic union names ITS OWN definition. A
+        // fuaran#1068 — an instantiated generic union names ITS OWN definition. A
         // non-generic one is `defName`'s identity case, so this line is unchanged
         // for every union that has no parameters.
         | TUnion _ -> JObj [ "$ref", JStr("#/$defs/" + defName t) ]
@@ -162,7 +162,7 @@ module internal JsonSchema =
         | TClosure
         | TFn _ -> JObj [ "type", JStr "string"; "const", JStr "<closure>" ]
         | TOpaque -> JObj [ "type", JStr "string"; "const", JStr "<opaque>" ]
-        // Phase 676 — "any JSON": the schema deliberately does not constrain content
+        // fuaran#676 — "any JSON": the schema deliberately does not constrain content
         // the encoder does not decompose, matching how the hand-written schema already
         // renders the rule-12 structured-payload positions. A hosted slot is the same
         // deliberate abstention: its content belongs to the host codec's own spec.
@@ -178,14 +178,14 @@ module internal JsonSchema =
         | TMap vt -> JObj [ "type", JStr "object"; "additionalProperties", schemaOf vt ]
 
     /// The wire-visible fields of a declaration. A [[HostOnly]] field is never on
-    /// the wire in any state (Phase 691), so it is not a property the schema
+    /// the wire in any state (fuaran#691), so it is not a property the schema
     /// describes — listing it would advertise a key no encoder emits.
     let wireFields (fields: IdlField list) =
         fields |> List.filter (fun f -> f.Opt <> HostOnly)
 
     /// The property/required pair shared by every object-shaped schema.
     ///
-    /// **`additionalProperties` is deliberately absent** (Phase 697). The decoder
+    /// **`additionalProperties` is deliberately absent** (fuaran#697). The decoder
     /// tolerates unknown keys — it looks fields up by name, `WIRE_FORMAT.md` §2.1
     /// rule 2 — and the published `schema.json` matches that tolerance. A generated
     /// schema that set `additionalProperties: false` would reject payloads the
@@ -293,7 +293,7 @@ module internal JsonSchema =
 
         let unionDef (u: IdlUnion) = unionDefWith Map.empty u.Name u
 
-        // ── Phase 1068: the instantiations of every GENERIC union ─────────────
+        // ── fuaran#1068: the instantiations of every GENERIC union ─────────────
         //
         // A generic union has no single wire shape — `Binding<float>` and `Binding<int>` accept
         // different `Static` payloads — so it is emitted once per instantiation the vocabulary
@@ -310,7 +310,7 @@ module internal JsonSchema =
             k.Tag, objectSchema idl idl.Wire.Discriminator k.Tag k.Fields
 
         // Phase 511 — the node envelope from its layout: one object carrying `id`, the kind under
-        // its key when the kind is nested, and the declared envelope members (Phase 690: optional by
+        // its key when the kind is nested, and the declared envelope members (fuaran#690: optional by
         // construction, so `required` names only those declared Required). Phase 109 — a MERGED
         // kind makes a node a kind object also carrying that envelope, which `allOf` states.
         let nodeDef =
@@ -341,7 +341,7 @@ module internal JsonSchema =
             | KindPlacement.Merged ->
                 "Node", JObj [ "allOf", JArr [ JObj [ "$ref", JStr "#/$defs/NodeKind" ]; envelopeObject ] ]
 
-        // The kind alternation, named (Phase 703). It was inlined into `Node.kind`,
+        // The kind alternation, named (fuaran#703). It was inlined into `Node.kind`,
         // which is equivalent for a node but leaves `TKind` — `EditNode.newKind`'s
         // type — with nothing to reference. Naming it also matches the published
         // schema, which has always carried a `NodeKind` definition.
@@ -372,12 +372,12 @@ module internal JsonSchema =
             else
                 "oneOf", JArr [ JObj [ "$ref", JStr "#/$defs/Node" ]; JObj [ "$ref", JStr "#/$defs/TreeOp" ] ]
 
-        // Records join the assembly (Phase 697). Every `TRecord` slot emits a
+        // Records join the assembly (fuaran#697). Every `TRecord` slot emits a
         // `$ref` into `#/$defs/`, so omitting them left a dangling reference for
         // `FormField` / `FilterSpec` / `TabHeader` / `ColumnErased` / … — under a
         // strict validator an unresolvable `$ref` is an error, not a permissive
         // skip, so the leg could never have certified against the corpus.
-        // A generic union contributes its INSTANTIATIONS (Phase 1068), never its
+        // A generic union contributes its INSTANTIATIONS (fuaran#1068), never its
         // bare erased name. An unparameterised union is unchanged.
         genericDefsR
         |> Result.map (fun genericDefs ->

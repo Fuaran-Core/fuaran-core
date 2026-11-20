@@ -1,6 +1,6 @@
 namespace Fuaran.Core
 
-/// The typed, hashed actor that produced an op (Phase 320). The `Human` / `Agent` distinction is
+/// The typed, hashed actor that produced an op (fuaran#320). The `Human` / `Agent` distinction is
 /// the load-bearing accountability fact: a `Human` is a person / account id; an `Agent`
 /// additionally carries the `model` + `version` that emitted the op (a neutral attribution axis a
 /// consumer may use for its own analytics or provenance reporting). The actor is folded into the chain
@@ -23,7 +23,7 @@ type ActorInvalid =
     | EmptyId
 
 /// Companion helpers for `Actor` — the canonical hash pre-image (`encode`), the stable id
-/// projection, and the pre-Phase-320 migration lift.
+/// projection, and the pre-fuaran#320 migration lift.
 [<RequireQualifiedAccess>]
 module Actor =
 
@@ -56,7 +56,7 @@ module Actor =
         | Human id -> id
         | Agent(_, _, id) -> id
 
-    /// Lift a pre-Phase-320 bare actor *string* (the old op-stream format recorded the actor as an
+    /// Lift a pre-fuaran#320 bare actor *string* (the old op-stream format recorded the actor as an
     /// unstructured string outside any Human/Agent distinction) to the typed `Human` case — the
     /// migration default. See `StreamConfig.legacyActor` / `Jsonl.readLegacyActor`.
     let ofLegacyString (s: string) : Actor = Human s

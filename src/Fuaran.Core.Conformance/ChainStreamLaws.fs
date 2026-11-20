@@ -98,7 +98,7 @@ module internal ChainStreamLaws =
         @ [ LawKit.guard runner "accepted op" [ "accepted", accepted ]
             LawKit.guard runner "tampered chain" [ "tampered", tampered ] ]
 
-    /// Domain-reducer laws (Phase 254) — certify a domain's *own* reducer
+    /// Domain-reducer laws (fuaran#254) — certify a domain's *own* reducer
     /// `apply : 'Op -> 'State -> Result<'State, 'Rej>` (Doc's `DocOp` apply, Calc's, …), not
     /// just the tree witness. Checks **totality** (`apply` never throws — failures are `'Rej`)
     /// and **replay determinism** (re-applying the accepted ops from `State0` reproduces the

@@ -1,7 +1,7 @@
 namespace Fuaran.Core
 
 // ============================================================================
-//  Fuaran.Core.Function — the artifact-function protocol (Phase 181).
+//  Fuaran.Core.Function — the artifact-function protocol (fuaran#181).
 //
 //  A saved typed tree behaves as a *function* of declared holes: declare typed
 //  holes (abstraction) -> bind a parameter set (application) -> re-derive
@@ -21,7 +21,7 @@ namespace Fuaran.Core
 /// The hole flavours. The first three are the *data* axis — a typed value, a tree-typed
 /// slot (higher-order), and a bounded repeat (the only iteration the total language permits)
 /// — bound by `apply` / `curry` / `compose` with an `Arg<'Node>`. `ActionHole` is the
-/// *behaviour* axis (Phase 318): a dispatch/handler slot bound, separately, by `bindHandlers`
+/// *behaviour* axis (fuaran#318): a dispatch/handler slot bound, separately, by `bindHandlers`
 /// with a host-supplied handler. The artifact stays a pure tree — an action hole carries no
 /// handler and no `'Msg`; it declares only the *effect ceiling* of the handler that will fill
 /// it. The handler (the closure) lives host-side and never travels on the wire (closures erase
@@ -72,7 +72,7 @@ type HoleDecl =
 /// A signature entry — the introspectable projection of a hole (the AiTools surface). `Kind` is the
 /// hole kind itself (Phase 409): a value or repeat hole's space, a slot's kind constraint and an action
 /// hole's declared effect ceiling are read from it, so the schema projection can type a slot
-/// faithfully and a host's hole-binding can be effect-checked (Phase 318). There is one copy of each,
+/// faithfully and a host's hole-binding can be effect-checked (fuaran#318). There is one copy of each,
 /// so no entry can carry a space or an effect its kind disagrees with.
 ///
 /// `Required` means the hole must be BOUND. At the capability seam (`Capability.validateArgs`) a
@@ -220,7 +220,7 @@ type ApplyError =
     /// landing on an address the outer already uses is the case it exists for.
     | IllFormedResult of fault: DeclarationFault
 
-// ---- the behaviour axis: typed handler-table binding (Phase 318) ----
+// ---- the behaviour axis: typed handler-table binding (fuaran#318) ----
 
 /// A host-supplied handler bound to an action hole. The core treats the handler as opaque
 /// (`'Handler` — in F# typically `unit -> 'Msg` or `'Event -> 'Msg`; in a generated C#/VB
@@ -839,7 +839,7 @@ module Function =
                     | _ -> Error(NotASlot slotAddr)
 
     /// Bind a typed handler table to the artifact's declared action holes, validated against the
-    /// signature (Phase 318) — the behaviour-axis analogue of `apply`. The artifact tree is never
+    /// signature (fuaran#318) — the behaviour-axis analogue of `apply`. The artifact tree is never
     /// touched: it stays a pure `Node<unit>`-equivalent; `bindHandlers` returns the validated
     /// host-side sidecar. Three checks, default-deny by shape:
     ///   1. every handler key addresses a *declared action hole* (a non-action hole is `NotAnActionHole`;
@@ -1034,7 +1034,7 @@ module Function =
     /// (value / slot / repeat) becomes a property keyed by its absolute address (hygiene —
     /// addresses, never bare names); the required ones (value + slot + bounded repeat — Phase 295) are
     /// listed; the two-axis effect class travels alongside as `x-effect`, OUTSIDE the parameter
-    /// schema so it never pollutes the argument properties. Action holes (Phase 318) are NOT
+    /// schema so it never pollutes the argument properties. Action holes (fuaran#318) are NOT
     /// arguments the LLM fills — they are the *host's* hole-binding surface (a human binds a
     /// handler) — so they travel under `x-actions`, also OUTSIDE `properties`/`required`. This is
     /// the trust split made wire-visible: the parameter schema is the inert structure the AI

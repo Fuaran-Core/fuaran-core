@@ -3,10 +3,10 @@ namespace Fuaran.Core.Idl
 open System
 
 // ---------------------------------------------------------------------------
-// Phase 321 — codegen trust boundary (tasks 2 + 3).
+// fuaran#321 — codegen trust boundary (tasks 2 + 3).
 //
 // When AI-emitted wire is codegen'd to host source you compile and run, the
-// generator is a trusted computing base. Phase 321 task 1 (shipped) removed the
+// generator is a trusted computing base. fuaran#321 task 1 (shipped) removed the
 // template-injection class: `Gen.fsharpValue` routes every wire string through an
 // escaped literal. The two risks that remain are the ones this file closes:
 //
@@ -32,9 +32,9 @@ open System
 
 /// The pure, Fable-portable sanitisation floor — lifted from
 /// `Fuaran.UI.Renderer.Sanitize` to a Core-shared location so every host (UI,
-/// non-UI, the codegen boundary) reuses one implementation (Phase 321 task 3).
+/// non-UI, the codegen boundary) reuses one implementation (fuaran#321 task 3).
 ///
-/// **Parity is held by the shared corpus, not by this comment.** Phase 321 claimed
+/// **Parity is held by the shared corpus, not by this comment.** fuaran#321 claimed
 /// the semantics matched the UI module "byte-for-byte" and they did not: the lift
 /// copied a subset and dropped two behaviours, both failing open (Phase 96). The
 /// claim was load-bearing and unenforced, which is the combination that let the
@@ -345,7 +345,7 @@ module Sanitize =
             // Neutralise dangerous scheme substrings by REPLACEMENT, rescanning from the
             // start after each hit.
             //
-            // Deleting the match instead (the Phase 321 shape) is unsound: deletion
+            // Deleting the match instead (the fuaran#321 shape) is unsound: deletion
             // splices the surrounding text together and can form a fresh occurrence out
             // of the halves, and a single non-rescanning pass then emits it. That is not
             // theoretical — `javascjavascript:ript:alert(1)` came out of the old code as

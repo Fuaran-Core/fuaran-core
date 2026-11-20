@@ -10,7 +10,7 @@ open Fuaran.Core.Idl.Emit.FSharpDefaults
 module internal Scaffold =
 
     // -----------------------------------------------------------------------
-    // Phase 317 syntax-tree-emission leg + Phase 321 trust boundary. The
+    // fuaran#317 syntax-tree-emission leg + fuaran#321 trust boundary. The
     // wire→source SCAFFOLD mode: emit host SOURCE that constructs a specific
     // node tree (the AI-emitted wire becomes compilable host code). This is the
     // only path where wire-derived VALUES land in source, so it is the
@@ -177,7 +177,7 @@ module internal Scaffold =
                 match members with
                 | [] -> u.Name + "." + c.Tag
                 | ps -> sprintf "%s.%s(%s)" u.Name c.Tag (ps |> List.map snd |> String.concat ", ")
-          // Phase 698 — the envelope's assignments sit on the `Node` record itself (`Style =
+          // fuaran#698 — the envelope's assignments sit on the `Node` record itself (`Style =
           // Some …`), the kind's on the spec record.
           Node =
             fun id k kindMembers envMembers ->
@@ -193,7 +193,7 @@ module internal Scaffold =
                      |> String.concat "")
           // What remains is REFUSED by construct, never mis-emitted: a hosted slot's value is a
           // host type only its own codec knows how to build (unless its wire form is declared,
-          // above), a closure is behaviour (human-bound, Phase 318), and a JSON / map / sentinel /
+          // above), a closure is behaviour (human-bound, fuaran#318), and a JSON / map / sentinel /
           // op slot has no scaffold arm yet.
           Unmatched =
             fun t _ ->
@@ -260,10 +260,10 @@ module internal Scaffold =
 
             "(" + bound + " : Result<_, Fuaran.Core.DecodeError>)")
 
-    /// A provenance-stamp header for AI-scaffolded source (Phase 321) — records
+    /// A provenance-stamp header for AI-scaffolded source (fuaran#321) — records
     /// the source wire hash + the typed actor so generated code is auditable +
     /// reproducible, and states the trust-split invariant: generated code is
-    /// inert structure; behaviour is human-bound (named holes, Phase 318).
+    /// inert structure; behaviour is human-bound (named holes, fuaran#318).
     ///
     /// Phase 505 — written by the one [[Stamp]] renderer every generated header uses; its keyed
     /// input is the source wire's hash, which is already a content hash of what it was given.

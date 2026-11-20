@@ -2,7 +2,7 @@ namespace Fuaran.Core
 
 /// One append-only, hash-chained op record. `Hash = hashFn PrevHash payload`, where
 /// `payload` is the canonical `{seq, actor, op}` envelope (the `actor` is the typed `Actor`
-/// object since Phase 320). The chain makes tampering — including attribution tampering —
+/// object since fuaran#320). The chain makes tampering — including attribution tampering —
 /// detectable (`verifyChain`) and replay deterministic.
 type OpRecord<'Op> =
     {
@@ -96,7 +96,7 @@ type ChainBreak =
 /// The two-seam witness the whole module lifts over: `Apply` is the domain reducer,
 /// `Encode`/`Decode` the domain op codec. Per the Documents extraction assessment,
 /// parameterise over these and the op-stream module is line-for-line shared.
-/// `Decode` returns `Result` (Phase 252) — the same recoverable-envelope discipline the
+/// `Decode` returns `Result` (fuaran#252) — the same recoverable-envelope discipline the
 /// rest of the substrate follows, so a malformed op surfaces as a named `Error`, never an
 /// exception (the F3 adoption finding: every domain decode is already `Result`-returning).
 type StreamWitness<'Op, 'State, 'Rej> =
@@ -116,7 +116,7 @@ type StreamWitness<'Op, 'State, 'Rej> =
 /// Fable-clean default) for SHA-256 at its boundary while keeping cross-host parity.
 type HashFn = string -> string -> string
 
-/// How this package builds the pre-images it hashes (Phase 255 — finding F4; one value with the
+/// How this package builds the pre-images it hashes (fuaran#255 — finding F4; one value with the
 /// encoding profile since Phase 516): the chain-*payload* binding `Payload seq actor opJson ->
 /// payload`, the genesis sentinel for the first record's `PrevHash`, and the JSON string spelling
 /// (`Quote`) of every string this package spells inside a pre-image it builds itself. Cross-host hash
@@ -129,7 +129,7 @@ type HashFn = string -> string -> string
 /// `{seq,actor,op}` envelope + `""` genesis with every control character spelled `\u00xx` (the
 /// spelling since `0.33.0`, Phase 287 — `Wire`'s `EncodingProfile.V2`); `StreamConfig.legacyEscape` is
 /// the same envelope with `\n`, `\r` and `\t` spelled short (`0.30.0` through `0.32.0` — `V1`); and
-/// `StreamConfig.legacyActor` is the pre-Phase-320 envelope, which folded the actor as a bare string.
+/// `StreamConfig.legacyActor` is the pre-fuaran#320 envelope, which folded the actor as a bare string.
 /// A store reads the profile it declares as one of these values, and migrates by `OpStream.rehash`
 /// between two streams built over them.
 type StreamConfig =
@@ -309,7 +309,7 @@ module Anchor =
 [<CompilationRepresentation(CompilationRepresentationFlags.ModuleSuffix)>]
 module StreamConfig =
 
-    /// The canonical `{seq, actor, op}` payload the chain hash is computed over. Since Phase 320 the
+    /// The canonical `{seq, actor, op}` payload the chain hash is computed over. Since fuaran#320 the
     /// `actor` is the typed `Actor` *object* (`Actor.encode`), so altering the attribution changes the
     /// hash — attribution is folded into the integrity chain. Since Phase 287 the actor's strings carry
     /// every control character as `\u00xx`, the spelling the UI host's DAG chain and the TypeScript twin
@@ -335,7 +335,7 @@ module StreamConfig =
     /// same `{seq,actor,op}` envelope over the same typed `Actor` object, but with `\n`, `\r` and `\t`
     /// inside the strings it spells written as the short escapes rather than `\u000a` / `\u000d` /
     /// `\u0009`, in the actor of the chain payload, the actor of a DAG node id and a capture's tags
-    /// alike. The `from` stream of a migration for a store persisted between Phase 320 and Phase 287:
+    /// alike. The `from` stream of a migration for a store persisted between fuaran#320 and Phase 287:
     /// verify under it, then `OpStream.rehash` to canonical.
     ///
     /// A record whose actor holds no control character has the SAME payload under both configs, so for
@@ -347,10 +347,10 @@ module StreamConfig =
           Genesis = ""
           Quote = JsonString.quoteLegacy }
 
-    /// The **pre-Phase-320** config — it folded the actor as a *bare JSON string* (`"actor":"alice"`)
+    /// The **pre-fuaran#320** config — it folded the actor as a *bare JSON string* (`"actor":"alice"`)
     /// rather than the typed object. The `from` stream of a migration for a store persisted before the
     /// typed-actor change: read it with `Jsonl.readLegacyActor` (which lifts each bare-string actor to
-    /// `Human`), verify under it, then `OpStream.rehash` to canonical — the standard Phase-255
+    /// `Human`), verify under it, then `OpStream.rehash` to canonical — the standard fuaran#255
     /// migration shape. Pre-320 streams only ever held `Human` actors; an `Agent` reaching this payload
     /// is migration misuse, so it folds in just the id (best effort). The bare string keeps the pre-287
     /// short escapes: this payload reproduces the bytes a pre-320 writer produced, and that writer
@@ -461,7 +461,7 @@ module ChainShape =
         let at = tip shape anchor items
         items @ [ linkAt shape hashFn at (make at.Seq) ]
 
-    /// Re-chain a run (Phase 255's migration, over a shape since Phase 530; a hash per side since Phase
+    /// Re-chain a run (fuaran#255's migration, over a shape since Phase 530; a hash per side since Phase
     /// 516): `items` verified under `from` and `fromHash`, hung from `anchor` — the first break is the
     /// `Error`, and nothing is re-chained — then each record mapped by `map` and linked under `into` and
     /// `intoHash`, hung from `{ anchor with PrevHash = intoPrev }`. Each record keeps its sequence; only
@@ -682,7 +682,7 @@ module OpStream =
     let verifyChain (s: Stream<'Op, 'State, 'Rej>) (records: OpRecord<'Op> list) : bool =
         firstChainBreak s records |> Option.isNone
 
-    /// Migrate a chain from one stream to another (Phase 255; typed break, Phase 296; one verb over two
+    /// Migrate a chain from one stream to another (fuaran#255; typed break, Phase 296; one verb over two
     /// streams since Phase 516). Verifies `records` under `from` first — a chain that does not verify
     /// under its declared format is a migration the caller must not silently re-bless, so it is `Error`
     /// carrying the first `ChainBreak` — then re-derives every `PrevHash` / `Hash` under `into`, from
@@ -749,7 +749,7 @@ module OpStream =
 
         go 0 state0 [] records
 
-    // ---- the chain head (Phase 296; what an attestation signs, Phase 320) ----
+    // ---- the chain head (Phase 296; what an attestation signs, fuaran#320) ----
 
     /// The current head of a chain — the last record's `Hash`, or `cfg`'s genesis for an empty chain:
     /// the seed every chain walker starts from, so an empty stream appended under a non-empty genesis

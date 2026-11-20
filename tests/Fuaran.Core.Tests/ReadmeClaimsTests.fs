@@ -708,11 +708,11 @@ let internal namedFableExclusions (contract: string) : Set<string> option =
             |> Some)
 
 /// Paragraphs naming the typed actor's arrival by its phase without its version — one event, one
-/// spelling (`Phase 320`, `0.0.1-alpha.13`).
+/// spelling (`fuaran#320`, `0.0.1-alpha.13`).
 let internal typedActorSpellingFaults (doc: string) : string list =
     paragraphs doc
     |> List.filter (fun p ->
-        p.Contains("Phase 320", StringComparison.Ordinal)
+        p.Contains("fuaran#320", StringComparison.Ordinal)
         && not (p.Contains("0.0.1-alpha.13", StringComparison.Ordinal)))
 
 /// The members the contract's bulleted lists name as `**`Fuaran.Core.…`**`.
@@ -1256,12 +1256,12 @@ let tests =
                   let text = File.ReadAllText(Path.Combine(root, doc))
 
                   Expect.isTrue
-                      (text.Contains("Phase 320", StringComparison.Ordinal))
+                      (text.Contains("fuaran#320", StringComparison.Ordinal))
                       (sprintf "%s names the event" doc)
 
                   Expect.isEmpty
                       (typedActorSpellingFaults text)
-                      (sprintf "%s names Phase 320 without `0.0.1-alpha.13`" doc)
+                      (sprintf "%s names fuaran#320 without `0.0.1-alpha.13`" doc)
           }
 
           test "every member a contract bullet names is on a public-surface baseline" {
@@ -1342,8 +1342,8 @@ let tests =
 
               Expect.equal
                   (typedActorSpellingFaults
-                      "folded in (Phase 320, `0.0.1-alpha.13`).\n\nfolded into the hash since Phase 320, so")
-                  [ "folded into the hash since Phase 320, so" ]
+                      "folded in (fuaran#320, `0.0.1-alpha.13`).\n\nfolded into the hash since fuaran#320, so")
+                  [ "folded into the hash since fuaran#320, so" ]
                   "the spelling without the version is red"
 
               Expect.equal
