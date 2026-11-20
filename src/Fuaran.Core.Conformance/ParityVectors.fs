@@ -157,7 +157,7 @@ let private streamWitness: StreamWitness<int, int, string> =
       Decode = fun s -> Json.parse s |> Result.bind (Decoder.describing Decoder.int) }
 
 /// A two-op chain under `OpStream.defaultHash`, with a `Human` and an `Agent` actor so the typed
-/// attribution folded into the pre-image (Phase 320) is exercised on both shapes. Two ops, not one:
+/// attribution folded into the pre-image (fuaran#320) is exercised on both shapes. Two ops, not one:
 /// the second record's `PrevHash` is the first's `Hash`, so a divergence in the FIRST hash cannot
 /// hide behind a matching second one.
 let private chain: OpRecord<int> list =

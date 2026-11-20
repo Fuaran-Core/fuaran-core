@@ -8,7 +8,7 @@ open Fuaran.Core.Idl
 // last, and every emitter read a field-for-field mirror of them (`Core.Projection`,
 // `Core.Support`, `FSharpDerive.Request`) through three converters; the mirrors are gone.
 
-/// Phase 945 — a per-kind HOST PROJECTION: the F# record, encoder and decoder for one
+/// fuaran#945 — a per-kind HOST PROJECTION: the F# record, encoder and decoder for one
 /// node kind are supplied verbatim instead of being derived from the kind's IDL fields.
 /// The IDL fields REMAIN the wire truth (the artifact, the schema and the diff still
 /// read them); the projection changes only what the generated F# looks like — the
@@ -48,7 +48,7 @@ type KindProjection =
         RecordFields: IdlField list option
     }
 
-/// Phase 945 — the declared-support channel for `fsharpModuleWith`: doc comments,
+/// fuaran#945 — the declared-support channel for `fsharpModuleWith`: doc comments,
 /// verbatim splices and host projections that were previously HAND-EDITS to the
 /// generated artefact (the "hand-added ahead of the IDL backfill" regions). Everything
 /// here is versioned data beside the IDL, so the emission is reproducible and the

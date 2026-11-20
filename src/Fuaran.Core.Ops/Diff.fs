@@ -1,6 +1,6 @@
 namespace Fuaran.Core
 
-/// Structural tree-diff → op script (Phase 245): the inverse direction of `Ops.apply`.
+/// Structural tree-diff → op script (fuaran#245): the inverse direction of `Ops.apply`.
 /// Given two trees over a shared id space, derive a `SkeletonOp` list that transforms one
 /// into the other — so a desired tree lowers to the apply/op-stream path every domain has.
 ///
@@ -160,7 +160,7 @@ module Diff =
                     None)
 
     // ---- the one emitter behind every entry (Phase 305; Phase 518 reads `changes` off it) ----
-    // The four structural passes are Phase 245's, and are what `proofs/TreeDiff.fst` models
+    // The four structural passes are fuaran#245's, and are what `proofs/TreeDiff.fst` models
     // clause for clause; Phase 305 changed one clause of step 4 (the settled-order drop, below).
     // Phase 305 also added the two CONTENT blocks around them — `UpdateNode`
     // for every survivor whose own content differs between the trees, which only a caller's
@@ -414,7 +414,7 @@ module Diff =
             | run, _ -> run
 
     /// Derive a script such that `Ops.applyAll policy scope (toOps policy scope before after) before`
-    /// reproduces `after` structurally (Phase 245; the policy and scope, Phase 517). Relocated
+    /// reproduces `after` structurally (fuaran#245; the policy and scope, Phase 517). Relocated
     /// subtrees diff to `MoveNode` (never remove+insert), so an unchanged subtree is preserved, not
     /// destroyed and rebuilt. The emitted order is always applyable: added nodes go in as shells
     /// (top-down), every survivor is then reattached/reordered to its `after` position, and removed

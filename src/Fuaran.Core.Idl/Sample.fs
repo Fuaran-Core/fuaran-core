@@ -15,7 +15,7 @@ open System.Runtime.CompilerServices
 /// model, [[Encode]] and [[Decode]] in the domain-neutral, Fable-clean half.
 module Sample =
     // -----------------------------------------------------------------------
-    // Phase 317 — GENERATIVE conformance vectors.
+    // fuaran#317 — GENERATIVE conformance vectors.
     //
     // The fixed corpus proves the hosts agree on the shapes someone thought to
     // write down. It cannot prove they agree on the shapes nobody did — and
@@ -236,7 +236,7 @@ module Sample =
             match Encode.valueJson idl w (sampleType idl r depth w) with
             | Ok j -> VJson j
             | Error m -> refuse (sprintf "the hosted wire form %A" w) m
-        // Phase 676 — sample real JSON, built from the SAME adversarial pools, so the
+        // fuaran#676 — sample real JSON, built from the SAME adversarial pools, so the
         // passthrough is stressed on escaping and float layout like every other leg. A hosted slot
         // that declares no wire form samples the same way: both the interpreter and the TS backend
         // carry it verbatim, so arbitrary JSON stresses exactly what they share, and a vocabulary
@@ -387,7 +387,7 @@ module Sample =
                     | _ -> name, VAbsent
                 | _ -> name, v)
 
-    /// Phase 698 — the node ENVELOPE, sampled from [[Idl.NodeFields]] through the
+    /// fuaran#698 — the node ENVELOPE, sampled from [[Idl.NodeFields]] through the
     /// same [[sampleFields]] the kind fields use, so both presence polarities are
     /// drawn on a node field exactly as on a kind field (`Optional` absent 1-in-3,
     /// `OmitDefault` at its default 1-in-2, `HostOnly` never present).
@@ -397,7 +397,7 @@ module Sample =
     /// [[VNode]] and keeps every seeded stream that predates this byte-identical.
     /// An IDL declaring no envelope draws nothing at all from the RNG.
     ///
-    /// **This closes the Phase 690 limitation that stood here.** That note recorded
+    /// **This closes the fuaran#690 limitation that stood here.** That note recorded
     /// that a sampled node carried no envelope, so `state` / `style` /
     /// `accessibility` were reachable only by the GENERATED codecs and cross-host
     /// envelope parity was unproven — covered by one corpus fixture rather than by

@@ -11,7 +11,7 @@ open Fuaran.Core.Idl.Emit.Core
 module internal FSharpWitness =
 
     // -----------------------------------------------------------------------
-    // Phase 317 increment 5 — the Core witness-record leg. Emit a
+    // fuaran#317 increment 5 — the Core witness-record leg. Emit a
     // `NodeWitness<Node, string>` for the generated `Node`, so the generated
     // structural layer plugs straight into `Fuaran.Core.Tree` / `.Validator` /
     // `.Observer` — the "serves every domain via the Core witness, not just UI"
@@ -196,7 +196,7 @@ module internal FSharpWitness =
                       "      ReplaceChildren = witnessReplaceChildren }" ])
 
     // -----------------------------------------------------------------------
-    // Phase 317 increment 6 — the validator-rule-scaffold leg. Emit a
+    // fuaran#317 increment 6 — the validator-rule-scaffold leg. Emit a
     // `Fuaran.Core.Validator`-ready entry point wired through the generated
     // `nodeWitness`. Rule *content* stays domain-side (that is the whole point
     // of `Core.Validator` — `RuleFamily` packs are domain-supplied); what the

@@ -124,7 +124,7 @@ module internal FSharpTypes =
 
     /// A closed string set as a `[<RequireQualifiedAccess>]` union, with its declared docs.
     let rqaEnum (doc: string -> string -> string) (e: IdlEnum) =
-        // Phase 945 — declared docs on the enum type and its cases.
+        // fuaran#945 — declared docs on the enum type and its cases.
         // Phase 119 — a case's declared ANNOTATIONS follow, in the same two places a
         // union case takes them: doc lines above the bar, the single attribute inline
         // after it. An unannotated enum emits exactly the lines it always did.
@@ -183,7 +183,7 @@ module internal FSharpTypes =
                 "[<RequireQualifiedAccess>]" :: (obsoleteAttr u.Annotations |> Option.toList),
                 sprintf "%s%s =\n%s" u.Name (declParams msg u.Name u.Params) cases)
 
-        // Phase 945 — field docs land above the field line, at field indent.
+        // fuaran#945 — field docs land above the field line, at field indent.
         let fieldDecls (owner: string) (fields: IdlField list) =
             fields
             |> List.map (fun f ->
@@ -228,7 +228,7 @@ module internal FSharpTypes =
 
         let specBody (k: IdlKind) =
             // Phase 119 — the kind's own declared annotations: the doc block joins
-            // the category comment and any Phase-945 declared doc above the
+            // the category comment and any fuaran#945 declared doc above the
             // declaration, and the single `Obsolete` joins the attribute list, which
             // is what puts it in the position an `and`-joined member needs.
             // Phase 293 — the support doc ahead of the authored annotations: `memberDocLines`
@@ -241,7 +241,7 @@ module internal FSharpTypes =
 
             let attrs = obsoleteAttr k.Annotations |> Option.toList
 
-            // Phase 945 — a projected kind's record body is the projection's, verbatim.
+            // fuaran#945 — a projected kind's record body is the projection's, verbatim.
             match projections.TryFind k.Tag with
             | Some proj -> Ok(comment, attrs, proj.SpecDecl)
             | None ->
@@ -262,7 +262,7 @@ module internal FSharpTypes =
                |> List.map (fun k -> sprintf "    | %s of %sSpec%s" k.Tag k.Tag (declParams msg (k.Tag + "Spec") []))
                |> String.concat "\n")
 
-        // Phase 690 — `id` + `kind` + the declared envelope. An IDL declaring no
+        // fuaran#690 — `id` + `kind` + the declared envelope. An IDL declaring no
         // envelope keeps the original one-liner, so nothing about it changes.
         let nodeBody =
             if List.isEmpty idl.NodeFields then
@@ -330,7 +330,7 @@ module internal FSharpTypes =
         |> Result.map (fun members ->
             let rendered = members |> List.mapi render |> String.concat "\n\n"
 
-            // Phase 945 — verbatim members appended to the SAME type-recursion group
+            // fuaran#945 — verbatim members appended to the SAME type-recursion group
             // (`and`-joined), so a spliced type may reference generated types freely.
             match typeSplice with
             | Some t -> rendered + "\n\n" + t

@@ -1,7 +1,7 @@
 namespace Fuaran.Core
 
 /// The domain-supplied op-algebra generator: how to build a random tree, and how to mint
-/// a fresh node whose id avoids a given set (for `InsertChild`). `CanHold` (Phase 251) is
+/// a fresh node whose id avoids a given set (for `InsertChild`). `CanHold` (fuaran#251) is
 /// the container capability — `Some p` exercises the laws through `Ops.apply` under `OpScope.contained` so a
 /// witness whose `ReplaceChildren` is partial on leaves certifies green without restricting
 /// the generator to containers; `None` uses the plain `apply` (every node can hold children).

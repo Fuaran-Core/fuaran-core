@@ -3,7 +3,7 @@ namespace Fuaran.Core.Idl
 open Fuaran.Core
 
 // ---------------------------------------------------------------------------
-// Phase 696 — the IDL as a canonical DATA artifact (`idl.json`).
+// fuaran#696 — the IDL as a canonical DATA artifact (`idl.json`).
 //
 // Every other leg in this file projects the IDL into some HOST's shape — F#
 // source, a TypeScript codec, a JSON Schema. This one projects the IDL into
@@ -301,7 +301,7 @@ module Artifact =
     /// after artifacts that lacked it were published, so it is omitted at the value their absence
     /// meant, and every earlier artifact stays byte-identical.
     module private Omit =
-        /// Phase 703 — an op-free vocabulary writes no `ops`.
+        /// fuaran#703 — an op-free vocabulary writes no `ops`.
         let ops: Omission<IdlKind list> =
             { Owner = "the artifact"
               Key = "ops"
@@ -435,7 +435,7 @@ module Artifact =
               Default = HostedRefusal.Sentence
               Omits = (=) HostedRefusal.Sentence }
 
-        /// Phase 707 — an enum whose wire strings are its case names writes no `hostCases`.
+        /// fuaran#707 — an enum whose wire strings are its case names writes no `hostCases`.
         let hostCases: Omission<string list option> =
             { Owner = "an enum"
               Key = "hostCases"
@@ -886,7 +886,7 @@ module Artifact =
                       | _ -> None)
                       VMap
                       named
-                  // Phase 698 — the enveloped form records its envelope under its own key rather
+                  // fuaran#698 — the enveloped form records its envelope under its own key rather
                   // than merged into `fields`: the two namespaces can collide (an envelope `style`
                   // and `Drawing.style` both exist). It is told from the bare form by the PRESENCE
                   // of `envelope`; an empty envelope is still one (`"envelope": []`).
@@ -1129,7 +1129,7 @@ module Artifact =
           Annotations: Annotations }
 
     /// `cases` is the wire contract (what a decoder must accept). `hostCases` appears ONLY for a
-    /// Phase 707 wire-mapped enum and is a hostSurface key in the §13 sense. `caseAnnotations`
+    /// fuaran#707 wire-mapped enum and is a hostSurface key in the §13 sense. `caseAnnotations`
     /// (Phase 119) is keyed by the WIRE string rather than the host case name: `cases` is the one
     /// key every revision carries, so a third-party reader resolves an entry without consulting
     /// the conditional `hostCases`. Resolving it back is where a defect can hide, so a `hostCases`
@@ -1536,7 +1536,7 @@ module Artifact =
             |> Codec.field "records" (fun (_, idl: Idl) -> idl.Records) (Codec.list record)
             |> Codec.field "defaults" (fun (_, idl: Idl) -> idl.Defaults) (Codec.list fieldDefault)
             |> Codec.field "nodeFields" (fun (_, idl: Idl) -> idl.NodeFields) fields
-            // The op vocabulary (Phase 703) — the wire's second root.
+            // The op vocabulary (fuaran#703) — the wire's second root.
             |> omitting Omit.ops (fun (_, idl: Idl) -> idl.Ops) (Codec.list kind)
             |> omitting Omit.wire (fun (_, idl: Idl) -> idl.Wire) wireShape
             // The declared hardening vocabulary, written ALWAYS since Phase 179 and read as

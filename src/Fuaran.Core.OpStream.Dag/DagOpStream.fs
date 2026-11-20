@@ -1,7 +1,7 @@
 namespace Fuaran.Core
 
 // ============================================================================
-//  Fuaran.Core.OpStream.Dag (Phase 250) — a content-addressed branching/merging
+//  Fuaran.Core.OpStream.Dag (fuaran#250) — a content-addressed branching/merging
 //  op-DAG over the SAME `StreamWitness<'Op,'State,'Rej>` the linear op-stream uses.
 //
 //  Where the linear spine assumes one totally-ordered actor, the DAG carries
@@ -10,7 +10,7 @@ namespace Fuaran.Core
 //  converge to identical ids and tampering is detectable. Replay to a head folds
 //  the reducer over the head's ancestor-closure in a deterministic topological
 //  order. The linear `Fuaran.Core.OpStream` is untouched — linear consumers pay
-//  nothing. FSharp.Core only, Fable-clean (encode path; decode per Phase 241).
+//  nothing. FSharp.Core only, Fable-clean (encode path; decode per fuaran#241).
 // ============================================================================
 
 /// One node of the op-DAG. `Id` is the content hash; `Parents` is `[]` at genesis,
@@ -278,7 +278,7 @@ module Dag =
 
     /// `nodeHash = hashFn (sorted parents joined) (actor | encoded-op)` — content addressing,
     /// reusing the pluggable `HashFn` (FNV-1a default; host SHA swap) for cross-host parity. Since
-    /// Phase 320 the actor is the typed `Actor` (`Actor.encode`), folded into the content id so a
+    /// fuaran#320 the actor is the typed `Actor` (`Actor.encode`), folded into the content id so a
     /// tampered attribution changes the node id exactly as a tampered op does.
     ///
     /// Parents are sorted (Ordinal) BEFORE hashing (Phase 64.1), so a merge node's identity is
@@ -1106,7 +1106,7 @@ module Dag =
     // The linear OpStream round-trips to JSONL; the DAG does too, closing the persistence
     // asymmetry. Read through the linear package's one scanner (`OpStream.Jsonl`, Phase 296) and
     // spelled by its one escaper (`Jsonl.quote`, Phase 388): this package references
-    // `OpStream`, so neither is copied here, and it stays Fable-clean (Phase 241). One JSON
+    // `OpStream`, so neither is copied here, and it stays Fable-clean (fuaran#241). One JSON
     // object per node; the `op` value is the witness's own Encode output embedded raw (preserved
     // byte-for-byte); nodes are emitted in id-sorted order so output is stable for a fixed DAG.
 
@@ -2283,7 +2283,7 @@ module Dag =
             |> Ok
 
     // ---- checkpoints (Phase 288) ----
-    // The linear stream has had a checkpoint since Phase 244 — a `Snapshot` sealed into the chain, a
+    // The linear stream has had a checkpoint since fuaran#244 — a `Snapshot` sealed into the chain, a
     // replay that resumes from it, a compaction that truncates behind it. This is the DAG's: a state at
     // a node, sealed with the SAME pre-image (a checkpoint at node N is the strict snapshot at sequence
     // zero of the history that begins at N, chained from N's content id the way a linear snapshot chains
@@ -3324,7 +3324,7 @@ module Dag =
               Ids = r.Ids })
 
     // ---- attestation (Phase 311) ----
-    // The linear stream signs its chain head through `IAttestationSink` (Phase 320). A DAG node's id is a
+    // The linear stream signs its chain head through `IAttestationSink` (fuaran#320). A DAG node's id is a
     // hash over its whole closure, so signing a node signs its history; on a store several parties write,
     // the signature also says WHO vouched (`Attestation.attestationSubject`, a party-bound subject).
 

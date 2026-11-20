@@ -1,7 +1,7 @@
 namespace Fuaran.Core
 
 // ============================================================================
-//  Fuaran.Core.Conformance (Phase 243) — a property-based law kit a domain runs
+//  Fuaran.Core.Conformance (fuaran#243) — a property-based law kit a domain runs
 //  against its own witness to certify it conforms to the Fuaran.Core op algebra
 //  and op-stream. It generalises the `Core.Wire.Corpus` "methodology-is-the-asset"
 //  posture from the wire codec to the op algebra: supply a generator, get a
@@ -1054,7 +1054,7 @@ module Conformance =
 
     // ---- the aggregates ------------------------------------------------------------------------
 
-    /// Certify a witness end-to-end: run the **witness laws first** (Phase 253), then — only
+    /// Certify a witness end-to-end: run the **witness laws first** (fuaran#253), then — only
     /// if the witness is well-formed — the op-algebra laws + the diff laws (Phase 03) + the
     /// op-stream laws, and return a structured pass / counterexample report. A witness defect
     /// short-circuits the downstream laws (running them over a broken witness produces noise,
@@ -1126,7 +1126,7 @@ module Conformance =
         (seed: int)
         (iterations: int)
         : ConformanceReport =
-        // Reducer laws first (they alone guard `apply` against throwing — Phase 254's totality
+        // Reducer laws first (they alone guard `apply` against throwing — fuaran#254's totality
         // try/catch); only run the op-stream laws if the reducer is total, since `streamLaws`
         // drives the *unguarded* reducer through `append` and a non-total `apply` would crash it
         // rather than report. Same short-circuit philosophy as `certify`: foundational law first.

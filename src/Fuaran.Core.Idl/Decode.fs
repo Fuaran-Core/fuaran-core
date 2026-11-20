@@ -6,7 +6,7 @@ open Fuaran.Core
 /// round-trips (`encode (decode wire) = wire`). Parsing is the shared portable
 /// `Fuaran.Core.Json.parse`; the IDL drives the walk. Decoders are key-order and
 /// extra-key tolerant by contract (only declared fields are read), so this is the
-/// floor the Phase 319 unknown-kind tolerance builds on.
+/// floor the fuaran#319 unknown-kind tolerance builds on.
 module Decode =
 
     // Phase 310 — the walk reports a `DecodeError`: a code, the path through the document the
@@ -113,7 +113,7 @@ module Decode =
         | WireForm.Unbound v, _ ->
             err DecodeCode.SchemaFault "a substituted type" (sprintf "unsubstituted type variable '%s'" v)
         | WireForm.Sentinel(value, wire), JStr s when s = wire -> Ok value
-        // Phase 676 — accept any JSON at this position, verbatim and unvalidated.
+        // fuaran#676 — accept any JSON at this position, verbatim and unvalidated.
         // A shape check here would be wrong by definition: the field's whole
         // contract is that its content is not the schema's business. A hosted slot that declares
         // no wire form decodes the same way — only the generated F# runs the real host codec (see
@@ -370,7 +370,7 @@ module Decode =
     /// (Phase 520): an absent `id` or kind member is `MissingField` at it and one of the wrong kind
     /// `WrongKind` there, in that order; an unknown kind is `UnknownTag` at the discriminator.
     and private decodeNode (idl: Idl) (j: JVal) : Result<IdlValue, DecodeError> =
-        // Phase 698 — the envelope decodes through the same `decodeFields` the kind fields do, so it
+        // fuaran#698 — the envelope decodes through the same `decodeFields` the kind fields do, so it
         // is the encoder's inverse by construction. An empty result (nothing on the wire, and no
         // `OmitDefault` to restore) yields the bare `VNode` this returned before the envelope
         // existed, which is why every pre-existing decode round-trip is byte-unchanged.
@@ -583,7 +583,7 @@ module Decode =
     let decode (idl: Idl) (json: string) : Result<IdlValue, string> =
         decodeDetailed idl json |> Result.mapError DecodeError.describe
 
-    /// Decode canonical wire JSON as a TREE OP (Phase 703) — the symmetric partner
+    /// Decode canonical wire JSON as a TREE OP (fuaran#703) — the symmetric partner
     /// of [[Encode.encodeOp]], and the wire's second root. The sentence of
     /// [[decodeOpDetailed]]'s refusal.
     let decodeOp (idl: Idl) (json: string) : Result<IdlValue, string> =
