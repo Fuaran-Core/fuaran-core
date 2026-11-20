@@ -111,26 +111,30 @@ let private capabilityIdl =
           union
               "DeclarationFault"
               []
-              [ case "EmptySpace" [ req "addr" TStr; req "space" space ]
-                case "NonFiniteBound" [ req "addr" TStr ]
+              [ case "EmptySpace" [ req "name" TStr; req "space" space ]
+                case "NonFiniteBound" [ req "name" TStr ]
                 case "DuplicateHoleAddr" [ req "addr" TStr ]
                 case "HoleUnderSlot" [ req "node" TStr ]
                 // Phase 642: a capability's declared result, held to the well-formedness a hole is.
                 case "EmptyResult" [ req "space" space ]
-                case "NonFiniteResult" [] ]
+                case "NonFiniteResult" []
+                // Phase 712 (D281): the capability seam binds by qualified name, held to a grammar and
+                // to uniqueness.
+                case "IllFormedHoleName" [ req "name" TStr ]
+                case "DuplicateHoleName" [ req "name" TStr ] ]
           union
               "InvokeError"
               []
               [ case "NoSuchCapability" [ req "id" TStr; req "known" strs ]
                 case "DuplicateCapability" [ req "id" TStr ]
-                case "UnknownArg" [ req "addr" TStr; req "declared" strs ]
-                case "ArgOutOfSpace" [ req "addr" TStr; req "space" space; req "got" TStr ]
-                case "RequiredArgsUnbound" [ req "addrs" strs ]
-                case "UninvocableArg" [ req "addr" TStr ]
+                case "UnknownArg" [ req "name" TStr; req "declared" strs ]
+                case "ArgOutOfSpace" [ req "name" TStr; req "space" space; req "got" TStr ]
+                case "RequiredArgsUnbound" [ req "names" strs ]
+                case "UninvocableArg" [ req "name" TStr ]
                 case "BodyFailed" [ req "reason" TStr ]
-                case "NonTotalCapability" [ req "id" TStr; req "addrs" strs ]
+                case "NonTotalCapability" [ req "id" TStr; req "names" strs ]
                 case "IllFormedCapability" [ req "id" TStr; req "fault" (TUnion("DeclarationFault", [])) ]
-                case "DuplicateArg" [ req "addr" TStr ]
+                case "DuplicateArg" [ req "name" TStr ]
                 case "PolicyRefused" [ req "policy" TStr; req "reason" TStr; req "allowed" strs ]
                 case "ApprovalRequired" [ req "policy" TStr ] ]
           union
@@ -165,13 +169,14 @@ let capability: SeamModule =
 let private outputSpace =
     THosted(typed "Fuaran.Core.ValueSpace" "SpaceCodec.toJson" "PipelineWire.outputSpace")
 
-/// One argument of an `Invoke` node: the host's `(addr, source)` pair, written as one object.
+/// One argument of an `Invoke` node: the host's `(name, source)` pair, keyed by the hole's qualified
+/// name (Phase 712, D281), written as one object.
 let private pipelineArg =
     THosted(
         typed
             "string * Fuaran.Core.ArgSource"
-            "(fun (addr: string, source: Fuaran.Core.ArgSource) -> JObj [ \"addr\", JStr addr; \"source\", encArgSource source ])"
-            "(fun (j: JVal) -> Decoder.field \"addr\" Decoder.str j |> Result.bind (fun addr -> Decoder.field \"source\" decArgSource j |> Result.map (fun source -> addr, source)))"
+            "(fun (name: string, source: Fuaran.Core.ArgSource) -> JObj [ \"name\", JStr name; \"source\", encArgSource source ])"
+            "(fun (j: JVal) -> Decoder.field \"name\" Decoder.str j |> Result.bind (fun name -> Decoder.field \"source\" decArgSource j |> Result.map (fun source -> name, source)))"
     )
 
 let private pipelineIdl =

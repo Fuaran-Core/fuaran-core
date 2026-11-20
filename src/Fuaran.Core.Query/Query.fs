@@ -442,7 +442,7 @@ module Query =
                     | Some t -> Error(ParamTypeMismatch(name, p.Type, t))
 
         // Phase 307: the first repeated name, at its second occurrence, before any cell is read.
-        match Capability.repeatedAddrs args with
+        match Capability.repeatedNames args with
         | dup :: _ -> Error(DuplicateParam dup)
         | [] -> checkArgs args
         |> Result.bind (fun () ->
@@ -560,7 +560,7 @@ module Query =
         // Every repeated name first (Phase 307), as `validateParams` checks it first; then one
         // refusal per argument, in order.
         let faults =
-            (Capability.repeatedAddrs args |> List.map DuplicateParam)
+            (Capability.repeatedNames args |> List.map DuplicateParam)
             @ (args |> List.choose argFault)
 
         let unbound =

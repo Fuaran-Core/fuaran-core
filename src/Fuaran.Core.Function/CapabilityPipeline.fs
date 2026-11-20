@@ -111,9 +111,9 @@ module CapabilityPipeline =
                         Error(PipelineError.PipelineOutputContradicts(nid, capId, declared, cap.Result))
                     | Some cap ->
                         let holes = cap.Signature.Holes
-                        let declared = holes |> List.map _.Addr
+                        let declared = holes |> List.map _.Name
 
-                        let edgeFault (addr: string) (up: string) (argSpace: ValueSpace) =
+                        let edgeFault (name: string) (up: string) (argSpace: ValueSpace) =
                             match Map.tryFind up nodeById with
                             | None -> Some(PipelineError.UnknownNode up)
                             | Some _ when up = nid -> Some(PipelineError.PipelineCycle(nid, [ nid ]))
@@ -121,35 +121,35 @@ module CapabilityPipeline =
                                 if position[up] > position[nid] then
                                     match pathTo nid up with
                                     | Some path -> Some(PipelineError.PipelineCycle(nid, nid :: path))
-                                    | None -> Some(PipelineError.PipelineForwardEdge(nid, addr, up))
+                                    | None -> Some(PipelineError.PipelineForwardEdge(nid, name, up))
                                 elif spaceFeeds (nodeOutputType upNode) argSpace then
                                     None
                                 else
                                     Some(
                                         PipelineError.EdgeTypeMismatch(
                                             nid,
-                                            addr,
+                                            name,
                                             spaceTag (nodeOutputType upNode),
                                             spaceTag argSpace
                                         )
                                     )
 
-                        let argFault (addr: string, src: ArgSource) =
+                        let argFault (name: string, src: ArgSource) =
                             match src with
                             | Literal v ->
-                                Capability.argFault cap declared (addr, v)
+                                Capability.argFault cap declared (name, v)
                                 |> Option.map (fun e -> PipelineError.PipelineArgRefused(nid, e))
                             | FromNode up ->
-                                match holes |> List.tryFind (fun h -> h.Addr = addr) with
-                                | None -> Some(PipelineError.PipelineArgRefused(nid, UnknownArg(addr, declared)))
+                                match holes |> List.tryFind (fun h -> h.Name = name) with
+                                | None -> Some(PipelineError.PipelineArgRefused(nid, UnknownArg(name, declared)))
                                 | Some h ->
                                     match h.Space with
-                                    | None -> Some(PipelineError.PipelineArgRefused(nid, UninvocableArg addr))
-                                    | Some argSpace -> edgeFault addr up argSpace
+                                    | None -> Some(PipelineError.PipelineArgRefused(nid, UninvocableArg name))
+                                    | Some argSpace -> edgeFault name up argSpace
 
-                        // Phase 307: an address bound twice is `DuplicateArg`, as `validateArgs`
+                        // Phase 307: a name bound twice is `DuplicateArg`, as `validateArgs`
                         // refuses it — checked first, at the second occurrence.
-                        let duplicate = Capability.repeatedAddrs args |> List.tryHead
+                        let duplicate = Capability.repeatedNames args |> List.tryHead
 
                         match
                             duplicate
@@ -162,8 +162,8 @@ module CapabilityPipeline =
 
                             let unbound =
                                 holes
-                                |> List.filter (fun h -> h.Required && not (bound.Contains h.Addr))
-                                |> List.map _.Addr
+                                |> List.filter (fun h -> h.Required && not (bound.Contains h.Name))
+                                |> List.map _.Name
 
                             if List.isEmpty unbound then
                                 go rest
@@ -177,7 +177,7 @@ module CapabilityPipeline =
     /// threads this as `EffectCapture.captureEffect`'s `eff` argument, so the whole dataflow replays
     /// byte-identically. Since Phase 225 the hashed pre-image goes through `Hash.canonicalFields`
     /// and covers EVERY component — the ids as well as the arg references, each binding three
-    /// fields (addr, `L`/`N`, value) and the bindings in sorted order — so it is injective: two
+    /// fields (the hole's qualified name, `L`/`N`, value) and the bindings in sorted order — so it is injective: two
     /// nodes share a pre-image only when they share every component, whatever `#` or `=` an id or
     /// a literal contains. (It joined `addr=L:value` on the empty string before, the collision
     /// `Query.invocationKey`'s `key_collision` finding named.)
@@ -262,37 +262,37 @@ module CapabilityPipeline =
             match n with
             | Source _ -> Ok []
             | Invoke(_, capId, _, args) ->
-                let spaceOf (addr: string) =
+                let spaceOf (name: string) =
                     lookup.TryFind capId
                     |> Option.bind (fun c ->
                         c.Signature.Holes
-                        |> List.tryPick (fun h -> if h.Addr = addr then h.Space else None))
+                        |> List.tryPick (fun h -> if h.Name = name then h.Space else None))
 
                 (Ok [], args)
-                ||> List.fold (fun acc (addr, src) ->
+                ||> List.fold (fun acc (name, src) ->
                     acc
                     |> Result.bind (fun xs ->
                         match src with
-                        | Literal s -> Ok((addr, LiteralArg s) :: xs)
+                        | Literal s -> Ok((name, LiteralArg s) :: xs)
                         | FromNode up ->
-                            match Map.tryFind up results, spaceOf addr with
+                            match Map.tryFind up results, spaceOf name with
                             | Some v, Some space ->
                                 let spelled = spell v
 
                                 if Space.validate space spelled then
-                                    Ok((addr, FromUpstream v) :: xs)
+                                    Ok((name, FromUpstream v) :: xs)
                                 else
-                                    Error(PipelineEvalError.EvalArgRefused(nid, ArgOutOfSpace(addr, space, spelled)))
+                                    Error(PipelineEvalError.EvalArgRefused(nid, ArgOutOfSpace(name, space, spelled)))
                             // Unreachable after `typeCheck`: an edge names an earlier node into a
                             // spaced hole of a resolved capability. Refused as the type-check would.
                             | None, _ ->
                                 Error(
-                                    PipelineEvalError.EvalIllTyped(PipelineError.PipelineForwardEdge(nid, addr, up))
+                                    PipelineEvalError.EvalIllTyped(PipelineError.PipelineForwardEdge(nid, name, up))
                                 )
                             | Some _, None ->
                                 Error(
                                     PipelineEvalError.EvalIllTyped(
-                                        PipelineError.PipelineArgRefused(nid, UninvocableArg addr)
+                                        PipelineError.PipelineArgRefused(nid, UninvocableArg name)
                                     )
                                 )))
                 |> Result.map List.rev
@@ -314,10 +314,10 @@ module CapabilityPipeline =
                 | Some c ->
                     let spelled =
                         args
-                        |> List.map (fun (addr, a) ->
+                        |> List.map (fun (name, a) ->
                             match a with
-                            | LiteralArg s -> addr, s
-                            | FromUpstream v -> addr, spell v)
+                            | LiteralArg s -> name, s
+                            | FromUpstream v -> name, spell v)
 
                     RegistryPolicy.admit
                         InvokeError.policyRefused

@@ -26,12 +26,13 @@ type ArgSource =
 
 /// A node in a capability pipeline. `Source` is a named data ref (the `DataSource.Ref` precedent) with a
 /// declared output value-space; `Invoke` runs a registered capability, declaring its output value-space
-/// and wiring each arg (by hole address) to a `Literal` or an upstream node's output.
+/// and wiring each arg (by the hole's qualified name, Phase 712) to a `Literal` or an upstream node's output.
 type PipelineNode =
     /// An input the host supplies: `dataRef` is opaque to the core, and `outputType` is what
     /// downstream edges are checked against.
     | Source of id: string * dataRef: string * outputType: ValueSpace
-    /// A call of `capabilityId`, each argument keyed by hole address; every downstream edge is checked
+    /// A call of `capabilityId`, each argument keyed by the hole's qualified name (Phase 712, D281;
+    /// on the wire `{"name", "source"}`); every downstream edge is checked
     /// against `outputType`. It restates what the capability answers, so validation holds it to the
     /// capability's declared result (Phase 642): it must admit every value that result admits, and a
     /// capability that answers nothing has no output to declare (`PipelineOutputContradicts`).
@@ -56,7 +57,8 @@ type CapabilityPipeline =
 /// value, `UninvocableArg`, `RequiredArgsUnbound` — as `PackLoadError.PackRegisterFailed` wraps a
 /// registration's, so a pipeline refusal says what the equivalent invocation refusal says. It
 /// replaced `PipelineUnknownArg`, `PipelineArgOutOfSpace` and `PipelineRequiredUnbound`, which
-/// carried the address alone.
+/// carried the hole alone. Since Phase 712 every argument, and every refusal naming one, is keyed
+/// by the hole's qualified name.
 [<RequireQualifiedAccess>]
 type PipelineError =
     /// Two nodes share this id; checked before anything else.
@@ -71,7 +73,7 @@ type PipelineError =
     /// An edge closes a cycle (Phase 295): `cycle` is the node ids around it, starting at `node`
     /// and following each `FromNode` edge to its upstream; a self-edge is `[node]`.
     | PipelineCycle of node: string * cycle: string list
-    /// The upstream's output space does not fit argument `arg` of `node`. `producer` and `consumer`
+    /// The upstream's output space does not fit argument `arg` (a qualified name) of `node`. `producer` and `consumer`
     /// name only the space FAMILIES (`int`, `float`, `string`, `enum`, `anyString`, `slotTree`, `document`), so a
     /// bounds mismatch inside one family reads as e.g. `int` against `int`.
     | EdgeTypeMismatch of node: string * arg: string * producer: string * consumer: string
