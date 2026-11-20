@@ -386,3 +386,144 @@ let tests =
                   generated
                   (File.ReadAllText path)
                   "the generator no longer reproduces DocAnnotatedGenerated.fs byte-for-byte - regenerate it with FUARAN_REGEN=1 and this test's filter" ]
+
+// ---------------------------------------------------------------------------
+// Phase 713 — two doc channels on one member. A member can carry a support doc block (the
+// support record's `Docs`) and authored annotation lines, and the support block is printed
+// first, so it holds the `///` block's first line and decides its mode. Under a support block in
+// XML mode, authored text holding `<` or `&` was invalid XML (FS3390) and was dropped by tools
+// reading the comment; under one in text mode, an authored doc opening with `<` printed a
+// `<summary>` the compiler then showed as text. Every site a support block and annotations
+// meet is checked: a kind's spec, a field, a union and its cases, an enum and its cases, a record.
+// ---------------------------------------------------------------------------
+
+/// `docIdl` with an authored doc on the union, the enum and the record types as well.
+let private typeDocumented: Idl =
+    { docIdl with
+        Unions =
+            docIdl.Unions
+            |> List.map (fun u ->
+                { u with
+                    Annotations = doc "Where a note's text comes from: a < b & c." })
+        Enums =
+            docIdl.Enums
+            |> List.map (fun e ->
+                { e with
+                    Annotations = doc "How loud a note is, & why." })
+        Records =
+            docIdl.Records
+            |> List.map (fun r ->
+                { r with
+                    Annotations = doc "Two halves <in order>." }) }
+
+/// A support doc block, the same one line, at every documented site of `typeDocumented`.
+let private supportEverywhere (line: string) : GenSupport =
+    { GenSupport.Empty with
+        Docs =
+            [ "type:NoteSpec"
+              "field:NoteSpec.Label"
+              "type:Src"
+              "case:Src.Lit"
+              "case:Src.Ref"
+              "type:Tone"
+              "case:Tone.Quiet"
+              "case:Tone.Loud"
+              "type:Pair"
+              "field:Pair.Left" ]
+            |> List.map (fun path -> path, [ line ])
+            |> Map.ofList }
+
+let private emitWith (sup: GenSupport) (idl: Idl) =
+    match Gen.fsharpModuleWith sup generatedModule idl [ "Note" ] with
+    | Ok s -> s
+    | Error e -> failtestf "codegen rejected the vocabulary: %A" e
+
+/// Every `///` block whose first line opens with `<` — the blocks the compiler reads as XML —
+/// that is not well-formed XML once wrapped in one root element, as the compiler wraps it. Each
+/// is answered with its text and the parser's complaint.
+let private invalidXmlBlocks (source: string) : (string * string) list =
+    let blocks =
+        lines source
+        |> List.fold
+            (fun (acc: string list list) (l: string) ->
+                let t = l.TrimStart()
+
+                if t.StartsWith "///" then
+                    match acc with
+                    | current :: rest -> (t.Substring(3) :: current) :: rest
+                    | [] -> [ [ t.Substring 3 ] ]
+                else
+                    [] :: acc)
+            [ [] ]
+        |> List.map List.rev
+        |> List.filter (fun b -> not (List.isEmpty b))
+
+    [ for block in blocks do
+          if block.Head.TrimStart().StartsWith "<" then
+              let text = String.concat "\n" block
+
+              try
+                  System.Xml.Linq.XDocument.Parse("<doc>" + text + "</doc>") |> ignore
+              with e ->
+                  text, e.Message ]
+
+[<Tests>]
+let twoChannelTests =
+    testList
+        "IDL doc annotation: two doc channels on one member (Phase 713)"
+        [ testCase "under an XML support block, every member's comment is well-formed XML"
+          <| fun _ ->
+              let out =
+                  emitWith (supportEverywhere "/// <summary>Support says so.</summary>") typeDocumented
+
+              Expect.isEmpty (invalidXmlBlocks out) "every XML-mode block parses"
+
+          testCase "under an XML support block, the authored lines are an explicit, encoded <remarks>"
+          <| fun _ ->
+              let out =
+                  emitWith (supportEverywhere "/// <summary>Support says so.</summary>") typeDocumented
+
+              let expected =
+                  [ "      /// <summary>Support says so.</summary>"
+                    "      /// <remarks>"
+                    "      /// The left half, &lt; the right."
+                    "      /// </remarks>"
+                    "      Left: string" ]
+                  |> String.concat "\n"
+
+              Expect.stringContains out expected "the record field's block, line for line"
+
+              let typeBlock =
+                  [ "/// <summary>Support says so.</summary>"
+                    "/// <remarks>"
+                    "/// Two halves &lt;in order>."
+                    "/// </remarks>" ]
+                  |> String.concat "\n"
+
+              Expect.stringContains out typeBlock "the record type's block"
+
+          testCase "under a text support block, the authored lines are verbatim, with no <summary> of their own"
+          <| fun _ ->
+              let out = emitWith (supportEverywhere "/// Support says so.") typeDocumented
+
+              let expected =
+                  [ "    /// Support says so."
+                    "    /// <'T> is not a tag here: Option<'T> & friends."
+                    "    | Loud" ]
+                  |> String.concat "\n"
+
+              Expect.stringContains out expected "the enum case's block reads as authored"
+              Expect.isFalse (out.Contains "&lt;'T>") "nothing in a text block is encoded twice"
+
+          testCase "a support block over a member that says nothing is printed alone"
+          <| fun _ ->
+              // A guard that cannot be red against the old emission: a member with no annotation
+              // printed its support block alone before, and must still, with no empty <remarks>.
+              let out =
+                  emitWith (supportEverywhere "/// <summary>Support says so.</summary>") typeDocumented
+
+              let expected =
+                  [ "    /// <summary>Support says so.</summary>"; "    | Quiet" ]
+                  |> String.concat "\n"
+
+              Expect.stringContains out expected "the case's support block, then the case" ]

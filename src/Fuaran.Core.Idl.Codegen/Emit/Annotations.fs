@@ -34,22 +34,11 @@ module internal Annotations =
         | [] -> "// "
         | lines -> lines |> List.map (fun l -> "// " + l) |> String.concat "\n"
 
-    /// The `///` doc lines for an annotation set, at the given indent. Empty for an
-    /// empty set, which is what keeps an unannotated vocabulary's emission
-    /// byte-identical. The authored doc (Phase 255) comes FIRST — it says what the
-    /// member is, and the notes after it say what is true about it — so a block that
-    /// gains a doc gains exactly its lines and nothing else moves.
-    ///
-    /// **The block's MODE is the F# compiler's, and the emitter follows it rather than
-    /// fighting it.** A `///` block whose first line does not begin with `<` is TEXT:
-    /// the compiler wraps it in `<summary>` and XML-encodes it itself, so the authored
-    /// prose is emitted verbatim — encoding it here as well would show a reader
-    /// `&lt;'T>` where the author wrote `<'T>`. A block whose first line DOES begin
-    /// with `<` is XML, taken as written, and authored text there is not valid XML in
-    /// general (FS3390). So a doc that opens with `<` is emitted as an explicit
-    /// `<summary>` holding every line of the block, the notes included, encoded — the
-    /// one case where a block gains lines around it as well as the doc's own.
-    let annotationDocLines (indent: string) (a: Annotations) : string list =
+    /// The authored lines an annotation set says, unindented: the doc's (Phase 255), then the
+    /// notes'. The authored doc comes FIRST — it says what the member is, and the notes after
+    /// it say what is true about it — so a block that gains a doc gains exactly its lines and
+    /// nothing else moves.
+    let private authoredTexts (a: Annotations) : string list * string list =
         let docTexts =
             match a.Doc with
             | Some d -> SourceLit.fsDocLines d
@@ -82,15 +71,33 @@ module internal Annotations =
             // and everything after it was live source in the generated module.
             |> List.collect SourceLit.fsDocLines
 
-        let line (text: string) =
-            if text = "" then indent + "///" else indent + "/// " + text
+        docTexts, noteTexts
+
+    let private docLine (indent: string) (text: string) =
+        if text = "" then indent + "///" else indent + "/// " + text
+
+    /// The `///` doc lines for an annotation set, at the given indent, when they OPEN the
+    /// member's block. Empty for an empty set, which is what keeps an unannotated
+    /// vocabulary's emission byte-identical.
+    ///
+    /// **The block's MODE is the F# compiler's, and the emitter follows it rather than
+    /// fighting it.** A `///` block whose first line does not begin with `<` is TEXT:
+    /// the compiler wraps it in `<summary>` and XML-encodes it itself, so the authored
+    /// prose is emitted verbatim — encoding it here as well would show a reader
+    /// `&lt;'T>` where the author wrote `<'T>`. A block whose first line DOES begin
+    /// with `<` is XML, taken as written, and authored text there is not valid XML in
+    /// general (FS3390). So a doc that opens with `<` is emitted as an explicit
+    /// `<summary>` holding every line of the block, the notes included, encoded — the
+    /// one case where a block gains lines around it as well as the doc's own.
+    let annotationDocLines (indent: string) (a: Annotations) : string list =
+        let docTexts, noteTexts = authoredTexts a
 
         match docTexts with
         | first :: _ when first.TrimStart().StartsWith "<" ->
             (indent + "/// <summary>")
-            :: ((docTexts @ noteTexts) |> List.map (SourceLit.fsDocXml >> line))
+            :: ((docTexts @ noteTexts) |> List.map (SourceLit.fsDocXml >> docLine indent))
             @ [ indent + "/// </summary>" ]
-        | _ -> (docTexts @ noteTexts) |> List.map line
+        | _ -> (docTexts @ noteTexts) |> List.map (docLine indent)
 
     /// The single `System.Obsolete` attribute an annotation set earns, or `None`.
     ///
@@ -167,7 +174,47 @@ module internal Annotations =
     // `Obsolete` attribute). Neither replaces the other, and neither is dropped.
     // -----------------------------------------------------------------------
 
+    /// Phase 713 — the mode a support doc block sets for the `///` block it opens: `Some true`
+    /// when its first `///` line opens with `<` (XML), `Some false` when that line is text, and
+    /// `None` when the block carries no `///` line and so leaves the mode to the lines after it.
+    let private supportMode (supportDoc: string option) : bool option =
+        supportDoc
+        |> Option.bind (fun block ->
+            block.Split '\n'
+            |> Array.map _.TrimStart()
+            |> Array.tryFind _.StartsWith("///")
+            |> Option.map (fun l -> l.Substring(3).TrimStart().StartsWith "<"))
+
     /// The comment lines above one declaration: the support doc block (if any) ahead of the
-    /// authored annotation lines, at the given indent.
+    /// authored annotation lines, at the given indent. `supportDoc` is the block as it is
+    /// printed (each line at the declaration's indent, no trailing line break).
+    ///
+    /// **Phase 713 — the support block decides the mode of the whole `///` block**, because it
+    /// holds the block's first line. Under a support block in XML mode the authored lines would
+    /// be text inside XML, which is not valid XML in general (FS3390, and a tool reading the
+    /// comment drops text outside an element): they are emitted as an explicit `<remarks>`
+    /// holding every authored line, encoded. Under a support block in text mode they are
+    /// verbatim, with no `<summary>` of their own, which the compiler would encode and show as
+    /// text. A support block with no `///` line leaves the mode to [[annotationDocLines]].
     let memberDocLines (indent: string) (supportDoc: string option) (a: Annotations) : string list =
-        (supportDoc |> Option.toList) @ annotationDocLines indent a
+        let support = supportDoc |> Option.toList
+
+        match supportMode supportDoc with
+        | None -> support @ annotationDocLines indent a
+        | Some xml ->
+            match authoredTexts a with
+            | [], [] -> support
+            | docTexts, noteTexts when xml ->
+                support
+                @ [ indent + "/// <remarks>" ]
+                @ ((docTexts @ noteTexts) |> List.map (SourceLit.fsDocXml >> docLine indent))
+                @ [ indent + "/// </remarks>" ]
+            | docTexts, noteTexts -> support @ ((docTexts @ noteTexts) |> List.map (docLine indent))
+
+    /// The support block `doc` renders at a member's site — each line indented, the block
+    /// line-terminated, empty when the member has none — as [[memberDocLines]]' `supportDoc`.
+    let supportAt (rendered: string) : string option =
+        if rendered = "" then
+            None
+        else
+            Some(rendered.Substring(0, rendered.Length - 1))
