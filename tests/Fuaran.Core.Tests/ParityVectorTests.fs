@@ -341,7 +341,7 @@ let private expected: (string * string) list =
       "registry/decide/unregistered",
       @"refused:{""$type"":""noSuchCapability"",""id"":""nope"",""known"":[""edit"",""erase"",""note""]}"
       "registry/decide/out-of-space",
-      @"refused:{""$type"":""argOutOfSpace"",""addr"":""n"",""got"":""1e3"",""space"":{""$type"":""intRange"",""max"":2147483647,""min"":-2147483648}}"
+      @"refused:{""$type"":""argOutOfSpace"",""got"":""1e3"",""name"":""n"",""space"":{""$type"":""intRange"",""max"":2147483647,""min"":-2147483648}}"
       "registry/decide/plain", "<none>:allow"
       "registry/dispatch/parked", @"refused:{""$type"":""approvalRequired"",""policy"":""budget""}"
       "registry/dispatch/granted", "ran:edit"

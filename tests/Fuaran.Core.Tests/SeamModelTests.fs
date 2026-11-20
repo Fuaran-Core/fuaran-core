@@ -461,7 +461,7 @@ let tests =
                 <| fun _ ->
                     Expect.equal
                         (CapabilityCodec.encodeInvokeError (ArgOutOfSpace("celsius", IntRange(-60, 60), "hot")))
-                        "{\"$type\":\"argOutOfSpace\",\"name\":\"celsius\",\"got\":\"hot\",\"space\":{\"$type\":\"intRange\",\"max\":60,\"min\":-60}}"
+                        "{\"$type\":\"argOutOfSpace\",\"got\":\"hot\",\"name\":\"celsius\",\"space\":{\"$type\":\"intRange\",\"max\":60,\"min\":-60}}"
                         "bytes"
 
                     Expect.equal

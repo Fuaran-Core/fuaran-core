@@ -499,4 +499,5 @@ let seamCodecTests =
 
                   Expect.equal (Fuaran.Core.SeamRefusalLaws.outcome v) (Ok v.Document) "it reads back to its own bytes"
 
-              Expect.equal (List.length vectors) 143 "143 vectors" ]
+              // 145 since Phase 712: the two declaration faults it appended carry a vector each
+              Expect.equal (List.length vectors) 145 "145 vectors" ]

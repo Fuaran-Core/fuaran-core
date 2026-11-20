@@ -591,7 +591,7 @@ let tests =
                 testCase "the pipeline codec reports the path to the node at fault"
                 <| fun _ ->
                     let doc =
-                        """{"nodes":[{"$type":"source","id":"s","dataRef":"d","outputType":{"$type":"anyString"}},{"$type":"invoke","id":"i","capabilityId":"c","outputType":{"$type":"anyString"},"args":[{"addr":"a","source":{"$type":"elsewhere"}}]}]}"""
+                        """{"nodes":[{"$type":"source","id":"s","dataRef":"d","outputType":{"$type":"anyString"}},{"$type":"invoke","id":"i","capabilityId":"c","outputType":{"$type":"anyString"},"args":[{"name":"a","source":{"$type":"elsewhere"}}]}]}"""
 
                     match CapabilityPipeline.decodeDetailed doc with
                     | Error e ->
