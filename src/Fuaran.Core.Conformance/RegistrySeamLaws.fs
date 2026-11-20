@@ -904,7 +904,7 @@ module internal RegistrySeamLaws =
                     { NewId = "ghost-" + string i
                       BaseId = "no-such-base"
                       BaseSignatureVersion = pf.BaseSignatureVersion
-                      BoundAddrs = Set.ofList [ "h0" ] }
+                      BoundNames = Set.ofList [ "h0" ] }
 
                 let ghostManifest = { manifest with Functions = [ ghost ] }
 

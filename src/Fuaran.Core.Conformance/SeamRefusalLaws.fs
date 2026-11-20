@@ -94,17 +94,17 @@ module internal SeamRefusalLaws =
           for name, doc in
               [ "noSuchCapability", """{"$type":"noSuchCapability","id":"x","known":["a","b"]}"""
                 "duplicateCapability", """{"$type":"duplicateCapability","id":"x"}"""
-                "unknownArg", """{"$type":"unknownArg","addr":"a","declared":["b","c"]}"""
+                "unknownArg", """{"$type":"unknownArg","declared":["b","c"],"name":"a"}"""
                 "argOutOfSpace",
-                """{"$type":"argOutOfSpace","addr":"a","got":"9","space":{"$type":"intRange","max":1,"min":-1}}"""
-                "requiredArgsUnbound", """{"$type":"requiredArgsUnbound","addrs":["a","b"]}"""
-                "uninvocableArg", """{"$type":"uninvocableArg","addr":"a"}"""
+                """{"$type":"argOutOfSpace","got":"9","name":"a","space":{"$type":"intRange","max":1,"min":-1}}"""
+                "requiredArgsUnbound", """{"$type":"requiredArgsUnbound","names":["a","b"]}"""
+                "uninvocableArg", """{"$type":"uninvocableArg","name":"a"}"""
                 "bodyFailed", """{"$type":"bodyFailed","reason":"boom"}"""
-                "nonTotalCapability", """{"$type":"nonTotalCapability","addrs":["r"],"id":"x"}"""
+                "nonTotalCapability", """{"$type":"nonTotalCapability","id":"x","names":["r"]}"""
                 "illFormedCapability-emptySpace",
-                """{"$type":"illFormedCapability","fault":{"$type":"emptySpace","addr":"a","space":{"$type":"enum","values":[]}},"id":"x"}"""
+                """{"$type":"illFormedCapability","fault":{"$type":"emptySpace","name":"a","space":{"$type":"enum","values":[]}},"id":"x"}"""
                 "illFormedCapability-nonFiniteBound",
-                """{"$type":"illFormedCapability","fault":{"$type":"nonFiniteBound","addr":"b"},"id":"x"}"""
+                """{"$type":"illFormedCapability","fault":{"$type":"nonFiniteBound","name":"b"},"id":"x"}"""
                 "illFormedCapability-duplicateHoleAddr",
                 """{"$type":"illFormedCapability","fault":{"$type":"duplicateHoleAddr","addr":"c"},"id":"x"}"""
                 "illFormedCapability-holeUnderSlot",
@@ -114,7 +114,13 @@ module internal SeamRefusalLaws =
                 """{"$type":"illFormedCapability","fault":{"$type":"emptyResult","space":{"$type":"enum","values":[]}},"id":"x"}"""
                 "illFormedCapability-nonFiniteResult",
                 """{"$type":"illFormedCapability","fault":{"$type":"nonFiniteResult"},"id":"x"}"""
-                "duplicateArg", """{"$type":"duplicateArg","addr":"a"}"""
+                // Phase 712 (D281): the capability seam binds by qualified name, held to a grammar and
+                // to uniqueness.
+                "illFormedCapability-illFormedHoleName",
+                """{"$type":"illFormedCapability","fault":{"$type":"illFormedHoleName","name":"a..b"},"id":"x"}"""
+                "illFormedCapability-duplicateHoleName",
+                """{"$type":"illFormedCapability","fault":{"$type":"duplicateHoleName","name":"s.a"},"id":"x"}"""
+                "duplicateArg", """{"$type":"duplicateArg","name":"a"}"""
                 "policyRefused", """{"$type":"policyRefused","allowed":["a"],"policy":"p","reason":"r"}"""
                 "approvalRequired", """{"$type":"approvalRequired","policy":"p"}""" ] do
               yield reads "invokeError" name doc
@@ -141,7 +147,7 @@ module internal SeamRefusalLaws =
               refused
                   "invokeError"
                   "space-bound-not-an-int"
-                  """{"$type":"argOutOfSpace","addr":"a","got":"g","space":{"$type":"intRange","min":"x","max":1}}"""
+                  """{"$type":"argOutOfSpace","name":"a","got":"g","space":{"$type":"intRange","min":"x","max":1}}"""
                   DecodeCode.WrongKind
                   [ k "space"; k "min" ]
           yield
@@ -169,7 +175,7 @@ module internal SeamRefusalLaws =
               refused
                   "invokeError/strict"
                   "undeclared-member"
-                  """{"$type":"duplicateArg","addr":"a","x":1}"""
+                  """{"$type":"duplicateArg","name":"a","x":1}"""
                   DecodeCode.UndeclaredMember
                   [ k "x" ]
 
@@ -177,7 +183,7 @@ module internal SeamRefusalLaws =
               reads
                   "declarationFault"
                   "emptySpace"
-                  """{"$type":"emptySpace","addr":"a","space":{"$type":"enum","values":[]}}"""
+                  """{"$type":"emptySpace","name":"a","space":{"$type":"enum","values":[]}}"""
           yield reads "declarationFault" "nonFiniteResult" """{"$type":"nonFiniteResult"}"""
           yield
               refused
@@ -279,7 +285,7 @@ module internal SeamRefusalLaws =
               reads
                   "pipeline"
                   "every-case"
-                  """{"nodes":[{"$type":"source","dataRef":"ref","id":"s","outputType":{"$type":"intRange","max":9,"min":0}},{"$type":"invoke","args":[{"addr":"a","source":{"$type":"literal","value":"1"}},{"addr":"b","source":{"$type":"fromNode","node":"s"}}],"capabilityId":"cap","id":"i","outputType":{"$type":"anyString"}}]}"""
+                  """{"nodes":[{"$type":"source","dataRef":"ref","id":"s","outputType":{"$type":"intRange","max":9,"min":0}},{"$type":"invoke","args":[{"name":"a","source":{"$type":"literal","value":"1"}},{"name":"b","source":{"$type":"fromNode","node":"s"}}],"capabilityId":"cap","id":"i","outputType":{"$type":"anyString"}}]}"""
           yield refused "pipeline" "missing-nodes" "{}" DecodeCode.MissingField [ k "nodes" ]
           yield
               refused
@@ -306,14 +312,14 @@ module internal SeamRefusalLaws =
               refused
                   "pipeline"
                   "unknown-source"
-                  """{"nodes":[{"$type":"invoke","id":"i","capabilityId":"c","outputType":{"$type":"anyString"},"args":[{"addr":"a","source":{"$type":"constant"}}]}]}"""
+                  """{"nodes":[{"$type":"invoke","id":"i","capabilityId":"c","outputType":{"$type":"anyString"},"args":[{"name":"a","source":{"$type":"constant"}}]}]}"""
                   DecodeCode.UnknownTag
                   [ k "nodes"; i 0; k "args"; i 0; k "source"; k "$type" ]
           yield
               refused
                   "pipeline"
                   "from-node-missing-node"
-                  """{"nodes":[{"$type":"invoke","id":"i","capabilityId":"c","outputType":{"$type":"anyString"},"args":[{"addr":"a","source":{"$type":"fromNode","nodeId":3}}]}]}"""
+                  """{"nodes":[{"$type":"invoke","id":"i","capabilityId":"c","outputType":{"$type":"anyString"},"args":[{"name":"a","source":{"$type":"fromNode","nodeId":3}}]}]}"""
                   DecodeCode.MissingField
                   [ k "nodes"; i 0; k "args"; i 0; k "source"; k "node" ]
 
