@@ -12,6 +12,7 @@ attribute Fuaran.Core.Proposals+StagedApprovalFailure`1 RequireQualifiedAccess
 attribute Fuaran.Core.RejectionCodec RequireQualifiedAccess
 attribute Fuaran.Core.StateAwareGuardedWitness RequireQualifiedAccess
 ctor Fuaran.Core.AiSurfaceWitness`3..ctor(Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ReadTool`1<!0>>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpKindCard>, Microsoft.FSharp.Core.FSharpFunc`2<!1, System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PatternCard`1<!1>>, Microsoft.FSharp.Core.FSharpFunc`2<System.String, Microsoft.FSharp.Core.FSharpFunc`2<!1, Fuaran.Core.PolicyDecision>>, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, !2>>>, Microsoft.FSharp.Core.FSharpFunc`2<!2, Fuaran.Core.RejectionGuidance>)
+ctor Fuaran.Core.EmissionSurfaceWitness`3..ctor(Fuaran.Core.AiSurfaceWitness`3<!0, !1, !2>, Fuaran.Core.Codec`1<!1>)
 ctor Fuaran.Core.GuardedSurfaceWitness`3..ctor(Fuaran.Core.AiSurfaceWitness`3<!0, !1, !2>, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, !2>>>, Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>>>)
 ctor Fuaran.Core.Intent..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>)
 ctor Fuaran.Core.OpKindCard..ctor(System.String, System.String, Fuaran.Core.JVal)
@@ -39,6 +40,9 @@ field Fuaran.Core.Proposals+SubmitOutcome`3+Tags.SubmitProposed : System.Int32 (
 method Fuaran.Core.AiSurface+ReadToolFailureModule.describe(Fuaran.Core.AiSurface+ReadToolFailure) : System.String
 method Fuaran.Core.AiSurface.catalogueJson`3(Fuaran.Core.AiSurfaceWitness`3<!!0, !!1, !!2>) : System.String
 method Fuaran.Core.AiSurface.catalogue`3(Fuaran.Core.AiSurfaceWitness`3<!!0, !!1, !!2>) : Fuaran.Core.JVal
+method Fuaran.Core.AiSurface.decodeEmissionJson`3(Fuaran.Core.EmissionSurfaceWitness`3<!!0, !!1, !!2>, Fuaran.Core.JVal) : Microsoft.FSharp.Core.FSharpResult`2<!!1, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>
+method Fuaran.Core.AiSurface.decodeEmission`3(Fuaran.Core.EmissionSurfaceWitness`3<!!0, !!1, !!2>, System.String) : Microsoft.FSharp.Core.FSharpResult`2<!!1, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.DecodeError>>
+method Fuaran.Core.AiSurface.kindSchemas`1(Fuaran.Core.Codec`1<!!0>) : Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.JVal>>
 method Fuaran.Core.AiSurface.runTool`3(Fuaran.Core.AiSurfaceWitness`3<!!0, !!1, !!2>, System.String, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, System.String>
 method Fuaran.Core.AiSurface.tryRunTool`3(Fuaran.Core.AiSurfaceWitness`3<!!0, !!1, !!2>, System.String, !!0) : Microsoft.FSharp.Core.FSharpResult`2<Fuaran.Core.JVal, Fuaran.Core.AiSurface+ReadToolFailure>
 method Fuaran.Core.PatternBank.literalSegments(System.String) : Microsoft.FSharp.Collections.FSharpList`1<System.String>
@@ -73,6 +77,8 @@ record-field Fuaran.Core.AiSurfaceWitness`3.KindOfOp #2 : Microsoft.FSharp.Core.
 record-field Fuaran.Core.AiSurfaceWitness`3.OpKinds #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.OpKindCard>
 record-field Fuaran.Core.AiSurfaceWitness`3.Patterns #3 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.PatternCard`1<!1>>
 record-field Fuaran.Core.AiSurfaceWitness`3.ReadTools #0 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.ReadTool`1<!0>>
+record-field Fuaran.Core.EmissionSurfaceWitness`3.Emission #1 : Fuaran.Core.Codec`1<!1>
+record-field Fuaran.Core.EmissionSurfaceWitness`3.Surface #0 : Fuaran.Core.AiSurfaceWitness`3<!0, !1, !2>
 record-field Fuaran.Core.GuardedSurfaceWitness`3.DryRun #1 : Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Core.FSharpFunc`2<!0, Microsoft.FSharp.Core.FSharpResult`2<!0, !2>>>
 record-field Fuaran.Core.GuardedSurfaceWitness`3.EffectsOf #2 : Microsoft.FSharp.Core.FSharpFunc`2<!1, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>>>>
 record-field Fuaran.Core.GuardedSurfaceWitness`3.Surface #0 : Fuaran.Core.AiSurfaceWitness`3<!0, !1, !2>
@@ -107,6 +113,7 @@ type Fuaran.Core.AiSurface (module)
 type Fuaran.Core.AiSurface+ReadToolFailure (union)
 type Fuaran.Core.AiSurface+ReadToolFailureModule (module)
 type Fuaran.Core.AiSurfaceWitness`3 (record)
+type Fuaran.Core.EmissionSurfaceWitness`3 (record)
 type Fuaran.Core.GuardedSurfaceWitness`3 (record)
 type Fuaran.Core.Intent (record)
 type Fuaran.Core.OpKindCard (record)
