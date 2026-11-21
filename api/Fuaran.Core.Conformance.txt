@@ -64,6 +64,7 @@ field Fuaran.Core.Families+Takes+Tags.ArtifactWitness : System.Int32 (literal)
 field Fuaran.Core.Families+Takes+Tags.CapabilityPipelineWitness : System.Int32 (literal)
 field Fuaran.Core.Families+Takes+Tags.CapabilitySeamWitness : System.Int32 (literal)
 field Fuaran.Core.Families+Takes+Tags.Codec : System.Int32 (literal)
+field Fuaran.Core.Families+Takes+Tags.EmissionSurfaceWitness : System.Int32 (literal)
 field Fuaran.Core.Families+Takes+Tags.EvaluatorWitness : System.Int32 (literal)
 field Fuaran.Core.Families+Takes+Tags.GuardedSurfaceWitness : System.Int32 (literal)
 field Fuaran.Core.Families+Takes+Tags.IAttestationSink : System.Int32 (literal)
@@ -144,6 +145,7 @@ method Fuaran.Core.Conformance.diffContainedLaws`2(Fuaran.Core.NodeWitness`2<!!0
 method Fuaran.Core.Conformance.diffLaws`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Fuaran.Core.OpGen`2<!!0, !!1>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Conformance.digestLaws`2(Fuaran.Core.NodeWitness`2<!!0, !!1>, Fuaran.Core.IdWitness`1<!!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Fuaran.Core.OpGen`2<!!0, !!1>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Conformance.dirtyPropagationLaws(System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
+method Fuaran.Core.Conformance.emissionLawsAt`3(Fuaran.Core.EmissionSurfaceWitness`3<!!0, !!1, !!2>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<!!1, Fuaran.Core.ConfRng+T>>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Conformance.encoderInjectivityLawsAt`2(Fuaran.Core.ArtifactWitness`2<!!0, !!1>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, System.String>, Microsoft.FSharp.Core.FSharpFunc`2<Fuaran.Core.ConfRng+T, System.Tuple`2<!!0, Fuaran.Core.ConfRng+T>>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Conformance.footprintInLawsAt`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.Footprint>, Microsoft.FSharp.Core.FSharpFunc`2<!!1, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.Footprint>>, Microsoft.FSharp.Core.FSharpFunc`2<!!1, System.String>, Fuaran.Core.StreamGen`2<!!0, !!1>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
 method Fuaran.Core.Conformance.footprintLawsAt`3(Fuaran.Core.StreamWitness`3<!!0, !!1, !!2>, Microsoft.FSharp.Core.FSharpFunc`2<!!0, Fuaran.Core.Footprint>, Microsoft.FSharp.Core.FSharpFunc`2<!!1, System.String>, Fuaran.Core.StreamGen`2<!!0, !!1>, System.Int32, System.Int32) : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.LawResult>
@@ -516,6 +518,7 @@ union-case Fuaran.Core.Families+Takes.ArtifactWitness #8()
 union-case Fuaran.Core.Families+Takes.CapabilityPipelineWitness #15()
 union-case Fuaran.Core.Families+Takes.CapabilitySeamWitness #14()
 union-case Fuaran.Core.Families+Takes.Codec #19()
+union-case Fuaran.Core.Families+Takes.EmissionSurfaceWitness #20()
 union-case Fuaran.Core.Families+Takes.EvaluatorWitness #11()
 union-case Fuaran.Core.Families+Takes.GuardedSurfaceWitness #10()
 union-case Fuaran.Core.Families+Takes.IAttestationSink #18()

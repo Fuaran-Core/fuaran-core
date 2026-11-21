@@ -115,6 +115,8 @@ module Families =
         | IAttestationSink
         /// The domain's own codec, `Codec` (Phase 507).
         | Codec
+        /// The AI surface witness with its emission codec, `EmissionSurfaceWitness` (Phase 714).
+        | EmissionSurfaceWitness
 
         /// The type's name, without its generic arity — the name a signature, the export's
         /// `witness` member and `STABILITY.md` use.
@@ -140,6 +142,7 @@ module Families =
             | SanitizeWitness -> "SanitizeWitness"
             | IAttestationSink -> "IAttestationSink"
             | Codec -> "Codec"
+            | EmissionSurfaceWitness -> "EmissionSurfaceWitness"
 
     /// Who runs a family: an aggregate, or a domain that elects it for a stated reason.
     type Election =
@@ -430,6 +433,11 @@ module Families =
           drawn
               "explainRejection and the allowed-submit parity read a reducer rejection only when the caller's op generator draws one; the kit rolls the decision, and unknown tool and unknown id are built",
           ""
+          ("Conformance.emissionLawsAt", [ Takes.EmissionSurfaceWitness ], capability, []),
+          Guarded [ "admitted"; "refused" ],
+          drawn
+              "every emission the two laws read is written from an op the caller's generator draws, and its variants are built from it; guarded on variants the catalogue admitted and refused",
+          "AiSurface.decodeEmissionJson"
           ("Conformance.capabilityLawsAt", [ Takes.CapabilitySeamWitness ], capability, []),
           Guarded [ "settled"; "pending"; "refused" ],
           drawn
@@ -537,7 +545,7 @@ module Families =
           ("Conformance.capabilityLaws", [], seam, []),
           Unconditional "each iteration exercises accept, reject and unknown-arg on a built declaration",
           built "out-of-space arg, unknown arg and unregistered id are built each iteration",
-          "Capability.create Capability.invoke Capability.invocationKey Capability.determinismTag Capability.validateArgs CapabilityCodec.encode CapabilityCodec.decode CapabilityRegistry.register CapabilityRegistry.dispatch CapabilityRegistry.enumerate"
+          "Capability.create Capability.invoke Capability.invocationKey Capability.determinismTag Capability.validateArgs CapabilityCodec.encode CapabilityCodec.decode CapabilityRegistry.register CapabilityRegistry.dispatch CapabilityRegistry.enumerate CapabilityCodec.decodeArgsJson"
           ("Conformance.seamRefusalLaws", [], seam, []),
           Unconditional "every authored seam vector is read once by the reader it names",
           built "every refusal the family reads is an authored document, refused with its code at its path",

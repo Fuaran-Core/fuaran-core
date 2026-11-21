@@ -457,7 +457,7 @@ let private expected: (string * string) list =
       "jdoc/decode/of-decoder", "-7"
       // The seam laws at seed 4242, 200 iterations: passed / results, and the digest of each law's
       // statement, verdict and evidence.
-      "laws/capabilityLaws", "11/11:dc161c6ccaef3dcdda46c3c0ce31ae4b71d1f80acf31714af7a571e3779c712f"
+      "laws/capabilityLaws", "12/12:992c81ca860f4731a09d44b063cc6176218dbe976a7514cc7965b61ef47b820e"
       "laws/queryLaws", "13/13:2b1e93a2c0732a3c1d729bf9ea518a2590d1377d21828c297557818fd059cf52"
       "laws/policyLaws", "15/15:89aa33f6237458904fec75d36f59c079faa58ec393207d60abcb2c5bb669eb8c"
       // Phase 699 — the query declaration family (laws/query-declaration-laws.json), one row per vector: the

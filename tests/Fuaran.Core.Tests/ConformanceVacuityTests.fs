@@ -541,6 +541,11 @@ let private runs: Lazy<Map<LawKit.FamilyId, Run>> =
                       AiSurfaceTests.state0
                       1234
                       200)
+              // Phase 714 — the catalogue and the reader of an emission, at the reference note surface.
+              run
+                  "Conformance.emissionLawsAt"
+                  200
+                  (Conformance.emissionLawsAt AiSurfaceTests.emissionWitness AiSurfaceTests.genNoteOp 1234 200)
               // Phase 297 — the obsolete forwards the naming rule left for one draft, under their own ids.
               run
                   "Conformance.aiSurfaceKitPolicyLawsAt"

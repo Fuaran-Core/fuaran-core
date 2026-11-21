@@ -221,6 +221,24 @@ module StateAwareGuardedWitness =
           DryRun = gw.DryRun
           EffectsOf = fun op _ -> gw.EffectsOf op }
 
+/// The AI surface with a reader for what a model emits (Phase 714, DECISIONS.md D282) — a composing
+/// witness that EMBEDS the frozen `AiSurfaceWitness` and carries the op's codec, the evolution path
+/// STABILITY's witness-record freeze prescribes ("compose, never grow"). The codec is one declaration
+/// (`Codec<'Op>`, built with the `Codec` combinators) whose writer, strict collecting reader and JSON
+/// Schema agree by construction; `AiSurface.decodeEmission` reads a model's emitted op with it,
+/// `AiSurface.kindSchemas` gives the catalogue its schemas from it, and `Conformance.emissionLawsAt`
+/// holds the catalogue the model is shown to the reader of its answer. Frozen at birth.
+type EmissionSurfaceWitness<'State, 'Op, 'Rej> =
+    {
+        /// The surface whose catalogue a model is shown; its `OpKinds` schemas are what the
+        /// emission laws hold the codec's reader to, and its `KindOfOp` names a decoded op's kind.
+        Surface: AiSurfaceWitness<'State, 'Op, 'Rej>
+        /// The op's codec. `ReadAll` is the strict reader of an emission (an undeclared member is
+        /// refused); `Write` is what the laws draw an emission from; `Schema` is the declared shape,
+        /// a union under `kind` for a catalogue filled by `AiSurface.kindSchemas`.
+        Emission: Codec<'Op>
+    }
+
 /// The NL→op fast-path: deterministic anchor matching over the witness's
 /// pattern bank. The resolver is a pure function of the intent — no clock, no
 /// rng — so the same intent always resolves to the same emission (the token
@@ -1023,3 +1041,43 @@ module AiSurface =
     /// refusal as `ReadToolFailure.describe`'s sentence.
     let runTool (w: AiSurfaceWitness<'State, 'Op, 'Rej>) (name: string) (state: 'State) : Result<JVal, string> =
         tryRunTool w name state |> Result.mapError ReadToolFailure.describe
+
+    // ---- the emission (Phase 714, DECISIONS.md D282) ----
+
+    /// Read one op a model emitted with the witness's codec: strictly (a member the op's
+    /// declaration does not name is `UndeclaredMember`, an absent required one `MissingField`, an
+    /// unknown kind `UnknownTag`), answering EVERY defect as the Wire layer's `DecodeError`, so a
+    /// model repairs its emission from one answer.
+    let decodeEmissionJson (w: EmissionSurfaceWitness<'State, 'Op, 'Rej>) (el: JVal) : Result<'Op, DecodeError list> =
+        w.Emission.ReadAll el
+
+    /// `decodeEmissionJson` over text, parsed strictly (`Codec.read`): text that is not JSON, or
+    /// that repeats a member, is the parser's one refusal, at the root.
+    let decodeEmission (w: EmissionSurfaceWitness<'State, 'Op, 'Rej>) (text: string) : Result<'Op, DecodeError list> =
+        Codec.read w.Emission text
+
+    /// The case schemas of a codec declared as a union under `kind` (`Codec.union "kind"`): each
+    /// case's tag and its schema, in declaration order, which is what a domain fills its catalogue's
+    /// `OpKinds` from, so the schema a model is shown is the one its emission is read by. Empty when
+    /// the codec's schema is not such a union: no `oneOf` at its root, or a case that is not an
+    /// object whose `kind` property is one constant.
+    let kindSchemas (c: Codec<'Op>) : (string * JVal) list =
+        let memberOf (name: string) (v: JVal) =
+            match v with
+            | JObj ms -> ms |> List.tryFind (fun (k, _) -> k = name) |> Option.map snd
+            | _ -> None
+
+        let caseKind (case: JVal) =
+            match memberOf "properties" case |> Option.bind (memberOf "kind") with
+            | Some(JObj [ "const", JStr k ]) -> Some(k, case)
+            | _ -> None
+
+        match memberOf "oneOf" c.Schema with
+        | Some(JArr cases) ->
+            let read = cases |> List.map caseKind
+
+            if List.forall Option.isSome read then
+                List.choose id read
+            else
+                []
+        | _ -> []

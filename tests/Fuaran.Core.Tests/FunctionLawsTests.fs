@@ -374,3 +374,183 @@ let functionVerifyTests =
                   (Conformance.verifyHonestyLawsAt artw mkSoundDet mkBrokenDet countReg genParamsFor 777 200)
                   results
                   "same seed ⇒ identical report" ]
+
+// ---- Phase 714 (DECISIONS.md D282) — a model's argument object, read against its signature ----
+// The reader did not exist before Phase 714, so its tests cannot be red on the old code (they do not
+// compile there). The two schema tests below can: on the old `toJsonSchema` the object carried no
+// `additionalProperties` and a slot's property no `kind`. The agreement law is in `capabilityLaws`.
+
+let private hole (name: string) (kind: HoleKind) (required: bool) : SigEntry =
+    { Addr = "h-" + name
+      Name = name
+      Kind = kind
+      Required = required }
+
+let private argsSig: Signature =
+    { Name = "fill"
+      Holes =
+        [ hole "count" (ValueHole(IntRange(0, 10))) true
+          hole "ratio" (ValueHole(FloatRange(0.0, 1.0))) false
+          hole "title" (ValueHole(StringLen(1, 20))) true
+          hole "colour" (ValueHole(Enum [ "red"; "green" ])) false
+          hole "body" (SlotHole(Some "para")) false
+          hole "order" (ValueHole(Document None)) false
+          hole "onSave" (ActionHole Effect.pureDeterministic) false ]
+      Effect = Effect.pureDeterministic }
+
+let private argsCap = Capability.create "fill" argsSig Server Returns.Nothing
+
+let private refusals (r: Result<'T, DecodeError list>) : (DecodeCode * string) list =
+    match r with
+    | Ok v -> failtestf "expected refusals, read %A" v
+    | Error es -> es |> List.map (fun e -> e.Code, DecodePath.render e.Path)
+
+[<Tests>]
+let argumentObjectTests =
+    testList
+        "CapabilityCodec.decodeArgs"
+        [ testCase
+              "reads the object toJsonSchema describes into the seam's list, in declaration order and canonical spelling"
+          <| fun _ ->
+              let read =
+                  CapabilityCodec.decodeArgs
+                      argsCap
+                      """{"title":"x","order":{"b":1,"a":2},"count":5,"ratio":0.50,"colour":"red","body":{"kind":"para"}}"""
+
+              Expect.equal
+                  read
+                  (Ok
+                      [ "count", "5"
+                        "ratio", "0.5"
+                        "title", "x"
+                        "colour", "red"
+                        "body", "{\"kind\":\"para\"}"
+                        "order", "{\"a\":2,\"b\":1}" ])
+                  "every hole read, each in its space's canonical spelling"
+
+              match read with
+              | Ok args ->
+                  Expect.equal (Capability.validateArgs argsCap args) (Ok()) "what it reads the seam admits"
+
+                  Expect.equal
+                      (Capability.invoke argsCap args (fun () -> Ready 1))
+                      (Ok(Ready 1))
+                      "and invokes with no conversion by the host"
+              | Error _ -> ()
+
+          testCase "a number the schema calls an integer is read as one, and a fractional one is refused"
+          <| fun _ ->
+              Expect.equal
+                  (CapabilityCodec.decodeArgsJson argsCap (JObj [ "count", JFloat 5.0; "title", JStr "x" ]))
+                  (Ok [ "count", "5"; "title", "x" ])
+                  "an integral number is the integer"
+
+              Expect.equal
+                  (refusals (CapabilityCodec.decodeArgsJson argsCap (JObj [ "count", JFloat 5.5; "title", JStr "x" ])))
+                  [ DecodeCode.WrongKind, "$[\"count\"]" ]
+                  "a fractional number is no integer"
+
+          testCase "every refusal of the reader, each at the member it is about"
+          <| fun _ ->
+              let one (el: JVal) =
+                  refusals (CapabilityCodec.decodeArgsJson argsCap el)
+
+              let base' = [ "count", JInt 1; "title", JStr "x" ]
+
+              Expect.equal
+                  (one (JObj(base' @ [ "zz", JInt 0 ])))
+                  [ DecodeCode.UndeclaredMember, "$[\"zz\"]" ]
+                  "undeclared"
+
+              Expect.equal
+                  (one (JObj(base' @ [ "onSave", JStr "handler" ])))
+                  [ DecodeCode.UndeclaredMember, "$[\"onSave\"]" ]
+                  "an action hole is no property"
+
+              Expect.equal
+                  (one (JObj(base' @ [ "count", JInt 2 ])))
+                  [ DecodeCode.OutOfRange, "$[\"count\"]" ]
+                  "a member given twice, at its second occurrence"
+
+              Expect.equal
+                  (one (JObj [ "count", JStr "5"; "title", JStr "x" ]))
+                  [ DecodeCode.WrongKind, "$[\"count\"]" ]
+                  "a stringified number is another kind"
+
+              Expect.equal
+                  (one (JObj [ "count", JInt 11; "title", JStr "x" ]))
+                  [ DecodeCode.OutOfRange, "$[\"count\"]" ]
+                  "past the upper bound"
+
+              Expect.equal
+                  (one (JObj(base' @ [ "body", JStr "{\"kind\":\"para\"}" ])))
+                  [ DecodeCode.WrongKind, "$[\"body\"]" ]
+                  "a stringified tree is no object"
+
+              Expect.equal
+                  (one (JObj(base' @ [ "body", JObj [ "kind", JStr "list" ] ])))
+                  [ DecodeCode.OutOfRange, "$[\"body\"]" ]
+                  "a tree of another kind than the slot's"
+
+              Expect.equal
+                  (one (JObj [ "count", JInt 1 ]))
+                  [ DecodeCode.MissingField, "$[\"title\"]" ]
+                  "a required hole absent"
+
+              Expect.equal (one (JArr [])) [ DecodeCode.WrongKind, "$" ] "no object"
+
+              Expect.equal
+                  (refusals (CapabilityCodec.decodeArgs argsCap "{\"count\":"))
+                  [ DecodeCode.InvalidJson, "$" ]
+                  "text that is not JSON"
+
+              let e =
+                  match CapabilityCodec.decodeArgsJson argsCap (JObj [ "count", JInt 11; "title", JStr "x" ]) with
+                  | Error [ e ] -> e
+                  | other -> failtestf "expected one refusal, got %A" other
+
+              Expect.equal e.Expected "an integer from 0 to 10" "an out-of-space refusal says what would be accepted"
+
+          testCase "every defect at once: members in authored order, then each hole in declaration order"
+          <| fun _ ->
+              Expect.equal
+                  (refusals (
+                      CapabilityCodec.decodeArgsJson
+                          argsCap
+                          (JObj [ "ratio", JStr "half"; "zz", JInt 0; "count", JInt 99; "zz", JInt 1 ])
+                  ))
+                  [ DecodeCode.UndeclaredMember, "$[\"zz\"]"
+                    DecodeCode.OutOfRange, "$[\"zz\"]"
+                    DecodeCode.OutOfRange, "$[\"count\"]"
+                    DecodeCode.WrongKind, "$[\"ratio\"]"
+                    DecodeCode.MissingField, "$[\"title\"]" ]
+                  "one answer repairs every defect"
+
+          testCase "toJsonSchema refuses an argument naming no data hole (red on the schema before Phase 714)"
+          <| fun _ ->
+              match Function.toJsonSchema argsSig with
+              | JObj members ->
+                  Expect.equal
+                      (members |> List.tryFind (fun (k, _) -> k = "additionalProperties"))
+                      (Some("additionalProperties", JBool false))
+                      "the seam refuses an undeclared argument, and the schema says so"
+              | other -> failtestf "not an object: %A" other
+
+          testCase "toJsonSchema requires a slot's kind, its constraint (red on the schema before Phase 714)"
+          <| fun _ ->
+              let json = Json.render (Function.toJsonSchema argsSig)
+
+              Expect.stringContains
+                  json
+                  "\"body\":{\"type\":\"object\",\"description\":\"slot of kind: para\",\"properties\":{\"kind\":{\"enum\":[\"para\"]}},\"required\":[\"kind\"]}"
+                  "an object the seam would refuse is refused by the schema"
+
+          testCase "the argument-object law is among capabilityLaws, and green"
+          <| fun _ ->
+              let law =
+                  Conformance.capabilityLaws 714 100
+                  |> List.tryFind (fun r -> r.Law.Contains "a model's argument object")
+
+              match law with
+              | Some r -> Expect.isTrue r.Passed (sprintf "%A" r.Counterexample)
+              | None -> failtest "the argument-object law is not reported" ]

@@ -397,3 +397,162 @@ let tests =
                   [ SampleAdequacy.lawPrefix "Conformance.aiSurfaceLawsAt"
                     + "the sample reached every rejected op the laws distinguish" ]
                   "exactly the rejected-op guard is red" ]
+
+// ---- Phase 714 (DECISIONS.md D282) — an emission decoded by Core, and the catalogue held to it ----
+// `decodeEmission`, `kindSchemas` and `EmissionSurfaceWitness` did not exist before Phase 714, so
+// their tests cannot be red on the old code. What can be red is the law: the reference witness's
+// catalogue as it stood (a free schema per kind) and a lenient reader that reads past an undeclared
+// member each fail it below.
+
+let private noteCodec: Codec<NoteOp> =
+    match
+        Codec.union
+            "kind"
+            [ Codec.case
+                  "addNote"
+                  (function
+                  | AddNote(id, text) -> Some(id, text)
+                  | RemoveNote _ -> None)
+                  AddNote
+                  (Codec.record (fun (id: string) (text: string) -> id, text)
+                   |> Codec.field "id" fst Codec.string
+                   |> Codec.field "text" snd Codec.string)
+              Codec.case
+                  "removeNote"
+                  (function
+                  | RemoveNote id -> Some id
+                  | AddNote _ -> None)
+                  RemoveNote
+                  (Codec.record (fun (id: string) -> id) |> Codec.field "id" id Codec.string) ]
+    with
+    | Ok c -> c
+    | Error faults -> failwithf "the note codec did not build: %A" faults
+
+let private describeKind (kind: string) =
+    witness.OpKinds
+    |> List.tryFind (fun c -> c.Kind = kind)
+    |> Option.map _.Description
+    |> Option.defaultValue kind
+
+/// The reference surface with its catalogue filled from the codec, so the schema a model is shown is
+/// the one its emission is read by.
+let emissionWitness: EmissionSurfaceWitness<NoteState, NoteOp, NoteRej> =
+    { Surface =
+        { policedWitness with
+            OpKinds =
+                AiSurface.kindSchemas noteCodec
+                |> List.map (fun (kind, schema) ->
+                    { Kind = kind
+                      Description = describeKind kind
+                      Schema = schema }) }
+      Emission = noteCodec }
+
+let private codes (r: Result<'T, DecodeError list>) : (DecodeCode * string) list =
+    match r with
+    | Ok v -> failtestf "expected refusals, read %A" v
+    | Error es -> es |> List.map (fun e -> e.Code, DecodePath.render e.Path)
+
+let private failed (results: LawResult list) : string list =
+    results
+    |> List.filter (fun r -> not r.Passed)
+    |> List.map (fun r -> r.Law + " — " + defaultArg r.Counterexample "")
+
+[<Tests>]
+let emissionTests =
+    testList
+        "AiSurface.emission"
+        [ testCase "kindSchemas lists a kind-keyed union codec's cases in declaration order, and nothing else"
+          <| fun _ ->
+              Expect.equal
+                  (AiSurface.kindSchemas noteCodec |> List.map fst)
+                  [ "addNote"; "removeNote" ]
+                  "each case by its tag"
+
+              Expect.equal (AiSurface.kindSchemas Codec.string) [] "a codec that is no union under kind has none"
+
+          testCase "decodeEmission reads an emitted op strictly"
+          <| fun _ ->
+              Expect.equal
+                  (AiSurface.decodeEmission emissionWitness """{"kind":"addNote","id":"n2","text":"hi"}""")
+                  (Ok(AddNote("n2", "hi")))
+                  "an emission in the catalogue's shape reads as the op"
+
+              Expect.equal
+                  (AiSurface.decodeEmissionJson emissionWitness (JObj [ "kind", JStr "removeNote"; "id", JStr "n1" ]))
+                  (Ok(RemoveNote "n1"))
+                  "the JSON form reads the same"
+
+          testCase "an undeclared member is refused, never read past"
+          <| fun _ ->
+              Expect.equal
+                  (codes (
+                      AiSurface.decodeEmission
+                          emissionWitness
+                          """{"kind":"addNote","id":"n2","text":"hi","actor":"admin"}"""
+                  ))
+                  [ DecodeCode.UndeclaredMember, "$[\"actor\"]" ]
+                  "the member the published schema refuses, the reader refuses"
+
+          testCase "every refusal is typed and placed, and every defect comes at once"
+          <| fun _ ->
+              Expect.equal
+                  (codes (AiSurface.decodeEmission emissionWitness """{"kind":"renameNote","id":"n1"}"""))
+                  [ DecodeCode.UnknownTag, "$[\"kind\"]" ]
+                  "a kind the catalogue does not carry"
+
+              Expect.equal
+                  (codes (AiSurface.decodeEmission emissionWitness """{"kind":"addNote","id":3,"extra":true}"""))
+                  [ DecodeCode.UndeclaredMember, "$[\"extra\"]"
+                    DecodeCode.WrongKind, "$[\"id\"]"
+                    DecodeCode.MissingField, "$[\"text\"]" ]
+                  "undeclared first, then each member's defect"
+
+              Expect.equal
+                  (codes (AiSurface.decodeEmission emissionWitness "{\"kind\":"))
+                  [ DecodeCode.InvalidJson, "$" ]
+                  "text that is not JSON"
+
+          testCase "emissionLawsAt certifies the reference surface"
+          <| fun _ ->
+              let results = Conformance.emissionLawsAt emissionWitness genNoteOp 714 200
+              Expect.equal (failed results) [] "the catalogue and the reader agree"
+              Expect.equal (List.length results) 3 "the round trip, the agreement and the vacuity guard"
+              Expect.equal (Conformance.emissionLawsAt emissionWitness genNoteOp 714 200) results "seed-replayable"
+
+          testCase "emissionLawsAt is red on a catalogue written by hand beside the codec"
+          <| fun _ ->
+              let handWritten =
+                  { emissionWitness with
+                      Surface = policedWitness }
+
+              Expect.isNonEmpty
+                  (failed (Conformance.emissionLawsAt handWritten genNoteOp 714 50))
+                  "the free schemas the reference witness published are not the reader's"
+
+          testCase "emissionLawsAt is red on a reader that reads past an undeclared member"
+          <| fun _ ->
+              let lenient: Codec<NoteOp> =
+                  Codec.make
+                      (fun op ->
+                          match noteCodec.Write op with
+                          | Ok j -> j
+                          | Error f -> failwithf "%A" f)
+                      (fun j ->
+                          match j with
+                          | JObj ms ->
+                              noteCodec.ReadAll(
+                                  JObj(ms |> List.filter (fun (k, _) -> List.contains k [ "kind"; "id"; "text" ]))
+                              )
+                          | other -> noteCodec.ReadAll other)
+                      noteCodec.Schema
+
+              let w =
+                  { emissionWitness with
+                      Emission = lenient }
+
+              let reds = failed (Conformance.emissionLawsAt w genNoteOp 714 50)
+
+              Expect.isTrue
+                  (reds
+                   |> List.exists (fun l -> l.Contains "the emission reader accepts a variant of a written emission"))
+                  (sprintf "the reader accepts what the catalogue refuses, and the agreement law says so: %A" reds) ]

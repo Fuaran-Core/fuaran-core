@@ -191,7 +191,33 @@
       "reason": "The catalogue as a JSON value; `catalogueJson` renders it, and the AI-surface tests read that rendering.",
       "through": "AiSurface.catalogueJson",
       "standIn": "tests/Fuaran.Core.Tests/AiSurfaceTests.fs"
+    },    {
+      "members": [
+        "AiSurface.decodeEmission"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "An emitted op read from text (Phase 714, D282): the strict parse, then `decodeEmissionJson`, which `Conformance.emissionLawsAt` holds to the catalogue; the text form adds only the parser's one refusal, which the AI-surface tests pin.",
+      "through": "AiSurface.decodeEmissionJson",
+      "standIn": "tests/Fuaran.Core.Tests/AiSurfaceTests.fs"
     },
+    {
+      "members": [
+        "AiSurface.kindSchemas"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "Lists the case schemas of a codec declared as a union under `kind` (Phase 714, D282): a projection of the codec's own schema with no algebra beyond its examples; the reference surface the emission laws certify fills its catalogue from it.",
+      "standIn": "tests/Fuaran.Core.Tests/AiSurfaceTests.fs"
+    },
+    {
+      "members": [
+        "CapabilityCodec.decodeArgs"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "A model's argument object read from text (Phase 714, D282): the strict parse, then `decodeArgsJson`, which `Conformance.capabilityLaws` holds to `toJsonSchema` and `validateArgs`; every refusal is pinned in the `capabilityArgumentLaws` vectors and the reader's tests.",
+      "through": "CapabilityCodec.decodeArgsJson",
+      "standIn": "tests/Fuaran.Core.Tests/FunctionLawsTests.fs"
+    },
+
     {
       "members": [
         "PatternBank.matchesAnchor"

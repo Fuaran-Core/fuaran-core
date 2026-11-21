@@ -549,6 +549,173 @@ module internal SurfaceLaws =
         : LawResult list =
         aiSurfaceRun true w genOp state0 runner iterations
 
+    /// The emission laws (Phase 714, DECISIONS.md D282): the schema a model is shown and the reader of
+    /// its answer, held to each other at a domain's `EmissionSurfaceWitness`. Over the caller's drawn
+    /// ops:
+    ///
+    ///  - **a drawn op round-trips through the catalogue and the reader** — the codec writes it, the
+    ///    written emission names the op's kind (`KindOfOp`) where it carries a `kind`, the catalogued
+    ///    schema of that kind admits it, and `AiSurface.decodeEmissionJson` reads it back to the op;
+    ///  - **the reader accepts exactly what the catalogue admits** — over variants of each written
+    ///    emission (each member removed in turn, an undeclared member added, the `kind` replaced by
+    ///    one no card catalogues, each member's value replaced by one of another JSON kind, and each
+    ///    member but `kind` given another value of its own kind), the
+    ///    reader accepts a variant exactly when some catalogued schema admits it.
+    ///
+    /// Judged by `SchemaReading`, which shares no code with the reader; a catalogued schema using a
+    /// keyword it does not read is a failure naming the keyword. The variants are structural, so a
+    /// codec whose reader refines a record beyond what its schema states (two members that must
+    /// agree) is reported where a variant breaks the refinement: that is a schema saying less than
+    /// the reader. `'Op` needs equality. Guarded on variants the catalogue admitted and refused.
+    let emissionLawsAt
+        (w: EmissionSurfaceWitness<'State, 'Op, 'Rej>)
+        (genOp: ConfRng.T -> 'Op * ConfRng.T)
+        (runner: LawKit.Runner)
+        (iterations: int)
+        : LawResult list =
+        let roundTrip =
+            LawKit.LawCell
+                "a drawn op is written by the codec, admitted by the catalogued schema of its kind, and read back to itself"
+
+        let agreement =
+            LawKit.LawCell
+                "the emission reader accepts a variant of a written emission exactly when a catalogued schema admits it"
+
+        let admitted = ref 0
+        let refused = ref 0
+
+        let catalogueAdmits (v: JVal) : Result<bool, string> =
+            w.Surface.OpKinds
+            |> List.fold
+                (fun acc card ->
+                    match acc with
+                    | Ok false -> SchemaReading.admits card.Schema v
+                    | settled -> settled)
+                (Ok false)
+
+        let otherKind (v: JVal) : JVal =
+            match v with
+            | JStr _ -> JInt 0
+            | _ -> JStr "zz"
+
+        // A value of the same JSON kind, where one differs: what a model writes when it writes the
+        // member right and the value otherwise.
+        let sameKind (v: JVal) : JVal option =
+            match v with
+            | JStr s -> Some(JStr(s + "-other"))
+            | JInt n -> Some(JInt(n + 1))
+            | JFloat f -> Some(JFloat(f + 1.0))
+            | JBool b -> Some(JBool(not b))
+            | JArr _
+            | JObj _ -> None
+
+        let variants (written: JVal) : JVal list =
+            match written with
+            | JObj members ->
+                [ for i in 0 .. List.length members - 1 do
+                      yield JObj(List.removeAt i members)
+
+                  yield JObj(members @ [ "zz-undeclared", JInt 0 ])
+
+                  if members |> List.exists (fun (k, _) -> k = "kind") then
+                      yield
+                          JObj(
+                              members
+                              |> List.map (fun (k, v) -> if k = "kind" then k, JStr "zz-uncatalogued" else k, v)
+                          )
+
+                  for i in 0 .. List.length members - 1 do
+                      let k, v = List.item i members
+
+                      yield JObj(members |> List.mapi (fun j m -> if i = j then k, otherKind v else m))
+
+                      if k <> "kind" then
+                          match sameKind v with
+                          | Some v' -> yield JObj(members |> List.mapi (fun j m -> if i = j then k, v' else m))
+                          | None -> () ]
+            | other -> [ otherKind other ]
+
+        LawKit.run runner iterations (fun rng _ at ->
+            let op = rng.Draw genOp
+            let kind = w.Surface.KindOfOp op
+
+            match w.Emission.Write op with
+            | Error fault -> roundTrip.Fail(at (sprintf "the codec refused to write a drawn op: %A" fault))
+            | Ok written ->
+                let named =
+                    match written with
+                    | JObj ms ->
+                        match ms |> List.tryFind (fun (k, _) -> k = "kind") with
+                        | Some(_, JStr k) -> k = kind
+                        | Some _ -> false
+                        | None -> true
+                    | _ -> true
+
+                roundTrip.Check(
+                    named,
+                    fun () ->
+                        at (sprintf "the emission %s does not name the op's kind '%s'" (Json.render written) kind)
+                )
+
+                (match w.Surface.OpKinds |> List.tryFind (fun c -> c.Kind = kind) with
+                 | None -> roundTrip.Fail(at (sprintf "the op's kind '%s' is not catalogued" kind))
+                 | Some card ->
+                     match SchemaReading.admits card.Schema written with
+                     | Error unread -> roundTrip.Fail(at ("the schema reading cannot interpret " + unread))
+                     | Ok ok ->
+                         roundTrip.Check(
+                             ok,
+                             fun () ->
+                                 at (
+                                     sprintf
+                                         "the catalogued schema of '%s' refuses the written emission %s"
+                                         kind
+                                         (Json.render written)
+                                 )
+                         ))
+
+                (match AiSurface.decodeEmissionJson w written with
+                 | Ok back ->
+                     roundTrip.Check(
+                         (back = op),
+                         fun () -> at (sprintf "the emission %s read back as another op" (Json.render written))
+                     )
+                 | Error es ->
+                     roundTrip.Fail(
+                         at (sprintf "the reader refused the written emission %s: %A" (Json.render written) es)
+                     ))
+
+                for variant in variants written do
+                    match catalogueAdmits variant with
+                    | Error unread -> agreement.Fail(at ("the schema reading cannot interpret " + unread))
+                    | Ok inCatalogue ->
+                        if inCatalogue then
+                            admitted.Value <- admitted.Value + 1
+                        else
+                            refused.Value <- refused.Value + 1
+
+                        let read = AiSurface.decodeEmissionJson w variant
+
+                        let readIt =
+                            match read with
+                            | Ok _ -> true
+                            | Error _ -> false
+
+                        agreement.Check(
+                            (inCatalogue = readIt),
+                            fun () ->
+                                at (
+                                    sprintf
+                                        "the catalogue %s %s, and the reader answers %A"
+                                        (if inCatalogue then "admits" else "refuses")
+                                        (Json.render variant)
+                                        read
+                                )
+                        ))
+
+        LawKit.results [ roundTrip; agreement ]
+        @ [ LawKit.guard runner "emission variant" [ "admitted", admitted.Value; "refused", refused.Value ] ]
+
     // ---- Phase 232 — the witness-record field freeze, held by a law --------------------------------
     //
     // STABILITY.md's "Witness-record field freeze" names the public witness records whose field sets
@@ -610,7 +777,11 @@ module internal SurfaceLaws =
           // Phase 643 — the guarded witness's state-aware form, frozen at birth on the same terms: it
           // sits beside `GuardedSurfaceWitness` rather than growing it, and a domain constructs it by
           // name (or lifts the present one into it).
-          "StateAwareGuardedWitness", [ "Surface"; "DryRun"; "EffectsOf" ] ]
+          "StateAwareGuardedWitness", [ "Surface"; "DryRun"; "EffectsOf" ]
+          // Phase 714 — the AI surface with its emission codec, frozen at birth on the same terms: it
+          // embeds the frozen `AiSurfaceWitness` and adds the op's codec, the reader of what a model
+          // emits.
+          "EmissionSurfaceWitness", [ "Surface"; "Emission" ] ]
 
     /// The frozen witness records and their field sets, by name and in declaration order — the
     /// freeze STABILITY.md states, as data (Phase 232).
@@ -788,7 +959,8 @@ module internal SurfaceLaws =
           "RefWitness", typeof<RefWitness<obj, obj>>
           "SanitizeWitness", typeof<SanitizeWitness>
           "GuardedSurfaceWitness", typeof<GuardedSurfaceWitness<obj, obj, obj>>
-          "StateAwareGuardedWitness", typeof<StateAwareGuardedWitness<obj, obj, obj>> ]
+          "StateAwareGuardedWitness", typeof<StateAwareGuardedWitness<obj, obj, obj>>
+          "EmissionSurfaceWitness", typeof<EmissionSurfaceWitness<obj, obj, obj>> ]
 
     /// Every public type in the kit's own assembly and in the Fuaran.Core assemblies it references,
     /// transitively. A Fable-compiled program has no assembly to enumerate, which is why this and

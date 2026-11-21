@@ -76,8 +76,9 @@ let jsonSchemaTests =
                   + "\"properties\":{"
                   + "\"title\":{\"type\":\"string\",\"minLength\":1,\"maxLength\":20},"
                   + "\"count\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":10},"
-                  + "\"body\":{\"type\":\"object\",\"description\":\"slot of kind: para\"}"
-                  + "},\"required\":[\"title\",\"count\",\"body\"]}"
+                  + "\"body\":{\"type\":\"object\",\"description\":\"slot of kind: para\","
+                  + "\"properties\":{\"kind\":{\"enum\":[\"para\"]}},\"required\":[\"kind\"]}"
+                  + "},\"required\":[\"title\",\"count\",\"body\"],\"additionalProperties\":false}"
 
               Expect.equal json expected "standard JSON-Schema shape"
               Expect.equal (Json.render (Function.toJsonSchema sg)) json "stable for a fixed signature"

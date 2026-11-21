@@ -715,6 +715,84 @@ let tests =
                       (LawVectorExport.Documents.render ())
                       "the committed file is the render"
 
+          testCase
+              "every argument-object vector reads back through the public codecs and is true of this kit (Phase 714)"
+          <| fun _ ->
+              let text = LawVectorExport.Arguments.render ()
+
+              let str (name: string) (el: JVal) =
+                  match Decoder.field name Decoder.str el with
+                  | Ok s -> s
+                  | Error e -> failtestf "%s: %s" name (DecodeError.render e)
+
+              let at (name: string) (el: JVal) =
+                  match el with
+                  | JObj ms ->
+                      match ms |> List.tryFind (fun (k, _) -> k = name) with
+                      | Some(_, v) -> v
+                      | None -> failtestf "no member %s" name
+                  | other -> failtestf "not an object: %A" other
+
+              let vectors =
+                  match Json.parse text with
+                  | Ok doc ->
+                      match at "vectors" doc with
+                      | JArr vs -> vs
+                      | other -> failtestf "vectors is not a list: %A" other
+                  | Error e -> failtestf "the file does not parse: %s" e
+
+              Expect.equal (List.length vectors) 20 "the schema and nineteen objects"
+
+              for v in vectors do
+                  let id = str "id" v
+                  let input = at "input" v
+                  let expected = at "expected" v
+
+                  let cap =
+                      match CapabilityCodec.decode (str "capability" input) with
+                      | Ok c -> c
+                      | Error e -> failtestf "%s: the declaration does not decode: %s" id e
+
+                  match str "case" v with
+                  | "argumentSchema" ->
+                      Expect.equal
+                          (str "schema" expected)
+                          (Canonical.write Rendering.CrossHost (Function.toJsonSchema cap.Signature))
+                          id
+                  | "decodeArgs" ->
+                      let answer =
+                          match CapabilityCodec.decodeArgs cap (str "arguments" input) with
+                          | Ok args ->
+                              JObj
+                                  [ "verdict", JStr "accept"
+                                    "args",
+                                    JArr(args |> List.map (fun (n, x) -> JObj [ "name", JStr n; "value", JStr x ])) ]
+                          | Error es ->
+                              JObj
+                                  [ "verdict", JStr "reject"
+                                    "refusals",
+                                    JArr(
+                                        es
+                                        |> List.map (fun e ->
+                                            JObj
+                                                [ "code", JStr(DecodeError.codeName e.Code)
+                                                  "path",
+                                                  JArr(
+                                                      e.Path
+                                                      |> List.map (function
+                                                          | PathSegment.Key k -> JStr k
+                                                          | PathSegment.Index i -> JStr(string i))
+                                                  ) ])
+                                    ) ]
+
+                      Expect.equal (Json.render expected) (Json.render answer) id
+                  | other -> failtestf "%s: an unknown case %s" id other
+
+              Expect.equal
+                  (File.ReadAllText(Path.Combine(OwnedConformance.root (), "laws", LawVectorExport.Arguments.fileName)))
+                  text
+                  "the committed file is the render"
+
           testCase "every rendered capability vector reads back through the public codecs and is true of this kit"
           <| fun _ ->
               match capabilityVectorsOf (LawVectorExport.Capabilities.render ()) with
