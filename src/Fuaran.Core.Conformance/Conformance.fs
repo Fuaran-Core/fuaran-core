@@ -1035,6 +1035,17 @@ module Conformance =
         SurfaceLaws.aiSurfaceKitPolicyLawsAt w genOp state0
         |> within (family "aiSurfaceKitPolicyLawsAt" seed) iterations
 
+    /// Forward — see `SurfaceLaws.emissionLawsAt` (Phase 714): the catalogue a model is shown and the
+    /// reader of its emission, held to each other at the domain's `EmissionSurfaceWitness`.
+    let emissionLawsAt
+        (w: EmissionSurfaceWitness<'State, 'Op, 'Rej>)
+        (genOp: ConfRng.T -> 'Op * ConfRng.T)
+        (seed: int)
+        (iterations: int)
+        : LawResult list =
+        SurfaceLaws.emissionLawsAt w genOp
+        |> within (family "emissionLawsAt" seed) iterations
+
     /// Forward — see `SurfaceLaws.frozenWitnessFields`.
     let frozenWitnessFields: WitnessFields list = SurfaceLaws.frozenWitnessFields
 

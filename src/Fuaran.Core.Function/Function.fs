@@ -1055,38 +1055,112 @@ module Function =
               "holes", JArr(sg.Holes |> List.map entryJson)
               "required", JArr(sg.Holes |> List.filter _.Required |> List.map (fun h -> JStr h.Name)) ]
 
-    // ---- signature → standard JSON Schema projection ----
+    // ---- the argument object a model writes (Phase 714, DECISIONS.md D282) ----
 
-    /// The standard JSON-Schema keywords for a value space.
-    let private spaceSchema (s: ValueSpace) : (string * JVal) list =
+    /// How a value of a space is written in a model's argument object: the JSON-Schema keywords
+    /// that state it, the JSON kind they name (a phrase for a `WrongKind` refusal; `None` where any
+    /// JSON value is admitted), and the reading of one JSON value of that kind into the seam's
+    /// spelling (`None` for a value of another kind). ONE entry per space, read by both
+    /// `toJsonSchema` (the keywords) and `CapabilityCodec.decodeArgs` (the kind and the spelling,
+    /// then the seam's own membership, `Space.canonical`), so the schema a model is given and the
+    /// reader of its answer cannot drift apart.
+    type internal ArgumentForm =
+        { Keywords: (string * JVal) list
+          Kind: string option
+          Spell: JVal -> string option }
+
+    /// An integer's spelling: a JSON integer, or a number with no fractional part (JSON Schema's
+    /// `integer`). One past the 32-bit range is spelled as the number it is, which the integer
+    /// reader then refuses as out of range.
+    let private integerSpelling (v: JVal) : string option =
+        match v with
+        | JInt n -> Some(string n)
+        | JFloat f when
+            not (System.Double.IsNaN f || System.Double.IsInfinity f)
+            && System.Math.Floor f = f
+            ->
+            if f >= float System.Int32.MinValue && f <= float System.Int32.MaxValue then
+                Some(string (int f))
+            else
+                Some(FloatLayout.canonical f)
+        | _ -> None
+
+    /// The argument form of a value space (see `ArgumentForm`).
+    let internal argumentForm (s: ValueSpace) : ArgumentForm =
+        let text (v: JVal) =
+            match v with
+            | JStr t -> Some t
+            | _ -> None
+
+        let str = Some "a string"
+
         match s with
-        | IntRange(lo, hi) -> [ "type", JStr "integer"; "minimum", JInt lo; "maximum", JInt hi ]
-        | FloatRange(lo, hi) -> [ "type", JStr "number"; "minimum", JFloat lo; "maximum", JFloat hi ]
-        | StringLen(lo, hi) -> [ "type", JStr "string"; "minLength", JInt lo; "maxLength", JInt hi ]
-        | Enum xs -> [ "enum", JArr(xs |> List.map JStr) ]
-        | AnyString -> [ "type", JStr "string" ]
+        | IntRange(lo, hi) ->
+            { Keywords = [ "type", JStr "integer"; "minimum", JInt lo; "maximum", JInt hi ]
+              Kind = Some "an integer"
+              Spell = integerSpelling }
+        | FloatRange(lo, hi) ->
+            { Keywords = [ "type", JStr "number"; "minimum", JFloat lo; "maximum", JFloat hi ]
+              Kind = Some "a number"
+              Spell =
+                function
+                | JInt n -> Some(string n)
+                | JFloat f -> Some(FloatLayout.canonical f)
+                | _ -> None }
+        | StringLen(lo, hi) ->
+            { Keywords = [ "type", JStr "string"; "minLength", JInt lo; "maxLength", JInt hi ]
+              Kind = str
+              Spell = text }
+        | Enum xs ->
+            { Keywords = [ "enum", JArr(xs |> List.map JStr) ]
+              Kind = str
+              Spell = text }
+        | AnyString ->
+            { Keywords = [ "type", JStr "string" ]
+              Kind = str
+              Spell = text }
+        // A tree is an object whose string `kind` is the slot's constraint where it has one: what
+        // `Space.slotKindOf` reads, stated so the schema refuses what the seam refuses (D282).
         | SlotTree c ->
-            [ "type", JStr "object" ]
-            @ (match c with
-               | Some k -> [ "description", JStr("slot of kind: " + k) ]
-               | None -> [])
+            let kind, described =
+                match c with
+                | Some k -> JObj [ "enum", JArr [ JStr k ] ], [ "description", JStr("slot of kind: " + k) ]
+                | None -> JObj [ "type", JStr "string" ], []
+
+            { Keywords =
+                [ "type", JStr "object" ]
+                @ described
+                @ [ "properties", JObj [ "kind", kind ]; "required", JArr [ JStr "kind" ] ]
+              Kind = Some "an object"
+              Spell =
+                function
+                | JObj _ as o -> Some(Json.render o)
+                | _ -> None }
         // A document is any JSON value, so it projects NO `type` keyword: a schema that said
         // `object` would refuse a list, and the type's own schema is its owner's to emit.
         | Document c ->
-            match c with
-            | Some t -> [ "description", JStr("document of type: " + t) ]
-            | None -> []
+            { Keywords =
+                match c with
+                | Some t -> [ "description", JStr("document of type: " + t) ]
+                | None -> []
+              Kind = None
+              Spell = fun v -> Some(Json.render v) }
 
-    /// The JSON-Schema property for one signature entry. A slot hole projects an `object`
-    /// carrying its kind-constraint in `description` (a tree-typed argument has no scalar JSON
-    /// type); a value / repeat hole projects its value-space keywords.
-    let private propSchema (e: SigEntry) : JVal =
-        match e.Kind with
-        | SlotHole c -> JObj(spaceSchema (SlotTree c))
-        | ValueHole s
-        | RepeatHole s -> JObj(spaceSchema s)
-        // An action hole is no property: `toJsonSchema` lists it under `x-actions`.
-        | ActionHole _ -> JObj [ "type", JStr "string" ]
+    /// One JSON value read as an argument in `s`: its kind first (`WrongKind`, expecting the kind
+    /// the schema names), then the seam's membership (`OutOfRange`, expecting the space in words),
+    /// answering the space's canonical spelling. The refusal is at the value; the caller puts it
+    /// under the member.
+    let internal readArgument (s: ValueSpace) (v: JVal) : Result<string, DecodeError> =
+        let form = argumentForm s
+
+        match form.Spell v with
+        | None -> Error(Decoder.wrongKind (defaultArg form.Kind "a JSON value") v)
+        | Some spelled ->
+            match Space.canonical s spelled with
+            | Some canonical -> Ok canonical
+            | None -> Error(DecodeError.make DecodeCode.OutOfRange (Space.describe s) spelled)
+
+    // ---- signature → standard JSON Schema projection ----
 
     /// The `x-actions` entry for one action hole — addr, name, and the declared effect ceiling.
     let private actionEntryJson (e: SigEntry) : JVal =
@@ -1113,23 +1187,26 @@ module Function =
     /// emits; `x-actions` is the behaviour a human binds. `x-actions` is omitted entirely when
     /// the artifact declares no action holes, so a data-only signature is byte-identical to
     /// before. `Json.render` of the result is canonical + stable for a fixed signature.
+    ///
+    /// Since Phase 714 (DECISIONS.md D282) each property's keywords are its space's `argumentForm`,
+    /// the description `CapabilityCodec.decodeArgs` reads by, and the schema states what the seam
+    /// refuses: `additionalProperties` is `false` (an argument naming no data hole is refused), and a
+    /// slot's object requires a string `kind`, its constraint where it has one. `minLength` /
+    /// `maxLength` carry a `StringLen`'s bounds, which the seam counts in UTF-16 code units (D282.5).
     let toJsonSchema (sg: Signature) : JVal =
-        let isAction (e: SigEntry) =
-            match e.Kind with
-            | ActionHole _ -> true
-            | ValueHole _
-            | SlotHole _
-            | RepeatHole _ -> false
-
-        let dataHoles = sg.Holes |> List.filter (isAction >> not)
-        let actionHoles = sg.Holes |> List.filter isAction
+        let dataHoles, actionHoles = sg.Holes |> List.partition _.Space.IsSome
 
         JObj(
             [ "type", JStr "object"
               "title", JStr sg.Name
               "x-effect", EffectCodec.toJson sg.Effect
-              "properties", JObj(dataHoles |> List.map (fun e -> e.Name, propSchema e))
-              "required", JArr(dataHoles |> List.filter _.Required |> List.map (fun h -> JStr h.Name)) ]
+              "properties",
+              JObj(
+                  dataHoles
+                  |> List.choose (fun e -> e.Space |> Option.map (fun s -> e.Name, JObj (argumentForm s).Keywords))
+              )
+              "required", JArr(dataHoles |> List.filter _.Required |> List.map (fun h -> JStr h.Name))
+              "additionalProperties", JBool false ]
             @ (match actionHoles with
                | [] -> []
                | _ -> [ "x-actions", JArr(actionHoles |> List.map actionEntryJson) ])

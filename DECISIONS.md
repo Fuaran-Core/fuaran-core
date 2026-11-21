@@ -345,7 +345,9 @@ and the commit that closes the slot refuses it (D275).
    counts as the seam does, and the agreement law below reads the bounds in the space's unit and says so.
 6. **The refusals are `DecodeError`s, every one.** A member naming no data hole is `UndeclaredMember` (its
    expectation names the declared holes; an action hole's name is one, since it rides `x-actions` and is no
-   property); a member repeated in a constructed document is `NotAdmitted` at its second occurrence; a value of
+   property); a member repeated in a constructed document is `OutOfRange` at its second occurrence, "each name
+   once", the refusal the invocation reader gives an argument named twice (text that repeats a member is refused by
+   the strict parser before any of this); a value of
    another JSON kind than its hole's is `WrongKind`; a value of the right kind outside the space is `OutOfRange`,
    its expectation the space in words (`Space.describe`); an absent required hole is `MissingField`; a document that
    is not an object is `WrongKind` at the root, and text that is not JSON the parser's refusal. Not `InvokeError`,
@@ -377,6 +379,15 @@ and the commit that closes the slot refuses it (D275).
     (`conformance/laws/capability-argument-laws.json`), for D255.1's reason: a host that reads
     `capability-laws.json` refuses a case it does not know. It is not declared as a copy in the shared corpus;
     declaring one is a separate act.
+11. **The class is breaking**, on the `0.45.0` slot, by the surface guard: the roster's `Families.Takes` gains a case
+    naming the new witness, and `toJsonSchema`'s answer changes for every signature (point 4). The rest is additive.
+    The finding that filed the work called it additive; it was written before the schema's disagreements with the
+    seam were measured.
+12. **Found and not moved here.** A hand-built declaration may mark an action hole required. `SigEntry.ofHoleDecl`
+    never does, and the admission gate admits it, but no invocation can bind an action hole, so every call is refused
+    `RequiredArgsUnbound`, and `toJsonSchema` does not list the hole as required. The agreement law draws action holes
+    as the derivation makes them. Whether the gate should refuse such a declaration is a question for the admission
+    gate, not for this reader.
 
 ## 2026-11-20 — D281: a capability invocation keys its arguments by the hole's name qualified by the slots it was composed through (`slotA.amount`); a qualified name is unique in a signature by construction, the hygiene law is unchanged, and the address is no longer an invocation key
 

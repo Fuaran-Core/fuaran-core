@@ -550,6 +550,130 @@ module LawVectorExport =
         let render () : string = renderAt (kitVersion ())
 
     // -----------------------------------------------------------------------
+    //  the capability argument family (Phase 714)
+    // -----------------------------------------------------------------------
+    //  A model's argument object read against a signature (DECISIONS.md D282): the schema
+    //  `Function.toJsonSchema` gives a model and `CapabilityCodec.decodeArgs`'s answer to an object.
+    //  A file of its own, for D255.1's reason: a host that reads `capability-laws.json` refuses a
+    //  case it does not know. Authored inputs, no seed: what the vectors pin is the reading of each
+    //  space, every refusal and the order refusals come in.
+
+    module Arguments =
+
+        let fileName = "capability-argument-laws.json"
+
+        let familyId = "capabilityArgumentLaws"
+
+        let private hole (name: string) (kind: HoleKind) (required: bool) : SigEntry =
+            { Addr = "h-" + name
+              Name = name
+              Kind = kind
+              Required = required }
+
+        /// The capability every vector is stated over: one hole in each value space, a slot, a name
+        /// qualified by a slot and an action hole.
+        let capability: Capability =
+            Capability.create
+                "cap-arguments"
+                { Name = "fill"
+                  Holes =
+                    [ hole "count" (ValueHole(IntRange(0, 10))) true
+                      hole "ratio" (ValueHole(FloatRange(0.0, 1.0))) false
+                      hole "title" (ValueHole(StringLen(1, 4))) true
+                      hole "colour" (ValueHole(Enum [ "red"; "green" ])) false
+                      hole "body" (SlotHole(Some "para")) false
+                      hole "order" (ValueHole(Document None)) false
+                      hole "s.note" (ValueHole AnyString) false
+                      hole "onSave" (ActionHole Effect.pureDeterministic) false ]
+                  Effect = Effect.pureDeterministic }
+                Server
+                Returns.Nothing
+
+        let private declaration = CapabilityCodec.encode capability
+
+        let private schema () : Vector =
+            { Id = "argument-schema"
+              Case = "argumentSchema"
+              Model = None
+              Input = [ "capability", jstr declaration ]
+              Expected =
+                [ "schema", jstr (Canonical.write Rendering.CrossHost (Function.toJsonSchema capability.Signature)) ] }
+
+        let private read (id: string) (arguments: string) : Vector =
+            let expected =
+                match CapabilityCodec.decodeArgs capability arguments with
+                | Ok args ->
+                    [ "verdict", jstr "accept"
+                      "args", jarr (args |> List.map (fun (n, v) -> jobj [ "name", jstr n; "value", jstr v ])) ]
+                | Error refusals ->
+                    [ "verdict", jstr "reject"
+                      "refusals",
+                      jarr (
+                          refusals
+                          |> List.map (fun e ->
+                              jobj
+                                  [ "code", jstr (DecodeError.codeName e.Code)
+                                    "path", jarr (e.Path |> List.map (Capabilities.segText >> jstr)) ])
+                      ) ]
+
+            { Id = id
+              Case = "decodeArgs"
+              Model = None
+              Input = [ "capability", jstr declaration; "arguments", jstr arguments ]
+              Expected = expected }
+
+        let internal allVectors () : Vector list =
+            [ schema ()
+              read
+                  "arguments-every-space"
+                  """{"title":"abc","order":{"b":1,"a":[2.50,"x"]},"count":5,"ratio":0.50,"colour":"red","body":{"kind":"para"},"s.note":"n"}"""
+              read "arguments-integral-number" """{"count":5.0,"title":"a"}"""
+              read "arguments-at-the-bounds" """{"count":10,"ratio":1,"title":"abcd"}"""
+              read "arguments-below-the-bounds" """{"count":-1,"ratio":-0.25,"title":""}"""
+              read "arguments-past-the-bounds" """{"count":11,"ratio":1.25,"title":"abcde"}"""
+              read "arguments-astral-text" """{"count":0,"title":"😀😀😀"}"""
+              read "arguments-fractional-integer" """{"count":5.5,"title":"a"}"""
+              read "arguments-stringified-number" """{"count":"5","ratio":"0.5","title":"a"}"""
+              read "arguments-not-a-member" """{"count":0,"colour":"blue","title":"a"}"""
+              read "arguments-slot-of-another-kind" """{"count":0,"body":{"kind":"list"},"title":"a"}"""
+              read "arguments-slot-stringified" """{"count":0,"body":"{\"kind\":\"para\"}","title":"a"}"""
+              read "arguments-slot-without-kind" """{"count":0,"body":{"children":[]},"title":"a"}"""
+              read "arguments-undeclared-member" """{"count":0,"title":"a","actor":"admin"}"""
+              read "arguments-action-hole" """{"count":0,"title":"a","onSave":"handler"}"""
+              read "arguments-required-absent" """{"count":0}"""
+              read "arguments-not-an-object" """["count",0]"""
+              read "arguments-not-json" """{"count":"""
+              read "arguments-member-repeated" """{"count":0,"title":"a","count":1}"""
+              read "arguments-every-defect" """{"ratio":"half","zz":0,"count":99}""" ]
+
+        let private description =
+            "A model's argument object read against a capability's signature (Phase 714, DECISIONS.md D282): the JSON Schema a model is given "
+            + "(`Function.toJsonSchema`) and the reading of an object into the argument list the seam takes (`CapabilityCodec.decodeArgs`). Authored "
+            + "inputs, each `expected` computed by calling the pinned kit; no seed. Every vector is stated over one capability, `cap-arguments`, whose "
+            + "`capability` member carries its canonical declaration as a JSON STRING. `argumentSchema` expects the schema's cross-host canonical text: "
+            + "each data hole a property keyed by its qualified name, `required` naming the required ones, `additionalProperties` false, a slot's "
+            + "object requiring its `kind`. `decodeArgs` vectors give the object as JSON text in `arguments`, parsed strictly, and expect `accept` with "
+            + "`args`, each `{\"name\", \"value\"}` in declaration order, the value in its space's canonical spelling (an integer without sign or "
+            + "leading zeros, a number in its shortest round-trip form, a tree or a document as its cross-host canonical text, a string as given); or "
+            + "`reject` with EVERY refusal as a decode `code` and the `path` to it: members naming no data hole (`UndeclaredMember`; an action hole is "
+            + "no property) and members given twice (`OutOfRange`, at the second) first, in authored order, then each hole in declaration order: a "
+            + "value of another JSON kind than its hole's `WrongKind` (a number with no fractional part IS an integer), a value outside its space "
+            + "`OutOfRange` (a string's length counted in UTF-16 code units), an absent required hole `MissingField`. A document that is not an "
+            + "object is `WrongKind` at the root, and text that is not JSON, or that repeats a member, the parser's one refusal at the root."
+
+        /// Rendered with an explicit `kitVersion`, as every law file is (Phase 560).
+        let renderAt (stamp: string) : string =
+            CorpusFile.render
+                { Head =
+                    [ "family", jstr familyId
+                      "kitVersion", jstr stamp
+                      "description", jstr description ]
+                  Items = "vectors"
+                  Rows = allVectors () |> List.map renderVector }
+
+        let render () : string = renderAt (kitVersion ())
+
+    // -----------------------------------------------------------------------
     //  the capability gate family (Phase 650)
     // -----------------------------------------------------------------------
     //  Phase 638 gave a gate a decision context and let a dispatch present a grant (DECISIONS.md
@@ -2618,6 +2742,9 @@ module LawVectorExport =
     let documentPath (corpusDir: string) : string =
         Path.Combine(familyDir corpusDir, Documents.fileName)
 
+    let argumentPath (corpusDir: string) : string =
+        Path.Combine(familyDir corpusDir, Arguments.fileName)
+
     let queryGrantPath (corpusDir: string) : string =
         Path.Combine(familyDir corpusDir, QueryGrants.fileName)
 
@@ -2634,6 +2761,7 @@ module LawVectorExport =
           canonicalFormPath corpusDir, CanonicalFormVectorExport.renderAt stamp
           gatePath corpusDir, Gates.renderAt stamp
           documentPath corpusDir, Documents.renderAt stamp
+          argumentPath corpusDir, Arguments.renderAt stamp
           queryGrantPath corpusDir, QueryGrants.renderAt stamp
           queryDeclarationPath corpusDir, QueryDeclarations.renderAt stamp ]
 

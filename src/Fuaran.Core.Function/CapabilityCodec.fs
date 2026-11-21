@@ -295,6 +295,81 @@ module CapabilityCodec =
     let decodeInvocation (s: string) : Result<string * (string * string) list, string> =
         Json.parse s |> Result.bind (Decoder.describing invocationOf)
 
+    // ---- a model's argument object (Phase 714, DECISIONS.md D282) ----
+    // `Function.toJsonSchema` tells a model to write one object keyed by qualified hole name; this
+    // reads that object back into the argument list every seam operation takes. Each value is read
+    // by its space's `Function.argumentForm`, the entry the schema's keywords come from, so a number
+    // the schema calls an integer is read as one, and the answer is in each space's canonical
+    // spelling, the one `invocationKey` keys by.
+
+    /// Read a model's argument object against `c`'s signature into the seam's argument list, in
+    /// declaration order and in each space's canonical spelling, answering EVERY defect: a member
+    /// naming no data hole is `UndeclaredMember` (an action hole is no property, so its name is
+    /// one), a member given twice is `OutOfRange` at its second occurrence (each name once, as an
+    /// invocation reads it), a value of another JSON kind than its hole's is `WrongKind`, a value of
+    /// the right kind outside the space `OutOfRange`, an absent required hole `MissingField`, and a
+    /// document that is not an object `WrongKind` at the root. Undeclared and repeated members come
+    /// first, in authored order, then each hole's defect in declaration order. An `Ok` is a list
+    /// `Capability.validateArgs` admits.
+    let decodeArgsJson (c: Capability) (el: JVal) : Result<(string * string) list, DecodeError list> =
+        match el with
+        | JObj members ->
+            let holes = c.Signature.Holes |> List.filter _.Space.IsSome
+            let declared = holes |> List.map _.Name
+
+            // Each member in authored order: a repeat at its second occurrence, else undeclared or clean.
+            let memberFaults =
+                members
+                |> List.mapi (fun i (name, v) ->
+                    if members |> List.take i |> List.exists (fun (n, _) -> n = name) then
+                        [ DecodeError.under
+                              (PathSegment.Key name)
+                              (DecodeError.make
+                                  DecodeCode.OutOfRange
+                                  "each name once"
+                                  ("argument '" + name + "' is given more than once")) ]
+                    else
+                        Decoder.undeclared declared (JObj [ name, v ]))
+                |> List.concat
+
+            let read =
+                holes
+                |> List.choose (fun h ->
+                    match members |> List.tryFind (fun (n, _) -> n = h.Name), h.Space with
+                    | Some(_, v), Some space ->
+                        Some(
+                            Function.readArgument space v
+                            |> Result.map (fun spelled -> h.Name, spelled)
+                            |> Result.mapError (DecodeError.under (PathSegment.Key h.Name))
+                        )
+                    | None, _ when h.Required -> Some(Error(Decoder.missing h.Name))
+                    | _ -> None)
+
+            let faults =
+                memberFaults
+                @ (read
+                   |> List.choose (function
+                       | Error e -> Some e
+                       | Ok _ -> None))
+
+            match faults with
+            | [] ->
+                Ok(
+                    read
+                    |> List.choose (function
+                        | Ok arg -> Some arg
+                        | Error _ -> None)
+                )
+            | _ -> Error faults
+        | other -> Error [ Decoder.wrongKind "object" other ]
+
+    /// `decodeArgsJson` over text, parsed strictly: text that is not JSON, or that repeats a member,
+    /// is the parser's one refusal, at the root.
+    let decodeArgs (c: Capability) (s: string) : Result<(string * string) list, DecodeError list> =
+        match Decoder.parse ReadOptions.strict s with
+        | Error e -> Error [ e ]
+        | Ok el -> decodeArgsJson c el
+
     // ---- Deferred<'T> async-result envelope (Phase 32) ----
     // Phase 551: the envelope's codec is DERIVED (`CapabilitySeamCodec.encodeDeferred` /
     // `decodeDeferred` / `decodeDeferredStrict`, typed over the payload's codec); these are its text

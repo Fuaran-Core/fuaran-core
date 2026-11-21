@@ -1,5 +1,320 @@
 namespace Fuaran.Core
 
+/// A reading of the JSON Schema keywords Core's writers emit (Phase 714, DECISIONS.md D282) — the
+/// judge the argument-object and emission laws hold a reader to. It is written from the JSON Schema
+/// meaning of each keyword and shares no code with any reader it judges: `type`, `enum`, `const`,
+/// `minimum` / `maximum`, `minLength` / `maxLength` (counted in UTF-16 code units, the unit Core's
+/// `StringLen` declares, D282.5), `properties`, `required`, `additionalProperties`, `items`, `oneOf`,
+/// `anyOf`, `allOf` and a `$ref` into the root's `$defs`. Annotations (`title`, `description`,
+/// `$schema`, `$defs`, `default`, `examples`) and `x-` members are read past. Any other keyword is
+/// answered `Error`, naming it: a keyword this reading cannot interpret is never passed over.
+module internal SchemaReading =
+
+    let private number (v: JVal) : float option =
+        match v with
+        | JInt n -> Some(float n)
+        | JFloat f -> Some f
+        | _ -> None
+
+    /// JSON equality, as `enum` and `const` compare: numbers by value, objects by member set.
+    let rec jsonEqual (a: JVal) (b: JVal) : bool =
+        match a, b with
+        | (JInt _ | JFloat _), (JInt _ | JFloat _) -> number a = number b
+        | JStr x, JStr y -> x = y
+        | JBool x, JBool y -> x = y
+        | JArr xs, JArr ys -> List.length xs = List.length ys && List.forall2 jsonEqual xs ys
+        | JObj xs, JObj ys ->
+            List.length xs = List.length ys
+            && xs
+               |> List.forall (fun (k, x) ->
+                   match ys |> List.tryFind (fun (k', _) -> k' = k) with
+                   | Some(_, y) -> jsonEqual x y
+                   | None -> false)
+        | _ -> false
+
+    let private hasType (t: string) (v: JVal) : bool =
+        match t, v with
+        | "object", JObj _
+        | "array", JArr _
+        | "string", JStr _
+        | "boolean", JBool _
+        | "number", (JInt _ | JFloat _)
+        | "integer", JInt _ -> true
+        | "integer", JFloat f ->
+            not (System.Double.IsNaN f || System.Double.IsInfinity f)
+            && System.Math.Floor f = f
+        | _ -> false
+
+    let private annotations =
+        set [ "title"; "description"; "$schema"; "$defs"; "default"; "examples" ]
+
+    let private all (rs: Result<bool, string> list) : Result<bool, string> =
+        rs
+        |> List.fold
+            (fun acc r ->
+                match acc, r with
+                | Error e, _ -> Error e
+                | Ok _, Error e -> Error e
+                | Ok a, Ok b -> Ok(a && b))
+            (Ok true)
+
+    let private count (rs: Result<bool, string> list) : Result<int, string> =
+        rs
+        |> List.fold
+            (fun acc r ->
+                match acc, r with
+                | Error e, _ -> Error e
+                | Ok _, Error e -> Error e
+                | Ok n, Ok b -> Ok(if b then n + 1 else n))
+            (Ok 0)
+
+    /// Does `schema` admit `v`, with `$ref`s resolved against `root`? An object instance holding a
+    /// repeated member is no JSON Schema instance and is admitted by nothing.
+    let rec admitsUnder (root: JVal) (schema: JVal) (v: JVal) : Result<bool, string> =
+        match schema with
+        | JBool b -> Ok b
+        | JObj keywords ->
+            let named (k: string) =
+                keywords |> List.tryFind (fun (n, _) -> n = k) |> Option.map snd
+
+            let repeated =
+                match v with
+                | JObj ms -> (ms |> List.map fst |> List.distinct |> List.length) <> List.length ms
+                | _ -> false
+
+            if repeated then
+                Ok false
+            else
+                keywords
+                |> List.map (fun (k, arg) ->
+                    match k, arg with
+                    | _ when annotations.Contains k || k.StartsWith("x-", System.StringComparison.Ordinal) -> Ok true
+                    | "type", JStr t -> Ok(hasType t v)
+                    | "enum", JArr xs -> Ok(xs |> List.exists (jsonEqual v))
+                    | "const", c -> Ok(jsonEqual v c)
+                    | "minimum", bound ->
+                        Ok(
+                            match number v, number bound with
+                            | Some x, Some b -> x >= b
+                            | _ -> true
+                        )
+                    | "maximum", bound ->
+                        Ok(
+                            match number v, number bound with
+                            | Some x, Some b -> x <= b
+                            | _ -> true
+                        )
+                    | "minLength", JInt n ->
+                        Ok(
+                            match v with
+                            | JStr s -> s.Length >= n
+                            | _ -> true
+                        )
+                    | "maxLength", JInt n ->
+                        Ok(
+                            match v with
+                            | JStr s -> s.Length <= n
+                            | _ -> true
+                        )
+                    | "properties", JObj props ->
+                        (match v with
+                         | JObj ms ->
+                             all
+                                 [ for (name, value) in ms do
+                                       match props |> List.tryFind (fun (p, _) -> p = name) with
+                                       | Some(_, s) -> admitsUnder root s value
+                                       | None -> Ok true ]
+                         | _ -> Ok true)
+                    | "required", JArr names ->
+                        Ok(
+                            match v with
+                            | JObj ms ->
+                                names
+                                |> List.forall (fun n ->
+                                    match n with
+                                    | JStr n -> ms |> List.exists (fun (m, _) -> m = n)
+                                    | _ -> false)
+                            | _ -> true
+                        )
+                    | "additionalProperties", extra ->
+                        (match v with
+                         | JObj ms ->
+                             let declared =
+                                 match named "properties" with
+                                 | Some(JObj props) -> props |> List.map fst
+                                 | _ -> []
+
+                             all
+                                 [ for (name, value) in ms do
+                                       if not (List.contains name declared) then
+                                           admitsUnder root extra value ]
+                         | _ -> Ok true)
+                    | "items", s ->
+                        (match v with
+                         | JArr xs -> all (xs |> List.map (admitsUnder root s))
+                         | _ -> Ok true)
+                    | "oneOf", JArr ss -> count (ss |> List.map (fun s -> admitsUnder root s v)) |> Result.map ((=) 1)
+                    | "anyOf", JArr ss -> count (ss |> List.map (fun s -> admitsUnder root s v)) |> Result.map ((<) 0)
+                    | "allOf", JArr ss -> all (ss |> List.map (fun s -> admitsUnder root s v))
+                    | "$ref", JStr reference when reference.StartsWith("#/$defs/", System.StringComparison.Ordinal) ->
+                        let name = reference.Substring 8
+
+                        let target =
+                            match root with
+                            | JObj rootMembers ->
+                                rootMembers
+                                |> List.tryFind (fun (n, _) -> n = "$defs")
+                                |> Option.bind (fun (_, defs) ->
+                                    match defs with
+                                    | JObj ds -> ds |> List.tryFind (fun (n, _) -> n = name) |> Option.map snd
+                                    | _ -> None)
+                            | _ -> None
+
+                        (match target with
+                         | Some target -> admitsUnder root target v
+                         | None -> Error("an unresolved $ref " + reference))
+                    | other, _ -> Error("the keyword '" + other + "'"))
+                |> all
+        | _ -> Error "a schema that is neither an object nor a boolean"
+
+    /// Does `schema`, its own root, admit `v`?
+    let admits (schema: JVal) (v: JVal) : Result<bool, string> = admitsUnder schema schema v
+
+/// Drawn signatures and drawn argument objects for the argument-object law (Phase 714): every hole
+/// kind and every value space, and for each hole a value its space admits on most draws and, on
+/// the rest, a value past a bound or of another JSON kind (a stringified number, a fractional one
+/// for an integer, a stringified tree, a tree with no `kind`); an integral number for an integer
+/// hole; a string outside the Basic Multilingual Plane against a length bound; and objects with a
+/// required hole left out, an undeclared member, an action hole's name, a member repeated, or no
+/// object at all.
+module internal ArgumentObjects =
+
+    let private drawSpace (rng: LawKit.Draws) : ValueSpace =
+        match rng.IntBelow 9 with
+        | 0 ->
+            let lo = rng.IntBelow 20 - 10
+            IntRange(lo, lo + rng.IntBelow 10)
+        | 1 ->
+            let lo = float (rng.IntBelow 8 - 4) / 4.0
+            FloatRange(lo, lo + float (rng.IntBelow 8) / 4.0)
+        | 2 ->
+            let lo = rng.IntBelow 3
+            StringLen(lo, lo + rng.IntBelow 4)
+        | 3 -> Enum(List.take (1 + rng.IntBelow 3) [ "red"; "green"; "blue" ])
+        | 4 -> AnyString
+        | 5 -> SlotTree None
+        | 6 -> SlotTree(Some "para")
+        | 7 -> Document None
+        | _ -> Document(Some "Order")
+
+    /// A signature of one to four holes, named `a`, `b`, `s.c` (a name qualified by a slot) and `d`.
+    let drawSignature (rng: LawKit.Draws) (i: int) : Signature =
+        let names = [ "a"; "b"; "s.c"; "d" ]
+        let n = 1 + rng.IntBelow 4
+
+        { Name = "args" + string i
+          Holes =
+            [ for k in 0 .. n - 1 ->
+                  let kind =
+                      match rng.IntBelow 8 with
+                      | 0 -> RepeatHole(IntRange(0, 3))
+                      | 1 -> SlotHole(if rng.IntBelow 2 = 0 then None else Some "para")
+                      | 2 -> ActionHole Effect.pureDeterministic
+                      | _ -> ValueHole(drawSpace rng)
+
+                  // An action hole is never required, as `SigEntry.ofHoleDecl` derives it: a host binds
+                  // it and no invocation can.
+                  let required = rng.IntBelow 3 > 0
+
+                  { Addr = "h" + string k
+                    Name = List.item k names
+                    Kind = kind
+                    Required =
+                      match kind with
+                      | ActionHole _ -> false
+                      | _ -> required } ]
+          Effect = Effect.pureDeterministic }
+
+    let private drawValue (rng: LawKit.Draws) (s: ValueSpace) : JVal =
+        let k = rng.IntBelow 6
+
+        match s with
+        | IntRange(lo, hi) ->
+            match k with
+            | 0 -> JInt(hi + 1)
+            | 1 -> JStr(string lo)
+            | 2 -> JFloat(float lo + 0.5)
+            | 3 -> JFloat(float (lo + rng.IntBelow(hi - lo + 1)))
+            | _ -> JInt(lo + rng.IntBelow(hi - lo + 1))
+        | FloatRange(lo, hi) ->
+            match k with
+            | 0 -> JFloat(hi + 0.25)
+            | 1 -> JStr "0.5"
+            | 2 -> JInt(int (ceil lo))
+            | _ -> JFloat(lo + (hi - lo) * float (rng.IntBelow 5) / 4.0)
+        | StringLen(lo, hi) ->
+            match k with
+            | 0 -> JStr(String.replicate (hi + 1) "x")
+            | 1 -> JInt lo
+            | 2 -> JStr "\U0001F600"
+            | _ -> JStr(String.replicate (lo + rng.IntBelow(hi - lo + 1)) "y")
+        | Enum xs ->
+            match k with
+            | 0 -> JStr "mauve"
+            | 1 -> JInt 1
+            | _ -> JStr(rng.Choose xs)
+        | AnyString ->
+            match k with
+            | 0 -> JBool true
+            | 1 -> JObj []
+            | _ -> JStr "any"
+        | SlotTree c ->
+            let kind = defaultArg c "note"
+
+            match k with
+            | 0 -> JStr("{\"kind\":\"" + kind + "\"}")
+            | 1 -> JObj [ "kind", JStr "other" ]
+            | 2 -> JObj [ "children", JArr [] ]
+            | 3 -> JObj [ "kind", JInt 1 ]
+            | _ -> JObj [ "kind", JStr kind; "children", JArr [] ]
+        | Document _ ->
+            match k with
+            | 0 -> JArr [ JInt 1; JStr "x" ]
+            | 1 -> JStr "text"
+            | 2 -> JFloat 2.5
+            | _ -> JObj [ "b", JInt 1; "a", JBool false ]
+
+    /// An argument object for `sg`: a required hole left out on one draw in eight, an optional one
+    /// on half, an action hole's name sent on a quarter; on one draw in twelve no object, and on
+    /// one each an undeclared member or a member repeated.
+    let drawObject (rng: LawKit.Draws) (sg: Signature) : JVal =
+        match rng.IntBelow 12 with
+        | 0 -> JArr []
+        | k ->
+            let members =
+                [ for h in sg.Holes do
+                      match h.Space with
+                      | Some s ->
+                          let omit =
+                              if h.Required then
+                                  rng.IntBelow 8 = 0
+                              else
+                                  rng.IntBelow 2 = 0
+
+                          if not omit then
+                              h.Name, drawValue rng s
+                      | None ->
+                          if rng.IntBelow 4 = 0 then
+                              h.Name, JStr "handler" ]
+
+            let extra =
+                match k, members with
+                | 1, _ -> [ "zz", JInt 0 ]
+                | 2, first :: _ -> [ first ]
+                | _ -> []
+
+            JObj(members @ extra)
+
 /// The invocable-capability seam family (Phase 30; `SeamLaws` until the Phase 388 split along its banners).
 module internal CapabilitySeamLaws =
     /// The invocable-capability laws (Phase 30) — the teeth on `Capability` / `Registry` and their
@@ -77,6 +392,10 @@ module internal CapabilitySeamLaws =
         let slotted =
             LawKit.LawCell
                 "a capability over a slotted artifact is invocable; a non-conforming slot arg is refused by name"
+
+        let argumentObjects =
+            LawKit.LawCell
+                "a model's argument object: toJsonSchema admits it exactly when decodeArgs reads it, and what decodeArgs reads validateArgs admits (Phase 714)"
 
         // value-codec for the captured realized value (an int — the stand-in for a model output).
         let encodeV (v: int) : string = string v
@@ -425,6 +744,65 @@ module internal CapabilitySeamLaws =
                      | other ->
                          failSlotted (sprintf "a scalar bound to a slot was not refused as uninvocable: %A" other)))
 
+        // Phase 714 (D282): a model's argument object, judged by the schema the model is given. On a
+        // stream of its own (`Fork`), so the draws above, which the published vectors reproduce, are
+        // unchanged.
+        let admittedDraws = ref 0
+        let refusedDraws = ref 0
+
+        LawKit.run (runner.Fork 714) iterations (fun rng i at ->
+            let sg = ArgumentObjects.drawSignature rng i
+            let cap = Capability.create ("args-" + string i) sg Server Returns.Nothing
+            let schema = Function.toJsonSchema sg
+            let object = ArgumentObjects.drawObject rng sg
+
+            match SchemaReading.admits schema object with
+            | Error unread -> argumentObjects.Fail(at ("the schema reading cannot interpret " + unread))
+            | Ok admitted ->
+                let read = CapabilityCodec.decodeArgsJson cap object
+
+                let readIt =
+                    match read with
+                    | Ok _ -> true
+                    | Error _ -> false
+
+                if admitted then
+                    admittedDraws.Value <- admittedDraws.Value + 1
+                else
+                    refusedDraws.Value <- refusedDraws.Value + 1
+
+                argumentObjects.Check(
+                    (admitted = readIt),
+                    fun () ->
+                        at (
+                            sprintf
+                                "the schema %s %s, and decodeArgs answers %A; schema %s"
+                                (if admitted then "admits" else "refuses")
+                                (Json.render object)
+                                read
+                                (Json.render schema)
+                        )
+                )
+
+                match read with
+                | Ok args ->
+                    let validated = Capability.validateArgs cap args
+
+                    argumentObjects.Check(
+                        (validated = Ok()),
+                        fun () -> at (sprintf "decodeArgs read %A, which validateArgs refuses: %A" args validated)
+                    )
+                | Error _ -> ())
+
+        argumentObjects.Check(
+            (admittedDraws.Value > 0 && refusedDraws.Value > 0),
+            fun () ->
+                sprintf
+                    "the draws reached %d admitted and %d refused argument objects; the law needs both"
+                    admittedDraws.Value
+                    refusedDraws.Value
+        )
+
         LawKit.results
             [ validation
               replay
@@ -436,7 +814,8 @@ module internal CapabilitySeamLaws =
               typedFailure
               slotted
               capturedEffect
-              underDeclared ]
+              underDeclared
+              argumentObjects ]
 
     /// The capability-seam laws at a DOMAIN'S seam (Phase 246). `capabilityLaws` beside it builds
     /// its own capabilities from the seed and certifies Core's `CapabilityRegistry.dispatch`; it cannot see a
