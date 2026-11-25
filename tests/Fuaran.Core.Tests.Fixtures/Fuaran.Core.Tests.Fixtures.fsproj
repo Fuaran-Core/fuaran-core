@@ -40,6 +40,7 @@
     <Compile Include="ContractsIdl.fs" />
     <Compile Include="ContractsCorpus.fs" />
     <Compile Include="CertificationVectors.fs" />
+    <Compile Include="LayoutIdl.fs" />
     <Compile Include="FStarModels.fs" />
     <Compile Include="GeneratedModules.fs" />
     <Compile Include="VectorOracle.fs" />

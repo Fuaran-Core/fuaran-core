@@ -16,6 +16,9 @@ module Fuaran.Core.Tests.LayoutIdl
 // identically by both, which is the phase's acceptance: the reshape is the host's, never the wire's.
 // `LayoutGenerated.fs` is the F# emitted for `layout` with the collecting decoders requested,
 // committed and held to the generator by `IdlLayoutTests`.
+//
+// Phase 722 — in the fixtures library, because `layout` is also a certification vocabulary of the
+// F* target: `FStarModels` generates `proofs/LayoutVocabulary.fst` and its proofs from it.
 // ---------------------------------------------------------------------------
 
 open Fuaran.Core

@@ -3058,6 +3058,51 @@
       }
     },
     {
+      "id": "layout-vocabulary-generated-model",
+      "level": "proved",
+      "statement": "The GENERATED model of the INLINE declarations — `proofs/LayoutVocabulary.fst`: the layout vocabulary (`tests/Fuaran.Core.Tests.Fixtures/LayoutIdl.fs`), which declares an inline record, a record-payload case and two presence-keyed unions, one synthesising a member, emitted by `FStarTarget.vocabularyModuleFrom`. An inline record's members are stated on its holder. A holder of a presence-keyed union has one constructor per choice of case, each the members the wire object carries under that choice, and its decoder asks the union's reading of the holder's own object: the cases whose key is present, less each whose key another present case synthesises; one left is that case, none is no case, two is refused. A synthesised member is written at its declared value and the decoder refuses it absent or at another value. Every decoder is `Tot` on an arbitrary `jval`, by the `get_prop` termination argument the `vocabulary-generated-model` row states. Both kinds are modelled. Proved with no assume and no admit under --report_assumes error, and held to a fresh generation by the Proofs.Vocabulary family.",
+      "boundary": "A model of the WIRE, on the default wire shape: the model's type for a holder is one constructor per choice of case, not the host's field holding a union value, and a synthesised member is carried as `unit`. The reading (`pick_u_<union>`) is a definition transcribed by the generator from the declaration's rules; that it is the interpreter's reading is the generator's construction and the suite's vectors, not a theorem here. A synthesised value is compared as the `jval` it is: the model has no render step, so key order inside it is the literal's. A union whose case declares another case's key as its own member is refused by name, because its round trip is false; so is a synthesised value holding a number, which the opaque numeric model cannot spell. CHECKED but not EXTRACTED, for the reason `check.ps1`'s `$proofOnly` note gives; the claim is within the model.",
+      "phase": "fuaran-core#722",
+      "evidence": {
+        "theorem": "dec_node",
+        "model": "proofs/LayoutVocabulary.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.vocabularyModuleFrom"
+        ]
+      }
+    },
+    {
+      "id": "layout-vocabulary-round-trip",
+      "level": "proved",
+      "statement": "The ROUND TRIP over `LayoutVocabulary`, GENERATED and COMMITTED: `rt_node` in `proofs/LayoutVocabularyProofs.fst` proves `dec_node (enc_node x) == Ok x` for every value of every modelled type — so for each of the six constructors of `Grid` (no row identity, `rowKey` or `rowKeyField`; `source`, or `staticRows` beside the synthesised `source`) and for the record-payload case of `Field`, the object the encoder writes is read back as the same constructor with the same members. By the mutual induction and the lemma shapes of the `vocabulary-round-trip` row, plus one lemma per constructor and union stating the reading off the encoded object (`pk_<type>__<constructor>__<field>`), with no in-file option beyond the leg's own.",
+      "boundary": "Over the layout vocabulary only. It is the ACCEPTANCE half of the guarantee: it speaks of what the encoder writes, and says nothing of a document no encoder writes; the `layout-vocabulary-reading-decides` row is the other half. A round trip in the model: it says nothing of any host's codec. NOT claimed: the `wf` characterisation, for the reason the `doc-vocabulary-round-trip` row gives.",
+      "phase": "fuaran-core#722",
+      "evidence": {
+        "theorem": "rt_node",
+        "model": "proofs/LayoutVocabularyProofs.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.proofsModuleFrom"
+        ]
+      }
+    },
+    {
+      "id": "layout-vocabulary-reading-decides",
+      "level": "proved",
+      "statement": "THE READING DECIDES, over `LayoutVocabulary`, GENERATED and COMMITTED: `dec_vkind_reads` in `proofs/LayoutVocabularyProofs.fst` proves, for EVERY input `el`, that `dec_vkind el` answers a constructor holding a case of a presence-keyed union only where that union's reading of `el`'s own keys picked that case (`pick_u_row_identity el`, `pick_u_grid_rows el`), and only where each member the case synthesises is present at its declared value (`get_prop \"source\" el == Ok` the declared `jval`). So a document with two cases left, or with none where the union is required, or with a synthesised member absent or at another value, is the answer of no constructor and is refused; and no document is read as two constructors of one kind.",
+      "boundary": "Over the layout vocabulary's kinds only, and in the model. It states which constructor an ACCEPTED document is; it does not state the refusal's code or path, which the model's string errors do not carry and the hosts' conformance vectors do. That the reading function is the interpreter's is not a theorem here (see the `layout-vocabulary-generated-model` row's boundary).",
+      "phase": "fuaran-core#722",
+      "evidence": {
+        "theorem": "dec_vkind_reads",
+        "model": "proofs/LayoutVocabularyProofs.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.proofsModuleFrom"
+        ]
+      }
+    },
+    {
       "id": "evolution-classify-sound",
       "level": "proved",
       "statement": "WIRE_FORMAT section 15.4's classifier is SOUND, and the three theorems beside it stand on that. `proofs/WireVersioning.fst` models `Versioning.classify` / `bump` / `negotiate` clause for clause and proves `classify_sound`: `classify` answers `Additive` ONLY when every tag of the before-vocabulary survives into the after-vocabulary. The function computes a LIST — a difference — where the table talks about a SUBSET, and the two are the same statement only through an induction, which is the module's whole substance; `classify_additive_is_sub` packages the quantified form. `rename_is_breaking` is the row section 15.4 calls out by name, because a rename LOOKS additive from the new vocabulary's side: a tag present before and absent after forces `Breaking` whatever else the change added, and nothing about the addition enters the proof. `breaking_bump_is_foreign` and `additive_bump_is_behind` carry the verdict through to the consequence a reader acts on — a breaking verdict mints a new major and the old consumer is `Foreign` and refuses; an additive verdict keeps the major and that consumer is `Behind` and tolerates. Section 15.4's FIELD rows are proved beside them, at the composition that decides them: `classify_field_add` models `Diff.classifyFieldAdd` clause for clause, `evolution_of` models `Diff.evolution`'s partition of each row's subject by severity, and `optional_field_addition_bumps_the_minor` carries the result through `bump` and `negotiate` — an added optional field introduces a subject, the verdict is a NON-EMPTY `Additive`, the minor moves and an old consumer is `Behind`. `required_field_addition_is_foreign_not_behind` states the required row: a required field added retires its subject, moves the major and leaves an old consumer `Foreign` — a minor would rest on the premise that every old document still decodes, which `field_additive_monotone` refutes — and `host_only_field_addition_moves_no_profile` states the one that genuinely moves nothing, which is what makes the other two a measurement rather than a constant. `tag_delta_is_blind_to_field_additions` keeps the other half: the kind-tag delta alone cannot decide any of them. Proved with no assume and no admit under --report_assumes error.",

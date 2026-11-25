@@ -65,6 +65,11 @@ module internal FStarModel =
         /// declared type would put the tuple inside the recursive family, which the model does not do;
         /// it is refused by name.
         | STuple of Slot list
+        /// Phase 722 (D220.3) — a member a presence-keyed case SYNTHESISES: the wire carries one
+        /// declared value there, spelled here as the F* `jval` literal of the interpreter's encoding
+        /// of it. Like a sentinel it holds no information, so the model carries `unit`; unlike one,
+        /// the decoder compares what it reads and refuses another value, as the reading does.
+        | SConst of wire: string
 
     /// A member of the model: one declared field with its resolved slot. A host-only field
     /// has no wire projection and never becomes a member — the model is of the WIRE.
@@ -80,15 +85,16 @@ module internal FStarModel =
             /// The declared optionality — what the one presence rule ([[Decl.memberValue]]) reads.
             Opt: Optionality
             /// Phase 722 — the field of the holder this member was laid out from, when it is a member
-            /// of an INLINE record (D220): the record has no object on the wire, so its members are
-            /// the holder's own in the model, and an authored value of the holder still carries them
+            /// of an INLINE declaration (D220): an inline record or the picked case of a
+            /// presence-keyed union. Neither has an object on the wire, so its members are the
+            /// holder's own in the model, and an authored value of the holder still carries them
             /// one level down, under this field ([[authoredFor]]). `None` for the holder's own member.
             Held: string option
         }
 
     /// The authored field list the member `m` of a holder is looked up in: the holder's own, or,
-    /// for a member laid out from an inline record, the record value the holder carries at
-    /// [[Member.Held]] (nothing when the holder carries none there).
+    /// for a member laid out from an inline declaration, the record value or the case value the
+    /// holder carries at [[Member.Held]] (nothing when the holder carries none there).
     let authoredFor (m: Member) (authored: (string * IdlValue) list) : (string * IdlValue) list =
         match m.Held with
         | None -> authored
@@ -96,9 +102,31 @@ module internal FStarModel =
             authored
             |> List.tryPick (fun (n, v) ->
                 match v with
-                | VRecord inner when n = held -> Some inner
+                | VRecord inner
+                | VUnion(_, inner) when n = held -> Some inner
                 | _ -> None)
             |> Option.defaultValue []
+
+    /// Phase 722 (D220.3) — what one field holding a PRESENCE-KEYED union reads as in one
+    /// constructor of its holder: the case whose members that constructor carries, or no case (an
+    /// optional union with no key present). The wire object has one shape per choice, so the model
+    /// states one constructor per choice ([[fieldVariants]]).
+    type Pick =
+        {
+            /// The holder's field.
+            Field: string
+            /// The union the field holds, by its declared name.
+            Union: string
+            Case: string option
+        }
+
+    /// The case of the union at `field` an authored value of the holder carries, if it carries one.
+    let authoredCase (field: string) (authored: (string * IdlValue) list) : string option =
+        authored
+        |> List.tryPick (fun (n, v) ->
+            match v with
+            | VUnion(case, _) when n = field -> Some case
+            | _ -> None)
 
     // -----------------------------------------------------------------------
     // 2. Resolution — IDL type to slot, with the refusals.
@@ -243,6 +271,7 @@ module internal FStarModel =
         | SText n -> "t_" + snake n
         // The arity leads, so a nested tuple's name reads one way (a prefix code over the names).
         | STuple cs -> sprintf "tp%d_" cs.Length + (cs |> List.map slotName |> String.concat "_")
+        | SConst _ -> "const"
 
     /// The F* TYPE EXPRESSION of a slot. Every declared type is parameterised by the two
     /// opaque numeric carriers, because `jval` is — see `WireDecode`'s header on opacity.
@@ -253,7 +282,8 @@ module internal FStarModel =
         | SBool -> "bool"
         | SFloat -> "flt"
         | SJson -> "jval num flt"
-        | SSentinel _ -> "unit"
+        | SSentinel _
+        | SConst _ -> "unit"
         | SEnum n -> "e_" + snake n
         | SRecord _
         | SUnion _
@@ -431,6 +461,55 @@ module internal FStarModel =
     /// is a string REFINED by its grammar, so a literal there must be proved to satisfy it, which no
     /// term this emitter prints discharges — the boundary the vectors already state for a value at
     /// those types ([[FStarVectors]]).
+    /// A wire value as an F* `jval` term, or `None` when it holds a number: the model's `num` and
+    /// `flt` are OPAQUE, so no literal spells one.
+    let rec private jvalTerm (j: JVal) : string option =
+        let all (xs: string option list) =
+            if List.forall Option.isSome xs then
+                Some(List.choose id xs)
+            else
+                None
+
+        match j with
+        | JStr s -> Some("(JStr " + lit s + ")")
+        | JBool b -> Some(if b then "(JBool true)" else "(JBool false)")
+        | JInt _
+        | JFloat _ -> None
+        | JArr xs ->
+            all (List.map jvalTerm xs)
+            |> Option.map (fun ts -> "(JArr [" + String.concat "; " ts + "])")
+        | JObj ms ->
+            all (
+                ms
+                |> List.map (fun (k, x) -> jvalTerm x |> Option.map (fun t -> "(" + lit k + ", " + t + ")"))
+            )
+            |> Option.map (fun ts -> "(JObj [" + String.concat "; " ts + "])")
+
+    /// A wire value with every object's keys in the vocabulary's declared KEY ORDER: Ordinal-sorted
+    /// under `Sorted`, as the canonical writer leaves it, and as the encoder built it under `Declared`.
+    let rec private inKeyOrder (order: KeyOrder) (j: JVal) : JVal =
+        match j with
+        | JArr xs -> JArr(List.map (inKeyOrder order) xs)
+        | JObj ms ->
+            let inner = ms |> List.map (fun (k, x) -> k, inKeyOrder order x)
+
+            match order with
+            | KeyOrder.Sorted -> JObj(inner |> List.sortWith (fun (a, _) (b, _) -> System.String.CompareOrdinal(a, b)))
+            | KeyOrder.Declared -> JObj inner
+        | other -> other
+
+    /// The suffix a constructor's name takes for the cases its presence-keyed fields hold: each
+    /// picked case's name in field order, `No<Union>` where an optional union holds none. Empty
+    /// for a constructor holding no such field, so its name is the one it always had.
+    let variantSuffix (picks: Pick list) : string =
+        picks
+        |> List.map (fun p ->
+            "__"
+            + (match p.Case with
+               | Some case -> case
+               | None -> "No" + p.Union))
+        |> String.concat ""
+
     let rec private defaultLit (idl: Idl) (where: string) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
         Decl.literal idl t v
         |> Result.bind (fun l ->
@@ -461,45 +540,29 @@ module internal FStarModel =
                 |> sequenceR
                 |> Result.map (fun xs -> "(" + String.concat ", " xs + ")")
             | Literal.Json j ->
-                let rec term (j: JVal) : string option =
-                    let all (xs: string option list) =
-                        if List.forall Option.isSome xs then
-                            Some(List.choose id xs)
-                        else
-                            None
-
-                    match j with
-                    | JStr s -> Some("(JStr " + lit s + ")")
-                    | JBool b -> Some(if b then "(JBool true)" else "(JBool false)")
-                    | JInt _
-                    | JFloat _ -> None
-                    | JArr xs ->
-                        all (List.map term xs)
-                        |> Option.map (fun ts -> "(JArr [" + String.concat "; " ts + "])")
-                    | JObj ms ->
-                        all (
-                            ms
-                            |> List.map (fun (k, x) -> term x |> Option.map (fun t -> "(" + lit k + ", " + t + ")"))
-                        )
-                        |> Option.map (fun ts -> "(JObj [" + String.concat "; " ts + "])")
-
-                match term j with
+                match jvalTerm j with
                 | Some t -> Ok t
                 | None ->
                     unmodellable
                         (sprintf "a declared JSON default holding a number the opaque numeric model cannot spell: %A" v)
                         where
             | Literal.Record(r, authored) ->
-                fieldMembers idl Map.empty (where + " (default)") r.Fields
-                |> Result.bind (fun ms -> ctorLit idl where (ctorName (slotName (SRecord r.Name)) "Mk") ms authored)
+                variantFor idl Map.empty (where + " (default)") r.Fields authored
+                |> Result.bind (fun (picks, ms) ->
+                    ctorLit idl where (ctorName (slotName (SRecord r.Name)) ("Mk" + variantSuffix picks)) ms authored)
             | Literal.Union(u, args, c, authored) ->
                 let subst = TypeParams.bind u args |> Option.defaultValue Map.empty
 
                 slotOf where t
                 |> Result.bind (fun s ->
-                    fieldMembers idl subst (where + " (default)") c.Fields
-                    |> Result.bind (fun ms ->
-                        ctorLit idl where (ctorName (slotName s) (u.WireTagOf c.Tag)) ms authored)))
+                    variantFor idl subst (where + " (default)") c.Fields authored
+                    |> Result.bind (fun (picks, ms) ->
+                        ctorLit
+                            idl
+                            where
+                            (ctorName (slotName s) (u.WireTagOf c.Tag + variantSuffix picks))
+                            ms
+                            authored)))
 
     /// A constructor literal for a declared default, with each member taken from the authored
     /// field list under its own presence rule — the constructor's argument order is the declared
@@ -531,15 +594,17 @@ module internal FStarModel =
                 // model's members carry no host-only field, so the only refusal is the required
                 // member with no value.
                 let part =
-                    match Decl.memberValue ValueSite.Literal m.Opt authoredValue with
-                    | MemberValue.Absent -> Ok "None"
-                    | MemberValue.IdentityDefault d -> defaultLit idl where m.Type d
-                    | MemberValue.Optional av ->
+                    match m.Slot, Decl.memberValue ValueSite.Literal m.Opt authoredValue with
+                    // A synthesised member carries nothing: the wire value is the declaration's.
+                    | SConst _, _ -> Ok "()"
+                    | _, MemberValue.Absent -> Ok "None"
+                    | _, MemberValue.IdentityDefault d -> defaultLit idl where m.Type d
+                    | _, MemberValue.Optional av ->
                         defaultLit idl where m.Type av |> Result.map (fun e -> "(Some " + e + ")")
-                    | MemberValue.Carries av -> defaultLit idl where m.Type av |> Result.map (fun e -> "(" + e + ")")
-                    | MemberValue.Refused _
-                    | MemberValue.Placeholder
-                    | MemberValue.Parameter ->
+                    | _, MemberValue.Carries av -> defaultLit idl where m.Type av |> Result.map (fun e -> "(" + e + ")")
+                    | _, MemberValue.Refused _
+                    | _, MemberValue.Placeholder
+                    | _, MemberValue.Parameter ->
                         unmodellable ("a default omitting the required member '" + m.Name + "'") where
 
                 match part with
@@ -612,20 +677,181 @@ module internal FStarModel =
 
         go [] fs
 
+    /// Phase 722 (DECISIONS.md D220.3, D284) — one declared field list as the model's CONSTRUCTORS:
+    /// the members [[fieldMembers]] yields, once for each choice of case the list's PRESENCE-KEYED
+    /// fields admit, with the choice. A presence-keyed union has no object and no tag on the wire:
+    /// the holding object carries the picked case's members and the members that case synthesises,
+    /// in the union's roster order where the field stands, and nothing of the union when an optional
+    /// one holds no case. So the holder's object has one shape per choice, and the model states
+    /// one constructor per choice, each the members of that shape; a list holding no such field is
+    /// its one constructor with no pick, exactly as before.
+    ///
+    /// A synthesised member is a member of the shape at its declared value ([[SConst]]). A case that
+    /// declares ANOTHER case's key as a member of its own is refused by name: a value carrying that
+    /// member writes both keys, the reading refuses two cases left (D220.3), and `dec (enc x) == Ok x`
+    /// is false of that value, so no model of the union has the round trip.
+    and private fieldVariants
+        (idl: Idl)
+        (subst: Map<string, IdlType>)
+        (where: string)
+        (fs: IdlField list)
+        : Result<(Pick list * Member list) list, CodegenError> =
+        let alternatives (f: IdlField) (u: IdlUnion) (keyed: KeyedCase list) =
+            let at = where + "." + f.Name
+            let roster = Decl.keyedRoster u
+
+            let position (name: string) =
+                roster |> List.tryFindIndex ((=) name) |> Option.defaultValue roster.Length
+
+            let synthesisedMember (case: IdlUnionCase) (name: string, wire: JVal) : Result<Member, CodegenError> =
+                match jvalTerm (inKeyOrder idl.Wire.KeyOrder wire) with
+                | Some term ->
+                    Ok
+                        { Name = name
+                          Type =
+                            u.Cases
+                            |> List.tryPick (fun o -> o.Fields |> List.tryFind (fun g -> g.Name = name))
+                            |> Option.map _.Type
+                            |> Option.defaultValue TJson
+                          Slot = SConst term
+                          Presence = None
+                          Opt = Required
+                          Held = None }
+                | None ->
+                    unmodellable
+                        (sprintf
+                            "the synthesised member '%s' of union '%s' case '%s', whose value holds a number the opaque numeric model cannot spell"
+                            name
+                            u.Name
+                            case.Tag)
+                        at
+
+            let ofCase (case: IdlUnionCase) : Result<Pick list * Member list, CodegenError> =
+                let overlap =
+                    keyed
+                    |> List.tryFind (fun o ->
+                        o.Case <> case.Tag
+                        && case.Fields |> List.exists (fun g -> g.Opt <> HostOnly && g.Name = o.Key))
+
+                match overlap, keyed |> List.tryFind (fun k -> k.Case = case.Tag) with
+                | Some other, _ ->
+                    unmodellable
+                        (sprintf
+                            "a presence-keyed union '%s' whose case '%s' declares the member '%s', the key of case '%s': a value carrying it writes both keys, which the reading refuses, so its round trip does not hold"
+                            u.Name
+                            case.Tag
+                            other.Key
+                            other.Case)
+                        at
+                | None, None ->
+                    unmodellable
+                        (sprintf "a presence-keyed union '%s' naming no key for its case '%s'" u.Name case.Tag)
+                        at
+                | None, Some rule ->
+                    fieldMembers idl subst (at + "." + case.Tag) case.Fields
+                    |> Result.bind (fun own ->
+                        Decl.synthesisedJson idl u rule
+                        |> Result.bind (List.map (synthesisedMember case) >> sequenceR)
+                        |> Result.map (fun synthesised ->
+                            [ { Field = f.Name
+                                Union = u.Name
+                                Case = Some case.Tag } ],
+                            (own |> List.map (fun m -> { m with Held = Some f.Name })) @ synthesised
+                            |> List.sortBy (fun m -> position m.Name)))
+
+            (if f.Opt = Optional then
+                 [ Ok(
+                       [ { Field = f.Name
+                           Union = u.Name
+                           Case = None } ],
+                       []
+                   ) ]
+             else
+                 [])
+            @ (u.Cases |> List.map ofCase)
+            |> sequenceR
+
+        let rec go (acc: (Pick list * Member list) list) (rest: IdlField list) =
+            match rest with
+            | [] -> Ok acc
+            | (f: IdlField) :: t ->
+                let here =
+                    match
+                        (if f.Opt = HostOnly then
+                             None
+                         else
+                             Decl.inlineSlot idl f.Type)
+                    with
+                    | Some(InlineSlot.Keyed(u, keyed)) -> alternatives f u keyed
+                    | _ -> fieldMembers idl subst where [ f ] |> Result.map (fun ms -> [ [], ms ])
+
+                match here with
+                | Error e -> Error e
+                | Ok alts ->
+                    go
+                        [ for picks, ms in acc do
+                              for picks', ms' in alts -> picks @ picks', ms @ ms' ]
+                        t
+
+        go [ [], [] ] fs
+
+    /// The constructor of [[fieldVariants]] an authored value of the holder is a value of: the one
+    /// whose picks are the cases the value carries at its presence-keyed fields.
+    and private variantFor
+        (idl: Idl)
+        (subst: Map<string, IdlType>)
+        (where: string)
+        (fs: IdlField list)
+        (authored: (string * IdlValue) list)
+        : Result<Pick list * Member list, CodegenError> =
+        fieldVariants idl subst where fs
+        |> Result.bind (fun variants ->
+            match
+                variants
+                |> List.tryFind (fun (picks, _) ->
+                    picks |> List.forall (fun p -> authoredCase p.Field authored = p.Case))
+            with
+            | Some v -> Ok v
+            | None ->
+                unmodellable
+                    "a value holding a case its presence-keyed union does not declare, or none where one is required"
+                    where)
+
+    /// One constructor of a holder of presence-keyed unions: the wire tag its object carries (its
+    /// kind's or its case's — every constructor of one holder carries the same) and the cases it holds.
+    type Variant = { Tag: string; Picks: Pick list }
+
+    /// One presence-keyed union as the model reads it (D220.3): each case with its key and the keys
+    /// of the other cases that SYNTHESISE that key, in declaration order.
+    type Keyed =
+        { Union: string
+          Cases: (string * string * string list) list }
+
     /// The model of one kind selection: the declared types [[Decl]]'s wire reach yields, each
     /// with its members, in the reach's first-reach order. Every member list is in the
     /// vocabulary's declared KEY ORDER (Phase 293, [[orderMembers]]).
     type Model =
         {
             Order: Slot list
-            Members: Map<string, Member list>
-            /// Union slot name to (case WIRE tag, members) in declaration order (the case name under
-            /// the default tag rule; Phase 550).
+            /// Record slot name to its constructors, (label, members): `Mk` alone, or one per choice
+            /// of case when the record holds a presence-keyed union (Phase 722).
+            Records: Map<string, (string * Member list) list>
+            /// Union slot name to its constructors, (label, members), in declaration order. The label
+            /// is the case's WIRE tag (the case name under the default tag rule; Phase 550), suffixed
+            /// per choice of case when the case holds a presence-keyed union ([[Variants]]).
             Cases: Map<string, (string * Member list) list>
             /// The union slot names whose declared transparent case the model honours.
             Transparent: Map<string, string>
             Enums: string list
+            /// The kinds' constructors, (label, members): the kind's tag, suffixed per choice of case
+            /// when the kind holds a presence-keyed union ([[Variants]]).
             Kinds: (string * Member list) list
+            /// Phase 722 — the constructors that hold a presence-keyed union, by owner (`vkind`, or
+            /// the record's or union's slot name) and label. A constructor absent from it holds none
+            /// and its label is its wire tag.
+            Variants: Map<string * string, Variant>
+            /// The presence-keyed unions the selection reaches, in first-reach order.
+            Keyed: Keyed list
             Envelope: Member list
             /// Phase 293 — the declared wire shape the model encodes: the node envelope's
             /// shape and the key order. Carried so the emitters need no second look at the IDL.
@@ -642,6 +868,57 @@ module internal FStarModel =
     let flatNodeMembers (c: Model) (kindMembers: Member list) =
         orderMembers c.KeyOrder (kindMembers @ c.Envelope)
 
+    /// The wire tag the constructor `label` of `owner` carries: its label, unless it is one of the
+    /// constructors a holder of a presence-keyed union has ([[Model.Variants]]).
+    let wireTag (c: Model) (owner: string) (label: string) : string =
+        match c.Variants.TryFind((owner, label)) with
+        | Some v -> v.Tag
+        | None -> label
+
+    /// The cases the constructor `label` of `owner` holds at its presence-keyed fields.
+    let picksOf (c: Model) (owner: string) (label: string) : Pick list =
+        match c.Variants.TryFind((owner, label)) with
+        | Some v -> v.Picks
+        | None -> []
+
+    /// The emitted names of one presence-keyed union's READING: the type of its answers, the
+    /// function that reads it off an object, and the answer a pick is.
+    let pickType (union: string) : string = "pk_" + slotName (SUnion(union, []))
+
+    let pickFunction (union: string) : string = "pick_" + slotName (SUnion(union, []))
+
+    let pickAnswer (p: Pick) : string =
+        match p.Case with
+        | Some case -> sprintf "PK__%s__%s" (slotName (SUnion(p.Union, []))) case
+        | None -> "PN__" + slotName (SUnion(p.Union, []))
+
+    /// The answer when two cases are left — the both-present refusal.
+    let pickBoth (union: string) : string = "PB__" + slotName (SUnion(union, []))
+
+    /// D220.3 over the keys an object carries: the cases whose key is present, less each whose key
+    /// another present case synthesises. `Ok None` when none is left, the case when one is, and
+    /// `Error` when two are.
+    let readPick (k: Keyed) (has: string -> bool) : Result<string option, unit> =
+        match k.Cases |> List.filter (fun (_, key, by) -> has key && not (List.exists has by)) with
+        | [] -> Ok None
+        | [ (case, _, _) ] -> Ok(Some case)
+        | _ -> Error()
+
+    /// The constructor among `ctors` of `owner` that a value with the wire tag `tag` is a value of,
+    /// `held` answering the case it holds at a presence-keyed field (`None` when the reading has no
+    /// answer there, which no constructor is).
+    let ctorFor
+        (c: Model)
+        (owner: string)
+        (ctors: (string * Member list) list)
+        (tag: string)
+        (held: Pick -> string option option)
+        : (string * Member list) option =
+        ctors
+        |> List.tryFind (fun (label, _) ->
+            wireTag c owner label = tag
+            && picksOf c owner label |> List.forall (fun p -> held p = Some p.Case))
+
     // -----------------------------------------------------------------------
     // 5. The model over `Decl` — the reach is Decl's; this projects it.
     // -----------------------------------------------------------------------
@@ -654,12 +931,29 @@ module internal FStarModel =
     /// is the first one met in that order.
     let private modelOf (idl: Idl) (kindTags: string list) : Result<Model, CodegenError> =
         let reach = (Decl.resolve idl Map.empty kindTags).Wire
-        let memberMap = System.Collections.Generic.Dictionary<string, Member list>()
+        let mutable envelopeMembers: Member list = []
+
+        let recordMap =
+            System.Collections.Generic.Dictionary<string, (string * Member list) list>()
 
         let caseMap =
             System.Collections.Generic.Dictionary<string, (string * Member list) list>()
 
         let transparent = System.Collections.Generic.Dictionary<string, string>()
+        let variants = System.Collections.Generic.Dictionary<string * string, Variant>()
+        let keyedUnions = ResizeArray<Keyed>()
+
+        // One holder's constructors: `label` suffixed per choice of case ([[variantSuffix]]), each
+        // one that holds a presence-keyed union recorded under `owner` with the wire tag it carries.
+        let constructors (owner: string) (label: string) (found: (Pick list * Member list) list) =
+            found
+            |> List.map (fun (picks, ms) ->
+                let name = label + variantSuffix picks
+
+                if not picks.IsEmpty then
+                    variants[(owner, name)] <- { Tag = label; Picks = picks }
+
+                name, ms)
 
         let rec sequence (steps: (unit -> Result<unit, CodegenError>) list) =
             match steps with
@@ -677,13 +971,31 @@ module internal FStarModel =
                 // [[fieldMembers]] lays them out: it declares nothing of its own.
                 | Some r when r.Inline -> Ok()
                 | Some r ->
-                    fieldMembers idl Map.empty ("record " + n) r.Fields
-                    |> Result.map (fun ms -> memberMap[slotName (SRecord n)] <- ms)
+                    fieldVariants idl Map.empty ("record " + n) r.Fields
+                    |> Result.map (fun found ->
+                        let key = slotName (SRecord n)
+                        recordMap[key] <- constructors key "Mk" found)
             | TUnion(n, args) ->
                 match CodegenLookup.tryUnion idl n with
                 | None -> unmodellable ("an undeclared union '" + n + "'") ("union " + n)
-                // Phase 474 — a presence-keyed union has no tag and no object of its own.
-                | Some u when Decl.isKeyed u -> unmodellable ("a presence-keyed union '" + n + "'") ("union " + n)
+                // Phase 722 — a presence-keyed union has no tag and no object of its own, so it
+                // declares no type: its cases are laid out on each holder ([[fieldVariants]]). What
+                // it does declare is its READING, which the decoder of every holder asks.
+                | Some { Discrimination = UnionDiscrimination.ByPresence keyed } ->
+                    if keyedUnions |> Seq.forall (fun k -> k.Union <> n) then
+                        keyedUnions.Add
+                            { Union = n
+                              Cases =
+                                keyed
+                                |> List.map (fun k ->
+                                    k.Case,
+                                    k.Key,
+                                    keyed
+                                    |> List.filter (fun o ->
+                                        o.Case <> k.Case && o.Synthesised |> List.exists (fun (m, _) -> m = k.Key))
+                                    |> List.map _.Key) }
+
+                    Ok()
                 | Some u ->
                     match TypeParams.bind u args, slotOf ("union " + n) t with
                     | None, _ -> unmodellable ("a union arity mismatch on '" + n + "'") ("union " + n)
@@ -697,8 +1009,9 @@ module internal FStarModel =
                                 match acc with
                                 | Error e -> Error e
                                 | Ok cs ->
-                                    fieldMembers idl subst (n + "." + c.Tag) c.Fields
-                                    |> Result.map (fun ms -> (u.WireTagOf c.Tag, ms) :: cs))
+                                    fieldVariants idl subst (n + "." + c.Tag) c.Fields
+                                    |> Result.map (fun found ->
+                                        List.rev (constructors key (u.WireTagOf c.Tag) found) @ cs))
                             (Ok [])
                         |> Result.map List.rev
                         |> Result.bind (fun cs ->
@@ -735,7 +1048,23 @@ module internal FStarModel =
 
         let envelope () =
             fieldMembers idl Map.empty "node envelope" idl.NodeFields
-            |> Result.map (fun ms -> memberMap["node"] <- ms)
+            |> Result.map (fun ms -> envelopeMembers <- ms)
+
+        // Phase 722 — an inline declaration is modelled as the declaration check leaves it: where it
+        // stands, one key per case that is a required member of that case and of no other, and what
+        // a case may synthesise. The target is handed an `Idl` value, not a declaration that was
+        // checked, so it asks before it lays one out.
+        let layout () =
+            let reachesInline =
+                reach.FromEnvelope @ reach.FromKinds
+                |> List.exists (fun t -> (Decl.inlineSlot idl t).IsSome)
+
+            match (if reachesInline then Declare.layoutErrors idl else []) with
+            | [] -> Ok()
+            | fault :: _ ->
+                unmodellable
+                    ("an inline declaration the declaration check refuses (" + fault.Detail + ")")
+                    "the vocabulary"
 
         let kinds () =
             kindTags
@@ -747,14 +1076,14 @@ module internal FStarModel =
                         match CodegenLookup.tryKind idl tag with
                         | None -> unmodellable ("an undeclared kind '" + tag + "'") ("kind " + tag)
                         | Some k ->
-                            fieldMembers idl Map.empty ("kind " + tag) k.Fields
-                            |> Result.map (fun ms -> (tag, ms) :: ks))
+                            fieldVariants idl Map.empty ("kind " + tag) k.Fields
+                            |> Result.map (fun found -> List.rev (constructors "vkind" tag found) @ ks))
                 (Ok [])
             |> Result.map (fun ks -> caseMap["vkind"] <- List.rev ks)
 
         let translated =
             sequence (
-                [ envelope ]
+                [ layout; envelope ]
                 @ (reach.FromEnvelope |> List.map declare)
                 @ [ kinds ]
                 @ (reach.FromKinds |> List.map declare)
@@ -769,14 +1098,11 @@ module internal FStarModel =
                         | Error e -> Error e
                         | Ok s -> slots (s :: acc) tail
 
-                // Phase 722 — an inline record is no slot: it is laid out on each holder.
+                // Phase 722 — an inline declaration is no slot: it is laid out on each holder.
                 slots
                     []
                     (reach.FromEnvelope @ reach.FromKinds
-                     |> List.filter (fun t ->
-                         match Decl.inlineSlot idl t with
-                         | Some(InlineSlot.Record _) -> false
-                         | _ -> true))
+                     |> List.filter (fun t -> (Decl.inlineSlot idl t).IsNone))
                 // Phase 639 — a set is modelled as a list, so a set and a list of one element type
                 // are one slot, declared once.
                 |> Result.map (List.distinctBy slotName))
@@ -794,7 +1120,7 @@ module internal FStarModel =
             // `Declare.wireShapeErrors` refuses most of these at declaration; the target refuses them
             // again because it is handed an `Idl` value, not a declaration that was checked.
             let disc = idl.Wire.Discriminator
-            let envelope = memberMap["node"]
+            let envelope = envelopeMembers
             let kinds = caseMap["vkind"]
 
             let collisions (where: string) (reserved: (string * string) list) (ms: Member list) =
@@ -836,10 +1162,22 @@ module internal FStarModel =
                             | true, t when t = tag -> None
                             | _ -> collisions (sprintf "union %s case %s" kv.Key tag) [ disc, "case object" ] ms))
 
+            // Phase 722 — a constructor's name is its label, and a holder of a presence-keyed union
+            // has one per choice of case: two of one owner spelled alike would be one F* name.
+            let labelFailure () =
+                Seq.append caseMap recordMap
+                |> Seq.tryPick (fun kv ->
+                    kv.Value
+                    |> List.countBy fst
+                    |> List.tryFind (fun (_, n) -> n > 1)
+                    |> Option.map (fun (label, _) ->
+                        CodegenError.UnmodellableInFStar(sprintf "two constructors named '%s'" label, kv.Key)))
+
             let shapeFailure =
                 collisions "node envelope" nodeKeys envelope
                 |> Option.orElseWith kindFailure
                 |> Option.orElseWith unionFailure
+                |> Option.orElseWith labelFailure
 
             match shapeFailure with
             | Some e -> Error e
@@ -855,11 +1193,17 @@ module internal FStarModel =
                     | _ -> false
 
                 let everyMember =
-                    Seq.append (Seq.concat memberMap.Values) (caseMap.Values |> Seq.concat |> Seq.collect snd)
+                    Seq.append caseMap.Values recordMap.Values
+                    |> Seq.concat
+                    |> Seq.collect snd
+                    |> Seq.append envelope
 
                 Ok
                     { Order = order
-                      Members = memberMap |> Seq.map (fun kv -> kv.Key, ordered kv.Value) |> Map.ofSeq
+                      Records =
+                        recordMap
+                        |> Seq.map (fun kv -> kv.Key, kv.Value |> List.map (fun (t, ms) -> t, ordered ms))
+                        |> Map.ofSeq
                       Cases =
                         caseMap
                         |> Seq.map (fun kv -> kv.Key, kv.Value |> List.map (fun (t, ms) -> t, ordered ms))
@@ -867,6 +1211,8 @@ module internal FStarModel =
                       Transparent = transparent |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
                       Enums = reach.Enums
                       Kinds = kinds |> List.map (fun (t, ms) -> t, ordered ms)
+                      Variants = variants |> Seq.map (fun kv -> kv.Key, kv.Value) |> Map.ofSeq
+                      Keyed = List.ofSeq keyedUnions
                       Envelope = ordered envelope
                       Shape = idl.Wire.NodeEnvelope
                       KeyOrder = idl.Wire.KeyOrder

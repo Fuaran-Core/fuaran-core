@@ -26,7 +26,8 @@ module internal FStarProofs =
         | SBool
         | SFloat
         | SJson
-        | SSentinel _ -> None
+        | SSentinel _
+        | SConst _ -> None
         // The implicits are passed EXPLICITLY at every lemma call. A lemma over a type that is
         // not itself parameterised by the numeric carriers — an enum, or a walker over a list of
         // strings — mentions `num` and `flt` only inside its own statement, so nothing at the
@@ -206,7 +207,15 @@ module internal FStarProofs =
             Fixed: (string * string) list
             Members: Member list
             Extra: string list
+            /// Phase 722 — the cases this constructor holds at its presence-keyed fields, each with
+            /// every key its union's reading asks for: what the decoder's arm tests beyond the tag,
+            /// and so what [[emitLookups]] states off the encoded object, one lemma per pick.
+            Picks: (Pick * string list) list
         }
+
+    /// The lemma stating one pick of a constructor off its encoded object.
+    let private pickLemmaName (typeName: string) (label: string) (p: Pick) =
+        sprintf "pk_%s__%s__%s" typeName label (snake p.Field)
 
     /// A constructor's members, in the closure's declared key order (already ordered there).
     let private ctorMembers (c: Ctor) = c.Members
@@ -490,6 +499,75 @@ module internal FStarProofs =
                         line ""
                     | _ -> ())
 
+                // Phase 722 — one lemma per presence-keyed union the constructor holds: the reading
+                // off the encoded object answers the case the constructor carries. A key the object
+                // carries is an always-emitted entry, reached as its own lookup reaches it; a key it
+                // does not carry is skipped past every suffix, and the walk ends on the empty list.
+                for pick, keys in c.Picks do
+                    let asked =
+                        sprintf "%s #num #flt (enc_%s #num #flt x)" (pickFunction pick.Union) typeName
+
+                    let steps (key: string) =
+                        match entries |> List.tryFindIndex (fun e -> entryKey e = key) with
+                        | Some i when i < start -> []
+                        | Some _ -> skipsTo (linkOf key + 1) key
+                        | None -> links |> List.map (fun l -> step l "skip" (Some key))
+
+                    emit
+                        (pickLemmaName typeName c.Label pick)
+                        (sprintf "the reading of %s off the encoded object" pick.Union)
+                        (if multi then Some(sprintf "%s? x" c.CtorName) else None)
+                        (guarded (sprintf "%s == %s" asked (pickAnswer pick)) "True")
+                        (sprintf "reveal_opaque (`%%%s) (%s)" (pickFunction pick.Union) asked
+                         :: List.collect steps keys)
+
+            if List.length cs < presenceSplitAt then
+                // A constructor proved in one query has no suffix to step over: the reading is
+                // normalised off the literal, under fuel sized to the whole walk a missing key makes.
+                for pick, _ in c.Picks do
+                    let asked =
+                        sprintf "%s #num #flt (enc_%s #num #flt x)" (pickFunction pick.Union) typeName
+
+                    let answered = sprintf "%s == %s" asked (pickAnswer pick)
+
+                    line (
+                        sprintf
+                            "(* %s — the reading of %s off the encoded object *)"
+                            (pickLemmaName typeName c.Label pick)
+                            pick.Union
+                    )
+
+                    line (
+                        sprintf
+                            "#push-options \"--fuel %d --ifuel 4\""
+                            (lookupFuel (List.length c.Fixed) (List.length ms))
+                    )
+
+                    line (
+                        sprintf
+                            "let %s (#num #flt: eqtype) (x: %s) : Lemma %s(ensures (%s)) ="
+                            (pickLemmaName typeName c.Label pick)
+                            fsType
+                            (if multi then
+                                 sprintf "(requires (%s? x)) " c.CtorName
+                             else
+                                 "")
+                            (if multi then
+                                 sprintf "match x with | %s -> %s | _ -> True" (ctorPattern c) answered
+                             else
+                                 sprintf "match x with | %s -> %s" (ctorPattern c) answered)
+                    )
+
+                    line (sprintf "  reveal_opaque (`%%%s) (%s);" (pickFunction pick.Union) asked)
+                    line "  match x with"
+                    line (sprintf "  | %s -> ()" (ctorPattern c))
+
+                    if multi then
+                        line "  | _ -> ()"
+
+                    line "#pop-options"
+                    line ""
+
     /// One type's round trip as a family of lemmas — see 8b above for the shape. `rtHead` supplies
     /// `let rec` / `and`; `line` receives the emitted text.
     let private emitFamily
@@ -757,7 +835,23 @@ module internal FStarProofs =
             // round-trip family that cites them. Order is load-bearing in both walks — F* resolves
             // top to bottom, and `rt_node` must stay the family's first `let rec`.
             let disc = idl.Wire.Discriminator
-            let tagged (tag: string) = disc, "JStr " + lit tag
+
+            let tagged (owner: string) (label: string) =
+                disc, "JStr " + lit (wireTag c owner label)
+
+            // The picks of the constructor `label` of `owner`, each with its union's keys, and the
+            // citations of the lemmas stating them off the encoded object of the type `typeName`.
+            let picks (owner: string) (label: string) =
+                picksOf c owner label
+                |> List.map (fun p ->
+                    p,
+                    c.Keyed
+                    |> List.filter (fun k -> k.Union = p.Union)
+                    |> List.collect (fun k -> k.Cases |> List.map (fun (_, key, _) -> key)))
+
+            let cited (typeName: string) (owner: string) (label: string) =
+                picksOf c owner label
+                |> List.map (fun p -> sprintf "%s #num #flt x" (pickLemmaName typeName label p))
 
             let families =
                 [ match c.Shape with
@@ -771,7 +865,8 @@ module internal FStarProofs =
                           Lead = [ "i"; "k" ]
                           Fixed = [ "id", "JStr i"; "kind", "enc_vkind k" ]
                           Members = envArgs
-                          Extra = [ "rt_vkind #num #flt k" ] } ]
+                          Extra = [ "rt_vkind #num #flt k" ]
+                          Picks = [] } ]
                       // The kinds: `rt_vkind` is the case split, `rt_vkind__<Kind>` each kind's arm
                       // alone — the per-kind lemma Phase 168 was cut for.
                       "vkind",
@@ -780,9 +875,10 @@ module internal FStarProofs =
                             { Label = tag
                               CtorName = ctorName "vkind" tag
                               Lead = []
-                              Fixed = [ tagged tag ]
+                              Fixed = [ tagged "vkind" tag ]
                               Members = ms
-                              Extra = [] } ]
+                              Extra = cited "vkind" "vkind" tag
+                              Picks = picks "vkind" tag } ]
                   | NodeEnvelopeShape.FlatKind ->
                       // Phase 293 — the flat envelope: the node IS the kind union, so `rt_node` is
                       // the case split and `rt_node__<Kind>` each kind's arm, over the one object
@@ -793,9 +889,10 @@ module internal FStarProofs =
                             { Label = tag
                               CtorName = ctorName "node" tag
                               Lead = [ "i" ]
-                              Fixed = [ tagged tag; "id", "JStr i" ]
+                              Fixed = [ tagged "vkind" tag; "id", "JStr i" ]
                               Members = flatNodeMembers c ms
-                              Extra = [] } ]
+                              Extra = cited "node" "vkind" tag
+                              Picks = picks "vkind" tag } ]
                   for s in declared do
                       match s with
                       | SNode -> ()
@@ -804,12 +901,14 @@ module internal FStarProofs =
 
                           n,
                           (n + " num flt"),
-                          [ { Label = "Mk"
-                              CtorName = ctorName n "Mk"
-                              Lead = []
-                              Fixed = []
-                              Members = c.Members[n]
-                              Extra = [] } ]
+                          [ for label, ms in c.Records[n] do
+                                { Label = label
+                                  CtorName = ctorName n label
+                                  Lead = []
+                                  Fixed = []
+                                  Members = ms
+                                  Extra = cited n n label
+                                  Picks = picks n label } ]
                       | SUnion _ ->
                           let n = slotName s
 
@@ -822,9 +921,10 @@ module internal FStarProofs =
                                   Fixed =
                                     (match c.Transparent.TryFind n with
                                      | Some t when t = tag -> []
-                                     | _ -> [ tagged tag ])
+                                     | _ -> [ tagged n tag ])
                                   Members = ms
-                                  Extra = [] } ]
+                                  Extra = cited n n tag
+                                  Picks = picks n tag } ]
                       | _ -> () ]
 
             line "(* ======================================================================================"
@@ -915,6 +1015,58 @@ module internal FStarProofs =
                     line (sprintf "  | (k, v) :: t -> %srt_entries_%s #num #flt ((k, v) :: acc) t" innerCall n)
                     line ""
                 | _ -> ()
+
+            // Phase 722 (D220.3) — the other half of a presence-keyed union's guarantee. The round
+            // trip says the decoder ACCEPTS what the encoder writes; this says what it accepts at
+            // all: a constructor only where the reading of the document's own keys picked that
+            // constructor's case, with each member that case synthesises present at its declared
+            // value. Two cases left, or none where one is required, is the answer of no constructor,
+            // so such a document is refused, and two constructors of one holder are never both an
+            // answer for one document. Stated over EVERY input, not over encodings.
+            let held =
+                families
+                |> List.choose (fun (typeName, _, ctors) ->
+                    match ctors |> List.filter (fun k -> not k.Picks.IsEmpty) with
+                    | [] -> None
+                    | holding -> Some(typeName, holding))
+
+            if not held.IsEmpty then
+                line "(* ======================================================================================"
+                line "   3a. THE READING DECIDES. For EVERY input, a decoder answers a constructor holding a"
+                line "       case of a presence-keyed union only where that union's reading of the input's own"
+                line "       keys (D220.3) picked that case, and every member the case SYNTHESISES is present at"
+                line "       its declared value. Two cases left is the answer of no constructor, and neither is"
+                line "       none left where the union is required: such a document is REFUSED, and no document"
+                line "       is read as two constructors of one holder."
+                line "   ====================================================================================== *)"
+                line ""
+
+            for typeName, holding in held do
+                line (sprintf "let dec_%s_reads (#num #flt: eqtype) (el: jval num flt)" typeName)
+                line (sprintf "  : Lemma (ensures (match dec_%s #num #flt el with" typeName)
+
+                for k in holding do
+                    line (
+                        sprintf
+                            "                    | Ok (%s) -> %s"
+                            (String.concat
+                                " "
+                                (k.CtorName :: (k.Lead |> List.map (fun _ -> "_"))
+                                 @ (k.Members |> List.map (fun _ -> "_"))))
+                            ((k.Picks
+                              |> List.map (fun (pick, _) ->
+                                  sprintf "%s #num #flt el == %s" (pickFunction pick.Union) (pickAnswer pick)))
+                             @ (k.Members
+                                |> List.choose (fun m ->
+                                    match m.Slot with
+                                    | SConst wire -> Some(sprintf "get_prop %s el == Ok %s" (lit m.Name) wire)
+                                    | _ -> None))
+                             |> String.concat " /\\ ")
+                    )
+
+                line "                    | _ -> True))"
+                line "  = ()"
+                line ""
 
             line "(* ======================================================================================"
             line "   4. TOTALITY. That the decoders type-check at `Tot` is the termination proof; what the"

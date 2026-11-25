@@ -14,7 +14,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## Summary
 
-435 rows: 260 offered, 1 a host's own proof, 174 uncovered (proved 102, tested 31, assumed 39, policy 2).
+438 rows: 260 offered, 1 a host's own proof, 177 uncovered (proved 105, tested 31, assumed 39, policy 2).
 
 ## Offers, by model
 
@@ -74,6 +74,10 @@ Grouped by model. Each group is a candidate vector family or oracle function.
 - `FootprintIn` (2): `footprint-in-refines`, `footprint-in-sound`
 
 - `JsonDocument` (3): `lossless-reader-rebuilds-the-parse`, `document-decodes-soundly-through-the-layer`, `document-decoder-refusals-resolve`
+
+- `LayoutVocabulary` (1): `layout-vocabulary-generated-model`
+
+- `LayoutVocabularyProofs` (2): `layout-vocabulary-round-trip`, `layout-vocabulary-reading-decides`
 
 - `Limits` (1): `wire-resource-limits`
 

@@ -94,7 +94,23 @@ let generated: Generated list =
             Proves =
               [ "F* BACKEND over a CONTRACT's types: the round trip is a theorem about the arguments"
                 "of a call and about its answer. An argument's bound is not modelled; it stays in the"
-                "contract." ] } } ]
+                "contract." ] } }
+      // Phase 722 — the inline declarations: without this entry no committed proof would meet an
+      // inline record, a record-payload case or a presence-keyed union, and an emitter change that
+      // broke one would be found by an adopter.
+      { Module = "LayoutVocabulary"
+        Idl = LayoutIdl.layout
+        Provenance =
+          { Origin =
+              [ "the INLINE-DECLARATION vocabulary — `tests/Fuaran.Core.Tests.Fixtures/LayoutIdl.fs`, authored"
+                "for the three shapes that lay members on the object holding them: an inline record, a"
+                "record-payload case, and two presence-keyed unions, one of them synthesising a member"
+                "(fuaran-core Phase 722)." ]
+              @ remedyLines
+            Proves =
+              [ "F* BACKEND over the INLINE declarations: a holder of a presence-keyed union has one"
+                "constructor per choice of case, the round trip is a theorem about each, and a decoder"
+                "answers one only where the reading of the document's own keys picked its case." ] } } ]
 
 let modelPath (g: Generated) =
     Path.Combine(repoRoot, "proofs", g.Module + ".fst")

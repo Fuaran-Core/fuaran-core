@@ -509,6 +509,30 @@
       "note": "Phase 644 - the generated ROUND TRIP over `ContractVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type), plus `dec_node_total`: a theorem about the arguments of a call and about its answer, by the same walk and the same lemma shapes as `VocabularyProofs`. An argument's bound is not modelled; it stays in the contract."
     },
     {
+      "module": "LayoutVocabulary",
+      "kind": "generated",
+      "opens": [ "WireDecode" ],
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
+      "budgetSeconds": 20,
+      "measuredSeconds": 5,
+      "fastestSeconds": 5,
+      "fastestPhase": "fuaran-core#722",
+      "phase": "fuaran-core#722",
+      "note": "Phase 722 - the GENERATED model of the INLINE-DECLARATION vocabulary (`tests/Fuaran.Core.Tests.Fixtures/LayoutIdl.fs`): an inline record, a record-payload case and two presence-keyed unions, one of them synthesising a member. An inline record's members are its holder's; a holder of a presence-keyed union has ONE CONSTRUCTOR PER CHOICE of case (`Grid` has six), and its decoder asks each union's READING of the holder's own object (`pick_u_<union>`, D220.3). Both of its kinds are modelled. Carries the `--ext context_pruning` option inside the generated file, like every generated model."
+    },
+    {
+      "module": "LayoutVocabularyProofs",
+      "kind": "generated",
+      "opens": [ "WireDecode", "LayoutVocabulary" ],
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
+      "budgetSeconds": 120,
+      "measuredSeconds": 33,
+      "fastestSeconds": 30,
+      "fastestPhase": "fuaran-core#722",
+      "phase": "fuaran-core#722",
+      "note": "Phase 722 - the generated ROUND TRIP over `LayoutVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type, each constructor of a holder of a presence-keyed union included), `dec_node_total`, and `dec_vkind_reads`: for EVERY input the decoder answers a constructor only where the reading of the input's own keys picked its case and each member that case synthesises is present at its declared value. One `pk_` lemma per constructor and union states the reading off the encoded object, beside the lookups the linear presence split already emits."
+    },
+    {
       "module": "Relation",
       "kind": "extracted",
       "opens": [ "Twin", "ListAlgebra" ],

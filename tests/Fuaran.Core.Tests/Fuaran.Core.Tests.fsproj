@@ -469,12 +469,11 @@
          agreement with the short-circuiting form. -->
     <Compile Include="SpecDecodersGenerated.fs" />
     <Compile Include="IdlSpecDecoderTests.fs" />
-    <Compile Include="LayoutIdl.fs" />
     <Compile Include="LayoutGenerated.fs" />
     <Compile Include="IdlLayoutTests.fs" />
     <!-- Phase 722 - the TypeScript backend lays out the inline declarations: the layout corpus under
          node against the interpreter and the generated F# module. Depends on IdlDeriveTests (the node
-         runner) and LayoutIdl / LayoutGenerated. -->
+         runner), LayoutGenerated and the fixtures library's LayoutIdl. -->
     <Compile Include="IdlLayoutTypeScriptTests.fs" />
     <!-- Phase 379 - Canonical and Codec<'T>: the committed bytes a declaration writes under each
          profile and the positive control, the collecting order and paths, the build-time refusals,

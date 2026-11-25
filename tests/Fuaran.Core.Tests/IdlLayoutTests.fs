@@ -12,7 +12,8 @@ module Fuaran.Core.Tests.IdlLayoutTests
 //      and a required union with no key, each with its code and path, the generated decoders (the
 //      short-circuiting and the collecting form) and the interpreter answering alike.
 //   4. THE OTHER BACKENDS — the JSON schema states the inline members on the holding object; the
-//      TypeScript backend, the F* target and the codec-only module refuse by name.
+//      TypeScript backend lays them out and the F* target models them (Phase 722), each refusing by
+//      name what it cannot express; the codec-only module refuses by name.
 //   5. THE CLASSIFIER — an inline layout that moves is a wire break.
 // ---------------------------------------------------------------------------
 
@@ -61,6 +62,12 @@ let private refusalOf (r: Result<string, CodegenError>) : string =
     | Ok _ -> failtest "expected the backend to refuse"
     | Error(CodegenError.UnsupportedConstruct(what, _, _)) -> what
     | Error e -> sprintf "%A" e
+
+let private kindTags (idl: Idl) : string list = idl.Kinds |> List.map _.Tag
+
+/// The F* model of every kind of `idl`.
+let private fstarModel (idl: Idl) : string =
+    (emitted (FStarTarget.vocabularyModule "LayoutModel" idl (kindTags idl))).Replace("\r\n", "\n")
 
 /// `layout` with one declaration replaced.
 let private withUnion (name: string) (f: IdlUnion -> IdlUnion) : Idl =
@@ -434,19 +441,184 @@ let backendTests =
                     "value", Gen.typescriptValue LayoutIdl.layout TStr (VStr "x") ] do
                   Expect.isOk r name)
 
-          // Phase 722 (DECISIONS.md D283) — the F* target lays an inline record out on its holder, so a
-          // record-payload case is modelled; a presence-keyed union is still refused, by name.
-          testCase "the F* target models a record-payload kind and refuses a presence-keyed union, by name" (fun _ ->
-              let verdicts =
-                  FStarTarget.partition LayoutIdl.layout
-                  |> List.map (fun v -> v.Tag, v.Refusal)
-                  |> Map.ofList
+          // Phase 722 (DECISIONS.md D283, D284) — the F* target lays an inline record out on its holder
+          // and models a presence-keyed union: its holder has one constructor per choice of case, told
+          // apart by the D220.3 reading of the holder's own object.
+          testCase
+              "the F* target models every kind, a constructor per choice of a presence-keyed union's case"
+              (fun _ ->
+                  for v in FStarTarget.partition LayoutIdl.layout do
+                      Expect.isNone v.Refusal (v.Tag + " is modelled")
 
-              Expect.equal verdicts["Form"] None "the kind holding a record-payload case is modelled"
+                  let model = fstarModel LayoutIdl.layout
 
-              match verdicts["Grid"] with
-              | Some why -> Expect.stringContains why "a presence-keyed union 'RowIdentity'" "named"
-              | None -> failtest "the F* target modelled a presence-keyed union")
+                  for ctor in
+                      [ "C__vkind__Grid__NoRowIdentity__Source"
+                        "C__vkind__Grid__NoRowIdentity__StaticRows"
+                        "C__vkind__Grid__RowKey__Source"
+                        "C__vkind__Grid__RowKey__StaticRows"
+                        "C__vkind__Grid__RowKeyField__Source"
+                        "C__vkind__Grid__RowKeyField__StaticRows" ] do
+                      Expect.stringContains model ("  | " + ctor + " : ") ctor
+
+                  // An optional union with no key present is a constructor; a required one has none.
+                  Expect.isFalse (model.Contains "NoGridRows") "a required union always holds a case")
+
+          testCase
+              "the F* model's reading is D220.3: a case another present case explains drops out, two left is refused"
+              (fun _ ->
+                  let model = fstarModel LayoutIdl.layout
+
+                  for line in
+                      [ "let pick_u_grid_rows (#num #flt: eqtype) (el: jval num flt) : Tot pk_u_grid_rows ="
+                        "  let p0 = Ok? (get_prop \"source\" el) in"
+                        "  let p1 = Ok? (get_prop \"staticRows\" el) in"
+                        // `StaticRows` synthesises `source`, so `Source` is not left beside it.
+                        "  let c0 = p0 && not (p1) in"
+                        "  if c0 then (if c1 then PB__u_grid_rows else PK__u_grid_rows__Source) else"
+                        "  if c1 then PK__u_grid_rows__StaticRows else"
+                        "  PN__u_grid_rows"
+                        // Neither row-identity case synthesises the other's key: both present is two left.
+                        "  if c0 then (if c1 then PB__u_row_identity else PK__u_row_identity__RowKey) else"
+                        // A holder's arm asks every reading beside its tag.
+                        "    if tag = \"Grid\" && pick_u_row_identity #num #flt el = PK__u_row_identity__RowKey && pick_u_grid_rows #num #flt el = PK__u_grid_rows__StaticRows then" ] do
+                      Expect.stringContains model (line + "\n") line)
+
+          testCase "the F* model writes a synthesised member at its declared value and refuses another" (fun _ ->
+              let model = fstarModel LayoutIdl.layout
+              let declared = """(JObj [("$type", (JStr "Static")); ("value", (JArr []))])"""
+
+              Expect.stringContains model ("""("source", """ + declared + ")") "the encoder writes the declared value"
+
+              Expect.stringContains
+                  model
+                  ("(if v = " + declared + " then (let w = () in Ok w) else Error")
+                  "the decoder compares what it reads"
+
+              Expect.stringContains model "source:(unit)" "the constructor carries nothing for it"
+
+              // The proofs state both halves: the round trip, and that the reading decides.
+              let proofs =
+                  emitted (
+                      FStarTarget.proofsModule
+                          "LayoutProofs"
+                          "LayoutModel"
+                          LayoutIdl.layout
+                          (kindTags LayoutIdl.layout)
+                  )
+
+              Expect.stringContains proofs "let dec_vkind_reads (#num #flt: eqtype) (el: jval num flt)" "stated"
+
+              Expect.stringContains
+                  proofs
+                  ("| Ok (C__vkind__Grid__RowKey__StaticRows _ _ _ _ _ _ _) -> pick_u_row_identity #num #flt el == PK__u_row_identity__RowKey /\\ pick_u_grid_rows #num #flt el == PK__u_grid_rows__StaticRows /\\ get_prop \"source\" el == Ok "
+                   + declared)
+                  "an accepted document's constructor is the one its keys pick, its synthesised member as declared"
+
+              Expect.stringContains
+                  proofs
+                  "let pk_vkind__Grid__NoRowIdentity__Source__identity (#num #flt: eqtype) (x: vkind num flt)"
+                  "one lemma per constructor and union states the reading off the encoded object")
+
+          testCase
+              "the F* target refuses a case that declares another case's key, which the declaration check admits"
+              (fun _ ->
+                  let overlapping =
+                      withUnion "RowIdentity" (fun u ->
+                          { u with
+                              Cases =
+                                  u.Cases
+                                  |> List.map (fun c ->
+                                      if c.Tag = "RowKey" then
+                                          { c with
+                                              Fields =
+                                                  c.Fields
+                                                  @ [ { c.Fields.Head with
+                                                          Name = "rowKeyField"
+                                                          Type = TStr
+                                                          Opt = Optional } ] }
+                                      else
+                                          c) })
+
+                  Expect.isEmpty (Declare.errors overlapping) "the declaration check admits it"
+
+                  // A value of the case that carries the member writes both keys, and the reading refuses
+                  // two cases left: the round trip is false of it, so no model of the union has it.
+                  let value =
+                      VNode(
+                          "g",
+                          "Grid",
+                          [ "columns", VList []
+                            "paging", VRecord []
+                            "identity", VUnion("RowKey", [ "rowKey", VClosure; "rowKeyField", VStr "id" ])
+                            "rows", VUnion("Source", [ "source", VUnion("State", [ "key", VStr "k" ]) ]) ]
+                      )
+
+                  match Encode.encode overlapping value with
+                  | Error m -> failtestf "the value did not encode: %s" m
+                  | Ok doc ->
+                      match Decode.decodeDetailed overlapping doc with
+                      | Ok _ -> failtest "the interpreter read back a document carrying both keys"
+                      | Error e -> Expect.equal (shape e) ("OutOfRange", at [ "kind"; "rowKeyField" ]) "refused"
+
+                  match (FStarTarget.partition overlapping |> List.find (fun v -> v.Tag = "Grid")).Refusal with
+                  | None -> failtest "the F* target modelled a union whose round trip is false"
+                  | Some why ->
+                      Expect.stringContains
+                          why
+                          "a presence-keyed union 'RowIdentity' whose case 'RowKey' declares the member 'rowKeyField', the key of case 'RowKeyField'"
+                          "named"
+
+                      Expect.stringContains why "its round trip does not hold" "with the reason")
+
+          testCase "the F* target refuses a synthesised value the opaque numeric model cannot spell, by name" (fun _ ->
+              let numbered =
+                  withUnion "GridRows" (fun u ->
+                      { u with
+                          Discrimination =
+                              match u.Discrimination with
+                              | UnionDiscrimination.ByPresence keyed ->
+                                  UnionDiscrimination.ByPresence(
+                                      keyed
+                                      |> List.map (fun k ->
+                                          if k.Case = "StaticRows" then
+                                              { k with
+                                                  Synthesised =
+                                                      [ "source",
+                                                        VUnion("Static", [ ("value", VJson(JArr [ JInt 1 ])) ]) ] }
+                                          else
+                                              k)
+                                  )
+                              | other -> other })
+
+              Expect.isEmpty (Declare.errors numbered) "well-formed"
+
+              match (FStarTarget.partition numbered |> List.find (fun v -> v.Tag = "Grid")).Refusal with
+              | None -> failtest "the F* target spelled a number its carriers cannot"
+              | Some why ->
+                  Expect.stringContains
+                      why
+                      "the synthesised member 'source' of union 'GridRows' case 'StaticRows'"
+                      "named")
+
+          testCase "the F* vectors state each corpus document at the constructor its keys pick" (fun _ ->
+              let facts =
+                  emitted (
+                      FStarTarget.vectorsModule
+                          "LayoutVectors"
+                          [ { Model = "LayoutModel"
+                              Prefix = "L"
+                              Idl = LayoutIdl.layout
+                              Wires = LayoutIdl.corpus } ]
+                  )
+
+              for ctor in
+                  [ "L.C__vkind__Grid__NoRowIdentity__Source"
+                    "L.C__vkind__Grid__RowKeyField__Source"
+                    "L.C__vkind__Grid__RowKey__StaticRows"
+                    "L.C__vkind__Grid__NoRowIdentity__StaticRows"
+                    "L.C__vkind__Form" ] do
+                  Expect.stringContains facts ctor ctor)
 
           testCase "the F* model of a record-payload kind is its flat twin's, line for line" (fun _ ->
               // The stamp lines name the vocabulary, and the header's line for `Grid` says why each

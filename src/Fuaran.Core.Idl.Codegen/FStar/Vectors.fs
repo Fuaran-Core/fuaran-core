@@ -61,6 +61,11 @@ module internal FStarVectors =
 
     /// The MODEL value of an interpreter-decoded value, as an F* term qualified by `q` (the
     /// model module's abbreviation and a dot) at `num = int`, `flt = string`.
+    /// Phase 722 — the case an authored value holds at a presence-keyed field: what tells the
+    /// constructors of one holder apart ([[ctorFor]]).
+    let private authoredPick (fs: (string * IdlValue) list) (p: Pick) : string option option =
+        Some(authoredCase p.Field fs)
+
     let rec private valueTerm
         (idl: Idl)
         (m: Model)
@@ -76,7 +81,8 @@ module internal FStarVectors =
         | SFloat, VFloat f -> floatCarrier where f
         | SFloat, VInt i -> floatCarrier where (float i)
         | SJson, VJson j -> jsonTerm where j
-        | SSentinel _, _ -> Ok "()"
+        | SSentinel _, _
+        | SConst _, _ -> Ok "()"
         | SEnum n, VEnum spelling ->
             // Phase 525 — the WIRE spelling resolves through `CaseOf`, the one rule every backend
             // reads; a host case name the wire does not use is not this enum's value.
@@ -97,9 +103,12 @@ module internal FStarVectors =
             |> sequenceR
             |> Result.map (fun ts -> "[" + String.concat "; " ts + "]")
         | SRecord n, VRecord fs ->
-            match m.Members.TryFind(slotName s) with
+            match
+                m.Records.TryFind(slotName s)
+                |> Option.bind (fun ctors -> ctorFor m (slotName s) ctors "Mk" (authoredPick fs))
+            with
             | None -> unmodellable ("the undeclared record " + n) where
-            | Some ms -> ctorTerm idl m q where (q + ctorName (slotName s) "Mk") [] ms fs
+            | Some(label, ms) -> ctorTerm idl m q where (q + ctorName (slotName s) label) [] ms fs
         | SUnion(n, args), VUnion(tag, fs) ->
             match CodegenLookup.tryUnion idl n with
             | Some u when List.length u.Params = List.length args ->
@@ -108,10 +117,10 @@ module internal FStarVectors =
                 else
                     match
                         m.Cases.TryFind(slotName s)
-                        |> Option.bind (List.tryFind (fun (t, _) -> t = tag))
+                        |> Option.bind (fun ctors -> ctorFor m (slotName s) ctors tag (authoredPick fs))
                     with
                     | None -> unmodellable (sprintf "the case %s.%s" n tag) where
-                    | Some(_, ms) -> ctorTerm idl m q where (q + ctorName (slotName s) tag) [] ms fs
+                    | Some(label, ms) -> ctorTerm idl m q where (q + ctorName (slotName s) label) [] ms fs
             | _ -> unmodellable ("the union " + n) where
         | SNode, VNode(id, tag, fs) -> nodeTerm idl m q where id [] tag fs
         | SNode, VNodeEnv(id, env, tag, fs) -> nodeTerm idl m q where id env tag fs
@@ -162,6 +171,8 @@ module internal FStarVectors =
                     | _ -> None)
 
             match given, mb.Presence with
+            // A synthesised member carries nothing: the wire value is the declaration's.
+            | _ when mb.Slot.IsSConst -> Ok "()"
             | None, Some None -> Ok "None"
             | None, Some(Some d) -> Ok("(" + d + ")")
             | None, None -> unmodellable ("a value omitting the required member '" + mb.Name + "'") where
@@ -179,9 +190,9 @@ module internal FStarVectors =
         (tag: string)
         (fs: (string * IdlValue) list)
         : Result<string, CodegenError> =
-        match m.Kinds |> List.tryFind (fun (t, _) -> t = tag) with
+        match ctorFor m "vkind" m.Kinds tag (authoredPick fs) with
         | None -> unmodellable ("the undeclared kind " + tag) where
-        | Some(_, kms) ->
+        | Some(label, kms) ->
             let ems = m.Envelope
 
             match strLit where id with
@@ -189,11 +200,11 @@ module internal FStarVectors =
             | Ok idLit ->
                 match idl.Wire.NodeEnvelope with
                 | NodeEnvelopeShape.NestedKind ->
-                    ctorTerm idl m q where (q + ctorName "vkind" tag) [] kms fs
+                    ctorTerm idl m q where (q + ctorName "vkind" label) [] kms fs
                     |> Result.bind (fun kindTerm ->
                         ctorTerm idl m q where (q + ctorName "node" "Node") [ idLit; kindTerm ] ems env)
                 | NodeEnvelopeShape.FlatKind ->
-                    ctorTerm idl m q where (q + ctorName "node" tag) [ idLit ] (kms @ ems) (fs @ env)
+                    ctorTerm idl m q where (q + ctorName "node" label) [ idLit ] (kms @ ems) (fs @ env)
 
     /// The EXPECTED term: the interpreter's bytes, parsed, as a `jval int string`, walked by the
     /// slot each member declares — so a number at a float slot is the model's float carrier
@@ -219,15 +230,25 @@ module internal FStarVectors =
             | Some(_, JStr t) -> Ok t
             | _ -> unmodellable "an object with no discriminator in the interpreter's bytes" where
 
-        let kindMembers (tag: string) =
-            match m.Kinds |> List.tryFind (fun (t, _) -> t = tag) with
+        // Phase 722 — the case a presence-keyed union reads as off an object's keys (D220.3).
+        let wirePick (fs: (string * JVal) list) (p: Pick) : string option option =
+            m.Keyed
+            |> List.tryFind (fun k -> k.Union = p.Union)
+            |> Option.bind (fun k ->
+                match readPick k (fun key -> fs |> List.exists (fun (n, _) -> n = key)) with
+                | Ok case -> Some case
+                | Error() -> None)
+
+        let kindMembers (fs: (string * JVal) list) (tag: string) =
+            match ctorFor m "vkind" m.Kinds tag (wirePick fs) with
             | None -> unmodellable ("the undeclared kind " + tag) where
             | Some(_, ms) -> Ok ms
 
         match s, j with
         | SFloat, JInt i -> floatCarrier where (float i) |> Result.map (fun l -> "(JFloat " + l + ")")
         | SFloat, JFloat f -> floatCarrier where f |> Result.map (fun l -> "(JFloat " + l + ")")
-        | SJson, _ -> jsonTerm where j
+        | SJson, _
+        | SConst _, _ -> jsonTerm where j
         | (SStr | SSentinel _ | SEnum _ | SText _), JStr t -> strLit where t |> Result.map (fun l -> "(JStr " + l + ")")
         | STuple cs, JArr xs when List.length cs = List.length xs ->
             List.map2 (wireTerm idl m where) cs xs
@@ -242,16 +263,19 @@ module internal FStarVectors =
             |> Result.map (fun ts -> "(JArr [" + String.concat "; " ts + "])")
         | SMap inner, JObj fs -> objectOf (fun _ -> Some inner) fs
         | SRecord n, JObj fs ->
-            match m.Members.TryFind(slotName s) with
+            match
+                m.Records.TryFind(slotName s)
+                |> Option.bind (fun ctors -> ctorFor m (slotName s) ctors "Mk" (wirePick fs))
+            with
             | None -> unmodellable ("the undeclared record " + n) where
-            | Some ms -> objectOf (memberSlot ms) fs
+            | Some(_, ms) -> objectOf (memberSlot ms) fs
         | SUnion(n, args), JObj fs ->
             match CodegenLookup.tryUnion idl n, tagOf fs with
             | _, Error e -> Error e
             | Some u, Ok tag when List.length u.Params = List.length args ->
                 match
                     m.Cases.TryFind(slotName s)
-                    |> Option.bind (List.tryFind (fun (t, _) -> t = tag))
+                    |> Option.bind (fun ctors -> ctorFor m (slotName s) ctors tag (wirePick fs))
                 with
                 | None -> unmodellable (sprintf "the case %s.%s" n tag) where
                 | Some(_, ms) -> objectOf (fun k -> if k = disc then Some SStr else memberSlot ms k) fs
@@ -262,7 +286,7 @@ module internal FStarVectors =
             match idl.Wire.NodeEnvelope with
             | NodeEnvelopeShape.FlatKind ->
                 tagOf fs
-                |> Result.bind kindMembers
+                |> Result.bind (kindMembers fs)
                 |> Result.bind (fun kms ->
                     objectOf
                         (fun k ->
@@ -276,7 +300,7 @@ module internal FStarVectors =
                     match kj with
                     | JObj kfs ->
                         tagOf kfs
-                        |> Result.bind kindMembers
+                        |> Result.bind (kindMembers kfs)
                         |> Result.bind (fun kms ->
                             objectOf (fun k -> if k = disc then Some SStr else memberSlot kms k) kfs)
                     | _ -> unmodellable "a node whose kind is not an object" where

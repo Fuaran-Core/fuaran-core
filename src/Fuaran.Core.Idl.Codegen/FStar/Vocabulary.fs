@@ -84,6 +84,8 @@ module internal FStarVocabulary =
         | SFloat -> "JFloat " + e
         | SJson -> e
         | SSentinel sent -> "JStr " + lit sent
+        // A synthesised member is written at its declared value, whatever the constructor holds.
+        | SConst wire -> wire
         | SEnum _
         | SText _
         | STuple _
@@ -117,6 +119,7 @@ module internal FStarVocabulary =
         | SFloat
         | SJson
         | SSentinel _
+        | SConst _
         | SEnum _
         | SText _
         | STuple _ -> true
@@ -321,6 +324,15 @@ module internal FStarVocabulary =
             // value that is not the sentinel (`dSentinel`, Phase 347) — a refusal on input no
             // encoder writes, which the model's round trip has no need to state.
             | SSentinel _ -> sprintf "(let _ = %s in let w = () in %s)" v (k "w")
+            // Phase 722 (D220.3) — a synthesised member is read AND compared: present at another
+            // value is the reading's refusal, and so is absent (the member is required).
+            | SConst wire ->
+                sprintf
+                    "(if %s = %s then (let w = () in %s) else Error %s)"
+                    v
+                    wire
+                    (k "w")
+                    (lit ("a synthesised member at another value: " + m.Name))
             | SEnum _
             | SText _
             | STuple _
@@ -465,6 +477,18 @@ module internal FStarVocabulary =
                     "       decoder checks the declared type exactly as every host's decoder does before"
                     "       the codec runs. A declared string FORMAT is refused by name, because the"
                     "       model's string carries no format predicate." ]
+          // Phase 722 — stated where it applies, so a vocabulary holding no such union keeps its bytes.
+          if not c.Keyed.IsEmpty then
+              yield!
+                  [ "     - A PRESENCE-KEYED union has no object and no tag on the wire: the object holding"
+                    "       it carries the picked case's members. Its holder therefore has ONE CONSTRUCTOR"
+                    "       PER CHOICE of case (`<holder>__<Case>`; `No<Union>` where an optional union"
+                    "       holds none), and the holder's decoder asks the union's READING of its own object:"
+                    "       the cases whose key is present, less each whose key another present case"
+                    "       synthesises. One left is that case, none is no case, two is refused. A member a"
+                    "       case SYNTHESISES is written at its declared value and carried as `unit`; the"
+                    "       decoder refuses it absent or at another value, comparing the `jval` as it stands"
+                    "       (the model has no render step, so the literal is the canonical form)." ]
           "     - Generic unions are MONOMORPHISED at the arguments this vocabulary reaches, which"
           "       is what keeps every definition and every emitted lemma first-order."
           ""
@@ -735,10 +759,11 @@ module internal FStarVocabulary =
                 | SNode -> ()
                 | SRecord _ ->
                     let n = slotName s
-                    let ms = c.Members[n]
                     line ""
                     line (typeHead n)
-                    line (sprintf "  | %s : %s" (ctorName n "Mk") (ctorArgs ms (n + " num flt")))
+
+                    for label, ms in c.Records[n] do
+                        line (sprintf "  | %s : %s" (ctorName n label) (ctorArgs ms (n + " num flt")))
                 | SUnion _ ->
                     let n = slotName s
                     line ""
@@ -781,7 +806,9 @@ module internal FStarVocabulary =
                       match s with
                       | SRecord _ ->
                           let n = slotName s
-                          yield n, "Mk", c.Members[n]
+
+                          for label, ms in c.Records[n] do
+                              yield n, label, ms
                       | SUnion _ ->
                           let n = slotName s
 
@@ -847,6 +874,12 @@ module internal FStarVocabulary =
                 line ""
 
             let disc = idl.Wire.Discriminator
+
+            // The discriminator's entry in the constructor `label` of `owner`: the wire tag it
+            // carries, which is its label unless it holds a presence-keyed union ([[wireTag]]).
+            let tagged (owner: string) (label: string) =
+                disc, "JStr " + lit (wireTag c owner label)
+
             let mutable firstEnc = true
 
             let encHead (sig_: string) =
@@ -890,7 +923,7 @@ module internal FStarVocabulary =
                     let bind = bindOf ms
 
                     line (sprintf "  | %s %s ->" (ctorName "vkind" tag) (String.concat " " bs))
-                    line (sprintf "    JObj (%s)" (encMembers order ("vkind", tag) [ disc, "JStr " + lit tag ] ms bind))
+                    line (sprintf "    JObj (%s)" (encMembers order ("vkind", tag) [ tagged "vkind" tag ] ms bind))
             | NodeEnvelopeShape.FlatKind ->
                 for tag, kindMs in c.Kinds do
                     let ms = flatNodeMembers c kindMs
@@ -902,7 +935,7 @@ module internal FStarVocabulary =
                     line (
                         sprintf
                             "    JObj (%s)"
-                            (encMembers order ("node", tag) [ disc, "JStr " + lit tag; "id", "JStr i" ] ms bind)
+                            (encMembers order ("node", tag) [ tagged "vkind" tag; "id", "JStr i" ] ms bind)
                     )
 
             line ""
@@ -912,9 +945,6 @@ module internal FStarVocabulary =
                 | SNode -> ()
                 | SRecord _ ->
                     let n = slotName s
-                    let ms = c.Members[n]
-                    let bs = binders ms
-                    let bind = bindOf ms
 
                     line (
                         encHead (
@@ -927,13 +957,14 @@ module internal FStarVocabulary =
 
                     line "  match x with"
 
-                    line (
-                        sprintf
-                            "  | %s %s -> JObj (%s)"
-                            (ctorName n "Mk")
-                            (String.concat " " bs)
-                            (encMembers order (n, "Mk") [] ms bind)
-                    )
+                    for label, ms in c.Records[n] do
+                        line (
+                            sprintf
+                                "  | %s %s -> JObj (%s)"
+                                (ctorName n label)
+                                (String.concat " " (binders ms))
+                                (encMembers order (n, label) [] ms (bindOf ms))
+                        )
 
                     line ""
                 | SUnion _ ->
@@ -962,9 +993,7 @@ module internal FStarVocabulary =
                         | _ ->
                             line (sprintf "  | %s %s ->" (ctorName n tag) (String.concat " " bs))
 
-                            line (
-                                sprintf "    JObj (%s)" (encMembers order (n, tag) [ disc, "JStr " + lit tag ] ms bind)
-                            )
+                            line (sprintf "    JObj (%s)" (encMembers order (n, tag) [ tagged n tag ] ms bind))
 
                     line ""
                 | _ -> ()
@@ -1075,6 +1104,89 @@ module internal FStarVocabulary =
             line "   ====================================================================================== *)"
             line ""
 
+            // ---- the READING of a presence-keyed union (Phase 722, D220.3) -----
+            // One answer type and one function per union, above the decoder family because it calls
+            // nothing in it: which case an object's keys pick. Opaque to the solver, like a member's
+            // reader: the proof script states its answer off each encoded object in one lemma.
+            if not c.Keyed.IsEmpty then
+                line "(* The READING of a presence-keyed union (D220.3): the cases whose key is present, less each"
+                line "   whose key another present case synthesises. One left is that case; none is no case; two is"
+                line "   the both-present refusal. A holder's decoder asks it of the holder's own object, and reads"
+                line "   the picked case's members, and the members that case synthesises, off the same object. *)"
+                line ""
+
+            for k in c.Keyed do
+                let none: Pick =
+                    { Field = ""
+                      Union = k.Union
+                      Case = None }
+
+                let answer (case: string) =
+                    pickAnswer { none with Case = Some case }
+
+                let index = k.Cases |> List.mapi (fun i (_, key, _) -> key, i) |> Map.ofList
+                let n = List.length k.Cases
+
+                line (sprintf "type %s =" (pickType k.Union))
+
+                for case, _, _ in k.Cases do
+                    line (sprintf "  | %s" (answer case))
+
+                line (sprintf "  | %s" (pickAnswer none))
+                line (sprintf "  | %s" (pickBoth k.Union))
+                line ""
+                line "[@@\"opaque_to_smt\"]"
+
+                line (
+                    sprintf
+                        "let %s (#num #flt: eqtype) (el: jval num flt) : Tot %s ="
+                        (pickFunction k.Union)
+                        (pickType k.Union)
+                )
+
+                k.Cases
+                |> List.iteri (fun i (_, key, _) -> line (sprintf "  let p%d = Ok? (get_prop %s el) in" i (lit key)))
+
+                k.Cases
+                |> List.iteri (fun i (_, _, by) ->
+                    match by |> List.map (fun key -> sprintf "p%d" index[key]) with
+                    | [] -> line (sprintf "  let c%d = p%d in" i i)
+                    | others -> line (sprintf "  let c%d = p%d && not (%s) in" i i (String.concat " || " others)))
+
+                k.Cases
+                |> List.iteri (fun i (case, _, _) ->
+                    match [ i + 1 .. n - 1 ] |> List.map (sprintf "c%d") with
+                    | [] -> line (sprintf "  if c%d then %s else" i (answer case))
+                    | later ->
+                        line (
+                            sprintf
+                                "  if c%d then (if %s then %s else %s) else"
+                                i
+                                (String.concat " || " later)
+                                (pickBoth k.Union)
+                                (answer case)
+                        ))
+
+                line (sprintf "  %s" (pickAnswer none))
+                line ""
+
+            // What a constructor's arm asks beyond its tag: each presence-keyed union it holds
+            // reads as the case the constructor carries.
+            let readings (owner: string) (label: string) =
+                picksOf c owner label
+                |> List.map (fun p -> sprintf "%s #num #flt el = %s" (pickFunction p.Union) (pickAnswer p))
+
+            let guard (owner: string) (label: string) =
+                readings owner label |> List.map (fun r -> " && " + r) |> String.concat ""
+
+            // The refusal that closes a dispatch: an owner with no such constructor says what it
+            // always said.
+            let unknown (owner: string) (what: string) =
+                if c.Variants |> Map.exists (fun (o, _) _ -> o = owner) then
+                    what + ", or no case of a presence-keyed union it holds: "
+                else
+                    what + ": "
+
             let mutable firstDec = true
 
             let decHead (sig_: string) =
@@ -1120,7 +1232,7 @@ module internal FStarVocabulary =
                 line "  | Ok tag ->"
 
                 for tag, ms in c.Kinds do
-                    line (sprintf "    if tag = %s then" (lit tag))
+                    line (sprintf "    if tag = %s%s then" (lit (wireTag c "vkind" tag)) (guard "vkind" tag))
 
                     ms
                     |> List.iteri (fun i m -> line (indent 3 (decMemberOf "vkind" tag ms "el" i m)))
@@ -1128,7 +1240,7 @@ module internal FStarVocabulary =
                     line (indent 3 (decCombine ms (ctorName "vkind" tag)))
                     line "    else"
 
-                line (sprintf "    Error (%s ^ tag)" (lit "unknown kind: "))
+                line (sprintf "    Error (%s ^ tag)" (lit (unknown "vkind" "unknown kind")))
             | NodeEnvelopeShape.FlatKind ->
                 // Phase 293 — the flat envelope: the tag dispatch IS the node decoder, and each
                 // arm reads that kind's members and the envelope's off the one object. `id` is
@@ -1139,7 +1251,7 @@ module internal FStarVocabulary =
 
                 for tag, kindMs in c.Kinds do
                     let ms = flatNodeMembers c kindMs
-                    line (sprintf "    if tag = %s then" (lit tag))
+                    line (sprintf "    if tag = %s%s then" (lit (wireTag c "vkind" tag)) (guard "vkind" tag))
 
                     ms
                     |> List.iteri (fun i m -> line (indent 3 (decMemberOf "node" tag ms "el" i m)))
@@ -1154,7 +1266,7 @@ module internal FStarVocabulary =
 
                     line "    else"
 
-                line (sprintf "    Error (%s ^ tag)" (lit "unknown kind: "))
+                line (sprintf "    Error (%s ^ tag)" (lit (unknown "vkind" "unknown kind")))
 
             line ""
 
@@ -1163,7 +1275,6 @@ module internal FStarVocabulary =
                 | SNode -> ()
                 | SRecord _ ->
                     let n = slotName s
-                    let ms = c.Members[n]
 
                     line (
                         decHead (
@@ -1174,8 +1285,21 @@ module internal FStarVocabulary =
                         )
                     )
 
-                    ms |> List.iteri (fun i m -> line (indent 1 (decMemberOf n "Mk" ms "el" i m)))
-                    line (indent 1 (decCombine ms (ctorName n "Mk")))
+                    match c.Records[n] with
+                    | [ label, ms ] when (picksOf c n label).IsEmpty ->
+                        ms |> List.iteri (fun i m -> line (indent 1 (decMemberOf n label ms "el" i m)))
+                        line (indent 1 (decCombine ms (ctorName n label)))
+                    | ctors ->
+                        // Phase 722 — a record has no tag, so its constructors are told apart by
+                        // the readings alone.
+                        for label, ms in ctors do
+                            line (sprintf "  if %s then" (readings n label |> String.concat " && "))
+                            ms |> List.iteri (fun i m -> line (indent 2 (decMemberOf n label ms "el" i m)))
+                            line (indent 2 (decCombine ms (ctorName n label)))
+                            line "  else"
+
+                        line (sprintf "  Error %s" (lit (sprintf "no case of a presence-keyed union %s holds" n)))
+
                     line ""
                 | SUnion _ ->
                     let n = slotName s
@@ -1225,14 +1349,14 @@ module internal FStarVocabulary =
                         match c.Transparent.TryFind n with
                         | Some t when t = tag -> ()
                         | _ ->
-                            line (sprintf "    if tag = %s then" (lit tag))
+                            line (sprintf "    if tag = %s%s then" (lit (wireTag c n tag)) (guard n tag))
 
                             ms |> List.iteri (fun i m -> line (indent 3 (decMemberOf n tag ms "el" i m)))
 
                             line (indent 3 (decCombine ms (ctorName n tag)))
                             line "    else"
 
-                    line (sprintf "    Error (%s ^ tag)" (lit (sprintf "unknown %s case: " n)))
+                    line (sprintf "    Error (%s ^ tag)" (lit (unknown n (sprintf "unknown %s case" n))))
                     line ""
                 | _ -> ()
 
@@ -1265,6 +1389,8 @@ module internal FStarVocabulary =
                             "(match y with | JFloat w -> Ok w | other -> Error (\"expected float, got \" ^ kind_name other))"
                         | SJson -> "Ok y"
                         | SSentinel _ -> "Ok ()"
+                        // A synthesised member is a member of an object, never an item of a list or a map.
+                        | SConst _ -> invalidArg "inner" "a synthesised member is not an item"
                         | SEnum _
                         | SText _
                         | STuple _
@@ -1311,6 +1437,8 @@ module internal FStarVocabulary =
                             "(match v with | JFloat w -> Ok w | other -> Error (\"expected float, got \" ^ kind_name other))"
                         | SJson -> "Ok v"
                         | SSentinel _ -> "Ok ()"
+                        // A synthesised member is a member of an object, never an item of a list or a map.
+                        | SConst _ -> invalidArg "inner" "a synthesised member is not an item"
                         | SEnum _
                         | SText _
                         | STuple _
