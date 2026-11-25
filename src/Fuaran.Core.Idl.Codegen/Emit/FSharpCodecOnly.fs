@@ -5,6 +5,9 @@ open Fuaran.Core.Idl
 open Fuaran.Core.Idl.Codegen.Types
 open Fuaran.Core.Idl.Emit.Core
 open Fuaran.Core.Idl.Emit.FSharpCanonicalForm
+open Fuaran.Core.Idl.Emit.FSharpEncode
+open Fuaran.Core.Idl.Emit.FSharpDecode
+open Fuaran.Core.Idl.Emit.FSharpInline
 open Fuaran.Core.Idl.Emit.FSharpCodec
 
 /// Phase 550 (DECISIONS.md D198) — the CODEC-ONLY F# module: encoders and decoders for named
