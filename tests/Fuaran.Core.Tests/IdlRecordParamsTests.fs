@@ -15,7 +15,7 @@ open Fuaran.Core
 open Fuaran.Core.Idl
 open Fuaran.Core.Idl.Codegen.Types
 
-let private f (name: string) (t: IdlType) (opt: Optionality) : IdlField =
+let f (name: string) (t: IdlType) (opt: Optionality) : IdlField =
     { Name = name
       Type = t
       Opt = opt
@@ -24,19 +24,19 @@ let private f (name: string) (t: IdlType) (opt: Optionality) : IdlField =
       Presence = None
       Annotations = Annotations.Empty }
 
-let private kind (tag: string) (fields: IdlField list) : IdlKind =
+let kind (tag: string) (fields: IdlField list) : IdlKind =
     { Tag = tag
       Category = "test"
       Fields = fields
       Annotations = Annotations.Empty }
 
-let private case (tag: string) (fields: IdlField list) : IdlUnionCase =
+let case (tag: string) (fields: IdlField list) : IdlUnionCase =
     { Hosted = None
       Tag = tag
       Fields = fields
       Annotations = Annotations.Empty }
 
-let private union (name: string) (pars: string list) (cases: IdlUnionCase list) : IdlUnion =
+let union (name: string) (pars: string list) (cases: IdlUnionCase list) : IdlUnion =
     { Name = name
       Params = pars
       Cases = cases
@@ -44,14 +44,14 @@ let private union (name: string) (pars: string list) (cases: IdlUnionCase list) 
       TagRule = UnionTagRule.CaseName
       Discrimination = UnionDiscrimination.Tagged }
 
-let private record (name: string) (pars: string list) (fields: IdlField list) : IdlRecord =
+let record (name: string) (pars: string list) (fields: IdlField list) : IdlRecord =
     { Name = name
       Params = pars
       Fields = fields
       Annotations = Annotations.Empty
       Inline = false }
 
-let private vocabulary (kinds: IdlKind list) (unions: IdlUnion list) (records: IdlRecord list) : Idl =
+let vocabulary (kinds: IdlKind list) (unions: IdlUnion list) (records: IdlRecord list) : Idl =
     { Kinds = kinds
       Unions = unions
       Enums = []
@@ -66,7 +66,7 @@ let private vocabulary (kinds: IdlKind list) (unions: IdlUnion list) (records: I
 /// `Box<T>` holding its parameter bare, in a list and passed on to a union; `Pair<A, B>`; applied
 /// at a kind, at a union case that passes its own parameter down, and as an INLINE record a
 /// parameterised case holds (the shape fuaran-core#722 deferred here).
-let private boxed: Idl =
+let boxed: Idl =
     vocabulary
         [ kind
               "Holder"
@@ -311,10 +311,10 @@ let tests =
                   (at (TUnion("Maybe", [ TVar "T" ])))
                   "the same path and the same sentence"
 
-              Expect.stringContains
+              Expect.equal
                   (snd (at (TRecord("Box", [ TVar "T" ]))))
-                  "type variable 'T' is not a parameter"
-                  "naming the variable"
+                  "kind 'Bad', field 'x': type variable 'T' names a type parameter, and a kind declares none"
+                  "naming the variable, and that a kind declares no parameter to bind it"
 
               // A record's own parameter is not in scope in another declaration.
               Expect.isNonEmpty
@@ -324,6 +324,55 @@ let tests =
                               boxed.Records
                               @ [ record "Plain" [] [ f "v" (TRecord("Box", [ TVar "T" ])) Required ] ] })
                   "a record that declares no parameter binds none")
+
+          testCase "a variable where no declaration can bind it names the owner that declares none" (fun _ ->
+              // A union's case and a record's field name the declaration that lacks the parameter.
+              // A kind, an op, the node envelope and a contract's method declare none at all, and
+              // until this phase each was refused in the union's sentence, naming a union that is
+              // not there.
+              let sentence (idl: Idl) = theFault idl |> snd
+
+              let variable = f "x" (TVar "T") Required
+
+              Expect.equal
+                  (sentence
+                      { boxed with
+                          Kinds = boxed.Kinds @ [ kind "Bad" [ variable ] ] })
+                  "kind 'Bad', field 'x': type variable 'T' names a type parameter, and a kind declares none"
+                  "a kind"
+
+              Expect.equal
+                  (sentence
+                      { boxed with
+                          Ops = [ kind "Edit" [ variable ] ] })
+                  "op 'Edit', field 'x': type variable 'T' names a type parameter, and an op declares none"
+                  "an op"
+
+              Expect.equal
+                  (sentence { boxed with NodeFields = [ variable ] })
+                  "the node envelope, field 'x': type variable 'T' names a type parameter, and the node envelope declares none"
+                  "the node envelope"
+
+              let contract = ContractsIdl.idl.Contracts |> List.head
+              let method = contract.Methods |> List.head
+
+              let resulting =
+                  { ContractsIdl.idl with
+                      Contracts =
+                          [ { contract with
+                                Methods = [ { method with Result = Some(TVar "T") } ] } ] }
+
+              Expect.contains
+                  (details resulting)
+                  "method 'orders.get': its result: type variable 'T' names a type parameter, and a contract's method declares none"
+                  "a contract's method"
+
+              Expect.equal
+                  (sentence
+                      { boxed with
+                          Unions = boxed.Unions @ [ union "Loose" [] [ case "Of" [ variable ] ] ] })
+                  "union 'Loose' case 'Of', field 'x': type variable 'T' is not a parameter of the union declaring it"
+                  "a union's case keeps its sentence")
 
           testCase "a record's parameter names are held to the rules a union's are" (fun _ ->
               let recordDetails =
@@ -450,22 +499,4 @@ let tests =
                           Expect.stringContains
                               description
                               (sprintf "a type-parameterised record ('%s')" named)
-                              (sprintf "%s (%s) names the record" entry what))
-
-          testCase "the interpreter does not read a record's binding yet, and refuses the variable by name" (fun _ ->
-              // The lowering states a record reference's binding; the encoder, the decoder and the
-              // sampler do not read it until the round that makes the interpreter emit one. A
-              // member naming a parameter is therefore refused, never written or read at a guess.
-              let t = TRecord("Box", [ TStr ])
-
-              let one =
-                  { boxed with
-                      Kinds = [ kind "One" [ f "box" t Required ] ] }
-
-              match Encode.encode one (VNode("n", "One", [ "box", VRecord [ "value", VStr "x" ] ])) with
-              | Error e -> Expect.stringContains e "unsubstituted type variable 'T'" "the encoder names the variable"
-              | Ok text -> failtestf "encoded at a guess: %s" text
-
-              match Decode.value boxed t (JObj [ "value", JStr "x" ]) with
-              | Error e -> Expect.stringContains e "'T'" "the decoder refuses the member, naming the variable"
-              | Ok v -> failtestf "decoded at a guess: %A" v) ]
+                              (sprintf "%s (%s) names the record" entry what)) ]

@@ -216,6 +216,11 @@ module Sample =
         | [] -> owners
         | leaves -> leaves
 
+    /// Why a union or a record applied to another number of type arguments than it declares
+    /// parameters cannot be drawn: one clause for both (Phase 732).
+    let private misapplied (args: IdlType list) (pars: string list) : string =
+        sprintf "it is applied to %d type argument(s) and declares %d" (List.length args) (List.length pars)
+
     let rec private sampleType (idl: Idl) (r: Rng) (depth: int) (t: IdlType) : IdlValue =
         if depth < bottom then
             refuse (sprintf "%A" t) "it has no finite value — every draw at the depth floor recurses"
@@ -279,7 +284,11 @@ module Sample =
             |> distinctBy idl k fst
             |> List.map (fun (kv, vv) -> VList [ kv; vv ])
             |> VList
-        | WireForm.Record rc -> VRecord(sampleFields idl r (depth - 1) rc.Decl.Fields)
+        // Phase 732 — a record's fields are drawn at the reference's instantiation, as a case's are.
+        | WireForm.Record rc ->
+            match rc.Binding with
+            | None -> refuse ("record '" + rc.Name + "'") (misapplied rc.Args rc.Decl.Params)
+            | Some binding -> VRecord(sampleFields idl r (depth - 1) (WireForm.recordFields binding rc.Decl))
         | WireForm.Undeclared(Undeclared.Record(name, _)) ->
             refuse ("record '" + name + "'") "the vocabulary does not declare it"
         | WireForm.Union u ->
@@ -299,13 +308,7 @@ module Sample =
             // codec expects a float; the copy that replaced mapped every variable to the FIRST
             // argument, which drew a two-parameter union's second parameter at the first's type.
             match u.Binding with
-            | None ->
-                refuse
-                    ("union '" + u.Name + "'")
-                    (sprintf
-                        "it is applied to %d type argument(s) and declares %d"
-                        (List.length u.Args)
-                        (List.length u.Decl.Params))
+            | None -> refuse ("union '" + u.Name + "'") (misapplied u.Args u.Decl.Params)
             | Some binding ->
                 let c = pickAt r ("union '" + u.Name + "'") candidates
                 VUnion(u.Decl.WireTagOf c.Tag, sampleFields idl r (depth - 1) (WireForm.caseFields binding c))

@@ -107,7 +107,7 @@ module internal TypeScriptDerived =
 
         match slot with
         | InlineSlot.Record r ->
-            sprintf "function valMembers%s(h) {\n  return heldMembers(h, %s);\n}" r.Name (keys r.Fields)
+            sprintf "function valMembers%s(h) {\n  return heldMembers(h, %s);\n}" r.Decl.Name (keys r.Fields)
         | InlineSlot.Keyed(u, keyed) ->
             let arms =
                 keyed

@@ -58,6 +58,11 @@ module Encode =
         | Some((a, _), _) -> Error(sprintf "duplicate %s %s" what a)
         | None -> Ok(keyed |> List.map snd)
 
+    /// The refusal of a reference that applies a union or a record to another number of type
+    /// arguments than it declares parameters: one sentence for both (Phase 732).
+    let private arity (what: string) (name: string) (args: IdlType list) (pars: string list) : Result<'T, string> =
+        Error(sprintf "%s '%s' given %d type args, expects %d" what name (List.length args) (List.length pars))
+
     let rec private encodeValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<JVal, string> =
         // Phase 513 — the type's wire form is decided once, by [[WireForm.ofType]]; this arm list only
         // writes it.
@@ -76,14 +81,7 @@ module Encode =
         | WireForm.Undeclared(Undeclared.Enum name), VEnum _ -> Error(sprintf "unknown enum '%s'" name)
         | WireForm.Union u, VUnion(tag, fields) ->
             match u.Binding, u.Decl.CaseByWireTag tag with
-            | None, _ ->
-                Error(
-                    sprintf
-                        "union '%s' given %d type args, expects %d"
-                        u.Name
-                        (List.length u.Args)
-                        (List.length u.Decl.Params)
-                )
+            | None, _ -> arity "union" u.Name u.Args u.Decl.Params
             | Some _, None -> Error(sprintf "union '%s' has no case '%s'" u.Name tag)
             | Some binding, Some c ->
                 let caseFields = WireForm.caseFields binding c
@@ -114,7 +112,13 @@ module Encode =
         // [[HostedCodec]]); a declared wire form (Phase 252) is checked on DECODE, the direction a
         // document arrives from.
         | (WireForm.Verbatim | WireForm.Hosted _), VJson j -> verbatim j
-        | WireForm.Record r, VRecord fields -> encodeFields idl r.Decl.Fields fields |> Result.map JObj
+        // Phase 732 — a record's fields are read at the reference's instantiation, as a case's are.
+        | WireForm.Record r, VRecord fields ->
+            match r.Binding with
+            | None -> arity "record" r.Name r.Args r.Decl.Params
+            | Some binding ->
+                encodeFields idl (WireForm.recordFields binding r.Decl) fields
+                |> Result.map JObj
         | WireForm.Undeclared(Undeclared.Record(name, _)), VRecord _ -> Error(sprintf "unknown record '%s'" name)
         | WireForm.Map vt, VMap entries ->
             let rec go acc =

@@ -18,6 +18,14 @@ module TypeParams =
     /// variable the map does not name is left in place, so an unbound one stays visible to
     /// the caller (the encoder refuses it by name; [[Declare.errors]] refuses it at
     /// declaration).
+    ///
+    /// Every case is named, so a type added to [[IdlType]] is placed here on purpose. Until
+    /// Phase 732 the cases that hold no type were one wildcard, and a tuple, a set and a keyed
+    /// map (Phase 639) fell into it: a member holding its parameter in one of them was admitted
+    /// by [[Declare.errors]] and refused by the encoder at every instantiation. A hosted slot's
+    /// declared wire form and a host function's signature hold types and are left as declared:
+    /// the first cannot name a variable ([[Declare.hostedWireErrors]]), and the second is one
+    /// sentinel on the wire whatever it names.
     let rec substitute (subst: Map<string, IdlType>) (t: IdlType) : IdlType =
         match t with
         | TVar v ->
@@ -26,9 +34,29 @@ module TypeParams =
             | None -> t
         | TList inner -> TList(substitute subst inner)
         | TMap inner -> TMap(substitute subst inner)
+        | TSet element -> TSet(substitute subst element)
+        | TTuple components -> TTuple(List.map (substitute subst) components)
+        | TKeyedMap(key, value) -> TKeyedMap(substitute subst key, substitute subst value)
         | TUnion(n, args) -> TUnion(n, List.map (substitute subst) args)
         | TRecord(n, args) -> TRecord(n, List.map (substitute subst) args)
-        | other -> other
+        | TStr
+        | TInt
+        | TBool
+        | TFloat
+        | TEnum _
+        | TNode
+        | TClosure
+        | TFn _
+        | TOpaque
+        | TJson
+        | THosted _
+        | TKind
+        | TOp
+        | TInt64
+        | TDecimal
+        | TBytes
+        | TTimeOfDay
+        | TDuration -> t
 
     /// Each parameter keyed by its name to the argument at its position, or `None` when the
     /// counts differ, so no caller ever zips two lists of different length.

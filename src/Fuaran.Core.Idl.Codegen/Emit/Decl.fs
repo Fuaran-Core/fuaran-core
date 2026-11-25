@@ -32,6 +32,22 @@ type internal CaseLayout =
     | Tagged
     | Bare of Result<IdlField, CodegenError>
 
+/// Phase 732 — an inline record as the field holding it REFERS to it: the declaration, the type
+/// arguments the reference applies, and the members it lays on the holding object at that
+/// instantiation. A member naming one of the record's parameters is here at the argument, so a
+/// backend that reads [[Fields]] lays out and reads the instantiation without binding anything
+/// itself; a holder that passes its own parameter down leaves that variable in [[Args]] and in the
+/// member types, for the holder's own instantiation to bind.
+type internal InlineRecord =
+    {
+        /// The declaration: its name and annotations, its fields as declared.
+        Decl: IdlRecord
+        /// The type arguments the reference applies, in position.
+        Args: IdlType list
+        /// The members on the holding object, each at the reference's instantiation.
+        Fields: IdlField list
+    }
+
 /// Phase 474 (DECISIONS.md D220) — an INLINE declaration a field holds: its members are keys of the
 /// object holding the field, so no printer sees a nested key. An inline record is read and written
 /// member by member from that object; a presence-keyed union's case is the one whose key is
@@ -39,7 +55,7 @@ type internal CaseLayout =
 /// in the union's roster order.
 [<RequireQualifiedAccess>]
 type internal InlineSlot =
-    | Record of IdlRecord
+    | Record of InlineRecord
     | Keyed of IdlUnion * KeyedCase list
 
 /// A generic union instantiated at the arguments a vocabulary names: its instance name (the
@@ -1100,7 +1116,13 @@ module internal Decl =
     [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
     let inlineSlot (idl: Idl) (t: IdlType) : InlineSlot option =
         match WireForm.inlineRecord idl t, WireForm.keyedUnion idl t with
-        | Some r, _ -> Some(InlineSlot.Record r)
+        | Some r, _ ->
+            Some(
+                InlineSlot.Record
+                    { Decl = r.Decl
+                      Args = r.Args
+                      Fields = WireForm.instantiatedFields r }
+            )
         | _, Some(u, keyed) -> Some(InlineSlot.Keyed(u, keyed))
         | None, None -> None
 

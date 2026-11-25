@@ -28,6 +28,16 @@ module VocabularyFault =
 [<RequireQualifiedAccess>]
 module Declare =
 
+    /// What could bind a type variable where a field's type names one (Phase 732): the refusal of an
+    /// unbound variable names what declares, or cannot declare, the parameter.
+    [<RequireQualifiedAccess>]
+    type private Binder =
+        /// A union or a record: which of the two, and the type parameters it declares.
+        | Declares of what: string * pars: string list
+        /// An owner that declares no type parameter, as the refusal names it: a kind, an op, the
+        /// node envelope, a contract's method.
+        | DeclaresNone of owner: string
+
     /// An enum whose wire strings ARE its case names — the common case, and the
     /// shape every declaration had before fuaran#707.
     let enumOf (name: string) (cases: string list) : IdlEnum =
@@ -253,13 +263,8 @@ module Declare =
             | WireForm.Union u when u.Decl.Discrimination <> UnionDiscrimination.Tagged -> Some u.Decl
             | _ -> None
 
-        let inlineRecordOf (t: IdlType) : IdlRecord option =
-            match WireForm.ofType idl t with
-            | WireForm.Record r when r.Decl.Inline -> Some r.Decl
-            | _ -> None
-
         let describe (t: IdlType) : string option =
-            match inlineRecordOf t, keyedOf t with
+            match WireForm.inlineRecord idl t, keyedOf t with
             | Some r, _ -> Some(sprintf "inline record '%s'" r.Name)
             | _, Some u -> Some(sprintf "presence-keyed union '%s'" u.Name)
             | _ -> None
@@ -282,11 +287,11 @@ module Declare =
         let members (fields: IdlField list) : (string * string * bool) list =
             [ for f in fields do
                   if f.Opt <> HostOnly then
-                      match inlineRecordOf f.Type, keyedOf f.Type with
+                      match WireForm.inlineRecord idl f.Type, keyedOf f.Type with
                       | Some r, _ ->
                           let bearer = sprintf "field '%s' (inline record '%s')" f.Name r.Name
 
-                          for g in r.Fields do
+                          for g in WireForm.instantiatedFields r do
                               if g.Opt <> HostOnly then
                                   for n in WireForm.spellings g do
                                       n, bearer, true
@@ -340,7 +345,7 @@ module Declare =
                                   label
                                   what)
 
-                      match inlineRecordOf f.Type, f.Opt with
+                      match WireForm.inlineRecord idl f.Type, f.Opt with
                       | Some _, Required
                       | None, (Required | Optional) -> ()
                       | Some _, _ ->
@@ -807,10 +812,6 @@ module Declare =
                     | None -> false)
             | _ -> false
 
-        // The parameters of an owner that declares none (a kind, an op, the node envelope, a contract's
-        // method): a type variable there names no parameter, and is refused in the words it always was.
-        let noParams: string * string list = "union", []
-
         // A reference that applies a union or a record to another number of type arguments than it
         // declares parameters (Phase 732: one sentence for both).
         let arityFault
@@ -831,14 +832,8 @@ module Declare =
                     (List.length args)
                     (List.length declared))
 
-        // `pars`: what the field's owner is, and the type parameters it declares ([[noParams]] for an
-        // owner that declares none).
-        let rec typeErrors
-            (path: PathSegment list)
-            (at: string)
-            (pars: string * string list)
-            (t: IdlType)
-            : VocabularyFault list =
+        // `pars`: what binds a type variable at the field ([[Binder]]).
+        let rec typeErrors (path: PathSegment list) (at: string) (pars: Binder) (t: IdlType) : VocabularyFault list =
             match WireForm.ofType idl t with
             | WireForm.Undeclared(Undeclared.Enum n) ->
                 [ fault path (sprintf "%s: names enum '%s', which the vocabulary does not declare" at n) ]
@@ -874,10 +869,17 @@ module Declare =
                                 f.Name)
                         :: inner
                     | _ -> inner
-            | WireForm.Unbound v when not (List.contains v (snd pars)) ->
-                [ fault
-                      path
-                      (sprintf "%s: type variable '%s' is not a parameter of the %s declaring it" at v (fst pars)) ]
+            | WireForm.Unbound v ->
+                match pars with
+                | Binder.Declares(_, declared) when List.contains v declared -> []
+                | Binder.Declares(what, _) ->
+                    [ fault path (sprintf "%s: type variable '%s' is not a parameter of the %s declaring it" at v what) ]
+                // Until Phase 732 this owner was refused in the union's sentence, which named a
+                // union where none declares the field.
+                | Binder.DeclaresNone owner ->
+                    [ fault
+                          path
+                          (sprintf "%s: type variable '%s' names a type parameter, and %s declares none" at v owner) ]
             | WireForm.List inner
             | WireForm.Map inner -> typeErrors path at pars inner
             // Phase 639 (D251) — a tuple has at least two components, and a set's element and a keyed
@@ -968,7 +970,7 @@ module Declare =
         let fieldErrors
             (owner: string)
             (fieldAt: int -> PathSegment list)
-            (pars: string * string list)
+            (pars: Binder)
             (fields: IdlField list)
             : VocabularyFault list =
             [ yield!
@@ -1170,7 +1172,12 @@ module Declare =
                       (sprintf "%s: the category carries a line break, a control character or ill-formed UTF-16" label)
 
               yield! annotationErrors owner label k.Annotations
-              yield! fieldErrors label (fun j -> owner @ [ key "fields"; item j ]) noParams k.Fields
+              yield!
+                  fieldErrors
+                      label
+                      (fun j -> owner @ [ key "fields"; item j ])
+                      (Binder.DeclaresNone(if what = "kind" then "a kind" else "an op"))
+                      k.Fields
               yield! keyedErrors (what = "kind") label (fun j -> owner @ [ key "fields"; item j ]) k.Fields ]
 
         [ yield! wireShapeErrors idl
@@ -1236,7 +1243,7 @@ module Declare =
                       (r.Params
                        |> List.mapi (fun p n -> [ key "records"; item i; key "params"; item p ], n))
 
-              yield! fieldErrors owner (recordField i) ("record", r.Params) r.Fields
+              yield! fieldErrors owner (recordField i) (Binder.Declares("record", r.Params)) r.Fields
               yield! keyedErrors false owner (recordField i) r.Fields
 
           for i, u in List.indexed idl.Unions do
@@ -1306,7 +1313,7 @@ module Declare =
               for c, case in List.indexed u.Cases do
                   let caseOwner = sprintf "union '%s' case '%s'" u.Name case.Tag
                   yield! annotationErrors (at @ [ key "cases"; item c ]) caseOwner case.Annotations
-                  yield! fieldErrors caseOwner (caseField i c) ("union", u.Params) case.Fields
+                  yield! fieldErrors caseOwner (caseField i c) (Binder.Declares("union", u.Params)) case.Fields
                   yield! keyedErrors false caseOwner (caseField i c) case.Fields
 
           for i, e in List.indexed idl.Enums do
@@ -1335,7 +1342,7 @@ module Declare =
                           (sprintf "%s case '%s'" owner c)
                           a
 
-          yield! fieldErrors "the node envelope" envelopeField noParams idl.NodeFields
+          yield! fieldErrors "the node envelope" envelopeField (Binder.DeclaresNone "the node envelope") idl.NodeFields
           yield! keyedErrors false "the node envelope" envelopeField idl.NodeFields
 
           // The envelope's reserved names (Phase 292 amendment): `id` beside the node's own
@@ -1436,11 +1443,17 @@ module Declare =
                           typeErrors
                               (mAt @ [ key "arguments"; item k; key "type" ])
                               (sprintf "%s: argument '%s'" at a.Name)
-                              noParams
+                              (Binder.DeclaresNone "a contract's method")
                               a.Type
 
                   match m.Result with
-                  | Some t -> yield! typeErrors (mAt @ [ key "result" ]) (at + ": its result") noParams t
+                  | Some t ->
+                      yield!
+                          typeErrors
+                              (mAt @ [ key "result" ])
+                              (at + ": its result")
+                              (Binder.DeclaresNone "a contract's method")
+                              t
                   | None -> ()
 
           for path, f in Contract.faults idl do

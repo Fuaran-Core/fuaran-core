@@ -57,7 +57,7 @@ module internal TypeScriptCodec =
     /// The name an inline declaration's member functions carry.
     let tsInlineName (slot: InlineSlot) : string =
         match slot with
-        | InlineSlot.Record r -> r.Name
+        | InlineSlot.Record r -> r.Decl.Name
         | InlineSlot.Keyed(u, _) -> u.Name
 
     /// Where the member `f` of the value bound to `recv` is read from: its own key, or, for a

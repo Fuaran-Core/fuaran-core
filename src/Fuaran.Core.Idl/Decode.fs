@@ -22,13 +22,18 @@ module Decode =
     let private under (step: PathSegment) (r: Result<'T, DecodeError>) : Result<'T, DecodeError> =
         r |> Result.mapError (DecodeError.under step)
 
+    /// The refusal of a reference that applies a union or a record to another number of type
+    /// arguments than it declares parameters: one sentence for both (Phase 732).
+    let private arityOf (what: string) (name: string) (args: IdlType list) (pars: string list) =
+        err
+            DecodeCode.SchemaFault
+            (sprintf "%d type args for %s '%s'" (List.length pars) what name)
+            (sprintf "%d type args for %s '%s'" (List.length args) what name)
+
     /// The arity refusal both union arms share (Phase 292 — the bare arm used to zip the
     /// two lists unchecked and throw where the object arm refused).
     let private arity (u: UnionForm) =
-        err
-            DecodeCode.SchemaFault
-            (sprintf "%d type args for union '%s'" (List.length u.Decl.Params) u.Name)
-            (sprintf "%d type args for union '%s'" (List.length u.Args) u.Name)
+        arityOf "union" u.Name u.Args u.Decl.Params
 
     /// Phase 474 — the member a required presence-keyed union is refused `MissingField` at when no
     /// case's key is present: its first case's key.
@@ -133,7 +138,7 @@ module Decode =
                         DecodeCode.OutOfRange
                         ("a '" + HostedFormat.name fmt + "' string")
                         (Canonical.write Rendering.CrossHost j))
-        | WireForm.Record r, JObj fs -> decodeFields idl r.Decl.Fields fs |> Result.map VRecord
+        | WireForm.Record r, JObj fs -> decodeRecord idl r fs |> Result.map VRecord
         | WireForm.Undeclared(Undeclared.Record(name, _)), JObj _ ->
             err DecodeCode.SchemaFault ("a declared record '" + name + "'") (sprintf "record '%s'" name)
         | WireForm.Map vt, JObj fs ->
@@ -323,6 +328,17 @@ module Decode =
 
                 check k.Synthesised)
 
+    /// Phase 732 — a record's members, its fields read at the reference's instantiation as a union
+    /// case's are. An inline record's are read from the object holding it, through this same body.
+    and private decodeRecord
+        (idl: Idl)
+        (r: RecordForm)
+        (jfields: (string * JVal) list)
+        : Result<(string * IdlValue) list, DecodeError> =
+        match r.Binding with
+        | None -> arityOf "record" r.Name r.Args r.Decl.Params
+        | Some binding -> decodeFields idl (WireForm.recordFields binding r.Decl) jfields
+
     and private decodeFields
         (idl: Idl)
         (fields: IdlField list)
@@ -336,7 +352,7 @@ module Decode =
             | (f: IdlField) :: rest when f.Opt <> HostOnly && WireForm.isInline idl f.Type ->
                 let read =
                     match WireForm.inlineRecord idl f.Type, WireForm.keyedUnion idl f.Type with
-                    | Some r, _ -> decodeFields idl r.Fields jfields |> Result.map (VRecord >> Some)
+                    | Some r, _ -> decodeRecord idl r jfields |> Result.map (VRecord >> Some)
                     | _, Some(u, keyed) -> decodeKeyed idl u keyed jfields
                     | None, None -> Ok None
 
@@ -418,7 +434,10 @@ module Decode =
         let disc = idl.Wire.Discriminator
 
         match WireForm.ofType idl t, j with
-        | WireForm.Record r, JObj fs -> strictObject idl [] r.Decl.Fields j fs
+        | WireForm.Record r, JObj fs ->
+            match r.Binding with
+            | Some binding -> strictObject idl [] (WireForm.recordFields binding r.Decl) j fs
+            | None -> Ok()
         | WireForm.Union { Decl = { Discrimination = UnionDiscrimination.ByPresence keyed } as u }, JObj fs ->
             Decoder.members (WireForm.keyedRoster u) j
             |> Result.bind (fun () ->
@@ -534,7 +553,7 @@ module Decode =
                 acc
                 |> Result.bind (fun () ->
                     match WireForm.inlineRecord idl f.Type, WireForm.keyedUnion idl f.Type with
-                    | Some r, _ -> strictFields idl r.Fields fs
+                    | Some r, _ -> strictFields idl (WireForm.instantiatedFields r) fs
                     | _, Some(u, keyed) ->
                         match WireForm.pickKeyed u keyed fs with
                         | KeyedPick.Picked(c, _) -> strictFields idl c.Fields fs

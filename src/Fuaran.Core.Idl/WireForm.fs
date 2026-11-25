@@ -215,13 +215,20 @@ module internal WireForm =
         | WireForm.Tuple components -> components |> List.forall (orderable idl)
         | _ -> false
 
-    /// A union case's fields at an instantiation: each field's type with the binding's arguments
-    /// substituted for the union's parameters.
-    let caseFields (binding: Map<string, IdlType>) (c: IdlUnionCase) : IdlField list =
-        c.Fields
+    /// A declaration's fields at an instantiation: each field's type with the binding's arguments
+    /// substituted for the declaration's parameters.
+    let private fieldsAt (binding: Map<string, IdlType>) (fields: IdlField list) : IdlField list =
+        fields
         |> List.map (fun f ->
             { f with
                 Type = TypeParams.substitute binding f.Type })
+
+    /// A union case's fields at an instantiation ([[UnionForm.Binding]]).
+    let caseFields (binding: Map<string, IdlType>) (c: IdlUnionCase) : IdlField list = fieldsAt binding c.Fields
+
+    /// A record's fields at an instantiation ([[RecordForm.Binding]]), as [[caseFields]] answers a
+    /// union case's (Phase 732).
+    let recordFields (binding: Map<string, IdlType>) (r: IdlRecord) : IdlField list = fieldsAt binding r.Fields
 
     /// The JSON kind a value of the form takes — a `WrongKind` refusal's `Expected`.
     let jsonKind (form: WireForm) : string =
@@ -294,15 +301,19 @@ module internal WireForm =
     /// holds it, and its cases' fields are read as declared (an unbound variable reaches nothing). That
     /// is wider than the draw in exactly one corner — an argument that reaches a node only behind a
     /// case the floor never draws — and it is kept: an answer that moves here moves which draws the
-    /// sampler takes, and so every seeded stream over a vocabulary with that shape. `seen` breaks
-    /// declaration cycles.
+    /// sampler takes, and so every seeded stream over a vocabulary with that shape. A record reads its
+    /// arguments and its declared fields the same way (Phase 732), wider where an argument reaches a
+    /// node only behind an optional member. `seen` breaks declaration cycles.
     let rec reachesNodeAtFloor (idl: Idl) (seen: Set<string>) (t: IdlType) : bool =
         match ofType idl t with
         | WireForm.Node
         | WireForm.Kind
         | WireForm.Op -> true
         | WireForm.Record r when not (Set.contains ("r:" + r.Name) seen) ->
-            requiredReachesNode idl (Set.add ("r:" + r.Name) seen) r.Decl.Fields
+            let seen' = Set.add ("r:" + r.Name) seen
+
+            r.Args |> List.exists (reachesNodeAtFloor idl seen')
+            || requiredReachesNode idl seen' r.Decl.Fields
         | WireForm.Union u when not (Set.contains ("u:" + u.Name) seen) ->
             let seen' = Set.add ("u:" + u.Name) seen
 
@@ -317,6 +328,8 @@ module internal WireForm =
             || candidates |> List.exists (fun c -> requiredReachesNode idl seen' c.Fields)
         | WireForm.Undeclared(Undeclared.Union(name, args)) when not (Set.contains ("u:" + name) seen) ->
             args |> List.exists (reachesNodeAtFloor idl (Set.add ("u:" + name) seen))
+        | WireForm.Undeclared(Undeclared.Record(name, args)) when not (Set.contains ("r:" + name) seen) ->
+            args |> List.exists (reachesNodeAtFloor idl (Set.add ("r:" + name) seen))
         // Phase 639 — a tuple draws every component, so it reaches what any of them reaches; a set and
         // a keyed map are drawn empty at the floor, as a list and a map are.
         | WireForm.Tuple components -> components |> List.exists (reachesNodeAtFloor idl seen)
@@ -437,11 +450,23 @@ module internal WireForm =
     // decoder, the sampler and the generated hosts lay them out and read them alike.
     // -----------------------------------------------------------------------
 
-    /// The inline record `t` names, when it names one.
-    let inlineRecord (idl: Idl) (t: IdlType) : IdlRecord option =
+    /// The inline record `t` names, when it names one: the REFERENCE resolved, so a reader has the
+    /// binding the reference's arguments make beside the declaration (Phase 732). An inline record's
+    /// members sit on the object holding it, and what a member naming a parameter holds is the
+    /// holder's to say: a parameterised case that holds one passes its own argument down.
+    let inlineRecord (idl: Idl) (t: IdlType) : RecordForm option =
         match ofType idl t with
-        | WireForm.Record r when r.Decl.Inline -> Some r.Decl
+        | WireForm.Record r when r.Decl.Inline -> Some r
         | _ -> None
+
+    /// A resolved record reference's fields at its instantiation ([[recordFields]]), for a question
+    /// about the members the record puts on an object. A reference applying the wrong number of
+    /// arguments answers the fields as declared: no binding moves a member's NAME, and the reader of
+    /// the record's VALUE is where that fault is refused.
+    let instantiatedFields (r: RecordForm) : IdlField list =
+        match r.Binding with
+        | Some binding -> recordFields binding r.Decl
+        | None -> r.Decl.Fields
 
     /// The presence-keyed union `t` names, with its rules, when it names one.
     let keyedUnion (idl: Idl) (t: IdlType) : (IdlUnion * KeyedCase list) option =
@@ -497,6 +522,6 @@ module internal WireForm =
            |> List.filter (fun f -> f.Opt <> HostOnly)
            |> List.collect (fun f ->
                match inlineRecord idl f.Type, keyedUnion idl f.Type with
-               | Some r, _ -> roster idl [] r.Fields
+               | Some r, _ -> roster idl [] (instantiatedFields r)
                | _, Some(u, _) -> keyedRoster u
                | None, None -> spellings f))

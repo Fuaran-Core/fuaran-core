@@ -225,7 +225,7 @@ let private encFloat (f: float) : JVal =
     /// The F# piece laying an inline field's members onto the object being written, read from `src`.
     let inlineEncPiece (idl: Idl) (src: string) (f: IdlField) : string option =
         match Decl.inlineSlot idl f.Type, f.Opt with
-        | Some(InlineSlot.Record r), _ -> Some(sprintf "yield! encMembers%s %s" r.Name src)
+        | Some(InlineSlot.Record r), _ -> Some(sprintf "yield! encMembers%s %s" r.Decl.Name src)
         | Some(InlineSlot.Keyed(u, _)), Optional ->
             Some(sprintf "yield! (match %s with Some __v -> encMembers%s __v | None -> [])" src u.Name)
         | Some(InlineSlot.Keyed(u, _)), _ -> Some(sprintf "yield! encMembers%s %s" u.Name src)
@@ -234,7 +234,7 @@ let private encFloat (f: float) : JVal =
     /// The F# expression reading an inline field from the object `o` its members sit on.
     let inlineDecRead (idl: Idl) (o: string) (f: IdlField) : string option =
         match Decl.inlineSlot idl f.Type, f.Opt with
-        | Some(InlineSlot.Record r), _ -> Some(sprintf "decMembers%s %s" r.Name o)
+        | Some(InlineSlot.Record r), _ -> Some(sprintf "decMembers%s %s" r.Decl.Name o)
         | Some(InlineSlot.Keyed(u, _)), Optional -> Some(sprintf "decMembers%s %s" u.Name o)
         | Some(InlineSlot.Keyed(u, keyed)), _ ->
             Some(
@@ -249,7 +249,7 @@ let private encFloat (f: float) : JVal =
     /// The collecting twin of [[inlineDecRead]].
     let inlineColRead (idl: Idl) (o: string) (f: IdlField) : string option =
         match Decl.inlineSlot idl f.Type, f.Opt with
-        | Some(InlineSlot.Record r), _ -> Some(sprintf "colMembers%s __ov j %s" r.Name o)
+        | Some(InlineSlot.Record r), _ -> Some(sprintf "colMembers%s __ov j %s" r.Decl.Name o)
         | Some(InlineSlot.Keyed(u, _)), Optional -> Some(sprintf "colMembers%s __ov j %s" u.Name o)
         | Some(InlineSlot.Keyed(u, keyed)), _ ->
             Some(
