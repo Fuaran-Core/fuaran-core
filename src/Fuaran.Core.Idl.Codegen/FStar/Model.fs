@@ -79,7 +79,26 @@ module internal FStarModel =
             Presence: string option option
             /// The declared optionality — what the one presence rule ([[Decl.memberValue]]) reads.
             Opt: Optionality
+            /// Phase 722 — the field of the holder this member was laid out from, when it is a member
+            /// of an INLINE record (D220): the record has no object on the wire, so its members are
+            /// the holder's own in the model, and an authored value of the holder still carries them
+            /// one level down, under this field ([[authoredFor]]). `None` for the holder's own member.
+            Held: string option
         }
+
+    /// The authored field list the member `m` of a holder is looked up in: the holder's own, or,
+    /// for a member laid out from an inline record, the record value the holder carries at
+    /// [[Member.Held]] (nothing when the holder carries none there).
+    let authoredFor (m: Member) (authored: (string * IdlValue) list) : (string * IdlValue) list =
+        match m.Held with
+        | None -> authored
+        | Some held ->
+            authored
+            |> List.tryPick (fun (n, v) ->
+                match v with
+                | VRecord inner when n = held -> Some inner
+                | _ -> None)
+            |> Option.defaultValue []
 
     // -----------------------------------------------------------------------
     // 2. Resolution — IDL type to slot, with the refusals.
@@ -499,7 +518,7 @@ module internal FStarModel =
             | [] -> Ok(List.rev acc)
             | (m: Member) :: t ->
                 let authoredValue =
-                    authored
+                    authoredFor m authored
                     |> List.tryPick (fun (n, av) ->
                         if n = m.Name then
                             match av with
@@ -537,6 +556,12 @@ module internal FStarModel =
     /// instantiation `subst` and translated ([[slotOf]]), with its presence; host-only fields
     /// dropped, because the model is of the wire. A projection of fields [[Decl]] has already
     /// reached — it reaches nothing itself.
+    ///
+    /// Phase 722 (DECISIONS.md D283) — a field holding an INLINE record is laid out as the wire lays
+    /// it out: the record's members, in its declared order, where the field stands, each under the
+    /// holder's instantiation and its own presence. The model therefore states the holder's object
+    /// exactly as a vocabulary declaring those members flat would, and the holder's round trip is
+    /// the theorem over them; the record has no declaration of its own.
     and private fieldMembers
         (idl: Idl)
         (subst: Map<string, IdlType>)
@@ -547,6 +572,17 @@ module internal FStarModel =
             match rest with
             | [] -> Ok(List.rev acc)
             | (f: IdlField) :: t when f.Opt = HostOnly -> go acc t
+            | (f: IdlField) :: t when
+                (match Decl.inlineSlot idl f.Type with
+                 | Some(InlineSlot.Record _) -> true
+                 | _ -> false)
+                ->
+                match Decl.inlineSlot idl f.Type with
+                | Some(InlineSlot.Record r) ->
+                    match fieldMembers idl subst (where + "." + f.Name) r.Fields with
+                    | Error e -> Error e
+                    | Ok laid -> go ((laid |> List.map (fun m -> { m with Held = Some f.Name }) |> List.rev) @ acc) t
+                | _ -> go acc t
             | (f: IdlField) :: t ->
                 let at = where + "." + f.Name
                 let ft = TypeParams.substitute subst f.Type
@@ -569,7 +605,8 @@ module internal FStarModel =
                                Type = ft
                                Slot = slot
                                Presence = p
-                               Opt = f.Opt }
+                               Opt = f.Opt
+                               Held = None }
                              :: acc)
                             t
 
@@ -636,9 +673,9 @@ module internal FStarModel =
             | TRecord n ->
                 match CodegenLookup.tryRecord idl n with
                 | None -> unmodellable ("an undeclared record '" + n + "'") ("record " + n)
-                // Phase 474 — an inline record's members sit on its holder's object, which the model
-                // does not lay out: refused by name, never modelled as a nested object.
-                | Some r when r.Inline -> unmodellable ("an inline record '" + n + "'") ("record " + n)
+                // Phase 722 — an inline record's members sit on its holder's object, where
+                // [[fieldMembers]] lays them out: it declares nothing of its own.
+                | Some r when r.Inline -> Ok()
                 | Some r ->
                     fieldMembers idl Map.empty ("record " + n) r.Fields
                     |> Result.map (fun ms -> memberMap[slotName (SRecord n)] <- ms)
@@ -732,7 +769,14 @@ module internal FStarModel =
                         | Error e -> Error e
                         | Ok s -> slots (s :: acc) tail
 
-                slots [] (reach.FromEnvelope @ reach.FromKinds)
+                // Phase 722 — an inline record is no slot: it is laid out on each holder.
+                slots
+                    []
+                    (reach.FromEnvelope @ reach.FromKinds
+                     |> List.filter (fun t ->
+                         match Decl.inlineSlot idl t with
+                         | Some(InlineSlot.Record _) -> false
+                         | _ -> true))
                 // Phase 639 — a set is modelled as a list, so a set and a list of one element type
                 // are one slot, declared once.
                 |> Result.map (List.distinctBy slotName))

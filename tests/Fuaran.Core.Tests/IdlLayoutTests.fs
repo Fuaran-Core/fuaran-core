@@ -421,7 +421,9 @@ let backendTests =
                       "a member every case writes is required, as the flat grid requires it"
               | _ -> failtest "the schema is not an object")
 
-          testCase "the TypeScript backend refuses a vocabulary that lays a declaration out inline" (fun _ ->
+          // Phase 722 — the TypeScript backend lays the three shapes out (`IdlLayoutTypeScriptTests`);
+          // every entry point that refused the vocabulary under D220.5 emits it.
+          testCase "the TypeScript backend emits a vocabulary that lays a declaration out inline" (fun _ ->
               let tags = LayoutIdl.layout.Kinds |> List.map _.Tag
 
               for name, r in
@@ -430,22 +432,40 @@ let backendTests =
                     "declarations", Gen.typescriptDeclarations LayoutIdl.layout tags
                     "derived declarations", Gen.typescriptDeclarationsDerived [] LayoutIdl.layout tags
                     "value", Gen.typescriptValue LayoutIdl.layout TStr (VStr "x") ] do
-                  Expect.stringContains (refusalOf r) "the " (name + " names the declaration")
+                  Expect.isOk r name)
 
-              Expect.isOk
-                  (Gen.typescriptModule LayoutIdl.flat (LayoutIdl.flat.Kinds |> List.map _.Tag))
-                  "the flat twin")
+          // Phase 722 (DECISIONS.md D283) — the F* target lays an inline record out on its holder, so a
+          // record-payload case is modelled; a presence-keyed union is still refused, by name.
+          testCase "the F* target models a record-payload kind and refuses a presence-keyed union, by name" (fun _ ->
+              let verdicts =
+                  FStarTarget.partition LayoutIdl.layout
+                  |> List.map (fun v -> v.Tag, v.Refusal)
+                  |> Map.ofList
 
-          testCase "the F* target refuses a kind reaching an inline declaration, by name" (fun _ ->
-              let verdicts = FStarTarget.partition LayoutIdl.layout
+              Expect.equal verdicts["Form"] None "the kind holding a record-payload case is modelled"
 
-              for v in verdicts do
-                  match v.Refusal with
-                  | Some why ->
-                      Expect.isTrue
-                          (why.Contains "inline record" || why.Contains "presence-keyed union")
-                          (sprintf "%s: %s" v.Tag why)
-                  | None -> failtestf "the F* target modelled %s" v.Tag)
+              match verdicts["Grid"] with
+              | Some why -> Expect.stringContains why "a presence-keyed union 'RowIdentity'" "named"
+              | None -> failtest "the F* target modelled a presence-keyed union")
+
+          testCase "the F* model of a record-payload kind is its flat twin's, line for line" (fun _ ->
+              // The stamp lines name the vocabulary, and the header's line for `Grid` says why each
+              // vocabulary leaves it out; every other line is the model.
+              let body (text: string) =
+                  text.Replace("\r\n", "\n").Split('\n')
+                  |> Array.filter (fun l ->
+                      not (
+                          l.Contains "sha256:"
+                          || l.TrimStart().StartsWith("- Grid:", System.StringComparison.Ordinal)
+                      ))
+                  |> List.ofArray
+
+              for name, emit in
+                  [ "model", (fun idl -> FStarTarget.vocabularyModule "LayoutModel" idl [ "Form" ])
+                    "proofs", (fun idl -> FStarTarget.proofsModule "LayoutModelProofs" "LayoutModel" idl [ "Form" ]) ] do
+                  let layout = body (emitted (emit LayoutIdl.layout))
+                  Expect.isGreaterThan (List.length layout) 50 (name + ": a module was emitted")
+                  Expect.equal layout (body (emitted (emit LayoutIdl.flat))) name)
 
           testCase "the codec-only module refuses an inline declaration, by name" (fun _ ->
               let request: CodecOnly =

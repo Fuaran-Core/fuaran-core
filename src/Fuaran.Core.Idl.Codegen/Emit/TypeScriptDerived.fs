@@ -175,10 +175,26 @@ module internal TypeScriptDerived =
         let collectField (f: IdlField) e = Derive.positionsOf tsLister hs f e
         let mapField (f: IdlField) e = Derive.positionsOf tsMapper hs f e
 
+        // Phase 722 — this host holds the wire shape, so a member holding an inline declaration is
+        // read from its holder ([[tsMemberAt]]) and its rebuilt members are SPREAD into the
+        // holder's; an inline declaration's mapper therefore answers the rebuilt members alone,
+        // never a copy of the holder, which a second inline member's spread would overwrite.
+        let at (recv: string) (f: IdlField) : string =
+            match tsInlineOf ctx.Idl f with
+            | Some _ -> recv
+            | None -> tsProp recv f.Name
+
+        // The holder is always there, so an inline member is walked as a required one: an optional
+        // presence-keyed union with no case present answers no node from its own functions.
+        let held (f: IdlField) : IdlField =
+            match tsInlineOf ctx.Idl f with
+            | Some _ -> { f with Opt = Required }
+            | None -> f
+
         /// `const __m<i> = …;` per field, then the object of the rebuilt members.
         let rebuilt (indent: string) (fs: IdlField list) (access: IdlField -> string) =
             fs
-            |> List.mapi (fun i f -> mapField f (access f) |> Result.map (fun b -> i, f, b))
+            |> List.mapi (fun i f -> mapField (held f) (access f) |> Result.map (fun b -> i, f, b))
             |> sequenceR
             |> Result.map (fun xs ->
                 let lets =
@@ -188,46 +204,66 @@ module internal TypeScriptDerived =
 
                 let assigns =
                     xs
-                    |> List.map (fun (i, f, _) -> sprintf "%s: __m%d" (SourceLit.tsKey f.Name) i)
+                    |> List.map (fun (i, f, _) ->
+                        match tsInlineOf ctx.Idl f with
+                        | Some _ -> sprintf "...__m%d" i
+                        | None -> sprintf "%s: __m%d" (SourceLit.tsKey f.Name) i)
                     |> String.concat ", "
 
                 lets, assigns)
 
         let listed (access: IdlField -> string) (fs: IdlField list) =
             fs
-            |> List.map (fun f -> collectField f (access f))
+            |> List.map (fun f -> collectField (held f) (access f))
             |> sequenceR
             |> Result.map tsAppend
 
         let recordHelpers (r: IdlRecord, fs: IdlField list) =
-            match listed (tsProp "v" << _.Name) fs, rebuilt "  " fs (tsProp "v" << _.Name) with
+            // An inline record's `v` is its holder: the rebuilt members alone (see [[at]]).
+            let whole = if r.Inline then "" else "...v, "
+
+            match listed (at "v") fs, rebuilt "  " fs (at "v") with
             | Error e, _
             | _, Error e -> Error e
             | Ok items, Ok(lets, assigns) ->
                 Ok
                     [ sprintf "function nodesIn%s(v) {\n  return %s;\n}" r.Name items
-                      sprintf "function mapNodesIn%s(f, v) {\n%s  return { ...v, %s };\n}" r.Name lets assigns ]
+                      sprintf "function mapNodesIn%s(f, v) {\n%s  return { %s%s };\n}" r.Name lets whole assigns ]
 
         let unionHelpers (u: IdlUnion, holding: (IdlUnionCase * (int * IdlField) list) list, _: bool) =
-            let tag = tsDiscProp ctx.Idl.Wire.Discriminator "v"
+            // A tagged union's case is its discriminator; a presence-keyed union's `v` is its holder,
+            // its case the one `ePick` reads from the holder's keys, by index, and its mapper answers
+            // the rebuilt members alone.
+            let tag, caseLit, whole, unmapped =
+                match u.Discrimination with
+                | UnionDiscrimination.Tagged ->
+                    tsDiscProp ctx.Idl.Wire.Discriminator "v",
+                    (fun (c: IdlUnionCase) -> SourceLit.tsString (u.WireTagOf c.Tag)),
+                    "...v, ",
+                    "v"
+                | UnionDiscrimination.ByPresence keyed ->
+                    "ePick(v, " + tsPickRules keyed + ")",
+                    (fun (c: IdlUnionCase) ->
+                        keyed
+                        |> List.tryFindIndex (fun k -> k.Case = c.Tag)
+                        |> Option.defaultValue -1
+                        |> string),
+                    "",
+                    "{}"
 
             let listerArms =
                 holding
                 |> List.map (fun (c, fs) ->
-                    listed (tsProp "v" << _.Name) (List.map snd fs)
-                    |> Result.map (sprintf "    case %s: return %s;" (SourceLit.tsString (u.WireTagOf c.Tag))))
+                    listed (at "v") (List.map snd fs)
+                    |> Result.map (sprintf "    case %s: return %s;" (caseLit c)))
                 |> sequenceR
 
             let mapperArms =
                 holding
                 |> List.map (fun (c, fs) ->
-                    rebuilt "      " (List.map snd fs) (tsProp "v" << _.Name)
+                    rebuilt "      " (List.map snd fs) (at "v")
                     |> Result.map (fun (lets, assigns) ->
-                        sprintf
-                            "    case %s: {\n%s      return { ...v, %s };\n    }"
-                            (SourceLit.tsString (u.WireTagOf c.Tag))
-                            lets
-                            assigns))
+                        sprintf "    case %s: {\n%s      return { %s%s };\n    }" (caseLit c) lets whole assigns))
                 |> sequenceR
 
             match listerArms, mapperArms with
@@ -239,7 +275,7 @@ module internal TypeScriptDerived =
                       + String.concat "\n" (listerArms @ [ "    default: return [];" ])
                       + "\n  }\n}"
                       sprintf "function mapNodesIn%s(f, v) {\n  switch (%s) {\n" u.Name tag
-                      + String.concat "\n" (mapperArms @ [ "    default: return v;" ])
+                      + String.concat "\n" (mapperArms @ [ sprintf "    default: return %s;" unmapped ])
                       + "\n  }\n}" ]
 
         // This host holds the WIRE shape, so a kind's keyed positions are its wire fields.
@@ -254,7 +290,7 @@ module internal TypeScriptDerived =
             let listerArms =
                 plan.Kinds
                 |> List.map (fun (k, fs) ->
-                    listed (tsProp "k" << _.Name) fs
+                    listed (at "k") fs
                     |> Result.map (fun items -> k.Tag, sprintf "ofKind = %s; break;" items))
                 |> sequenceR
 
@@ -266,7 +302,7 @@ module internal TypeScriptDerived =
             let mapperArms =
                 plan.Kinds
                 |> List.map (fun (k, fs) ->
-                    rebuilt "      " fs (tsProp "k" << _.Name)
+                    rebuilt "      " fs (at "k")
                     |> Result.map (fun (lets, assigns) ->
                         k.Tag, sprintf "{\n%s      kind = { %s };\n      break;\n    }" lets assigns))
                 |> sequenceR
@@ -611,29 +647,55 @@ module internal TypeScriptDerived =
             Slot = tsColPrinter
             Req = fun key o c -> "cReq(" + key + ", " + o + ", " + c + ")"
             Opt = fun key o c -> "cOpt(" + key + ", " + o + ", " + c + ")"
-            Def = fun key o c lit -> "cDef(" + key + ", " + o + ", " + c + ", " + lit + ")" }
+            Def = fun key o c lit -> "cDef(" + key + ", " + o + ", " + c + ", " + lit + ")"
+            // Phase 722 — an inline declaration's members, read collecting from the object they sit on.
+            Inline =
+                fun o f ->
+                    match tsInlineOf idl f, f.Opt with
+                    | Some(InlineSlot.Keyed(u, keyed)), Required ->
+                        Some(tsSpread ("dKeyed(colMembers" + u.Name + "(" + o + "), " + tsKeyedFirst keyed + ")"))
+                    | Some slot, _ -> Some(tsSpread ("colMembers" + tsInlineName slot + "(" + o + ")"))
+                    | None, _ -> None }
 
-    /// Read every member in declaration order, then build the object [[tsFieldObject]] builds — the
-    /// same keys in the same order — or throw every member's refusals, in that order.
-    let private tsColObject (indent: string) (extra: (string * string) list) (members: (IdlField * string) list) =
+    /// Read every member in declaration order and then run each of `checks`, then build the object
+    /// [[tsFieldObject]] builds — the same keys in the same order, an inline member's spread in — or
+    /// throw every read's refusals, in that order.
+    let private tsColObjectWith
+        (indent: string)
+        (extra: (string * string) list)
+        (members: (IdlField * string) list)
+        (checks: string list)
+        =
         let pairs =
             (extra |> List.map (fun (k, v) -> k + ": " + v))
             @ (members
-               |> List.mapi (fun i (f, _) -> SourceLit.tsString f.Name + ": v[" + string i + "]"))
+               |> List.mapi (fun i (f, r) ->
+                   if tsIsSpread r then
+                       tsSpread ("v[" + string i + "]")
+                   else
+                       SourceLit.tsString f.Name + ": v[" + string i + "]"))
 
         let literal = "{ " + String.concat ", " pairs + " }"
 
-        match members with
+        let reads =
+            (members |> List.map (fun (_, r) -> if tsIsSpread r then r.Substring 3 else r))
+            @ checks
+
+        match reads with
         | [] -> indent + "return " + literal + ";"
         | _ ->
             indent
             + "const v = cAll(["
-            + (members |> List.map (fun (_, r) -> "() => " + r) |> String.concat ", ")
+            + (reads |> List.map (fun r -> "() => " + r) |> String.concat ", ")
             + "]);\n"
             + indent
             + "return "
             + literal
             + ";"
+
+    /// [[tsColObjectWith]] with no check beyond the members' own reads.
+    let private tsColObject (indent: string) (extra: (string * string) list) (members: (IdlField * string) list) =
+        tsColObjectWith indent extra members []
 
     let private tsColUnion
         (decl: Decl)
@@ -758,10 +820,27 @@ module internal TypeScriptDerived =
                 { Dec = tsMemberDecPrinter idl disc
                   Col = tsColMemberPrinter idl disc
                   Lift = id
-                  Union = tsColUnion decl disc
+                  // Phase 722 — an inline declaration is read from its holder's members: a
+                  // presence-keyed union by [[tsKeyedReader]], every defect of the picked case
+                  // collected and each synthesised member's check after the case's own reads.
+                  Union =
+                    fun read u ->
+                        match u.Discrimination with
+                        | UnionDiscrimination.ByPresence keyed ->
+                            tsKeyedReader "col" idl read (tsColObjectWith "      " []) u keyed
+                        | UnionDiscrimination.Tagged -> tsColUnion decl disc read u
                   NodeKind = colKind
                   Node = colNode
-                  Record = fun r members -> objectDecoder r.Name [] members
+                  Record =
+                    fun r members ->
+                        if r.Inline then
+                            "function colMembers"
+                            + r.Name
+                            + "(fs) {\n"
+                            + tsColObject "  " [] members
+                            + "\n}"
+                        else
+                            objectDecoder r.Name [] members
                   ReadsSpec = fun _ -> true
                   Spec =
                     fun k members ->

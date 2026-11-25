@@ -154,7 +154,7 @@ module internal FStarVectors =
         orderMembers idl.Wire.KeyOrder ms
         |> List.map (fun mb ->
             let given =
-                fs
+                authoredFor mb fs
                 |> List.tryPick (fun (n, fv) ->
                     match fv with
                     | VAbsent -> None

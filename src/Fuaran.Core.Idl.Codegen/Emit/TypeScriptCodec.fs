@@ -36,6 +36,113 @@ module internal TypeScriptCodec =
         else
             SourceLit.tsString disc
 
+    // -----------------------------------------------------------------------
+    // Phase 722 (DECISIONS.md D283) — the INLINE declarations (D220). This host holds a value in its
+    // WIRE shape, so an inline declaration's members are the holding object's own keys in the host
+    // value too: an inline record is written by `encMembers<Name>(holder)` (member pieces the
+    // holder's pair list spreads in) and read by `decMembers<Name>(fs)` (a members object the
+    // holder's literal spreads in), and so is a presence-keyed union, whose case is the one the
+    // D220.3 reading picks from the keys present (`ePick` over a value, `dPick` over a document).
+    // A member a keyed case SYNTHESISES is the codec's on both sides, as it is in the F# host: the
+    // encoder writes it at its declared value and the decoder checks it and does not return it.
+    // -----------------------------------------------------------------------
+
+    /// The inline declaration the wire member `f` holds, if it holds one.
+    let tsInlineOf (idl: Idl) (f: IdlField) : InlineSlot option =
+        if f.Opt = HostOnly then
+            None
+        else
+            Decl.inlineSlot idl f.Type
+
+    /// The name an inline declaration's member functions carry.
+    let tsInlineName (slot: InlineSlot) : string =
+        match slot with
+        | InlineSlot.Record r -> r.Name
+        | InlineSlot.Keyed(u, _) -> u.Name
+
+    /// Where the member `f` of the value bound to `recv` is read from: its own key, or, for a
+    /// member holding an inline declaration, the holder itself.
+    let tsMemberAt (idl: Idl) (recv: string) (f: IdlField) : string =
+        match tsInlineOf idl f with
+        | Some _ -> recv
+        | None -> recv + "." + f.Name
+
+    /// An inline member's read as it stands among an object literal's members: a SPREAD of the
+    /// members object. No other member read starts with the spread token, so [[tsIsSpread]] tells
+    /// the two apart where the literal is printed.
+    let tsSpread (e: string) : string = "..." + e
+
+    /// Whether a member read is [[tsSpread]]'s.
+    let tsIsSpread (e: string) : bool =
+        e.StartsWith("...", System.StringComparison.Ordinal)
+
+    /// A presence-keyed union's rules as a literal: each case's key and the members it synthesises.
+    let tsPickRules (keyed: KeyedCase list) : string =
+        "["
+        + (keyed
+           |> List.map (fun k ->
+               "["
+               + SourceLit.tsString k.Key
+               + ", ["
+               + (k.Synthesised |> List.map (fst >> SourceLit.tsString) |> String.concat ", ")
+               + "]]")
+           |> String.concat ", ")
+        + "]"
+
+    /// The key a REQUIRED presence-keyed union is refused `MissingField` at: its first case's.
+    let tsKeyedFirst (keyed: KeyedCase list) : string =
+        match keyed with
+        | k :: _ -> SourceLit.tsString k.Key
+        | [] -> SourceLit.tsString ""
+
+    /// A keyed case's synthesised members, each with the canonical text the encoder writes and the
+    /// decoder requires, as a string literal.
+    let tsSynthesised (idl: Idl) (u: IdlUnion) (k: KeyedCase) : Result<(string * string) list, CodegenError> =
+        Decl.synthesisedJson idl u k
+        |> Result.map (List.map (fun (name, j) -> name, SourceLit.tsString (Canonical.write Rendering.CrossHost j)))
+
+    /// The D220.3 reading shared by the encoder and the decoder, emitted only when a presence-keyed
+    /// union is reached: the cases whose key is present, less those whose key another present case
+    /// synthesises. `ePick` reads a value's keys and answers the case's index, or -1 for none.
+    let tsKeyedEncHelper: string =
+        [ "// Phase 722 — a presence-keyed union's case (D220.3): the cases whose key is present, less those"
+          "// whose key another present case synthesises. `rules` is each case's key and the members it"
+          "// synthesises; the answer is what is left, each as [index, key]."
+          "const kLeft = (has, rules) => {"
+          "  const present = rules.map(([k, syn], i) => [i, k, syn]).filter(([, k]) => has(k));"
+          "  return present.filter(([i, k]) => !present.some(([j, , syn]) => j !== i && syn.indexOf(k) >= 0));"
+          "};"
+          "// The case a VALUE holds, by the members it carries: its index, or -1 for none. A value carrying"
+          "// two cases' keys is no value of the union, and nothing is written for it."
+          "const ePick = (v, rules) => {"
+          "  const left = kLeft((k) => v[k] !== undefined, rules);"
+          "  if (left.length > 1) throw new Error(\"at most one of \" + rules.map(([k]) => \"'\" + k + \"'\").join(', ') + \": '\" + left[1][1] + \"' beside '\" + left[0][1] + \"'\");"
+          "  return left.length === 0 ? -1 : left[0][0];"
+          "};" ]
+        |> String.concat "\n"
+
+    /// The decode side of [[tsKeyedEncHelper]]: `dPick` reads a document's keys (two cases left is
+    /// the both-present refusal, `OutOfRange` at the second one's key), `dSynth` checks a
+    /// synthesised member is present and canonically its declared value, and `dKeyed` is the
+    /// `MissingField` a required union with no case present is refused with.
+    let tsKeyedDecHelpers: string =
+        [ "// Phase 722 — the case a DOCUMENT's members pick (D220.3): its index, or -1 for none; two left is"
+          "// the both-present refusal, `OutOfRange` at the second one's key."
+          "const dPick = (fs, rules) => {"
+          "  const left = kLeft((k) => hasOwn(fs, k), rules);"
+          "  if (left.length > 1) return dAt(left[1][1], () => dFail('OutOfRange', 'at most one of ' + rules.map(([k]) => \"'\" + k + \"'\").join(', '), \"'\" + left[1][1] + \"' beside '\" + left[0][1] + \"'\"));"
+          "  return left.length === 0 ? -1 : left[0][0];"
+          "};"
+          "// A member a presence-keyed case synthesises: present, and canonically its declared value."
+          "const dSynth = (name, expected, fs) => {"
+          "  if (!hasOwn(fs, name)) return dMissing(name, \"missing required field '\" + name + \"'\");"
+          "  const got = encJson(dRead(fs, name));"
+          "  return (got === expected) ? undefined : dAt(name, () => dFail('OutOfRange', expected, got));"
+          "};"
+          "// A required presence-keyed union with no case present: `MissingField` at its first case's key."
+          "const dKeyed = (members, key) => (members === null) ? dMissing(key, \"missing required field '\" + key + \"'\") : members;" ]
+        |> String.concat "\n"
+
     /// Phase 656 — bytes as this host's `Uint8Array` literal, from their canonical base64 text.
     let internal tsBytesLit (text: string) : string =
         "new Uint8Array(["
@@ -358,7 +465,7 @@ module internal TypeScriptCodec =
     let tsMemberEncPrinter (idl: Idl) (disc: string) : MemberEncPrinter =
         { Applied = tsEncPrinter
           Key = SourceLit.tsString
-          Access = fun recv f -> recv + "." + f.Name
+          Access = tsMemberAt idl
           Present = fun key e -> "[" + key + ", " + e + "]"
           OptionalVar = id
           Optional = fun src key e -> "(" + src + " === undefined ? null : [" + key + ", " + e + "])"
@@ -385,9 +492,11 @@ module internal TypeScriptCodec =
                             "generate this vocabulary's codec with the F# backend, which applies it"
                         )
                     )
-          // Phase 474 — this codec lays out no inline declaration: [[Gen.typescriptModule]] refuses a
-          // vocabulary that declares one before any member is printed.
-          Inline = fun _ _ -> None }
+          // Phase 722 — an inline declaration's member pieces, read off the holder ([[tsMemberAt]]).
+          Inline =
+            fun src f ->
+                tsInlineOf idl f
+                |> Option.map (fun slot -> tsSpread ("encMembers" + tsInlineName slot + "(" + src + ")")) }
 
     /// A member read off the bound JS variable `recv` (`s` for a spec/record encoder, `n` for the
     /// node envelope) — the F# side's `specPieceOf`.
@@ -505,7 +614,7 @@ module internal TypeScriptCodec =
 
         UnionEncTraversal.encoder
             { Member = member'
-              CaseVar = fun f -> "v." + f.Name
+              CaseVar = tsMemberAt idl "v"
               // Transparent case: return the single field's value bare (no `typed(...)`).
               Bare = fun _ c e -> arm c e
               Tagged =
@@ -549,6 +658,63 @@ module internal TypeScriptCodec =
             + "(s) {\n  return plain(["
             + pieces
             + "]);\n}")
+
+    /// Phase 722 — an inline record's member writer: its members' pieces, read off the holder `s`.
+    let tsInlineRecordEncoder (idl: Idl) (disc: string) (r: IdlRecord) =
+        tsObjectPieces idl disc r.Fields
+        |> Result.map (fun pieces ->
+            tsFieldAnnotationHeader r.Name r.Fields
+            + "function encMembers"
+            + r.Name
+            + "(s) {\n  return ["
+            + pieces
+            + "];\n}")
+
+    /// Phase 722 — a presence-keyed union's member writer: the case [[tsKeyedEncHelper]]'s `ePick`
+    /// reads from the holder `v`, its members and its synthesised members in the union's roster order.
+    let tsKeyedEncoder (idl: Idl) (disc: string) (u: IdlUnion) (keyed: KeyedCase list) =
+        let member' = tsMemberEncPrinter idl disc
+        let roster = Decl.keyedRoster u
+
+        keyed
+        |> List.mapi (fun i k ->
+            match u.Cases |> List.tryFind (fun c -> c.Tag = k.Case) with
+            | None -> Ok ""
+            | Some c ->
+                let own =
+                    c.Fields
+                    |> List.map (fun f ->
+                        MemberEncTraversal.encMember member' c.Fields (tsMemberAt idl "v") f
+                        |> Result.map (fun piece -> f.Name, MemberEncTraversal.print member' piece))
+                    |> sequenceR
+
+                match own, tsSynthesised idl u k with
+                | Error e, _
+                | _, Error e -> Error e
+                | Ok own, Ok synth ->
+                    let all =
+                        own
+                        @ (synth
+                           |> List.map (fun (n, text) -> n, "[" + SourceLit.tsString n + ", " + text + "]"))
+
+                    let pieces =
+                        roster
+                        |> List.choose (fun n -> all |> List.tryFind (fun (m, _) -> m = n) |> Option.map snd)
+                        |> String.concat ", "
+
+                    Ok(sprintf "    case %d: return [%s];" i pieces))
+        |> sequenceR
+        |> Result.map (fun arms ->
+            (u.Cases
+             |> List.map (fun c -> tsFieldAnnotationHeader (u.Name + "." + c.Tag) c.Fields)
+             |> String.concat "")
+            + "function encMembers"
+            + u.Name
+            + "(v) {\n  switch (ePick(v, "
+            + tsPickRules keyed
+            + ")) {\n"
+            + (arms |> List.filter (fun a -> a <> "") |> String.concat "\n")
+            + "\n    default: return [];\n  }\n}")
 
     /// A kind's spec encoder. Nested (the default): the discriminator-tagged
     /// object, byte-identical to the pre-declarable emission. Flat (Phase 109):
@@ -694,8 +860,16 @@ module internal TypeScriptCodec =
           HostOnlySentinel = id
           HostOnly = fun _ -> Ok "undefined"
           DefaultLit = tsDefaultLit idl disc
-          // Phase 474 — see [[tsMemberEncPrinter]].
-          Inline = fun _ _ -> None }
+          // Phase 722 — an inline declaration's members, read from the object they sit on and spread
+          // into the holder's literal; a required presence-keyed union with no case present is
+          // `MissingField` at its first case's key (`dKeyed`).
+          Inline =
+            fun o f ->
+                match tsInlineOf idl f, f.Opt with
+                | Some(InlineSlot.Keyed(u, keyed)), Required ->
+                    Some(tsSpread ("dKeyed(decMembers" + u.Name + "(" + o + "), " + tsKeyedFirst keyed + ")"))
+                | Some slot, _ -> Some(tsSpread ("decMembers" + tsInlineName slot + "(" + o + ")"))
+                | None, _ -> None }
 
     let tsDecField (idl: Idl) (disc: string) (fields: IdlField list) (f: IdlField) : Result<string, CodegenError> =
         MemberTraversal.decMember (tsMemberDecPrinter idl disc) fields f
@@ -705,7 +879,12 @@ module internal TypeScriptCodec =
     let tsObjectLit (extra: (string * string) list) (members: (IdlField * string) list) : string =
         let pairs =
             (extra |> List.map (fun (k, v) -> k + ": " + v))
-            @ (members |> List.map (fun (f, e) -> SourceLit.tsString f.Name + ": " + e))
+            @ (members
+               |> List.map (fun (f, e) ->
+                   if tsIsSpread e then
+                       e
+                   else
+                       SourceLit.tsString f.Name + ": " + e))
 
         "{ " + String.concat ", " pairs + " }"
 
@@ -838,6 +1017,73 @@ module internal TypeScriptCodec =
     let tsRecordDecoder (idl: Idl) (disc: string) (r: IdlRecord) =
         tsObjectDecoder idl disc (tsFieldAnnotationHeader r.Name r.Fields) r.Name [] r.Fields
 
+    /// Phase 722 — an inline record's member reader: its members read from the holding object `fs`.
+    let tsInlineRecordDecoder (idl: Idl) (disc: string) (r: IdlRecord) =
+        tsFieldObject idl disc [] r.Fields
+        |> Result.map (fun obj ->
+            tsFieldAnnotationHeader r.Name r.Fields
+            + "function decMembers"
+            + r.Name
+            + "(fs) {\n  return "
+            + obj
+            + ";\n}")
+
+    /// Phase 722 — a presence-keyed union's reader, short-circuiting or collecting by the reader it
+    /// is handed: the case `dPick` names, its members (`build`, from the members as read and the
+    /// synthesised members' checks), or `null` when no case's key is present.
+    let tsKeyedReader
+        (prefix: string)
+        (idl: Idl)
+        (read: IdlField list -> Result<(IdlField * string) list, CodegenError>)
+        (build: (IdlField * string) list -> string list -> string)
+        (u: IdlUnion)
+        (keyed: KeyedCase list)
+        : Result<string, CodegenError> =
+        keyed
+        |> List.mapi (fun i k ->
+            match u.Cases |> List.tryFind (fun c -> c.Tag = k.Case) with
+            | None -> Ok ""
+            | Some c ->
+                match read c.Fields, tsSynthesised idl u k with
+                | Error e, _
+                | _, Error e -> Error e
+                | Ok members, Ok synth ->
+                    let checks =
+                        synth
+                        |> List.map (fun (n, text) -> "dSynth(" + SourceLit.tsString n + ", " + text + ", fs)")
+
+                    Ok(sprintf "    case %d: {\n%s\n    }" i (build members checks)))
+        |> sequenceR
+        |> Result.map (fun arms ->
+            "function "
+            + prefix
+            + "Members"
+            + u.Name
+            + "(fs) {\n  switch (dPick(fs, "
+            + tsPickRules keyed
+            + ")) {\n"
+            + (arms |> List.filter (fun a -> a <> "") |> String.concat "\n")
+            + "\n    default: return null;\n  }\n}")
+
+    /// Phase 722 — a presence-keyed union's short-circuiting reader ([[tsKeyedReader]]): the case's
+    /// members first, then each synthesised member's check.
+    let tsKeyedDecoder (idl: Idl) (disc: string) (u: IdlUnion) (keyed: KeyedCase list) =
+        tsKeyedReader
+            "dec"
+            idl
+            (MemberTraversal.decMembers (tsMemberDecPrinter idl disc))
+            (fun members checks ->
+                match checks with
+                | [] -> "      return " + tsObjectLit [] members + ";"
+                | _ ->
+                    "      const members = "
+                    + tsObjectLit [] members
+                    + ";\n"
+                    + (checks |> List.map (fun c -> "      " + c + ";\n") |> String.concat "")
+                    + "      return members;")
+            u
+            keyed
+
     let tsSpecDecoder (idl: Idl) (disc: string) (k: IdlKind) =
         tsObjectDecoder
             idl
@@ -926,6 +1172,10 @@ module internal TypeScriptCodec =
         // Phase 511 — the declaration graph is the resolution's (this body used to walk it twice).
         let idl, kinds, enums, unions, records =
             decl.Idl, decl.Kinds, decl.Enums, decl.Unions, decl.Records
+
+        // Phase 722 — the presence-keyed reading's helpers are emitted only when a union needs them,
+        // so every other module is byte for byte what it was.
+        let reachesKeyed = unions |> List.exists Decl.isKeyed
 
         // Runtime prelude — escaping mirrors Fuaran.Core.Json.escape (WIRE_FORMAT §2
         // rule 6: only " and \ and control chars as \u00xx — NO \n/\r/\t shortcuts),
@@ -1218,8 +1468,18 @@ const plain = (pairs) =>
                 + "function decodeNode(s) {\n  try {\n    const root = dParse(s);\n    dFloatTok = false;\n    return { ok: true, value: decNode(root) };\n  } catch (e) {\n    if (!(e instanceof DecodeFault)) throw e;\n    return { ok: false, error: { code: e.code, path: e.path, expected: e.expected, message: e.message } };\n  }\n}")
 
         [ [ Ok prelude ]
-          records |> List.map (tsRecordEncoder idl disc)
-          unions |> List.map (tsUnionEncoder decl disc)
+          (if reachesKeyed then [ Ok tsKeyedEncHelper ] else [])
+          records
+          |> List.map (fun r ->
+              if r.Inline then
+                  tsInlineRecordEncoder idl disc r
+              else
+                  tsRecordEncoder idl disc r)
+          unions
+          |> List.map (fun u ->
+              match u.Discrimination with
+              | UnionDiscrimination.ByPresence keyed -> tsKeyedEncoder idl disc u keyed
+              | UnionDiscrimination.Tagged -> tsUnionEncoder decl disc u)
           kinds |> List.map (tsSpecEncoder idl disc flat)
           [ kindDispatch ]
           Ok(tsDecodePrelude disc)
@@ -1229,9 +1489,19 @@ const plain = (pairs) =>
                  [ Ok(Template.text "ts-wider-helpers.js") ]
              else
                  [])
+          @ (if reachesKeyed then [ Ok tsKeyedDecHelpers ] else [])
           enums |> List.map (tsEnumDecoder >> Ok)
-          records |> List.map (tsRecordDecoder idl disc)
-          unions |> List.map (tsUnionDecoder decl disc)
+          records
+          |> List.map (fun r ->
+              if r.Inline then
+                  tsInlineRecordDecoder idl disc r
+              else
+                  tsRecordDecoder idl disc r)
+          unions
+          |> List.map (fun u ->
+              match u.Discrimination with
+              | UnionDiscrimination.ByPresence keyed -> tsKeyedDecoder idl disc u keyed
+              | UnionDiscrimination.Tagged -> tsUnionDecoder decl disc u)
           kinds |> List.map (tsSpecDecoder idl disc)
           [ kindDecodeDispatch ]
           [ Ok "export { encodeNode, decodeNode };" ] ]

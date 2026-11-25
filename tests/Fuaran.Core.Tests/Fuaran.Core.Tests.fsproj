@@ -472,6 +472,10 @@
     <Compile Include="LayoutIdl.fs" />
     <Compile Include="LayoutGenerated.fs" />
     <Compile Include="IdlLayoutTests.fs" />
+    <!-- Phase 722 - the TypeScript backend lays out the inline declarations: the layout corpus under
+         node against the interpreter and the generated F# module. Depends on IdlDeriveTests (the node
+         runner) and LayoutIdl / LayoutGenerated. -->
+    <Compile Include="IdlLayoutTypeScriptTests.fs" />
     <!-- Phase 379 - Canonical and Codec<'T>: the committed bytes a declaration writes under each
          profile and the positive control, the collecting order and paths, the build-time refusals,
          the schema held to an independent validator, and the stored-codec family green and red.

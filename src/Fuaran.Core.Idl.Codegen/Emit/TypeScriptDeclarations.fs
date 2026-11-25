@@ -40,13 +40,21 @@ module internal TypeScriptDeclarations =
                 "author the value against the vocabulary's declaration (Encode.encode refuses the same value)"
             )
 
+        // Phase 722 — a member holding an inline declaration has no key: its value's members are the
+        // holder's own, so its literal is spread into the holder's (the empty key marks it).
         let objectOf (pairs: (string * string) list) =
             "{ "
-            + (pairs |> List.map (fun (k, e) -> k + ": " + e) |> String.concat ", ")
+            + (pairs
+               |> List.map (fun (k, e) -> if k = "" then tsSpread e else k + ": " + e)
+               |> String.concat ", ")
             + " }"
 
         let keyed (members: (IdlField * string) list) =
-            members |> List.map (fun (f, e) -> SourceLit.tsKey f.Name, e)
+            members
+            |> List.map (fun (f, e) ->
+                match tsInlineOf idl f with
+                | Some _ -> "", e
+                | None -> SourceLit.tsKey f.Name, e)
 
         // Phase 524 — the TypeScript printer of an authored value ([[ValueTraversal]]).
         let printer: ValuePrinter =
@@ -130,7 +138,13 @@ module internal TypeScriptDeclarations =
                         |> Result.map Some
                     | _ -> Ok None
               Record = fun _ members -> objectOf (keyed members)
-              Union = fun u c members -> objectOf ((disc, SourceLit.tsString (u.WireTagOf c.Tag)) :: keyed members)
+              // Phase 722 — a presence-keyed case is its own members, with no discriminator.
+              Union =
+                fun u c members ->
+                    if Decl.isKeyed u then
+                        objectOf (keyed members)
+                    else
+                        objectOf ((disc, SourceLit.tsString (u.WireTagOf c.Tag)) :: keyed members)
               Node =
                 fun id k kindMembers envMembers ->
                     let tagged = (disc, SourceLit.tsString k.Tag)
@@ -294,14 +308,34 @@ module internal TypeScriptDeclarations =
                 | Required
                 | OmitDefault _ -> SourceLit.tsKey f.Name + ": " + ty)
 
+        // Phase 722 — a member holding an inline declaration states no key of its own: the holder's
+        // type is its own members INTERSECTED with the declaration's (`& Paging`, `& GridRows`), and
+        // an optional presence-keyed union admits the object carrying no case's key beside its cases.
+        let inlineType (f: IdlField) (slot: InlineSlot) : string =
+            match slot, f.Opt with
+            | InlineSlot.Keyed(u, keyed), Optional ->
+                "("
+                + u.Name
+                + " | { "
+                + (keyed
+                   |> List.map (fun k -> SourceLit.tsKey k.Key + "?: undefined")
+                   |> String.concat "; ")
+                + " })"
+            | slot, _ -> tsInlineName slot
+
         let objectType (extra: string list) (fields: IdlField list) : Result<string, CodegenError> =
+            let held =
+                fields |> List.choose (fun f -> tsInlineOf idl f |> Option.map (inlineType f))
+
             fields
+            |> List.filter (fun f -> Option.isNone (tsInlineOf idl f))
             |> List.map memberDecl
             |> sequenceR
             |> Result.map (fun ms ->
-                match extra @ ms with
-                | [] -> "{}"
-                | all -> "{ " + String.concat "; " all + " }")
+                match extra @ ms, held with
+                | [], [] -> "{}"
+                | [], held -> String.concat " & " held
+                | all, held -> String.concat " & " (("{ " + String.concat "; " all + " }") :: held))
 
         let generic (ps: string list) =
             match ps with
@@ -335,7 +369,14 @@ module internal TypeScriptDeclarations =
             unions
             |> List.map (fun u ->
                 u.Cases
-                |> List.map (fun c -> objectType [ disc + ": " + SourceLit.tsString (u.WireTagOf c.Tag) ] c.Fields)
+                |> List.map (fun c ->
+                    // Phase 722 — a presence-keyed case is its own members: the key tells it apart.
+                    // A case holding an inline record is an intersection, parenthesised among the cases.
+                    (if Decl.isKeyed u then
+                         objectType [] c.Fields
+                     else
+                         objectType [ disc + ": " + SourceLit.tsString (u.WireTagOf c.Tag) ] c.Fields)
+                    |> Result.map (fun o -> if o.Contains " & " then "(" + o + ")" else o))
                 |> sequenceR
                 |> Result.map (fun cases ->
                     tsTypeDocBlock u.Annotations
