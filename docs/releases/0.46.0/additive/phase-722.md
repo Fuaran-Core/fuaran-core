@@ -9,8 +9,7 @@
   a fold and a projection read an inline declaration off its holder and answer what the F# derivation answers: a slot
   or a projection of an inline declaration is its own members rebuilt alone, a projection of a presence-keyed union
   switches on the case its keys pick, and a fold descends through a record payload and through a presence-keyed
-  union that holds itself, its folder taking the union's own members. A fold through a record payload and a
-  projection of one were emitted before and read a key the host object does not carry; both are corrected.
+  union that holds itself, its folder taking the union's own members.
   `FStarTarget` models an inline record's members as its holder's and a presence-keyed union as one constructor of
   its holder per choice of case, the decoder asking the D220.3 reading of the holder's own object; the generated
   proofs carry the round trip of each constructor and a second theorem, that a decoder answers a constructor only
