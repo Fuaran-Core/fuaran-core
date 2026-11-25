@@ -95,6 +95,76 @@ let private overlapping (opt: Optionality) : Idl =
                     else
                         c) })
 
+/// `layout` with one envelope field, `env`, under the node envelope `shape`; the inline record's
+/// member `pageSize` spelled `inRecord`, and the key of `RowIdentity`'s case `RowKeyField` spelled
+/// `asKey`. In the FLAT envelope the node id, the envelope and the kind's members share one object.
+let private enveloped (shape: NodeEnvelopeShape) (inRecord: string) (asKey: string) : Idl =
+    let renamed (from: string) (name: string) (fields: IdlField list) =
+        fields
+        |> List.map (fun f -> if f.Name = from then { f with Name = name } else f)
+
+    { LayoutIdl.layout with
+        NodeFields =
+            [ { Name = "env"
+                Type = TStr
+                Opt = Optional
+                Aliases = []
+                Keyed = false
+                Presence = None
+                Annotations = Annotations.Empty } ]
+        Wire =
+            { LayoutIdl.layout.Wire with
+                NodeEnvelope = shape }
+        Records =
+            LayoutIdl.layout.Records
+            |> List.map (fun r ->
+                if r.Name = "Paging" then
+                    { r with
+                        Fields = renamed "pageSize" inRecord r.Fields }
+                else
+                    r)
+        Unions =
+            LayoutIdl.layout.Unions
+            |> List.map (fun u ->
+                match u.Name, u.Discrimination with
+                | "RowIdentity", UnionDiscrimination.ByPresence keyed ->
+                    { u with
+                        Cases =
+                            u.Cases
+                            |> List.map (fun c ->
+                                { c with
+                                    Fields = renamed "rowKeyField" asKey c.Fields })
+                        Discrimination =
+                            keyed
+                            |> List.map (fun k -> if k.Key = "rowKeyField" then { k with Key = asKey } else k)
+                            |> UnionDiscrimination.ByPresence }
+                | _ -> u) }
+
+/// Grid values of an [[enveloped]] vocabulary: the envelope field, the inline record's member and
+/// the optional union's case each held and not held.
+let private envelopedValues (inRecord: string) (asKey: string) : IdlValue list =
+    [ for env in [ []; [ "env", VStr "E" ] ] do
+          for paging in [ []; [ inRecord, VInt 3 ] ] do
+              for identity in [ []; [ "identity", VUnion("RowKeyField", [ asKey, VStr "K" ]) ] ] do
+                  VNodeEnv(
+                      "n",
+                      env,
+                      "Grid",
+                      [ "columns", VList []; "paging", VRecord paging ]
+                      @ identity
+                      @ [ "rows", VUnion("Source", [ "source", VUnion("State", [ "key", VStr "k" ]) ]) ]
+                  ) ]
+
+/// Whether the interpreter writes `v` and reads the same value back.
+let private readsBack (idl: Idl) (v: IdlValue) : bool =
+    match Encode.encode idl v with
+    | Error _ -> false
+    | Ok s ->
+        match Decode.decodeDetailed idl s, v with
+        | Ok(VNode(id, kind, fields)), VNodeEnv(id', [], kind', fields') -> id = id' && kind = kind' && fields = fields'
+        | Ok back, _ -> back = v
+        | Error _, _ -> false
+
 let private faults (idl: Idl) : string list =
     Declare.layoutErrors idl |> List.map VocabularyFault.describe
 
@@ -199,7 +269,88 @@ let declarationTests =
                               else
                                   k) }
 
-              expectFault clash "the member 'pageSize' is on its object twice" "an inline member collides")
+              expectFault
+                  clash
+                  "kind 'Grid': the member 'pageSize' is on its object twice once inline declarations are laid out: field 'paging' (inline record 'Paging') and field 'pageSize'"
+                  "an inline member collides with a sibling, both named")
+
+          // Phase 722 — in the flat node envelope the node id and the envelope's fields are keys of
+          // the object a kind's members sit on, so a member an inline declaration lays there, or a
+          // presence-keyed case's key, spelled as one of them has a value the interpreter writes and
+          // does not read back. It is refused where it is declared, and both bearers are named.
+          testCase
+              "a member an inline declaration lays on a key its object already carries is refused, both named"
+              (fun _ ->
+                  let flat = enveloped NodeEnvelopeShape.FlatKind
+                  let twice = "is on its object twice once inline declarations are laid out"
+
+                  for name, bearer in
+                      [ "id", "the node id"
+                        "env", "the node-envelope field 'env'"
+                        "$type", "the discriminator" ] do
+                      expectFault
+                          (flat name "rowKeyField")
+                          (sprintf
+                              "kind 'Grid': the member '%s' %s: %s and field 'paging' (inline record 'Paging')"
+                              name
+                              twice
+                              bearer)
+                          "an inline record's member, and what already carries its key"
+
+                      expectFault
+                          (flat "pageSize" name)
+                          (sprintf
+                              "kind 'Grid': the member '%s' %s: %s and field 'identity' (presence-keyed union 'RowIdentity')"
+                              name
+                              twice
+                              bearer)
+                          "a presence-keyed case's key, and what already carries it"
+
+                      Expect.exists
+                          (Declare.errors (flat "pageSize" name))
+                          (fun f -> (VocabularyFault.describe f).Contains twice)
+                          "and the vocabulary is refused where every declaration fault is")
+
+          // The rule is exact over this family: a declaration is admitted exactly where every value
+          // of it is written and read back by the interpreter, in the flat envelope and the nested.
+          testCase
+              "a declaration laying members on its holder is admitted exactly where every value reads back"
+              (fun _ ->
+                  let names =
+                      [ "pageSize"; "rowKeyField"; "id"; "env"; "$type"; "columns"; "caption" ]
+
+                  let mutable admitted = 0
+                  let mutable refused = 0
+
+                  for shape in [ NodeEnvelopeShape.FlatKind; NodeEnvelopeShape.NestedKind ] do
+                      for inRecord in names do
+                          for asKey in names do
+                              let idl = enveloped shape inRecord asKey
+                              let values = envelopedValues inRecord asKey
+                              let every = values |> List.forall (readsBack idl)
+
+                              let label = sprintf "%A, record member '%s', case key '%s'" shape inRecord asKey
+
+                              if List.isEmpty (Declare.errors idl) then
+                                  admitted <- admitted + 1
+                                  Expect.isTrue every (label + ": admitted, so every value reads back")
+                              else
+                                  refused <- refused + 1
+                                  Expect.isFalse every (label + ": refused, so some value does not read back")
+
+                  // Neither side is vacuous: the nested envelope admits `id` and `env`, the flat one
+                  // refuses them, and both refuse the discriminator and a sibling's name.
+                  Expect.isGreaterThan admitted 8 "declarations are admitted"
+                  Expect.isGreaterThan refused 60 "and declarations are refused"
+
+                  for name in [ "id"; "env" ] do
+                      Expect.isEmpty
+                          (Declare.errors (enveloped NodeEnvelopeShape.NestedKind name "rowKeyField"))
+                          "in the nested envelope the kind's object carries neither"
+
+                      Expect.isNonEmpty
+                          (Declare.errors (enveloped NodeEnvelopeShape.FlatKind name "rowKeyField"))
+                          "and in the flat envelope it carries both")
 
           // Phase 722 (DECISIONS.md D285.6) — a value of such a case carrying the member writes both
           // keys, and the D220.3 reading refuses two cases left: the declaration has a value its own

@@ -238,11 +238,13 @@ module Declare =
     /// envelope or another inline declaration); an inline record is `Required` (a host grouping is
     /// always there) and a presence-keyed union `Required` or `Optional` (no case's key present).
     /// Members an inline declaration contributes take no alias and no presence condition, and no
-    /// member of the holding object may be spelled twice. A presence-keyed union names one rule per
-    /// case, in case order, whose key is a `Required` wire member of that case and no other case's
-    /// key; a synthesised member is another case's member at a value of its type, and a case whose
-    /// key is synthesised synthesises nothing (the reading would chain). Such a union takes no type
-    /// parameter, no tag rule, no transparent case and no case-level host codec — it has no tag.
+    /// member of the holding object may be spelled twice: not as a sibling member or the
+    /// discriminator, and, for a kind in the flat node envelope, not as the node id or an envelope
+    /// field, which are keys of the same object. The fault names both. A presence-keyed union names
+    /// one rule per case, in case order, whose key is a `Required` wire member of that case and no
+    /// other case's key; a synthesised member is another case's member at a value of its type, and a
+    /// case whose key is synthesised synthesises nothing (the reading would chain). Such a union takes
+    /// no type parameter, no tag rule, no transparent case and no case-level host codec — it has no tag.
     /// Empty list ⇒ every inline declaration is well-placed and well-formed.
     let layoutErrors (idl: Idl) : VocabularyFault list =
         let keyedOf (t: IdlType) : IdlUnion option =
@@ -273,27 +275,42 @@ module Declare =
             | THosted { Wire = Some w } -> w :: nested w
             | _ -> []
 
-        // The wire members an owner's fields put on its object, inline declarations expanded.
-        let members (fields: IdlField list) : string list =
+        // The wire members an owner's fields put on its object, inline declarations expanded: each
+        // key, the field that puts it there, and whether an inline declaration LAYS it there.
+        let members (fields: IdlField list) : (string * string * bool) list =
             [ for f in fields do
                   if f.Opt <> HostOnly then
                       match inlineRecordOf f.Type, keyedOf f.Type with
                       | Some r, _ ->
+                          let bearer = sprintf "field '%s' (inline record '%s')" f.Name r.Name
+
                           for g in r.Fields do
                               if g.Opt <> HostOnly then
-                                  yield! WireForm.spellings g
-                      | _, Some u -> yield! WireForm.keyedRoster u
-                      | _ -> yield! WireForm.spellings f ]
+                                  for n in WireForm.spellings g do
+                                      n, bearer, true
+                      | _, Some u ->
+                          let bearer = sprintf "field '%s' (presence-keyed union '%s')" f.Name u.Name
+
+                          for n in WireForm.keyedRoster u do
+                              n, bearer, true
+                      | _ ->
+                          for n in WireForm.spellings f do
+                              n, sprintf "field '%s'" f.Name, false ]
 
         // `admits`: whether this owner may hold an inline declaration; `within`: whether the owner IS
         // an inline declaration's member list (its members take no alias and no condition).
+        // `reserved`: the keys the owner's object carries before any field, each with what carries
+        // it. `shared`: the keys of an object the owner's members are MERGED into (the flat node
+        // envelope's id and fields), which a member an inline declaration lays may not respell; a
+        // field of the owner's own spelled as one is [[wireShapeErrors]]' fault, as it always was.
         let ownerErrors
             (owner: string)
             (at: PathSegment list)
             (fieldAt: int -> PathSegment list)
             (admits: bool)
             (within: bool)
-            (reserved: string list)
+            (reserved: (string * string) list)
+            (shared: (string * string) list)
             (fields: IdlField list)
             : VocabularyFault list =
             [ for j, f in List.indexed fields do
@@ -363,18 +380,43 @@ module Declare =
                   | Some WhenNonEmpty
                   | None -> ()
 
-              let names = reserved @ members fields
+              let own = members fields
+              let carried = (reserved |> List.map (fun (n, bearer) -> n, bearer, false)) @ own
 
-              for k, n in List.indexed names do
-                  if names |> List.take k |> List.contains n then
-                      fault
-                          at
-                          (sprintf
-                              "%s: the member '%s' is on its object twice once inline declarations are laid out"
-                              owner
-                              n) ]
+              let twice (n: string) (first: string) (second: string) =
+                  fault
+                      at
+                      (sprintf
+                          "%s: the member '%s' is on its object twice once inline declarations are laid out: %s and %s"
+                          owner
+                          n
+                          first
+                          second)
 
-        let disc = idl.Wire.Discriminator
+              for k, (n, bearer, _) in List.indexed carried do
+                  match carried |> List.take k |> List.tryFind (fun (m, _, _) -> m = n) with
+                  | Some(_, first, _) -> twice n first bearer
+                  | None -> ()
+
+              for n, bearer, laid in List.distinct own do
+                  if laid then
+                      match shared |> List.tryFind (fun (m, _) -> m = n) with
+                      | Some(_, first) -> twice n first bearer
+                      | None -> () ]
+
+        let disc = [ idl.Wire.Discriminator, "the discriminator" ]
+
+        // In the flat node envelope the node id, the envelope's fields and a kind's members are keys
+        // of ONE object, so a member an inline declaration lays there shares it with them.
+        let envelope =
+            match idl.Wire.NodeEnvelope with
+            | NodeEnvelopeShape.NestedKind -> []
+            | NodeEnvelopeShape.FlatKind ->
+                ("id", "the node id")
+                :: [ for g in idl.NodeFields do
+                         if g.Opt <> HostOnly then
+                             for n in WireForm.spellings g do
+                                 n, sprintf "the node-envelope field '%s'" g.Name ]
 
         [ for i, k in List.indexed idl.Kinds do
               yield!
@@ -384,12 +426,12 @@ module Declare =
                       (kindField i)
                       true
                       false
-                      [ disc ]
+                      disc
+                      envelope
                       k.Fields
 
           for i, o in List.indexed idl.Ops do
-              yield!
-                  ownerErrors (sprintf "op '%s'" o.Tag) [ key "ops"; item i ] (opField i) true false [ disc ] o.Fields
+              yield! ownerErrors (sprintf "op '%s'" o.Tag) [ key "ops"; item i ] (opField i) true false disc [] o.Fields
 
           for i, r in List.indexed idl.Records do
               yield!
@@ -400,9 +442,10 @@ module Declare =
                       (not r.Inline)
                       r.Inline
                       []
+                      []
                       r.Fields
 
-          yield! ownerErrors "the node envelope" [ key "nodeFields" ] envelopeField false false [] idl.NodeFields
+          yield! ownerErrors "the node envelope" [ key "nodeFields" ] envelopeField false false [] [] idl.NodeFields
 
           for i, u in List.indexed idl.Unions do
               let at = [ key "unions"; item i ]
@@ -421,7 +464,8 @@ module Declare =
                               (caseField i c)
                               (not isBare)
                               false
-                              (if isBare then [] else [ disc ])
+                              (if isBare then [] else disc)
+                              []
                               case.Fields
               | UnionDiscrimination.ByPresence keyed ->
                   let path = at @ [ key "byPresence" ]
@@ -434,6 +478,7 @@ module Declare =
                               (caseField i c)
                               false
                               true
+                              []
                               []
                               case.Fields
 
