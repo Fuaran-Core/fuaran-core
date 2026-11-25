@@ -1049,12 +1049,6 @@ const cEveryOf = (read) => {
         | [] -> "never"
         | _ -> kinds |> List.map (fun k -> SourceLit.tsString k.Tag) |> String.concat " | "
 
-    /// `<A, B>` for a declaration's type parameters, or nothing.
-    let private tsGeneric (ps: string list) =
-        match ps with
-        | [] -> ""
-        | _ -> "<" + String.concat ", " ps + ">"
-
     /// `StructuralAccess` — the four access members and the witness object over them.
     let private structuralDecls (kinds: IdlKind list) : string list =
         let tag = tsTagUnion kinds

@@ -223,10 +223,18 @@ module internal TypeScriptDeclarations =
                |> String.concat "\n")
             + "\n */\n"
 
+    /// `<A, B>` for a generic declaration's type parameters, or nothing for a declaration with none:
+    /// what a generic union's and (Phase 732) a generic record's `export type` is declared with.
+    let internal tsGeneric (ps: string list) : string =
+        match ps with
+        | [] -> ""
+        | _ -> "<" + String.concat ", " ps + ">"
+
     /// The declared TypeScript type of an IDL type, as the declaration file spells it: a declared
-    /// enum, record or union by its own name, a node as `Node`, and a sentinel, JSON or undeclared
-    /// hosted slot as `unknown`. Shared by [[typescriptDeclarations]] and the derived members'
-    /// declarations (Phase 381), so a member's type is spelled exactly as the file's own types are.
+    /// enum, record or union by its own name (a generic one applied to its arguments), a node as
+    /// `Node`, and a sentinel, JSON or undeclared hosted slot as `unknown`. Shared by
+    /// [[typescriptDeclarations]] and the derived members' declarations (Phase 381), so a member's
+    /// type is spelled exactly as the file's own types are.
     let rec internal tsDeclType (t: IdlType) : Result<string, CodegenError> =
         match t with
         | TStr -> Ok "string"
@@ -234,8 +242,9 @@ module internal TypeScriptDeclarations =
         | TFloat -> Ok "number"
         | TBool -> Ok "boolean"
         | TEnum n
-        | TRecord(n, _)
+        | TRecord(n, [])
         | TUnion(n, []) -> Ok n
+        | TRecord(n, args)
         | TUnion(n, args) ->
             args
             |> List.map tsDeclType
@@ -311,36 +320,45 @@ module internal TypeScriptDeclarations =
         // Phase 722 — a member holding an inline declaration states no key of its own: the holder's
         // type is its own members INTERSECTED with the declaration's (`& Paging`, `& GridRows`), and
         // an optional presence-keyed union admits the object carrying no case's key beside its cases.
-        let inlineType (f: IdlField) (slot: InlineSlot) : string =
+        // Phase 732 — an inline record applied to arguments is intersected at that instantiation
+        // (`& Paging<string>`; `& LocalState<T>` where the holder passes its own parameter down).
+        let inlineType (f: IdlField) (slot: InlineSlot) : Result<string, CodegenError> =
             match slot, f.Opt with
             | InlineSlot.Keyed(u, keyed), Optional ->
-                "("
-                + u.Name
-                + " | { "
-                + (keyed
-                   |> List.map (fun k -> SourceLit.tsKey k.Key + "?: undefined")
-                   |> String.concat "; ")
-                + " })"
-            | slot, _ -> tsInlineName slot
+                Ok(
+                    "("
+                    + u.Name
+                    + " | { "
+                    + (keyed
+                       |> List.map (fun k -> SourceLit.tsKey k.Key + "?: undefined")
+                       |> String.concat "; ")
+                    + " })"
+                )
+            | InlineSlot.Keyed(u, _), _ -> Ok u.Name
+            | InlineSlot.Record r, _ -> tsType (TRecord(r.Decl.Name, r.Args))
 
         let objectType (extra: string list) (fields: IdlField list) : Result<string, CodegenError> =
             let held =
-                fields |> List.choose (fun f -> tsInlineOf idl f |> Option.map (inlineType f))
+                fields
+                |> List.choose (fun f -> tsInlineOf idl f |> Option.map (inlineType f))
+                |> sequenceR
 
-            fields
-            |> List.filter (fun f -> Option.isNone (tsInlineOf idl f))
-            |> List.map memberDecl
-            |> sequenceR
-            |> Result.map (fun ms ->
-                match extra @ ms, held with
-                | [], [] -> "{}"
-                | [], held -> String.concat " & " held
-                | all, held -> String.concat " & " (("{ " + String.concat "; " all + " }") :: held))
+            let own =
+                fields
+                |> List.filter (fun f -> Option.isNone (tsInlineOf idl f))
+                |> List.map memberDecl
+                |> sequenceR
 
-        let generic (ps: string list) =
-            match ps with
-            | [] -> ""
-            | _ -> "<" + String.concat ", " ps + ">"
+            match own, held with
+            | Error e, _
+            | _, Error e -> Error e
+            | Ok ms, Ok held ->
+                Ok(
+                    match extra @ ms, held with
+                    | [], [] -> "{}"
+                    | [], held -> String.concat " & " held
+                    | all, held -> String.concat " & " (("{ " + String.concat "; " all + " }") :: held)
+                )
 
         let orNever (xs: string list) =
             match xs with
@@ -363,7 +381,14 @@ module internal TypeScriptDeclarations =
             records
             |> List.map (fun r ->
                 objectType [] r.Fields
-                |> Result.map (fun o -> tsTypeDocBlock r.Annotations + "export type " + r.Name + " = " + o + ";"))
+                |> Result.map (fun o ->
+                    tsTypeDocBlock r.Annotations
+                    + "export type "
+                    + r.Name
+                    + tsGeneric r.Params
+                    + " = "
+                    + o
+                    + ";"))
 
         let unionDecls =
             unions
@@ -382,7 +407,7 @@ module internal TypeScriptDeclarations =
                     tsTypeDocBlock u.Annotations
                     + "export type "
                     + u.Name
-                    + generic u.Params
+                    + tsGeneric u.Params
                     + " = "
                     + orNever cases
                     + ";"))

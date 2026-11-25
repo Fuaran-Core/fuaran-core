@@ -199,7 +199,7 @@ module Gen =
     let typescriptDeclarations (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
         Decl.resolve idl Map.empty kindTags
         |> Decl.laidOut
-        |> Result.bind Decl.unparameterised
+        |> Result.bind Decl.recordsApplied
         |> Result.bind TypeScriptDeclarations.typescriptDeclarations
 
     /// Phase 381 — `typescriptDeclarations` plus one declaration per member
