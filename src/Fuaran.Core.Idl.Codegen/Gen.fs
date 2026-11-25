@@ -187,7 +187,7 @@ module Gen =
         tsDerives derivations
         |> Result.bind (fun () -> tsCodecAdmits idl)
         |> Result.bind (fun () -> Decl.laidOut (Decl.resolve idl Map.empty kindTags))
-        |> Result.bind Decl.unparameterised
+        |> Result.bind Decl.recordsApplied
         |> Result.bind (TypeScriptDerived.typescriptModuleDerived derivations)
 
     /// A TypeScript value literal for an authored value of a declared type.
@@ -215,7 +215,7 @@ module Gen =
         : Result<string, CodegenError> =
         tsDerives derivations
         |> Result.bind (fun () -> Decl.laidOut (Decl.resolve idl Map.empty kindTags))
-        |> Result.bind Decl.unparameterised
+        |> Result.bind Decl.recordsApplied
         |> Result.bind (TypeScriptDerived.typescriptDeclarationsDerived derivations)
 
     /// An authored value as compilable F# source — the scaffold leg: an expression of type

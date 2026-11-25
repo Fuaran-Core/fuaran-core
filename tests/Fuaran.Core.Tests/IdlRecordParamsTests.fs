@@ -181,9 +181,10 @@ let private fixtures: (string * Idl) list =
       "classify base", IdlClassify.Fixtures.baseIdl ]
 
 /// One description per backend entry that emits a declaration or prints a value, over `idl`, in two
-/// lists: the F# entries, which emit a parameterised record (held to the interpreter in
-/// `IdlRecordFSharpTests`), and the TypeScript and F* entries, which do not yet. The JSON-schema
-/// entries emit one, and are held to the interpreter in `IdlSchemaValidatorTests`.
+/// lists: the F# and TypeScript entries, which emit a parameterised record (held to the interpreter
+/// in `IdlRecordFSharpTests`, `IdlRecordTypeScriptTests` and `IdlThreeHostTests`), and the F* entries,
+/// which do not yet. The JSON-schema entries emit one, and are held to the interpreter in
+/// `IdlSchemaValidatorTests`.
 let private backends (idl: Idl) : (string * Result<unit, string>) list * (string * Result<unit, string>) list =
     let tags = idl.Kinds |> List.map _.Tag
 
@@ -212,11 +213,11 @@ let private backends (idl: Idl) : (string * Result<unit, string>) list * (string
       )
       "fsharpValue", describe (Gen.fsharpValue idl TStr (VStr "x"))
       "typescriptModule", describe (Gen.typescriptModule idl tags)
+      "typescriptModuleDerived", describe (Gen.typescriptModuleDerived [] idl tags)
       "typescriptDeclarations", describe (Gen.typescriptDeclarations idl tags)
-      "typescriptValue", describe (Gen.typescriptValue idl TStr (VStr "x")) ],
-    [ "typescriptModuleDerived", describe (Gen.typescriptModuleDerived [] idl tags)
       "typescriptDeclarationsDerived", describe (Gen.typescriptDeclarationsDerived [] idl tags)
-      "FStarTarget.vocabularyModule", describe (FStarTarget.vocabularyModule "Boxed" idl tags)
+      "typescriptValue", describe (Gen.typescriptValue idl TStr (VStr "x")) ],
+    [ "FStarTarget.vocabularyModule", describe (FStarTarget.vocabularyModule "Boxed" idl tags)
       "FStarTarget.proofsModule", describe (FStarTarget.proofsModule "Boxed" "BoxedProofs" idl tags) ]
 
 [<Tests>]
@@ -515,7 +516,7 @@ let tests =
                   | Ok schema -> failtestf "a schema naming an instantiation that does not exist: %s" schema)
 
           testCase
-              "the F# entries emit a parameterised record; the TypeScript and F* entries refuse it by name"
+              "the F# and TypeScript entries emit a parameterised record; the F* entries refuse it by name"
               (fun _ ->
                   // A declared parameter, and separately an applied argument no declaration backs: a
                   // backend is handed an `Idl` value, not a declaration that was checked.
@@ -526,14 +527,15 @@ let tests =
                           Records = [ record "Shape" [] [ f "w" TInt Required ] ] }
 
                   let emitting, refusing = backends boxed
-                  Expect.equal (List.length emitting) 8 "the five F# entries and three TypeScript ones"
-                  Expect.equal (List.length refusing) 4 "two TypeScript entries and the two F* ones"
+                  Expect.equal (List.length emitting) 10 "the five F# entries and the five TypeScript ones"
+                  Expect.equal (List.length refusing) 2 "the two F* entries"
 
                   for entry, answer in emitting do
                       Expect.equal answer (Ok()) (sprintf "%s emits the parameterised records" entry)
 
-                  // A reference no binding can be made for has no generic type to name: every F# entry
-                  // refuses it by the record's name, in the sentence the JSON schema refuses it in.
+                  // A reference no binding can be made for has no generic type to name: every F# and
+                  // TypeScript entry refuses it by the record's name, in the sentence the JSON schema
+                  // refuses it in.
                   for entry, answer in fst (backends applied) do
                       match answer with
                       | Ok() -> failtestf "%s: emitted for a reference no binding can be made for" entry

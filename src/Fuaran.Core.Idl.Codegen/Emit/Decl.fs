@@ -1350,11 +1350,11 @@ module internal Decl =
         (allFieldLists idl |> List.collect (List.map _.Type)) @ methodTypes
         |> List.tryPick walk
 
-    /// Phase 732 — what the F# entries ask of a vocabulary before they emit a record: that every
-    /// reference applies as many arguments as its record declares parameters. A backend is handed
-    /// an `Idl` value, not a declaration that was checked, and a reference no binding can be made
-    /// for has no generic type to name; it is refused by the record's name, in the sentence the JSON
-    /// schema refuses it in ([[instantiated]]).
+    /// Phase 732 — what the F# and TypeScript entries ask of a vocabulary before they emit a record:
+    /// that every reference applies as many arguments as its record declares parameters. A backend is
+    /// handed an `Idl` value, not a declaration that was checked, and a reference no binding can be
+    /// made for has no generic type or function to apply; it is refused by the record's name, in the
+    /// sentence the JSON schema refuses it in ([[instantiated]]).
     let recordsAppliedIdl (idl: Idl) : Result<unit, CodegenError> =
         let misapplied (name: string) (args: IdlType list) =
             match CodegenLookup.tryRecord idl name with
@@ -1372,10 +1372,10 @@ module internal Decl =
 
     /// Phase 732 — the first record of the vocabulary that declares a type parameter, else the first
     /// a reference applies to a type argument. The declaration, the artifact, the declaration check,
-    /// the interpreter, the JSON schema and the F# entries carry both; the TypeScript and F* entries
-    /// do not emit one yet, so each asks this of the WHOLE vocabulary (its contracts' types
-    /// included) and refuses by the record's name ([[unparameterised]]). A backend drops the
-    /// question when it emits the record, and this goes with the last.
+    /// the interpreter, the JSON schema, the F# entries and the TypeScript entries carry both; the F*
+    /// model does not model one yet, so it asks this of the WHOLE vocabulary (its contracts' types
+    /// included) and refuses by the record's name ([[parameterisedRecordConstruct]]). A backend drops
+    /// the question when it emits the record, and this goes with the last.
     let parameterisedRecord (idl: Idl) : string option =
         idl.Records
         |> List.tryFind (fun r -> not (List.isEmpty r.Params))
@@ -1386,23 +1386,6 @@ module internal Decl =
     /// The construct a backend names when [[parameterisedRecord]] answers a record.
     let parameterisedRecordConstruct (name: string) : string =
         sprintf "a type-parameterised record ('%s')" name
-
-    /// [[parameterisedRecord]] as the refusal of a backend that answers `UnsupportedConstruct`.
-    let unparameterisedIdl (idl: Idl) : Result<unit, CodegenError> =
-        match parameterisedRecord idl with
-        | None -> Ok()
-        | Some name ->
-            Error(
-                CodegenError.UnsupportedConstruct(
-                    parameterisedRecordConstruct name,
-                    "GP5: the refusal names the construct and thereby the set that IS supported",
-                    "declare the record at each argument it is applied to, as a record of its own"
-                )
-            )
-
-    /// [[unparameterisedIdl]] over a resolution, answering the resolution itself.
-    let unparameterised (d: Decl) : Result<Decl, CodegenError> =
-        unparameterisedIdl d.Idl |> Result.map (fun () -> d)
 
     /// A presence-keyed union's roster — see [[WireForm.keyedRoster]].
     [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]

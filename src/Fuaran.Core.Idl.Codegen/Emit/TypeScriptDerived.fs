@@ -792,7 +792,10 @@ module internal TypeScriptDerived =
                     match tsInlineOf idl f, f.Opt with
                     | Some(InlineSlot.Keyed(u, keyed)), Required ->
                         Some(Ok(tsSpread ("dKeyed(colMembers" + u.Name + "(" + o + "), " + tsKeyedFirst keyed + ")")))
-                    | Some slot, _ -> Some(Ok(tsSpread ("colMembers" + tsInlineName slot + "(" + o + ")")))
+                    | Some(InlineSlot.Keyed(u, _)), _ -> Some(Ok(tsSpread ("colMembers" + u.Name + "(" + o + ")")))
+                    // Phase 732 — an inline record applied to arguments is handed one collecting
+                    // decoder per argument, as the short-circuiting reader is handed one decoder.
+                    | Some(InlineSlot.Record r), _ -> Some(tsInlineRecordCall "col" tsColPrinter r o)
                     | None, _ -> None }
 
     /// Read every member in declaration order and then run each of `checks`, then build the object
@@ -841,10 +844,7 @@ module internal TypeScriptDerived =
         (read: IdlField list -> Result<(IdlField * string) list, CodegenError>)
         (u: IdlUnion)
         =
-        let argList =
-            match u.Params with
-            | [] -> "j"
-            | ps -> (ps |> List.map (fun p -> "col" + p) |> String.concat ", ") + ", j"
+        let argList = tsCodecParams "col" u.Params + "j"
 
         UnionTraversal.decoder
             { Read = read
@@ -946,10 +946,19 @@ module internal TypeScriptDerived =
             + build
             + ";\n}"
 
-        let objectDecoder (name: string) (extra: (string * string) list) (members: (IdlField * string) list) =
+        // Phase 732 — a generic record's collecting decoder takes one collecting decoder per type
+        // parameter ahead of the value, as a generic union's does ([[tsCodecParams]]).
+        let objectDecoder
+            (name: string)
+            (pars: string list)
+            (extra: (string * string) list)
+            (members: (IdlField * string) list)
+            =
             "function col"
             + name
-            + "(j) {\n  const fs = dObj(j);\n"
+            + "("
+            + tsCodecParams "col" pars
+            + "j) {\n  const fs = dObj(j);\n"
             + tsColObject "  " extra members
             + "\n}"
 
@@ -974,16 +983,19 @@ module internal TypeScriptDerived =
                         if r.Inline then
                             "function colMembers"
                             + r.Name
-                            + "(fs) {\n"
+                            + "("
+                            + tsCodecParams "col" r.Params
+                            + "fs) {\n"
                             + tsColObject "  " [] members
                             + "\n}"
                         else
-                            objectDecoder r.Name [] members
+                            objectDecoder r.Name r.Params [] members
                   ReadsSpec = fun _ -> true
                   Spec =
                     fun k members ->
                         objectDecoder
                             (k.Tag + "Spec")
+                            []
                             [ tsDiscKey disc, SourceLit.tsString k.Tag ]
                             (defaultArg members []) }
                 decl
@@ -1067,12 +1079,15 @@ const cEveryOf = (read) => {
           "export declare function withKeyedChildren(kids: Array<Node>, n: Node): Node;"
           "export declare const keyedWitness: { surface: string; keyedChildren(n: Node): Array<Node>; replaceKeyedChildren(n: Node, kids: Array<Node>): Node; placeKeyedChild(n: Node, id: string): Node | undefined; idsUnique(root: Node): boolean };" ]
 
-    /// `SlotsOf T` — the pairs hold a `T`; a generic union's instantiations differ field by field,
-    /// so its pairs hold `unknown`, the F# host's `obj`, for the same reason.
+    /// `SlotsOf T` — the pairs hold a `T`; a generic union's or (Phase 732) a generic record's
+    /// instantiations differ field by field, so its pairs hold `unknown`, the F# host's `obj`, for
+    /// the same reason.
     let private slotsDecls (ctx: Decl) (typeName: string) : string list =
         let generic =
-            ctx.Unions
-            |> List.exists (fun u -> u.Name = typeName && not (List.isEmpty u.Params))
+            (ctx.Unions
+             |> List.exists (fun u -> u.Name = typeName && not (List.isEmpty u.Params)))
+            || (ctx.Records
+                |> List.exists (fun r -> r.Name = typeName && not (List.isEmpty r.Params)))
 
         let elem = if generic then "unknown" else typeName
 
@@ -1209,10 +1224,26 @@ const cEveryOf = (read) => {
                     |> List.map (fun (u, folds, fields, emitted) ->
                         unionModuleDecls u folds fields |> Result.map (part emitted))
 
-            // `default<N>` is a value of the declared type `N`: a `<Tag>Spec` or a record.
+            // `default<N>` is a value of the declared type `N`: a `<Tag>Spec` or a record. Phase 732 —
+            // a generic record's default holds no value at a parameter (a member at one has no default
+            // to stand at), so it is declared at `never` in every parameter, which is assignable to the
+            // record at any argument: the F# host's `default<N><'T>: N<'T>`.
             let defaultDecls (names: string list) =
                 names
-                |> List.map (fun n -> sprintf "export declare const %s: %s;" n (n.Substring "default".Length))
+                |> List.map (fun n ->
+                    let declared = n.Substring "default".Length
+
+                    let pars =
+                        ctx.Records
+                        |> List.tryFind (fun r -> r.Name = declared)
+                        |> Option.map _.Params
+                        |> Option.defaultValue []
+
+                    sprintf
+                        "export declare const %s: %s%s;"
+                        n
+                        declared
+                        (tsGeneric (pars |> List.map (fun _ -> "never"))))
 
             admitted
             |> Result.bind (fun () ->

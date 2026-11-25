@@ -268,7 +268,10 @@ let derived: Idl =
             @ [ kind
                     "Outline"
                     [ field "tree" (TUnion("Tree", [])) Required
-                      field "trail" (TRecord("Tagged", [ TStr ])) (OmitDefault(VRecord [])) ]
+                      field
+                          "trail"
+                          (TRecord("Tagged", [ TStr ]))
+                          (OmitDefault(VRecord [ "tag", VStr ""; "items", VList [] ])) ]
                 kind
                     "Frame"
                     [ field "panel" (TRecord("Panel", [ TStr ])) Required
