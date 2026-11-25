@@ -95,11 +95,22 @@ module internal TypeScriptCodec =
         | k :: _ -> SourceLit.tsString k.Key
         | [] -> SourceLit.tsString ""
 
-    /// A keyed case's synthesised members, each with the canonical text the encoder writes and the
-    /// decoder requires, as a string literal.
-    let tsSynthesised (idl: Idl) (u: IdlUnion) (k: KeyedCase) : Result<(string * string) list, CodegenError> =
+    /// A keyed case's synthesised members, each with two string literals: the text the encoder
+    /// writes, in the vocabulary's key order as the interpreter writes it, and the canonical text the
+    /// decoder holds the document's VALUE to. The two are one text under `KeyOrder.Sorted`.
+    let tsSynthesised (idl: Idl) (u: IdlUnion) (k: KeyedCase) : Result<(string * string * string) list, CodegenError> =
+        let written =
+            match idl.Wire.KeyOrder with
+            | KeyOrder.Sorted -> Rendering.CrossHost
+            | KeyOrder.Declared -> Rendering.Declared
+
         Decl.synthesisedJson idl u k
-        |> Result.map (List.map (fun (name, j) -> name, SourceLit.tsString (Canonical.write Rendering.CrossHost j)))
+        |> Result.map (
+            List.map (fun (name, j) ->
+                name,
+                SourceLit.tsString (Canonical.write written j),
+                SourceLit.tsString (Canonical.write Rendering.CrossHost j))
+        )
 
     /// The D220.3 reading shared by the encoder and the decoder, emitted only when a presence-keyed
     /// union is reached: the cases whose key is present, less those whose key another present case
@@ -124,8 +135,23 @@ module internal TypeScriptCodec =
     /// The decode side of [[tsKeyedEncHelper]]: `dPick` reads a document's keys (two cases left is
     /// the both-present refusal, `OutOfRange` at the second one's key), `dSynth` checks a
     /// synthesised member is present and canonically its declared value, and `dKeyed` is the
-    /// `MissingField` a required union with no case present is refused with.
-    let tsKeyedDecHelpers: string =
+    /// `MissingField` a required union with no case present is refused with. The comparison is of
+    /// the VALUE, never of the document's text: under `KeyOrder.Declared` the module's `encJson`
+    /// keeps a value's authored key order, so `dSynth` renders through a writer that sorts.
+    let tsKeyedDecHelpers (order: KeyOrder) : string =
+        let canonical, render =
+            match order with
+            | KeyOrder.Sorted -> [], "encJson"
+            | KeyOrder.Declared ->
+                [ "// The canonical text of a parsed value, its keys Ordinal-sorted at every depth: `encJson` keeps"
+                  "// the authored order under declared key order, and a synthesised member is compared by value."
+                  "const dCanon = (v) => {"
+                  "  if (v === null || typeof v !== 'object') return encJson(v);"
+                  "  if (Array.isArray(v)) return '[' + v.map(dCanon).join(',') + ']';"
+                  "  return '{' + Object.keys(v).sort().map((k) => encStr(k) + ':' + dCanon(v[k])).join(',') + '}';"
+                  "};" ],
+                "dCanon"
+
         [ "// Phase 722 — the case a DOCUMENT's members pick (D220.3): its index, or -1 for none; two left is"
           "// the both-present refusal, `OutOfRange` at the second one's key."
           "const dPick = (fs, rules) => {"
@@ -136,11 +162,12 @@ module internal TypeScriptCodec =
           "// A member a presence-keyed case synthesises: present, and canonically its declared value."
           "const dSynth = (name, expected, fs) => {"
           "  if (!hasOwn(fs, name)) return dMissing(name, \"missing required field '\" + name + \"'\");"
-          "  const got = encJson(dRead(fs, name));"
+          "  const got = " + render + "(dRead(fs, name));"
           "  return (got === expected) ? undefined : dAt(name, () => dFail('OutOfRange', expected, got));"
           "};"
           "// A required presence-keyed union with no case present: `MissingField` at its first case's key."
           "const dKeyed = (members, key) => (members === null) ? dMissing(key, \"missing required field '\" + key + \"'\") : members;" ]
+        |> List.append canonical
         |> String.concat "\n"
 
     /// Phase 656 — bytes as this host's `Uint8Array` literal, from their canonical base64 text.
@@ -495,8 +522,13 @@ module internal TypeScriptCodec =
           // Phase 722 — an inline declaration's member pieces, read off the holder ([[tsMemberAt]]).
           Inline =
             fun src f ->
-                tsInlineOf idl f
-                |> Option.map (fun slot -> tsSpread ("encMembers" + tsInlineName slot + "(" + src + ")")) }
+                match tsInlineOf idl f, f.Opt with
+                // A REQUIRED presence-keyed union holding no case is refused, as the interpreter
+                // refuses the absent member: the writer is told the member it writes for.
+                | Some(InlineSlot.Keyed(u, _)), Required ->
+                    Some(tsSpread ("encMembers" + u.Name + "(" + src + ", " + SourceLit.tsString f.Name + ")"))
+                | Some slot, _ -> Some(tsSpread ("encMembers" + tsInlineName slot + "(" + src + ")"))
+                | None, _ -> None }
 
     /// A member read off the bound JS variable `recv` (`s` for a spec/record encoder, `n` for the
     /// node envelope) — the F# side's `specPieceOf`.
@@ -695,7 +727,7 @@ module internal TypeScriptCodec =
                     let all =
                         own
                         @ (synth
-                           |> List.map (fun (n, text) -> n, "[" + SourceLit.tsString n + ", " + text + "]"))
+                           |> List.map (fun (n, written, _) -> n, "[" + SourceLit.tsString n + ", " + written + "]"))
 
                     let pieces =
                         roster
@@ -710,11 +742,11 @@ module internal TypeScriptCodec =
              |> String.concat "")
             + "function encMembers"
             + u.Name
-            + "(v) {\n  switch (ePick(v, "
+            + "(v, required) {\n  switch (ePick(v, "
             + tsPickRules keyed
             + ")) {\n"
             + (arms |> List.filter (fun a -> a <> "") |> String.concat "\n")
-            + "\n    default: return [];\n  }\n}")
+            + "\n    default:\n      if (required !== undefined) throw new Error(\"required field '\" + required + \"' is absent\");\n      return [];\n  }\n}")
 
     /// A kind's spec encoder. Nested (the default): the discriminator-tagged
     /// object, byte-identical to the pre-declarable emission. Flat (Phase 109):
@@ -1050,7 +1082,8 @@ module internal TypeScriptCodec =
                 | Ok members, Ok synth ->
                     let checks =
                         synth
-                        |> List.map (fun (n, text) -> "dSynth(" + SourceLit.tsString n + ", " + text + ", fs)")
+                        |> List.map (fun (n, _, canonical) ->
+                            "dSynth(" + SourceLit.tsString n + ", " + canonical + ", fs)")
 
                     Ok(sprintf "    case %d: {\n%s\n    }" i (build members checks)))
         |> sequenceR
@@ -1489,7 +1522,10 @@ const plain = (pairs) =>
                  [ Ok(Template.text "ts-wider-helpers.js") ]
              else
                  [])
-          @ (if reachesKeyed then [ Ok tsKeyedDecHelpers ] else [])
+          @ (if reachesKeyed then
+                 [ Ok(tsKeyedDecHelpers idl.Wire.KeyOrder) ]
+             else
+                 [])
           enums |> List.map (tsEnumDecoder >> Ok)
           records
           |> List.map (fun r ->

@@ -208,9 +208,22 @@ let generate () : Result<string, CodegenError> =
 // `IdlLayoutTypeScriptTests` runs it beside the TypeScript module the same requests emit.
 // ---------------------------------------------------------------------------
 
-/// `layout` with the `Outline` kind and its two self-recursive unions.
+/// `layout` with the `Outline` kind and its two self-recursive unions, and a declared default for
+/// each member of `Grid` a caller must otherwise pass: the two inline ones among them (`paging`, an
+/// inline record, and `rows`, a required presence-keyed union whose case synthesises a member), so
+/// the default record of a holder is emitted and held to the F# host's.
 let derived: Idl =
     { layout with
+        Defaults =
+            [ { Kind = "Grid"
+                Field = "columns"
+                Value = VList [] }
+              { Kind = "Grid"
+                Field = "paging"
+                Value = VRecord [ ("pageSize", VInt 10) ] }
+              { Kind = "Grid"
+                Field = "rows"
+                Value = VUnion("StaticRows", [ ("staticRows", VRecord [ ("headers", VList []); ("rows", VList []) ]) ]) } ]
         Kinds =
             layout.Kinds
             @ [ kind
@@ -252,7 +265,8 @@ let derived: Idl =
                       field "rows" (TUnion("GridRows", [])) Required
                       field "title" TStr Optional ] ] }
 
-/// Every slot enumerator, fold and projection the two hosts are held to each other over.
+/// Every slot enumerator, fold, projection and default record the two hosts are held to each other
+/// over.
 let derivations: Derivation list =
     [ Derivation.SlotsOf "Paging"
       Derivation.SlotsOf "RowIdentity"
@@ -266,7 +280,8 @@ let derivations: Derivation list =
       Derivation.Projections("GridRows", [ "source"; "staticRows" ])
       Derivation.Projections("Field", [ "payload"; "on" ])
       Derivation.Projections("Chain", [ "link"; "stop" ])
-      Derivation.Projections("Tree", [ "payload"; "n" ]) ]
+      Derivation.Projections("Tree", [ "payload"; "n" ])
+      Derivation.DefaultRecords ]
 
 /// Documents of the `Outline` kind, each in canonical (sorted) form: a chain of two links and a
 /// tree three deep; neither union nested; a link whose box holds no further case.

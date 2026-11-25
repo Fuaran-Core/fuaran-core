@@ -682,10 +682,18 @@ module internal TypeScriptDerived =
                     | Some k -> [ tsDiscKey disc + ": " + SourceLit.tsString k.Tag ]
                     | None -> []
 
+                // A member holding an inline declaration has no key on this host: its value's members
+                // are the holder's own, at their wire keys, so its literal is spread into the holder's
+                // as an authored value's is (`typescriptValue`).
                 r.Members
                 |> List.map (fun (f, mv) ->
                     fieldValue f mv
-                    |> Result.map (Option.map (fun lit -> SourceLit.tsString f.Name + ": " + lit)))
+                    |> Result.map (
+                        Option.map (fun lit ->
+                            match tsInlineOf idl f with
+                            | Some _ -> tsSpread lit
+                            | None -> SourceLit.tsString f.Name + ": " + lit)
+                    ))
                 |> sequenceR
                 |> Result.map (fun pieces ->
                     sprintf

@@ -98,18 +98,54 @@ let private refused: string list =
 let private manyDefects: string =
     """{"id":"g","kind":{"$type":"Grid","columns":3,"pageSize":"x","source":{"$type":"Static","value":[1]},"staticRows":{"headers":4,"rows":[]}}}"""
 
+let private field (name: string) (t: IdlType) (opt: Optionality) : IdlField =
+    { Name = name
+      Type = t
+      Opt = opt
+      Aliases = []
+      Keyed = false
+      Presence = None
+      Annotations = Annotations.Empty }
+
+/// `layout` with a HOST-ONLY member in each position a kind's keys are read from: the kind's own
+/// (`memo`), an inline record's (`hint`) and a presence-keyed case's (`note`).
+let private hostOnlyInCase: Idl =
+    { LayoutIdl.layout with
+        Kinds =
+            LayoutIdl.layout.Kinds
+            |> List.map (fun k ->
+                if k.Tag = "Grid" then
+                    { k with
+                        Fields = k.Fields @ [ field "memo" TStr HostOnly ] }
+                else
+                    k)
+        Records =
+            LayoutIdl.layout.Records
+            |> List.map (fun r ->
+                if r.Name = "Paging" then
+                    { r with
+                        Fields = r.Fields @ [ field "hint" TStr HostOnly ] }
+                else
+                    r)
+        Unions =
+            LayoutIdl.layout.Unions
+            |> List.map (fun u ->
+                if u.Name = "RowIdentity" then
+                    { u with
+                        Cases =
+                            u.Cases
+                            |> List.map (fun c ->
+                                if c.Tag = "RowKeyField" then
+                                    { c with
+                                        Fields = c.Fields @ [ field "note" TStr HostOnly ] }
+                                else
+                                    c) }
+                else
+                    u) }
+
 /// `layout` with a node in each kind of inline declaration: two in the inline record, one in a
 /// presence-keyed case.
 let private withNodes: Idl =
-    let field (name: string) (t: IdlType) (opt: Optionality) : IdlField =
-        { Name = name
-          Type = t
-          Opt = opt
-          Aliases = []
-          Keyed = false
-          Presence = None
-          Annotations = Annotations.Empty }
-
     { LayoutIdl.layout with
         Records =
             LayoutIdl.layout.Records
@@ -136,6 +172,41 @@ let private withNodes: Idl =
                                     c) }
                 else
                     u) }
+
+/// `layoutDeclared` with a placeholder whose keys are NOT in sorted order as the vocabulary declares
+/// them: `Feed.Static` carries `value` and then `kind`, so the member `StaticRows` synthesises is
+/// written `{"$type":"Static","value":[],"kind":"none"}`. The layout's own placeholder (`$type`,
+/// `value`) is in sorted order already, where a writer that sorts and one that does not agree.
+let private unsortedPlaceholder: Idl =
+    let placeholder = VUnion("Static", [ "value", VJson(JArr []); "kind", VStr "none" ])
+
+    { LayoutIdl.layoutDeclared with
+        Unions =
+            LayoutIdl.layoutDeclared.Unions
+            |> List.map (fun u ->
+                match u.Name, u.Discrimination with
+                | "Feed", _ ->
+                    { u with
+                        Cases =
+                            u.Cases
+                            |> List.map (fun c ->
+                                if c.Tag = "Static" then
+                                    { c with
+                                        Fields = c.Fields @ [ field "kind" TStr Required ] }
+                                else
+                                    c) }
+                | "GridRows", UnionDiscrimination.ByPresence keyed ->
+                    { u with
+                        Discrimination =
+                            keyed
+                            |> List.map (fun k ->
+                                if k.Case = "StaticRows" then
+                                    { k with
+                                        Synthesised = [ "source", placeholder ] }
+                                else
+                                    k)
+                            |> UnionDiscrimination.ByPresence }
+                | _ -> u) }
 
 [<Tests>]
 let agreementTests =
@@ -189,9 +260,91 @@ let agreementTests =
               let doc =
                   grid ""","source":{"value":[],"$type":"Static"},"staticRows":{"headers":[],"rows":[]}"""
 
-              match answers LayoutIdl.layout [ doc ] with
-              | [ (_, first, _) ] -> Expect.equal first ("ok " + interpreted LayoutIdl.layout doc) "accepted"
-              | other -> failtestf "one document, %d answers" (List.length other))
+              // Under declared key order the module's own JSON writer keeps a value's authored order,
+              // so a comparison of TEXT refuses this document there and accepts it under sorted order.
+              for idl, name in [ LayoutIdl.layout, "sorted"; LayoutIdl.layoutDeclared, "declared" ] do
+                  match answers idl [ doc ] with
+                  | [ (_, first, every) ] ->
+                      Expect.equal first ("ok " + interpreted idl doc) (name + ": accepted")
+                      Expect.equal every first (name + ": and by the collecting decoder")
+                  | other -> failtestf "one document, %d answers" (List.length other))
+
+          testCase
+              "under declared key order a synthesised member is written in the vocabulary's order and read by value"
+              (fun _ ->
+                  let idl = unsortedPlaceholder
+                  Expect.isEmpty (Declare.errors idl) "the vocabulary is admitted"
+
+                  let written =
+                      VNode(
+                          "g",
+                          "Grid",
+                          [ "columns", VList []
+                            "paging", VRecord []
+                            "rows",
+                            VUnion("StaticRows", [ "staticRows", VRecord [ "headers", VList []; "rows", VList [] ] ]) ]
+                      )
+                      |> Encode.encode idl
+                      |> function
+                          | Ok s -> s
+                          | Error m -> failtestf "the interpreter refused the value: %s" m
+
+                  // The fixture bites: the interpreter's placeholder is NOT in sorted key order.
+                  let placeholder = "\"source\":{\"$type\":\"Static\",\"value\":[],\"kind\":\"none\"}"
+                  Expect.stringContains written placeholder "the interpreter writes the placeholder as declared"
+
+                  let reordered =
+                      written.Replace(placeholder, "\"source\":{\"kind\":\"none\",\"value\":[],\"$type\":\"Static\"}")
+
+                  for doc, first, every in answers idl [ written; reordered ] do
+                      Expect.equal (interpreted idl doc) written "the interpreter reads it and writes its own bytes"
+
+                      Expect.equal
+                          first
+                          ("ok " + written)
+                          (sprintf "read, and written as the interpreter writes it: %s" doc)
+
+                      Expect.equal every first "and by the collecting decoder"
+
+                  // Another VALUE at the member is refused, as the interpreter refuses it.
+                  let other = written.Replace("\"kind\":\"none\"", "\"kind\":\"some\"")
+
+                  match Decode.decodeDetailed idl other, answers idl [ other ] with
+                  | Error e, [ (_, first, every) ] ->
+                      Expect.equal first ("refused " + shape e) "the interpreter's refusal, by code and path"
+                      Expect.equal every first "and the collecting decoder's one defect"
+                  | r, _ -> failtestf "the interpreter accepted another value at the member: %A" r)
+
+          testCase
+              "a required presence-keyed union holding no case is refused on encode, as the interpreter refuses it"
+              (fun _ ->
+                  let refusal =
+                      match
+                          Encode.encode
+                              LayoutIdl.layout
+                              (VNode("g", "Grid", [ "columns", VList []; "paging", VRecord [] ]))
+                      with
+                      | Error m -> m
+                      | Ok s -> failtestf "the interpreter wrote %s" s
+
+                  Expect.equal refusal "required field 'rows' is absent" "the interpreter names the member"
+
+                  let probe =
+                      [ "const __try = (v) => { try { return 'wrote ' + encodeNode(v); } catch (e) { return 'threw ' + e.message; } };"
+                        // No case of the REQUIRED union: refused. The same holder with a case: written,
+                        // the OPTIONAL union (`identity`) holding no case and writing nothing.
+                        "console.log(__try({ id: 'g', kind: { $type: 'Grid', columns: [] } }));"
+                        "console.log(__try({ id: 'g', kind: { $type: 'Grid', columns: [], source: { $type: 'State', key: 'k' } } }));" ]
+                      |> String.concat "\n"
+
+                  match IdlDeriveTests.runTsModule (moduleOf LayoutIdl.layout) probe with
+                  | None -> skiptest "node not on PATH — the executed TypeScript layout agreement is skipped"
+                  | Some lines ->
+                      Expect.equal
+                          lines
+                          [ "threw " + refusal
+                            "wrote " + grid ""","source":{"$type":"State","key":"k"}""" ]
+                          "no document the module's own decoder refuses is written")
 
           testCase "an authored value is printed in the wire shape the encoder reads" (fun _ ->
               let literals =
@@ -261,6 +414,59 @@ let shapeTests =
                     """export type Field = ({ $type: "Text" } & TextPayload) | { $type: "Check"; on: boolean; label?: string };"""
                     """export type GridSpec = { $type: "Grid"; columns: Array<string>; caption?: string } & Paging & (RowIdentity | { rowKey?: undefined; rowKeyField?: undefined }) & GridRows;""" ] do
                   Expect.stringContains text line "declared")
+
+          // The compiler leg (Phase 348): it runs where `FUARAN_CORE_TSC` names a TypeScript compiler,
+          // as the other declaration legs do, and is skipped by name without one.
+          testCase "with a TypeScript compiler, a typed consumer of the layout's declarations checks" (fun _ ->
+              match IdlDeriveTests.tscJs () with
+              | None -> skiptest "FUARAN_CORE_TSC names no TypeScript compiler — the type-check leg cannot run"
+              | Some tsc ->
+                  let idl = LayoutIdl.layout
+
+                  let consumer =
+                      [ "import { encodeNode, decodeNode, type Node, type GridSpec, type FormSpec, type StaticTable, type Feed } from './generated.mjs';"
+                        // Each case of the required union, the optional union held and not held, and
+                        // the inline record's members: all on the holder.
+                        "const a: GridSpec = { $type: 'Grid', columns: [], source: { $type: 'State', key: 'k' } };"
+                        "const b: GridSpec = { $type: 'Grid', columns: ['c'], pageSize: 3, rowKeyField: 'id', staticRows: { headers: [], rows: [] }, caption: 'c' };"
+                        "const c: GridSpec = { $type: 'Grid', columns: [], pageStateKey: 'p', rowKey: () => undefined, source: { $type: 'Static', value: [] } };"
+                        "const f: FormSpec = { $type: 'Form', field: { $type: 'Text', value: 'v', placeholder: 'p' } };"
+                        "const size: number | undefined = b.pageSize;"
+                        "if ('staticRows' in b) { const t: StaticTable = b.staticRows; console.log(t.headers.length); }"
+                        "if ('source' in a) { const s: Feed = a.source; console.log(s.$type); }"
+                        "const nodes: Node[] = [{ id: 'a', kind: a }, { id: 'b', kind: b }, { id: 'c', kind: c }, { id: 'f', kind: f }];"
+                        "for (const n of nodes) { const r = decodeNode(encodeNode(n)); if (r.ok) { const back: Node = r.value; console.log(back.id, size); } }"
+                        // A REQUIRED presence-keyed union with no case is not a value of the holder.
+                        "// @ts-expect-error"
+                        "const none: GridSpec = { $type: 'Grid', columns: [] };"
+                        // An inline declaration has no key of its own on this host.
+                        "// @ts-expect-error"
+                        "const keyed: GridSpec = { $type: 'Grid', columns: [], paging: { pageSize: 3 }, source: { $type: 'State', key: 'k' } };"
+                        "console.log(none, keyed);" ]
+                      |> String.concat "\n"
+
+                  let files =
+                      [ "generated.mjs", moduleOf idl
+                        "generated.d.mts",
+                        emitted (Gen.typescriptDeclarationsDerived [ Derivation.SpecDecoders ] idl (tagsOf idl))
+                        "consumer.mts", consumer ]
+
+                  match IdlDeriveTests.tscCheck tsc files with
+                  | None -> skiptest "node not on PATH"
+                  | Some(code, out) -> Expect.equal code 0 (sprintf "tsc accepts the typed consumer: %s" out))
+
+          testCase "with a TypeScript compiler, every layout vocabulary's derived declarations compile" (fun _ ->
+              match IdlDeriveTests.tscJs () with
+              | None -> skiptest "FUARAN_CORE_TSC names no TypeScript compiler — the type-check leg cannot run"
+              | Some tsc ->
+                  for name, idl in
+                      [ "layout", LayoutIdl.layout
+                        "layout, declared order", LayoutIdl.layoutDeclared
+                        "flat", LayoutIdl.flat
+                        "derived", LayoutIdl.derived
+                        "nodes in inline declarations", withNodes
+                        "a keyed case holding a host-only member", hostOnlyInCase ] do
+                      IdlDeriveTests.derivedDeclarationsCompile tsc name idl)
 
           testCase "a vocabulary with no inline declaration emits what it emitted" (fun _ ->
               let text = moduleOf LayoutIdl.flat
@@ -532,6 +738,33 @@ let derivedTests =
                           (sprintf
                               "a holder answers as the value it holds, and an inline value is its members alone, over %s"
                               d)))
+
+          testCase "a holder's default record lays an inline member's defaults on the holder, at wire keys" (fun _ ->
+              let text =
+                  emitted (Gen.typescriptModuleDerived [ Derivation.DefaultRecords ] idl tags)
+
+              let expected = enc (D.NodeKind.Grid D.defaultGridSpec)
+
+              // The fixture bites: the F# default holds a member of the inline record and the case
+              // of the required union, whose encoding carries the member that case synthesises.
+              for needle in [ "\"pageSize\":10"; "\"staticRows\":{"; "\"source\":{" ] do
+                  Expect.stringContains expected needle "the F# default record encodes this member"
+
+              let probe =
+                  [ "console.log(Object.keys(defaultGridSpec).sort().join(','));"
+                    "const __doc = encodeNode({ id: 'x', kind: defaultGridSpec });"
+                    "console.log(__doc);"
+                    "const __r = decodeNode(__doc);"
+                    "console.log(__r.ok ? 'ok ' + encodeNode(__r.value) : 'refused ' + __r.error.code + ' ' + __r.error.path.join('/'));" ]
+                  |> String.concat "\n"
+
+              match IdlDeriveTests.runTsModule text probe with
+              | None -> skiptest "node not on PATH — the executed TypeScript derived agreement is skipped"
+              | Some lines ->
+                  Expect.equal
+                      lines
+                      [ "$type,columns,pageSize,staticRows"; expected; "ok " + expected ]
+                      "the holder's own keys; the F# default's bytes; and the module's own decoder reads them back")
 
           testCase "the declaration file declares every derived member over the declaration's own type" (fun _ ->
               let text =
