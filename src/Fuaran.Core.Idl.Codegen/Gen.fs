@@ -19,7 +19,7 @@ module Gen =
 
     /// The F# type declarations for a whole vocabulary, from the one type emitter (Phase 293).
     let fsharpTypes (idl: Idl) : Result<string, CodegenError> =
-        FSharpTypes.fsharpTypes (Decl.declared idl)
+        Decl.declared idl |> Decl.laidOut |> Result.bind FSharpTypes.fsharpTypes
 
     /// Emit a compiling, self-contained F# encoder module (`moduleName`) for the named kinds,
     /// drawing in the enums/unions they transitively reference, under the declared support.
@@ -30,7 +30,9 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        FSharpCodec.fsharpModuleWith sup moduleName (Decl.resolve idl sup.KindProjections kindTags)
+        Decl.resolve idl sup.KindProjections kindTags
+        |> Decl.laidOut
+        |> Result.bind (FSharpCodec.fsharpModuleWith sup moduleName)
 
     /// `fsharpModuleWith` plus the requested structural derivations (Phase 374) and, under
     /// `Derivation.SpecDecoders`, the collecting decoders and public per-spec entries (Phase 377),
@@ -43,7 +45,9 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        FSharpCodec.fsharpModuleDerived sup derivations moduleName (Decl.resolve idl sup.KindProjections kindTags)
+        Decl.resolve idl sup.KindProjections kindTags
+        |> Decl.laidOut
+        |> Result.bind (FSharpCodec.fsharpModuleDerived sup derivations moduleName)
 
     /// The pre-945 entry — `fsharpModuleWith` under an empty declared-support record,
     /// emitting byte-identically to the generator before the support channel existed.
@@ -79,7 +83,7 @@ module Gen =
 
     /// The JSON Schema (draft 2020-12) of the vocabulary's wire.
     let jsonSchema (idl: Idl) : Result<string, CodegenError> =
-        JsonSchema.jsonSchema (Decl.declared idl)
+        Decl.declared idl |> Decl.laidOut |> Result.bind JsonSchema.jsonSchema
 
     /// Phase 644 — the JSON Schema (draft 2020-12) of the arguments of every method of every
     /// contract, in the shape a tool definition takes: one object schema a method, keyed
@@ -156,7 +160,8 @@ module Gen =
     /// The TypeScript structural encoder/decoder module for the named kinds.
     let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
         tsCodecAdmits idl
-        |> Result.bind (fun () -> TypeScriptCodec.typescriptModule (Decl.resolve idl Map.empty kindTags))
+        |> Result.bind (fun () -> Decl.laidOut (Decl.resolve idl Map.empty kindTags))
+        |> Result.bind TypeScriptCodec.typescriptModule
 
     /// Phase 380 — `typescriptModule` plus the requested derivations, the TypeScript host's
     /// `fsharpModuleDerived`: the same requests, appended after the module's members with one
@@ -172,8 +177,8 @@ module Gen =
         : Result<string, CodegenError> =
         tsDerives derivations
         |> Result.bind (fun () -> tsCodecAdmits idl)
-        |> Result.bind (fun () ->
-            TypeScriptDerived.typescriptModuleDerived derivations (Decl.resolve idl Map.empty kindTags))
+        |> Result.bind (fun () -> Decl.laidOut (Decl.resolve idl Map.empty kindTags))
+        |> Result.bind (TypeScriptDerived.typescriptModuleDerived derivations)
 
     /// A TypeScript value literal for an authored value of a declared type.
     let typescriptValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
@@ -181,7 +186,9 @@ module Gen =
 
     /// The TypeScript type declarations for the named kinds.
     let typescriptDeclarations (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        TypeScriptDeclarations.typescriptDeclarations (Decl.resolve idl Map.empty kindTags)
+        Decl.resolve idl Map.empty kindTags
+        |> Decl.laidOut
+        |> Result.bind TypeScriptDeclarations.typescriptDeclarations
 
     /// Phase 381 — `typescriptDeclarations` plus one declaration per member
     /// `typescriptModuleDerived` exports under the same requests, so the derived module and its
@@ -195,8 +202,8 @@ module Gen =
         (kindTags: string list)
         : Result<string, CodegenError> =
         tsDerives derivations
-        |> Result.bind (fun () ->
-            TypeScriptDerived.typescriptDeclarationsDerived derivations (Decl.resolve idl Map.empty kindTags))
+        |> Result.bind (fun () -> Decl.laidOut (Decl.resolve idl Map.empty kindTags))
+        |> Result.bind (TypeScriptDerived.typescriptDeclarationsDerived derivations)
 
     /// An authored value as compilable F# source — the scaffold leg: an expression of type
     /// `Result<'T, DecodeError>` since Phase 384, a hosted slot's codec refusal its `Error`.

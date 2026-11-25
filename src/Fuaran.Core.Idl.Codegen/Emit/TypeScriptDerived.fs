@@ -67,13 +67,6 @@ module internal TypeScriptDerived =
     // alone (`valMembers<Name>(holder)`), which is what the F# host's value of the type holds.
     // -----------------------------------------------------------------------
 
-    /// Where the member `f` of the value bound to `recv` is read from: its own key, or, for a
-    /// member holding an inline declaration, the holder itself.
-    let private tsHeldAt (idl: Idl) (recv: string) (f: IdlField) : string =
-        match tsInlineOf idl f with
-        | Some _ -> recv
-        | None -> tsProp recv f.Name
-
     /// The expression a union's case is switched on over the value bound to `v`, and a case's
     /// label under it: a tagged union's discriminator and wire tag; a presence-keyed union's case
     /// as `ePick` reads it from the keys `v` carries, by index.
@@ -283,10 +276,10 @@ module internal TypeScriptDerived =
         let mapField (f: IdlField) e = Derive.positionsOf tsMapper hs f e
 
         // Phase 722 — this host holds the wire shape, so a member holding an inline declaration is
-        // read from its holder ([[tsHeldAt]]) and its rebuilt members are SPREAD into the
+        // read from its holder ([[tsMemberAt]]) and its rebuilt members are SPREAD into the
         // holder's; an inline declaration's mapper therefore answers the rebuilt members alone,
         // never a copy of the holder, which a second inline member's spread would overwrite.
-        let at = tsHeldAt ctx.Idl
+        let at = tsMemberAt ctx.Idl
 
         // The holder is always there, so an inline member is walked as a required one: an optional
         // presence-keyed union with no case present answers no node from its own functions.
@@ -553,7 +546,7 @@ module internal TypeScriptDerived =
                   MapItem = fun e x -> sprintf "%s[%s]" e x
                   Map = fun e x s b st -> sprintf "Object.keys(%s).sort().reduce((%s, %s) => %s, %s)" e s x b st
                   // Phase 722 (D285) — a member holding an inline declaration is its holder.
-                  Access = tsHeldAt idl
+                  Access = tsMemberAt idl
                   OptionalVar = fun e _ -> e
                   Optional = fun e _ b st -> sprintf "(%s === undefined ? %s : %s)" e st b
                   StepState = fun d _ _ -> sprintf "__c%d" d
@@ -572,7 +565,7 @@ module internal TypeScriptDerived =
             |> Result.bind (fun recursive ->
                 recursive
                 |> List.map (fun (c, fs) ->
-                    Derive.foldMembers folder ctx u (List.map snd fs) (tsHeldAt idl "v") "state" 0
+                    Derive.foldMembers folder ctx u (List.map snd fs) (tsMemberAt idl "v") "state" 0
                     |> Result.map (sprintf "      case %s: return %s;" (caseLit c)))
                 |> sequenceR)
             |> Result.map (fun arms ->
@@ -738,6 +731,11 @@ module internal TypeScriptDerived =
         // so an inline declaration's members are keys of it and the field that holds the declaration
         // is not: the names are the keys `typescriptDeclarations` types for the owner. The F# host's
         // value keeps the grouping field, and its constant names that field.
+        //
+        // A HOST-ONLY member is named wherever it is declared, as the F# derivation names it
+        // ([[Derive.constants]] lists every declared field): the owner's own, an inline record's and
+        // a presence-keyed case's alike. It is a key of the host object, typed by the declaration
+        // file, though never on the wire.
         let hostKeys (owners: IdlKind list) =
             owners
             |> List.map (fun o ->
@@ -746,7 +744,8 @@ module internal TypeScriptDerived =
                 |> List.collect (fun f ->
                     match tsInlineOf ctx.Idl f with
                     | Some(InlineSlot.Record r) -> r.Fields |> List.map _.Name
-                    | Some(InlineSlot.Keyed(u, _)) -> Decl.keyedRoster u
+                    | Some(InlineSlot.Keyed(u, _)) ->
+                        u.Cases |> List.collect (fun c -> c.Fields |> List.map _.Name) |> List.distinct
                     | None -> [ f.Name ]))
 
         [ "// Phase 380 — VOCABULARY CONSTANTS. The kind tags of each declared category."

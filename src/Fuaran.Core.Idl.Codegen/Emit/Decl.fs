@@ -1108,15 +1108,39 @@ module internal Decl =
     let isKeyed (u: IdlUnion) : bool =
         u.Discrimination <> UnionDiscrimination.Tagged
 
-    /// The inline declarations a resolution reaches, each named as a refusal names it — the
-    /// backends that lay none out refuse a vocabulary by the first.
-    let inlineDeclarations (d: Decl) : string list =
-        (d.Records
-         |> List.filter _.Inline
-         |> List.map (fun r -> sprintf "the inline record '%s'" r.Name))
-        @ (d.Unions
-           |> List.filter isKeyed
-           |> List.map (fun u -> sprintf "the presence-keyed union '%s'" u.Name))
+    /// Phase 722 — what EVERY backend asks of a vocabulary before it lays an inline declaration out:
+    /// the declaration check's own verdict on the layout ([[Declare.layoutErrors]]), its first fault.
+    /// A backend is handed an `Idl` value, not a declaration that was checked, and an inline
+    /// declaration is laid out as the check leaves it: where it stands, one key per case, what a
+    /// case may synthesise, no key on its object twice. `None` where the selection reaches no inline
+    /// declaration on the wire, so a vocabulary declaring none is asked nothing and emits as it did.
+    let layoutFault (d: Decl) : VocabularyFault option =
+        let reachesInline =
+            d.Wire.FromEnvelope @ d.Wire.FromKinds
+            |> List.exists (fun t -> (inlineSlot d.Idl t).IsSome)
+
+        if reachesInline then
+            Declare.layoutErrors d.Idl |> List.tryHead
+        else
+            None
+
+    /// The construct a backend names when [[layoutFault]] answers a fault.
+    let layoutFaultConstruct (fault: VocabularyFault) : string =
+        "an inline declaration the declaration check refuses (" + fault.Detail + ")"
+
+    /// [[layoutFault]] as the refusal of a backend that answers `UnsupportedConstruct`, or the
+    /// resolution itself.
+    let laidOut (d: Decl) : Result<Decl, CodegenError> =
+        match layoutFault d with
+        | None -> Ok d
+        | Some fault ->
+            Error(
+                CodegenError.UnsupportedConstruct(
+                    layoutFaultConstruct fault,
+                    "GP5: a backend lays an inline declaration out as the declaration check leaves it, or refuses it by name",
+                    "correct the declaration — `Declare.errors` names every fault of the vocabulary"
+                )
+            )
 
     /// A presence-keyed union's roster — see [[WireForm.keyedRoster]].
     [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]

@@ -165,6 +165,18 @@ let private readsBack (idl: Idl) (v: IdlValue) : bool =
         | Ok back, _ -> back = v
         | Error _, _ -> false
 
+/// A grid holding each inline declaration: a member of the inline record, a case of the optional
+/// union and a case of the required one.
+let private gridValue: IdlValue =
+    VNode(
+        "g",
+        "Grid",
+        [ "columns", VList []
+          "paging", VRecord [ "pageSize", VInt 3 ]
+          "identity", VUnion("RowKeyField", [ "rowKeyField", VStr "id" ])
+          "rows", VUnion("StaticRows", [ "staticRows", VRecord [ "headers", VList []; "rows", VList [] ] ]) ]
+    )
+
 let private faults (idl: Idl) : string list =
     Declare.layoutErrors idl |> List.map VocabularyFault.describe
 
@@ -636,8 +648,109 @@ let backendTests =
                     "derived module", Gen.typescriptModuleDerived [] LayoutIdl.layout tags
                     "declarations", Gen.typescriptDeclarations LayoutIdl.layout tags
                     "derived declarations", Gen.typescriptDeclarationsDerived [] LayoutIdl.layout tags
-                    "value", Gen.typescriptValue LayoutIdl.layout TStr (VStr "x") ] do
-                  Expect.isOk r name)
+                    "value", Gen.typescriptValue LayoutIdl.layout TNode gridValue ] do
+                  Expect.isOk r name
+
+              // The value row reaches the inline declarations: a grid's literal lays the record's
+              // member and the case's member on the holder, and names neither grouping field.
+              let literal = emitted (Gen.typescriptValue LayoutIdl.layout TNode gridValue)
+
+              for laid in [ "pageSize: 3"; "rowKeyField: \"id\""; "staticRows: {" ] do
+                  Expect.stringContains literal laid "a member of an inline declaration, on the holder"
+
+              for grouping in [ "paging:"; "identity:"; " rows: {" ] do
+                  Expect.isFalse (literal.Contains grouping) (grouping + " is no key of the holder"))
+
+          // Phase 722 — every backend asks ONE question of a vocabulary before it lays an inline
+          // declaration out: the declaration check's own verdict on the layout. Each is handed an
+          // `Idl` value, not a declaration that was checked, so each refuses a layout the check
+          // refuses, in the check's words; a vocabulary that reaches no inline declaration is asked
+          // nothing.
+          testCase
+              "the F#, TypeScript and F* entries ask the same of a vocabulary before laying a declaration out"
+              (fun _ ->
+                  let entries (idl: Idl) : (string * Result<string, CodegenError>) list =
+                      let tags = kindTags idl
+
+                      [ "fsharpTypes", Gen.fsharpTypes idl
+                        "fsharpModule", Gen.fsharpModule "M" idl tags
+                        "fsharpModuleDerived", Gen.fsharpModuleDerived GenSupport.Empty [] "M" idl tags
+                        "jsonSchema", Gen.jsonSchema idl
+                        "typescriptModule", Gen.typescriptModule idl tags
+                        "typescriptModuleDerived", Gen.typescriptModuleDerived [] idl tags
+                        "typescriptDeclarations", Gen.typescriptDeclarations idl tags
+                        "typescriptDeclarationsDerived", Gen.typescriptDeclarationsDerived [] idl tags
+                        "FStarTarget.vocabularyModule", FStarTarget.vocabularyModule "M" idl tags
+                        "FStarTarget.proofsModule", FStarTarget.proofsModule "MProofs" "M" idl tags ]
+
+                  let construct (r: Result<string, CodegenError>) : string option =
+                      match r with
+                      | Ok _ -> None
+                      | Error(CodegenError.UnsupportedConstruct(what, _, _))
+                      | Error(CodegenError.UnmodellableInFStar(what, _)) -> Some what
+                      | Error e -> Some(sprintf "%A" e)
+
+                  // A layout the check admits: every entry emits.
+                  for name, r in entries LayoutIdl.layout do
+                      Expect.isNone (construct r) (name + " emits the layout vocabulary")
+
+                  // A layout the check refuses, one of each rule this phase added: every entry refuses,
+                  // naming the check's first fault.
+                  for label, idl in
+                      [ "a case declaring another case's key", overlapping Optional
+                        "a laid-out member spelled as the node id",
+                        enveloped NodeEnvelopeShape.FlatKind "id" "rowKeyField" ] do
+                      let fault =
+                          match Declare.layoutErrors idl with
+                          | f :: _ -> f.Detail
+                          | [] -> failtestf "%s: the declaration check admits it" label
+
+                      for name, r in entries idl do
+                          Expect.equal
+                              (construct r)
+                              (Some("an inline declaration the declaration check refuses (" + fault + ")"))
+                              (sprintf "%s: %s answers the check's fault" label name)
+
+                  // The codec-only module, over the vocabulary its request is declared against.
+                  let codec (idl: Idl) =
+                      Gen.fsharpCodecModule GenSupport.Empty LayoutIdl.codecRequest LayoutIdl.codecModuleName idl
+
+                  Expect.isNone
+                      (construct (codec LayoutIdl.derived))
+                      "the codec-only module emits the derived vocabulary"
+
+                  let refusedDerived =
+                      { LayoutIdl.derived with
+                          Unions =
+                              LayoutIdl.derived.Unions
+                              |> List.map (fun u ->
+                                  match (overlapping Optional).Unions |> List.tryFind (fun o -> o.Name = u.Name) with
+                                  | Some o when u.Name = "RowIdentity" -> o
+                                  | _ -> u) }
+
+                  Expect.stringContains
+                      (defaultArg (construct (codec refusedDerived)) "")
+                      "is the key of case 'RowKeyField'"
+                      "and refuses a layout the check refuses"
+
+                  // A vocabulary that reaches no inline declaration is asked nothing: the flat twin with a
+                  // layout fault of its own (a plain member spelled twice) is not refused in these words.
+                  let twice =
+                      { LayoutIdl.flat with
+                          Kinds =
+                              LayoutIdl.flat.Kinds
+                              |> List.map (fun k ->
+                                  if k.Tag = "Form" then
+                                      { k with Fields = k.Fields @ k.Fields }
+                                  else
+                                      k) }
+
+                  Expect.isNonEmpty (Declare.layoutErrors twice) "the check has a fault to report"
+
+                  for name, r in entries twice do
+                      Expect.isFalse
+                          ((defaultArg (construct r) "").Contains "the declaration check refuses")
+                          (name + " asks nothing of a vocabulary that lays no declaration out"))
 
           // Phase 722 (DECISIONS.md D283, D284) — the F* target lays an inline record out on its holder
           // and models a presence-keyed union: its holder has one constructor per choice of case, told
@@ -833,6 +946,57 @@ let backendTests =
                   let layout = body (emitted (emit LayoutIdl.layout))
                   Expect.isGreaterThan (List.length layout) 50 (name + ": a module was emitted")
                   Expect.equal layout (body (emitted (emit LayoutIdl.flat))) name)
+
+          // The holder of the inline RECORD is `Grid`. With its two presence-keyed unions it is six
+          // constructors against the flat twin's one, so the two are not comparable; less those unions
+          // it holds the inline record alone, and its model is the flat members' model line for line.
+          testCase "the F* model of a kind holding an inline record is its flat twin's, line for line" (fun _ ->
+              let body (text: string) =
+                  text.Replace("\r\n", "\n").Split('\n')
+                  |> Array.filter (fun l -> not (l.Contains "sha256:"))
+                  |> List.ofArray
+
+              let only (keep: string list) (idl: Idl) : Idl =
+                  { idl with
+                      Kinds =
+                          idl.Kinds
+                          |> List.filter (fun k -> k.Tag = "Grid")
+                          |> List.map (fun k ->
+                              { k with
+                                  Fields = keep |> List.map (fun n -> k.Fields |> List.find (fun f -> f.Name = n)) }) }
+
+              let holder = only [ "columns"; "paging"; "caption" ] LayoutIdl.layout
+
+              let twin = only [ "columns"; "pageSize"; "pageStateKey"; "caption" ] LayoutIdl.flat
+
+              // The twin with one member REQUIRED: another model, so the comparison below can fail.
+              let required =
+                  { twin with
+                      Kinds =
+                          twin.Kinds
+                          |> List.map (fun k ->
+                              { k with
+                                  Fields =
+                                      k.Fields
+                                      |> List.map (fun f ->
+                                          if f.Name = "pageSize" then { f with Opt = Required } else f) }) }
+
+              for name, emit in
+                  [ "model", (fun idl -> FStarTarget.vocabularyModule "LayoutModel" idl [ "Grid" ])
+                    "proofs", (fun idl -> FStarTarget.proofsModule "LayoutModelProofs" "LayoutModel" idl [ "Grid" ]) ] do
+                  let laid = body (emitted (emit holder))
+                  Expect.isGreaterThan (List.length laid) 50 (name + ": a module was emitted")
+
+                  Expect.isTrue
+                      (laid |> List.exists (fun l -> l.Contains "pageSize"))
+                      (name + ": the inline record's member is stated on the holder")
+
+                  Expect.equal laid (body (emitted (emit twin))) name
+
+                  Expect.notEqual
+                      laid
+                      (body (emitted (emit required)))
+                      (name + ": a member's presence rule is part of the model"))
 
           // D285.5 — the one refusal an inline declaration keeps in the codec-only module is the
           // wire's: a root's entries write and read one JSON value, and it has none of its own.

@@ -346,6 +346,10 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
         =
         let roots = request.Roots |> List.map (fun n -> n, rootType idl n)
 
+        // The resolution of the roots, asked only once every root is a declared type.
+        let resolved () =
+            resolveRoots idl (roots |> List.map (fun (n, t) -> n, Option.get t))
+
         match roots |> List.tryFind (snd >> Option.isNone) with
         | Some(n, _) ->
             refuse
@@ -378,8 +382,11 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                 "a kind projection or a type splice in a codec-only module"
                 "a codec-only module declares no type: the host declares them all"
                 "drop the type-declaring support, or generate the structural module"
+        // Phase 722 — the roots reach an inline declaration the declaration check refuses: the one
+        // question every backend asks before it lays one out ([[Decl.layoutFault]]).
+        | None when (Decl.layoutFault (resolved ())).IsSome -> Decl.laidOut (resolved ()) |> Result.map (fun _ -> "")
         | None ->
-            let decl = resolveRoots idl (roots |> List.map (fun (n, t) -> n, Option.get t))
+            let decl = resolved ()
 
             let names =
                 (decl.Enums |> List.map _.Name)

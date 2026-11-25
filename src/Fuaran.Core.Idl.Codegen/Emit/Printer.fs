@@ -203,8 +203,7 @@ type internal MemberDecPrinter =
         /// The declared default `d` at `t`, as the literal the decoder restores.
         DefaultLit: IdlType -> IdlValue -> Result<string, CodegenError>
         /// Phase 474 — a field holding an INLINE declaration ([[InlineSlot]]), read from the object
-        /// `o` its members sit on, or `None` for any other field (a backend that lays out no inline
-        /// declaration refuses the vocabulary first and answers `None`).
+        /// `o` its members sit on, or `None` for any other field.
         Inline: string -> IdlField -> string option
     }
 

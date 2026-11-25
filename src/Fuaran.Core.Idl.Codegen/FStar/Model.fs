@@ -687,9 +687,10 @@ module internal FStarModel =
     /// its one constructor with no pick, exactly as before.
     ///
     /// A synthesised member is a member of the shape at its declared value ([[SConst]]). A case that
-    /// declares ANOTHER case's key as a member of its own is refused by name: a value carrying that
-    /// member writes both keys, the reading refuses two cases left (D220.3), and `dec (enc x) == Ok x`
-    /// is false of that value, so no model of the union has the round trip.
+    /// declares ANOTHER case's key as a member of its own has no model with the round trip: a value
+    /// carrying that member writes both keys, the reading refuses two cases left (D220.3), and
+    /// `dec (enc x) == Ok x` is false of that value. The declaration check refuses such a union, and
+    /// the target asks that check before it reaches here ([[Decl.layoutFault]]).
     and private fieldVariants
         (idl: Idl)
         (subst: Map<string, IdlType>)
@@ -918,7 +919,8 @@ module internal FStarModel =
     /// what it reaches, the selected kinds, what they reach — so the refusal a kind is named with
     /// is the first one met in that order.
     let private modelOf (idl: Idl) (kindTags: string list) : Result<Model, CodegenError> =
-        let reach = (Decl.resolve idl Map.empty kindTags).Wire
+        let resolved = Decl.resolve idl Map.empty kindTags
+        let reach = resolved.Wire
         let mutable envelopeMembers: Member list = []
 
         let recordMap =
@@ -1041,18 +1043,12 @@ module internal FStarModel =
         // Phase 722 — an inline declaration is modelled as the declaration check leaves it: where it
         // stands, one key per case that is a required member of that case and of no other, and what
         // a case may synthesise. The target is handed an `Idl` value, not a declaration that was
-        // checked, so it asks before it lays one out.
+        // checked, so it asks before it lays one out: the one question every backend asks
+        // ([[Decl.layoutFault]]).
         let layout () =
-            let reachesInline =
-                reach.FromEnvelope @ reach.FromKinds
-                |> List.exists (fun t -> (Decl.inlineSlot idl t).IsSome)
-
-            match (if reachesInline then Declare.layoutErrors idl else []) with
-            | [] -> Ok()
-            | fault :: _ ->
-                unmodellable
-                    ("an inline declaration the declaration check refuses (" + fault.Detail + ")")
-                    "the vocabulary"
+            match Decl.layoutFault resolved with
+            | None -> Ok()
+            | Some fault -> unmodellable (Decl.layoutFaultConstruct fault) "the vocabulary"
 
         let kinds () =
             kindTags

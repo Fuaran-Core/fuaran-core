@@ -107,6 +107,13 @@ let private field (name: string) (t: IdlType) (opt: Optionality) : IdlField =
       Presence = None
       Annotations = Annotations.Empty }
 
+/// A host-only member's type: a function the host holds, which is what carries its placeholder.
+let private hostFn: IdlType =
+    TFn
+        { FSharp = "unit -> unit"
+          TypeScript = "() => void"
+          Placeholder = "ignore" }
+
 /// `layout` with a HOST-ONLY member in each position a kind's keys are read from: the kind's own
 /// (`memo`), an inline record's (`hint`) and a presence-keyed case's (`note`).
 let private hostOnlyInCase: Idl =
@@ -116,7 +123,7 @@ let private hostOnlyInCase: Idl =
             |> List.map (fun k ->
                 if k.Tag = "Grid" then
                     { k with
-                        Fields = k.Fields @ [ field "memo" TStr HostOnly ] }
+                        Fields = k.Fields @ [ field "memo" hostFn HostOnly ] }
                 else
                     k)
         Records =
@@ -124,7 +131,7 @@ let private hostOnlyInCase: Idl =
             |> List.map (fun r ->
                 if r.Name = "Paging" then
                     { r with
-                        Fields = r.Fields @ [ field "hint" TStr HostOnly ] }
+                        Fields = r.Fields @ [ field "hint" hostFn HostOnly ] }
                 else
                     r)
         Unions =
@@ -137,7 +144,7 @@ let private hostOnlyInCase: Idl =
                             |> List.map (fun c ->
                                 if c.Tag = "RowKeyField" then
                                     { c with
-                                        Fields = c.Fields @ [ field "note" TStr HostOnly ] }
+                                        Fields = c.Fields @ [ field "note" hostFn HostOnly ] }
                                 else
                                     c) }
                 else
@@ -479,7 +486,31 @@ let shapeTests =
                     "encMembers"
                     "decMembers"
                     "colMembers" ] do
-                  Expect.isFalse (text.Contains helper) (sprintf "the flat twin's module carries no %s" helper))
+                  Expect.isFalse (text.Contains helper) (sprintf "the flat twin's module carries no %s" helper)
+
+              // Every byte, not seven names: each emission is held to the SHA-256 of what the commit
+              // before Phase 722 emitted for the flat twin (`69faa9ac`, measured on a build of it). A
+              // later change that moves this host's emission for every vocabulary moves these three
+              // pins with it, deliberately; the laying-out of inline declarations must not.
+              let sha256 (s: string) : string =
+                  System.Text.Encoding.UTF8.GetBytes s
+                  |> System.Security.Cryptography.SHA256.HashData
+                  |> System.Convert.ToHexString
+                  |> fun h -> h.ToLowerInvariant()
+
+              let tags = tagsOf LayoutIdl.flat
+
+              for name, emission, pin in
+                  [ "the module",
+                    Gen.typescriptModule LayoutIdl.flat tags,
+                    "5feb26f1b16736e13ed66a7c6d2cde60214c3598d10c0a6a32061a44020eb821"
+                    "the declarations",
+                    Gen.typescriptDeclarations LayoutIdl.flat tags,
+                    "c5362a7ef7eb0f490cf367bd23bcb15ca1b0631b9a8540199d952e980ad2c82c"
+                    "the module with the collecting decoders",
+                    Ok text,
+                    "ee444ad114a080b6fa4e67850478be42d2647324103453eb3682e4fd21127fe6" ] do
+                  Expect.equal (sha256 (emitted emission)) pin (name + " of the flat twin is the bytes it was"))
 
           // Phase 722 (DECISIONS.md D284.3) — the constants name the keys of this host's object.
           testCase "the vocabulary constants name the host object's keys: an inline declaration's members" (fun _ ->
@@ -508,7 +539,67 @@ let shapeTests =
                           (tagsOf LayoutIdl.layout)
                   ))
                   """"Grid", set [ "columns"; "paging"; "identity"; "rows"; "caption" ]"""
-                  "the F# host names its own value's fields") ]
+                  "the F# host names its own value's fields")
+
+          // The rule for a host-only member is the F# derivation's: it names every declared field,
+          // host-only included. So this host names one wherever it is declared: the kind's own, an
+          // inline record's and a presence-keyed case's.
+          testCase
+              "the vocabulary constants name a host-only member wherever it is declared, as the F# derivation does"
+              (fun _ ->
+                  let idl = hostOnlyInCase
+                  Expect.isEmpty (Declare.errors idl) "the vocabulary is admitted"
+
+                  let fsharp =
+                      emitted (
+                          Gen.fsharpModuleDerived
+                              GenSupport.Empty
+                              [ Derivation.VocabularyConstants ]
+                              "M"
+                              idl
+                              (tagsOf idl)
+                      )
+
+                  // What the F# derivation names for the kind: every declared field, the host-only one too.
+                  let declared = [ "columns"; "paging"; "identity"; "rows"; "caption"; "memo" ]
+
+                  Expect.stringContains
+                      fsharp
+                      (sprintf "\"Grid\", set [ %s ]" (declared |> List.map (sprintf "\"%s\"") |> String.concat "; "))
+                      "the F# host names every declared field of the kind, host-only included"
+
+                  // The same rule one level down: a field holding an inline declaration is that
+                  // declaration's every declared member, host-only included.
+                  let membersOf (name: string) : string list =
+                      let grid = idl.Kinds |> List.find (fun k -> k.Tag = "Grid")
+                      let f = grid.Fields |> List.find (fun f -> f.Name = name)
+
+                      match f.Type with
+                      | TRecord r ->
+                          match idl.Records |> List.tryFind (fun d -> d.Name = r && d.Inline) with
+                          | Some d -> d.Fields |> List.map _.Name
+                          | None -> [ name ]
+                      | TUnion(u, _) ->
+                          match idl.Unions |> List.tryFind (fun d -> d.Name = u) with
+                          | Some d when d.Discrimination <> UnionDiscrimination.Tagged ->
+                              d.Cases |> List.collect (fun c -> c.Fields |> List.map _.Name) |> List.distinct
+                          | _ -> [ name ]
+                      | _ -> [ name ]
+
+                  let expected =
+                      declared
+                      |> List.collect membersOf
+                      |> List.sortWith (fun a b -> System.String.CompareOrdinal(a, b))
+
+                  for hostOnly in [ "memo"; "hint"; "note" ] do
+                      Expect.contains expected hostOnly "the fixture declares a host-only member in each position"
+
+                  Expect.stringContains
+                      (emitted (Gen.typescriptModuleDerived [ Derivation.VocabularyConstants ] idl (tagsOf idl)))
+                      (sprintf
+                          "[\"Grid\", new Set([%s])]"
+                          (expected |> List.map (sprintf "\"%s\"") |> String.concat ", "))
+                      "this host names the same members, each inline field as its declaration's") ]
 
 // ---------------------------------------------------------------------------
 // Phase 722 (DECISIONS.md D285) — the derived members over an inline declaration. Each host is run
