@@ -24,8 +24,8 @@
   sentence matches its opening words instead. Every entry of `Fuaran.Core.Idl.Codegen` that lays an inline
   declaration out asks the same check first, where its selection reaches one: `Gen.fsharpTypes`, `fsharpModule`,
   `fsharpModuleWith`, `fsharpModuleDerived`, `fsharpCodecModule`, `fsharpCodecModuleWith`, `jsonSchema`,
-  `typescriptModule`, `typescriptModuleDerived`, `typescriptDeclarations`, `typescriptDeclarationsDerived`, and
-  `FStarTarget`, which already did. So an `Idl` value built in memory that the check refuses is refused by each,
+  `contractArgumentSchemas`, `methodArgumentsSchema`, `typescriptModule`, `typescriptModuleDerived`,
+  `typescriptDeclarations`, `typescriptDeclarationsDerived`, and `FStarTarget`, which already did. So an `Idl` value built in memory that the check refuses is refused by each,
   `UnsupportedConstruct` naming the fault (`UnmodellableInFStar` from the F\* target), where the F# and schema
   entries emitted a module for it. A consumer runs `Declare.errors` over a vocabulary it builds in memory and
   corrects what it names; a vocabulary reaching no inline declaration is asked nothing and emits the bytes it

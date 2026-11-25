@@ -669,6 +669,9 @@ let backendTests =
           testCase
               "the F#, TypeScript and F* entries ask the same of a vocabulary before laying a declaration out"
               (fun _ ->
+                  let contractSchemas (idl: Idl) : Result<string, CodegenError> =
+                      Gen.contractArgumentSchemas idl |> Result.map (fun _ -> "")
+
                   let entries (idl: Idl) : (string * Result<string, CodegenError>) list =
                       let tags = kindTags idl
 
@@ -676,6 +679,7 @@ let backendTests =
                         "fsharpModule", Gen.fsharpModule "M" idl tags
                         "fsharpModuleDerived", Gen.fsharpModuleDerived GenSupport.Empty [] "M" idl tags
                         "jsonSchema", Gen.jsonSchema idl
+                        "contractArgumentSchemas", contractSchemas idl
                         "typescriptModule", Gen.typescriptModule idl tags
                         "typescriptModuleDerived", Gen.typescriptModuleDerived [] idl tags
                         "typescriptDeclarations", Gen.typescriptDeclarations idl tags

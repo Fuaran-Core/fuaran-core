@@ -91,14 +91,15 @@ module Gen =
     /// declares no contract. Nothing a runtime needs is emitted: no client, server table,
     /// protocol, route, envelope or tool executor.
     let contractArgumentSchemas (idl: Idl) : Result<(string * string) list, CodegenError> =
-        let decl = Decl.declared idl
-
-        (Ok [], idl.Contracts |> List.collect (fun c -> c.Methods |> List.map (fun m -> c, m)))
-        ||> List.fold (fun acc (c, m) ->
-            match acc, JsonSchema.methodArguments decl c m with
-            | Error e, _
-            | _, Error e -> Error e
-            | Ok done_, Ok schema -> Ok(done_ @ [ c.Name + "." + m.Id, Fuaran.Core.Json.render schema ]))
+        Decl.declared idl
+        |> Decl.laidOut
+        |> Result.bind (fun decl ->
+            (Ok [], idl.Contracts |> List.collect (fun c -> c.Methods |> List.map (fun m -> c, m)))
+            ||> List.fold (fun acc (c, m) ->
+                match acc, JsonSchema.methodArguments decl c m with
+                | Error e, _
+                | _, Error e -> Error e
+                | Ok done_, Ok schema -> Ok(done_ @ [ c.Name + "." + m.Id, Fuaran.Core.Json.render schema ])))
 
     /// Phase 644 — the JSON Schema of one method's arguments, named `<contract>.<method>`; a name
     /// the vocabulary does not declare is refused.

@@ -538,11 +538,11 @@
       "opens": [ "WireDecode" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 30,
-      "measuredSeconds": 15,
-      "fastestSeconds": 15,
+      "measuredSeconds": 12,
+      "fastestSeconds": 11,
       "fastestPhase": "fuaran-core#722",
       "phase": "fuaran-core#722",
-      "note": "Phase 722 - the GENERATED model of the HOLDERS vocabulary (`tests/Fuaran.Core.Tests.Fixtures/LayoutIdl.fs`, `holders`): the holders of a presence-keyed union the layout vocabulary does not reach (a plain record, a tagged case, a type-parameterised union's case) and unions of three and of four cases, the second with a key two cases synthesise. In the leg because the generator emits a proof script for each of these forms, and none is to be emitted unchecked. All three of its kinds are modelled. Carries the `--ext context_pruning` option inside the generated file, like every generated model."
+      "note": "Phase 722 - the GENERATED model of the HOLDERS vocabulary (`tests/Fuaran.Core.Tests.Fixtures/LayoutIdl.fs`, `holders`): the holders of a presence-keyed union the layout vocabulary does not reach (a plain record, a tagged case, a type-parameterised union's case) and unions of three and of four cases, the second with a key two cases synthesise. In the leg because the generator emits a proof script for each of these forms, and none is to be emitted unchecked. All three of its kinds are modelled. Carries the `--ext context_pruning` option inside the generated file, like every generated model. SEEDED from the phase's `check.ps1 -Runs 3` leg: 12s, 11s, 12s."
     },
     {
       "module": "LayoutHoldersVocabularyProofs",
@@ -550,11 +550,11 @@
       "opens": [ "WireDecode", "LayoutHoldersVocabulary" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 180,
-      "measuredSeconds": 86,
-      "fastestSeconds": 85,
+      "measuredSeconds": 75,
+      "fastestSeconds": 73,
       "fastestPhase": "fuaran-core#722",
       "phase": "fuaran-core#722",
-      "note": "Phase 722 - the generated ROUND TRIP over `LayoutHoldersVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type: every constructor of each holder, under every choice of case of the three-case and the four-case union) and `dec_node_total`, by the walk and the lemma shapes of `LayoutVocabularyProofs`. The widest module of the generated set: a kind holding both unions has fifteen constructors."
+      "note": "Phase 722 - the generated ROUND TRIP over `LayoutHoldersVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type: every constructor of each holder, under every choice of case of the three-case and the four-case union) and `dec_node_total`, by the walk and the lemma shapes of `LayoutVocabularyProofs`. The widest module of the generated set: a kind holding both unions has fifteen constructors. SEEDED from the phase's `check.ps1 -Runs 3` leg (74s, 73s, 75s) and from the single cold check before it, 86s, the slowest observed and the one the budget is seeded from."
     },
     {
       "module": "Relation",
