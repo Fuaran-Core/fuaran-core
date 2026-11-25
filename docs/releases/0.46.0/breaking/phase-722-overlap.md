@@ -1,5 +1,5 @@
 - **A declaration that puts one key on an object twice once its inline declarations are laid out is refused at its
-  declaration** (Phase 722, `Fuaran.Core.Idl`, DECISIONS.md D285.6) — class **breaking**: no public signature
+  declaration** (Phase 722, `Fuaran.Core.Idl`, DECISIONS.md D285.6 and D286) — class **breaking**: no public signature
   moves, and a vocabulary that loaded is refused. An inline record's members and a presence-keyed union's case keys
   are keys of the object holding them, so a vocabulary can spell one key twice on that object, and then it has a
   value its own interpreter writes and does not read back, or cannot write at all. `Declare.errors` refuses each
@@ -21,4 +21,12 @@
   envelope field was refused already and is refused in the same words. The fault for a member spelled twice among
   siblings, or as the discriminator, was raised already; its text now ends by naming both bearers
   (`…: field 'paging' (inline record 'Paging') and field 'pageSize'`), so a consumer that matched the whole
-  sentence matches its opening words instead.
+  sentence matches its opening words instead. Every entry of `Fuaran.Core.Idl.Codegen` that lays an inline
+  declaration out asks the same check first, where its selection reaches one: `Gen.fsharpTypes`, `fsharpModule`,
+  `fsharpModuleWith`, `fsharpModuleDerived`, `fsharpCodecModule`, `fsharpCodecModuleWith`, `jsonSchema`,
+  `typescriptModule`, `typescriptModuleDerived`, `typescriptDeclarations`, `typescriptDeclarationsDerived`, and
+  `FStarTarget`, which already did. So an `Idl` value built in memory that the check refuses is refused by each,
+  `UnsupportedConstruct` naming the fault (`UnmodellableInFStar` from the F\* target), where the F# and schema
+  entries emitted a module for it. A consumer runs `Declare.errors` over a vocabulary it builds in memory and
+  corrects what it names; a vocabulary reaching no inline declaration is asked nothing and emits the bytes it
+  emitted.
