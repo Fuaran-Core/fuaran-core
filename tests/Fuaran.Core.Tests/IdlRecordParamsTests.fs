@@ -180,7 +180,9 @@ let private fixtures: (string * Idl) list =
       "wider defaults", WiderDefaultsIdl.idl
       "classify base", IdlClassify.Fixtures.baseIdl ]
 
-/// One description per backend entry that emits a declaration or prints a value, over `idl`.
+/// One description per backend entry that emits a declaration or prints a value and does not emit a
+/// parameterised record yet, over `idl`. The JSON-schema entries emit one, and are held to the
+/// interpreter in `IdlSchemaValidatorTests`.
 let private backends (idl: Idl) : (string * Result<unit, string>) list =
     let tags = idl.Kinds |> List.map _.Tag
 
@@ -200,8 +202,6 @@ let private backends (idl: Idl) : (string * Result<unit, string>) list =
               idl
       )
       "fsharpValue", describe (Gen.fsharpValue idl TStr (VStr "x"))
-      "jsonSchema", describe (Gen.jsonSchema idl)
-      "contractArgumentSchemas", describe (Gen.contractArgumentSchemas idl)
       "typescriptModule", describe (Gen.typescriptModule idl tags)
       "typescriptModuleDerived", describe (Gen.typescriptModuleDerived [] idl tags)
       "typescriptDeclarations", describe (Gen.typescriptDeclarations idl tags)
@@ -482,6 +482,28 @@ let tests =
               let _, references = recordMembers (Artifact.json ReferenceIdl.refIdl)
               Expect.isNonEmpty references "the reference vocabulary names a record"
               Expect.equal (references |> List.distinct |> List.sort) [ "$type"; "name" ] "tag and name alone")
+
+          testCase
+              "the schema emits a parameterised record, and refuses a reference no binding can be made for"
+              (fun _ ->
+                  Expect.isOk (Gen.jsonSchema boxed) "every instantiation is stated"
+                  Expect.isOk (Gen.contractArgumentSchemas boxed) "and a method's arguments read the same definitions"
+
+                  // Arguments applied to a record that declares none: the declaration check refuses the
+                  // vocabulary, and a backend handed it unchecked names the reference.
+                  let applied =
+                      { boxed with
+                          Kinds = [ kind "Holder" [ f "shape" (TRecord("Shape", [ TStr ])) Required ] ]
+                          Unions = []
+                          Records = [ record "Shape" [] [ f "w" TInt Required ] ] }
+
+                  match Gen.jsonSchema applied with
+                  | Error e ->
+                      Expect.stringContains
+                          (CodegenError.describe e)
+                          "a reference applying record 'Shape' to 1 type argument(s) where it declares 0"
+                          "by the record's name"
+                  | Ok schema -> failtestf "a schema naming an instantiation that does not exist: %s" schema)
 
           testCase "a backend that does not emit a parameterised record yet refuses it by name" (fun _ ->
               // A declared parameter, and separately an applied argument no declaration backs: a

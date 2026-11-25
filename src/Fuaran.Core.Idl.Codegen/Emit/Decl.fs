@@ -58,6 +58,13 @@ type internal InlineSlot =
     | Record of InlineRecord
     | Keyed of IdlUnion * KeyedCase list
 
+/// Phase 732 — a generic record instantiated at the arguments a vocabulary names, as
+/// [[Instantiation]] is a generic union: its instance name, the declaration, and the binding.
+type internal RecordInstantiation =
+    { Name: string
+      Record: IdlRecord
+      Subst: Map<string, IdlType> }
+
 /// A generic union instantiated at the arguments a vocabulary names: its instance name (the
 /// declaration's name plus its mangled arguments), the declaration, and the parameter binding.
 type internal Instantiation =
@@ -241,7 +248,10 @@ module internal Decl =
                             for f in c.Fields do
                                 visit f.Type
                     | None -> ()
-            | TRecord(n, _) ->
+            | TRecord(n, args) ->
+                // Phase 732 — a declaration named only as a record's argument is reached.
+                args |> List.iter visit
+
                 if records.Add n then
                     match CodegenLookup.tryRecord idl n with
                     | Some r ->
@@ -984,8 +994,8 @@ module internal Decl =
     // -----------------------------------------------------------------------
 
     /// The instance name of a type — for a non-generic declaration its own name, and for an
-    /// instantiated generic union the name plus its mangled arguments (`Binding_float`,
-    /// `Binding_list_SelectOption`). Total over `IdlType`, so a printer can name an instance for
+    /// instantiated generic union or record (Phase 732) the name plus its mangled arguments
+    /// (`Binding_float`, `Binding_list_SelectOption`). Total over `IdlType`, so a printer can name an instance for
     /// any slot it meets: the instantiation walk below names by this same function, so the set
     /// of instances EMITTED and the set REFERENCED are computed one way.
     let rec instName (t: IdlType) : string =
@@ -1003,11 +1013,12 @@ module internal Decl =
         | TKind -> "NodeKind"
         | TOp -> "TreeOp"
         | TEnum n
-        | TRecord(n, _) -> n
+        | TRecord(n, [])
+        | TUnion(n, []) -> n
         | TVar v -> v
         | TList inner -> "list_" + instName inner
         | TMap vt -> "map_" + instName vt
-        | TUnion(n, []) -> n
+        | TRecord(n, args)
         | TUnion(n, args) -> n + "_" + (args |> List.map instName |> String.concat "_")
         | TInt64 -> "int64"
         | TDecimal -> "decimal"
@@ -1018,12 +1029,13 @@ module internal Decl =
         | TSet inner -> "set_" + instName inner
         | TKeyedMap(k, v) -> "keyedMap_" + instName k + "_" + instName v
 
-    /// Every instantiation of a generic union the vocabulary names on the wire, keyed and ordered
-    /// by instance name. A worklist over the wire fields of every declaration (an instantiation's
-    /// own case fields substituted before being walked); a vocabulary whose recursion GROWS its
-    /// type argument has no finite set, and the bound reports it as a typed refusal rather than
-    /// hanging (Phase 195).
-    let instantiations (idl: Idl) : Result<Instantiation list, CodegenError> =
+    /// Every instantiation of a generic union and of a generic record (Phase 732) the vocabulary
+    /// names on the wire, each keyed and ordered by instance name. ONE worklist over the wire fields
+    /// of every declaration (an instantiation's own fields substituted before being walked), because
+    /// a record's instantiation names a union's and a union's a record's; a vocabulary whose
+    /// recursion GROWS its type argument has no finite set, and the bound reports it as a typed
+    /// refusal rather than hanging (Phase 195).
+    let private instantiated (idl: Idl) : Result<Instantiation list * RecordInstantiation list, CodegenError> =
         let generics =
             idl.Unions
             |> List.filter (fun u -> not (List.isEmpty u.Params))
@@ -1034,6 +1046,8 @@ module internal Decl =
             fields |> List.filter (fun f -> f.Opt <> HostOnly)
 
         let mutable found: Map<string, Instantiation> = Map.empty
+        let mutable foundRecords: Map<string, RecordInstantiation> = Map.empty
+        let mutable misapplied: string option = None
         let mutable queue: IdlType list = []
 
         let rec discover (t: IdlType) =
@@ -1057,6 +1071,38 @@ module internal Decl =
                         let subst = TypeParams.bind u args |> Option.defaultValue Map.empty
                         found <- Map.add key { Name = key; Union = u; Subst = subst } found
                         queue <- t :: queue
+            | TRecord(n, args) when not (List.isEmpty args) ->
+                args |> List.iter discover
+                let key = instName t
+
+                if not (Map.containsKey key foundRecords) then
+                    match
+                        CodegenLookup.tryRecord idl n
+                        |> Option.map (fun r -> r, TypeParams.bindRecord r args)
+                    with
+                    | Some(r, Some subst) ->
+                        foundRecords <-
+                            Map.add
+                                key
+                                { Name = key
+                                  Record = r
+                                  Subst = subst }
+                                foundRecords
+
+                        queue <- t :: queue
+                    // A backend is handed an `Idl` value, not a declaration that was checked: a
+                    // reference no binding can be made for has no instantiation to name.
+                    | Some(r, None) ->
+                        if misapplied.IsNone then
+                            misapplied <-
+                                Some(
+                                    sprintf
+                                        "a reference applying record '%s' to %d type argument(s) where it declares %d"
+                                        n
+                                        (List.length args)
+                                        (List.length r.Params)
+                                )
+                    | None -> ()
             | _ -> ()
 
         let discoverFields (fields: IdlField list) =
@@ -1069,7 +1115,8 @@ module internal Decl =
                     discoverFields c.Fields
 
         for r in idl.Records do
-            discoverFields r.Fields
+            if List.isEmpty r.Params then
+                discoverFields r.Fields
 
         for k in idl.Kinds do
             discoverFields k.Fields
@@ -1079,7 +1126,7 @@ module internal Decl =
 
         discoverFields idl.NodeFields
 
-        // Expand: an instantiation's own case fields can name further ones.
+        // Expand: an instantiation's own fields can name further ones.
         let mutable guard = 0
 
         while not (List.isEmpty queue) && guard <= 1000 do
@@ -1089,12 +1136,15 @@ module internal Decl =
                 let head = List.head queue
                 queue <- List.tail queue
 
-                match Map.tryFind (instName head) found with
-                | None -> ()
-                | Some i ->
+                match head, Map.tryFind (instName head) found, Map.tryFind (instName head) foundRecords with
+                | TRecord _, _, Some i ->
+                    for f in wireFields i.Record.Fields do
+                        discover (TypeParams.substitute i.Subst f.Type)
+                | TUnion _, Some i, _ ->
                     for c in i.Union.Cases do
                         for f in wireFields c.Fields do
                             discover (TypeParams.substitute i.Subst f.Type)
+                | _ -> ()
 
         if guard > 1000 then
             Error(
@@ -1105,7 +1155,24 @@ module internal Decl =
                 )
             )
         else
-            Ok(found |> Map.toList |> List.map snd)
+            match misapplied with
+            | Some construct ->
+                Error(
+                    CodegenError.UnsupportedConstruct(
+                        construct,
+                        "GP5: the refusal names the construct and thereby the set that IS supported",
+                        "apply the record to as many arguments as it declares parameters — `Declare.errors` names every fault of the vocabulary"
+                    )
+                )
+            | None -> Ok(found |> Map.toList |> List.map snd, foundRecords |> Map.toList |> List.map snd)
+
+    /// Every instantiation of a generic union the vocabulary names on the wire ([[instantiated]]).
+    let instantiations (idl: Idl) : Result<Instantiation list, CodegenError> = instantiated idl |> Result.map fst
+
+    /// Every instantiation of a generic record the vocabulary names on the wire ([[instantiated]]),
+    /// an inline record's included: it has no object of its own, and its members are still walked.
+    let recordInstantiations (idl: Idl) : Result<RecordInstantiation list, CodegenError> =
+        instantiated idl |> Result.map snd
 
     // -----------------------------------------------------------------------
     // Phase 474 (DECISIONS.md D220) — the INLINE declarations. Each reads `Fuaran.Core.Idl`'s
@@ -1164,11 +1231,12 @@ module internal Decl =
                 )
             )
 
-    /// Phase 732, first round — the first record of the vocabulary that declares a type parameter,
-    /// else the first a reference applies to a type argument. The declaration, the artifact and the
-    /// declaration check carry both; no backend emits one yet, so each asks this of the WHOLE
-    /// vocabulary (its contracts' types included) and refuses by the record's name
-    /// ([[unparameterised]]). A backend drops the question in the round that emits the record.
+    /// Phase 732 — the first record of the vocabulary that declares a type parameter, else the first
+    /// a reference applies to a type argument. The declaration, the artifact, the declaration check,
+    /// the interpreter and the JSON schema carry both; the F#, TypeScript and F* entries do not emit
+    /// one yet, so each asks this of the WHOLE vocabulary (its contracts' types included) and
+    /// refuses by the record's name ([[unparameterised]]). A backend drops the question when it
+    /// emits the record, and this goes with the last.
     let parameterisedRecord (idl: Idl) : string option =
         let rec applied (t: IdlType) : string option =
             match t with

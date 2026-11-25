@@ -90,10 +90,7 @@ module Gen =
 
     /// The JSON Schema (draft 2020-12) of the vocabulary's wire.
     let jsonSchema (idl: Idl) : Result<string, CodegenError> =
-        Decl.declared idl
-        |> Decl.laidOut
-        |> Result.bind Decl.unparameterised
-        |> Result.bind JsonSchema.jsonSchema
+        Decl.declared idl |> Decl.laidOut |> Result.bind JsonSchema.jsonSchema
 
     /// Phase 644 — the JSON Schema (draft 2020-12) of the arguments of every method of every
     /// contract, in the shape a tool definition takes: one object schema a method, keyed
@@ -103,7 +100,6 @@ module Gen =
     let contractArgumentSchemas (idl: Idl) : Result<(string * string) list, CodegenError> =
         Decl.declared idl
         |> Decl.laidOut
-        |> Result.bind Decl.unparameterised
         |> Result.bind (fun decl ->
             (Ok [], idl.Contracts |> List.collect (fun c -> c.Methods |> List.map (fun m -> c, m)))
             ||> List.fold (fun acc (c, m) ->

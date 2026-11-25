@@ -394,3 +394,113 @@ let schemaDocs =
                   (at [ "properties"; "value"; "type" ] (branch "Fixed" (member' "Slot_str" defs)))
                   (JStr "string")
                   "each instantiation is the union at its argument") ]
+
+// ---------------------------------------------------------------------------
+// Phase 732 — a parameterised record in the schema: one definition per instantiation, named as a
+// union's instantiations are named, and held to the interpreter's reading in both directions.
+// ---------------------------------------------------------------------------
+
+[<Tests>]
+let parameterisedRecords =
+    let idl = ParameterisedRecordsIdl.idl
+    let defs () = schemaOf idl |> parsed |> defsOf
+
+    testList
+        "Phase 732 — the schema states a parameterised record once per instantiation"
+        [ testCase "each instantiation named has its own definition, and no generic record stands bare" (fun _ ->
+              let names = defs () |> Map.keys |> Set.ofSeq
+
+              for instance in
+                  [ "Ranged_float"
+                    "Ranged_int"
+                    "Labelled_float"
+                    "Labelled_str"
+                    "Labelled_Ranged_int"
+                    "Series_float"
+                    "Entry_str_Direction"
+                    "Binding_float"
+                    "Binding_int"
+                    "Direction" ] do
+                  Expect.isTrue (names.Contains instance) (sprintf "the schema defines %s" instance)
+
+              for generic in idl.Records |> List.filter (fun r -> not (List.isEmpty r.Params)) do
+                  Expect.isFalse
+                      (names.Contains generic.Name)
+                      (sprintf "%s is never defined uninstantiated" generic.Name)
+
+              // An inline record has no object of its own at any instantiation: its members are
+              // stated on the object that holds it.
+              for name in names do
+                  Expect.isFalse
+                      (name.StartsWith "Paging" || name.StartsWith "LocalState")
+                      (sprintf "%s: an inline record has no definition" name)
+
+              assertClosed "parameterised records" (schemaOf idl))
+
+          testCase "a member naming a parameter is stated at the instantiation's argument" (fun _ ->
+              let memberOf (instance: string) (name: string) =
+                  defs () |> Map.find instance |> at [ "properties"; name ]
+
+              Expect.equal (memberOf "Ranged_int" "low" |> member' "type") (JStr "integer") "Ranged<int>.low"
+              Expect.equal (memberOf "Labelled_str" "value" |> member' "type") (JStr "string") "Labelled<string>.value"
+
+              Expect.notEqual
+                  (memberOf "Ranged_float" "low")
+                  (memberOf "Ranged_int" "low")
+                  "one declaration, two instantiations, two schemas"
+
+              // A record of a record, and a record passing its parameter on, name the
+              // instantiation they make.
+              Expect.equal
+                  (memberOf "Labelled_Ranged_int" "value")
+                  (JObj [ "$ref", JStr "#/$defs/Ranged_int" ])
+                  "Labelled<Ranged<int>>.value"
+
+              Expect.equal
+                  (memberOf "Series_float" "points" |> member' "items")
+                  (JObj [ "$ref", JStr "#/$defs/Labelled_float" ])
+                  "Series<float>.points"
+
+              // An inline record held by a parameterised case: the case's object states the
+              // record's members, at the case's argument.
+              let local (instance: string) =
+                  branch "Local" (defs () |> Map.find instance) |> at [ "properties"; "initial" ]
+
+              Expect.equal (local "Binding_int" |> member' "type") (JStr "integer") "Binding<int>.Local.initial"
+              Expect.equal (local "Binding_float") (memberOf "Ranged_float" "low") "Binding<float>.Local.initial")
+
+          testCase "the schema admits what the interpreter writes, and refuses what it refuses" (fun _ ->
+              let schema = build (schemaOf idl)
+
+              for what, _, bytes in ParameterisedRecordsIdl.documents do
+                  Expect.isTrue (evaluate schema bytes) (what + ": validates")
+
+              match Sample.trySampleNodes idl ParameterisedRecordsIdl.kindTags 732 600 with
+              | Error fault -> failtestf "%s" fault.Describe
+              | Ok drawn ->
+                  let wires = drawn |> List.choose (Encode.encode idl >> Result.toOption)
+                  Expect.equal wires.Length drawn.Length "every drawn document encodes"
+                  Expect.isEmpty (wires |> List.filter (evaluate schema >> not) |> List.truncate 5) "and validates"
+
+              // One instantiation's value at another's slot: the interpreter refuses each, and so
+              // does the schema. A schema that erased the parameter would admit every one.
+              let document (i: int) =
+                  let _, _, bytes = ParameterisedRecordsIdl.documents[i]
+                  bytes
+
+              let slider, stepper, grid = document 0, document 1, document 2
+
+              for what, original, (find: string), (replace: string) in
+                  [ "a string at Ranged<float>.low", slider, "\"low\":0.5,\"steps\"", "\"low\":\"0.5\",\"steps\""
+                    "a fraction at Ranged<int>.high", stepper, "\"high\":9", "\"high\":9.5"
+                    "a number at an inline LocalState<float>'s key", slider, "\"stateKey\":\"k\"", "\"stateKey\":1"
+                    "a boolean at an inline Paging<string>.cursor", grid, "\"cursor\":\"c\"", "\"cursor\":true"
+                    "no Direction at Entry<string, Direction>.value",
+                    grid,
+                    "\"value\":\"desc\"",
+                    "\"value\":\"sideways\""
+                    "a record of a record missing its inner member", stepper, "{\"high\":4,\"low\":2}", "{\"high\":4}" ] do
+                  let wrong = original.Replace(find, replace)
+                  Expect.notEqual wrong original (what + ": the document was changed")
+                  Expect.isError (Decode.decode idl wrong) (what + ": the interpreter refuses")
+                  Expect.isFalse (evaluate schema wrong) (what + ": the schema refuses")) ]

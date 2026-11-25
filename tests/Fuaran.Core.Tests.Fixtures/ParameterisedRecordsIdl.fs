@@ -19,6 +19,8 @@ module Fuaran.Core.Tests.ParameterisedRecordsIdl
 //                                         is itself an applied record), and `Series<T>.points:
 //                                         Labelled<T> list` (a record passing its parameter on)
 //   * two parameters .................... `Entry<K, V>`, bound by name
+//   * a declaration reached only as a record's argument
+//                                         the enum `Direction`, at `Grid.sort: Entry<string, Direction>`
 //
 // No member is host-only, hosted or a function, so every backend that emits a parameterised record
 // emits this vocabulary whole.
@@ -108,9 +110,9 @@ let idl: Idl =
               [ field "paging" (TRecord("Paging", [ TStr ])) Required
                 field "title" (labelled TStr) Optional
                 field "series" (TRecord("Series", [ TFloat ])) Optional
-                field "sort" (TRecord("Entry", [ TStr; TBool ])) Optional ] ]
+                field "sort" (TRecord("Entry", [ TStr; TEnum "Direction" ])) Optional ] ]
       Unions = unions
-      Enums = []
+      Enums = [ Declare.enumOf "Direction" [ "asc"; "desc" ] ]
       Records = records
       Defaults = []
       NodeFields = []
@@ -156,6 +158,6 @@ let documents: (string * IdlValue * string) list =
           [ "paging", VRecord [ "pageSize", VInt 20; "cursor", VStr "c" ]
             "title", VRecord [ "label", VStr "t"; "value", VStr "v" ]
             "series", VRecord [ "points", VList [ VRecord [ "label", VStr "p"; "value", VFloat 0.5 ] ] ]
-            "sort", VRecord [ "key", VStr "name"; "value", VBool true ] ]
+            "sort", VRecord [ "key", VStr "name"; "value", VEnum "desc" ] ]
       ),
-      "{\"id\":\"g\",\"kind\":{\"$type\":\"Grid\",\"cursor\":\"c\",\"pageSize\":20,\"series\":{\"points\":[{\"label\":\"p\",\"value\":0.5}]},\"sort\":{\"key\":\"name\",\"value\":true},\"title\":{\"label\":\"t\",\"value\":\"v\"}}}" ]
+      "{\"id\":\"g\",\"kind\":{\"$type\":\"Grid\",\"cursor\":\"c\",\"pageSize\":20,\"series\":{\"points\":[{\"label\":\"p\",\"value\":0.5}]},\"sort\":{\"key\":\"name\",\"value\":\"desc\"},\"title\":{\"label\":\"t\",\"value\":\"v\"}}}" ]

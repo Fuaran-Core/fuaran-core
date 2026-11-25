@@ -25,8 +25,8 @@ module internal JsonSchema =
     // -----------------------------------------------------------------------
 
     /// The `$defs` NAME of a type: its instance name in the resolution ([[Decl.instName]]) —
-    /// for a non-generic declaration its own name, for an instantiated generic union the name
-    /// plus its mangled arguments (`Binding_float`). The instantiation walk names by this same
+    /// for a non-generic declaration its own name, for an instantiated generic union or record
+    /// the name plus its mangled arguments (`Binding_float`). The instantiation walk names by this same
     /// function, so the set of names EMITTED and the set REFERENCED are computed one way, and a
     /// dangling `$ref` (an ERROR to a strict validator, never a permissive skip) cannot arise
     /// from the two disagreeing.
@@ -176,8 +176,9 @@ module internal JsonSchema =
         | TEnum n -> JObj [ "$ref", JStr("#/$defs/" + n) ]
         // fuaran#1068 — an instantiated generic union names ITS OWN definition. A
         // non-generic one is `defName`'s identity case, so this line is unchanged
-        // for every union that has no parameters.
-        | TUnion _ -> JObj [ "$ref", JStr("#/$defs/" + defName t) ]
+        // for every union that has no parameters. Phase 732 — a record likewise.
+        | TUnion _
+        | TRecord _ -> JObj [ "$ref", JStr("#/$defs/" + defName t) ]
         // Reached only for a parameter no instantiation bound — a declaration read
         // outside any instantiation walk. The permissive `{}` is the pre-1068
         // behaviour, kept as the honest answer to "this slot's type is not yet known".
@@ -202,7 +203,6 @@ module internal JsonSchema =
             | s, _ -> s
         | TJson
         | THosted _ -> JBool true
-        | TRecord(n, _) -> JObj [ "$ref", JStr("#/$defs/" + n) ]
         | TMap vt -> JObj [ "type", JStr "object"; "additionalProperties", schemaOf vt ]
 
     /// The wire-visible fields of a declaration. A [[HostOnly]] field is never on
@@ -277,10 +277,10 @@ module internal JsonSchema =
               "properties", JObj props ]
 
     /// A NON-discriminated object schema — a [[TRecord]] (`FormField`, `FilterSpec`,
-    /// `TabHeader`, `ColumnErased`, …). No `$type` const: that is exactly what
-    /// distinguishes a record from a union case on the wire.
-    let recordSchema (idl: Idl) (r: IdlRecord) : JVal =
-        JObj(("type", JStr "object") :: objectBody idl r.Fields)
+    /// `TabHeader`, `ColumnErased`, …), from its fields at one instantiation. No `$type` const: that
+    /// is exactly what distinguishes a record from a union case on the wire.
+    let recordSchema (idl: Idl) (fields: IdlField list) : JVal =
+        JObj(("type", JStr "object") :: objectBody idl fields)
 
     /// The schema's two parts: the root member, and every definition in emission order. One
     /// assembly, read by the whole-vocabulary schema and (Phase 644) by a method's arguments, so
@@ -293,15 +293,17 @@ module internal JsonSchema =
             e.Name,
             definitionDoc e.Annotations (JObj [ "type", JStr "string"; "enum", JArr(e.WireCases |> List.map JStr) ])
 
-        /// One union definition, under a substitution for its type parameters
-        /// (empty for a non-generic union, so its emission is byte-identical to
-        /// what it always was).
+        /// A declaration's fields under a substitution for its type parameters (empty for a
+        /// declaration that has none, so its emission is byte-identical to what it always was).
+        let fieldsAt (subst: Map<string, IdlType>) (fields: IdlField list) =
+            fields
+            |> List.map (fun f ->
+                { f with
+                    Type = TypeParams.substitute subst f.Type })
+
+        /// One union definition, under a substitution for its type parameters.
         let unionDefWith (subst: Map<string, IdlType>) (name: string) (u: IdlUnion) =
-            let fieldsOf (c: IdlUnionCase) =
-                c.Fields
-                |> List.map (fun f ->
-                    { f with
-                        Type = TypeParams.substitute subst f.Type })
+            let fieldsOf (c: IdlUnionCase) = fieldsAt subst c.Fields
 
             let tagged =
                 u.Cases
@@ -341,8 +343,21 @@ module internal JsonSchema =
             Decl.instantiations idl
             |> Result.map (List.map (fun i -> unionDefWith i.Subst i.Name i.Union))
 
-        let recordDef (r: IdlRecord) =
-            r.Name, definitionDoc r.Annotations (recordSchema idl r)
+        /// One record definition, under a substitution for its type parameters.
+        let recordDefWith (subst: Map<string, IdlType>) (name: string) (r: IdlRecord) =
+            name, definitionDoc r.Annotations (recordSchema idl (fieldsAt subst r.Fields))
+
+        let recordDef (r: IdlRecord) = recordDefWith Map.empty r.Name r
+
+        // Phase 732 — a generic record is emitted as a generic union is: once per instantiation
+        // the vocabulary names, under the instance name `schemaOf` references, and never under
+        // its bare name. An inline one has no object of its own at any instantiation.
+        let genericRecordDefsR =
+            Decl.recordInstantiations idl
+            |> Result.map (
+                List.filter (fun (i: RecordInstantiation) -> not i.Record.Inline)
+                >> List.map (fun i -> recordDefWith i.Subst i.Name i.Record)
+            )
 
         // A kind and an op are both an `IdlKind`, defined the same way.
         let kindDef (k: IdlKind) =
@@ -417,7 +432,8 @@ module internal JsonSchema =
         // A generic union contributes its INSTANTIATIONS (fuaran#1068), never its
         // bare erased name. An unparameterised union is unchanged.
         genericDefsR
-        |> Result.map (fun genericDefs ->
+        |> Result.bind (fun genericDefs -> genericRecordDefsR |> Result.map (fun records -> genericDefs, records))
+        |> Result.map (fun (genericDefs, genericRecordDefs) ->
             let defs =
                 (decl.Enums |> List.map enumDef)
                 // Phase 474 — an inline declaration has no object of its own, so no definition: its
@@ -426,7 +442,10 @@ module internal JsonSchema =
                    |> List.filter (fun u -> List.isEmpty u.Params && not (Decl.isKeyed u))
                    |> List.map unionDef)
                 @ genericDefs
-                @ (decl.Records |> List.filter (fun r -> not r.Inline) |> List.map recordDef)
+                @ (decl.Records
+                   |> List.filter (fun r -> not r.Inline && List.isEmpty r.Params)
+                   |> List.map recordDef)
+                @ genericRecordDefs
                 @ (decl.Kinds |> List.map kindDef)
                 @ [ nodeKindDef; nodeDef ]
                 @ treeOpDefs
