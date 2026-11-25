@@ -45,6 +45,10 @@ module internal TypeScriptCodec =
     // D220.3 reading picks from the keys present (`ePick` over a value, `dPick` over a document).
     // A member a keyed case SYNTHESISES is the codec's on both sides, as it is in the F# host: the
     // encoder writes it at its declared value and the decoder checks it and does not return it.
+    //
+    // Phase 732 — an inline record that declares type parameters takes one codec per parameter
+    // ahead of the holder (`encMembers<Name>(encT, holder)`, `decMembers<Name>(decT, fs)`), handed
+    // by the field's reference at its arguments ([[tsInlineRecordCall]]).
     // -----------------------------------------------------------------------
 
     /// The inline declaration the wire member `f` holds, if it holds one.
