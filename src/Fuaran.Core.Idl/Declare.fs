@@ -483,6 +483,26 @@ module Declare =
                                   (rp @ [ key "key" ])
                                   (sprintf "%s: the key '%s' selects another case too" label kc.Key)
 
+                          // Phase 722 (D285.6) — a member of this case spelled as ANOTHER case's key: a
+                          // value carrying it writes both keys, and the reading (D220.3) refuses two
+                          // cases left, so the declaration would have a value it does not read back.
+                          for m, f in List.indexed case.Fields do
+                              match
+                                  keyed
+                                  |> List.tryFind (fun o -> o.Case <> kc.Case && o.Key = f.Name && o.Key <> kc.Key)
+                              with
+                              | Some other when f.Opt <> HostOnly ->
+                                  fault
+                                      (at
+                                       @ [ key "cases"; item (u.Cases |> List.findIndex (fun c -> c.Tag = case.Tag)) ]
+                                       @ [ key "fields"; item m ])
+                                      (sprintf
+                                          "%s: the member '%s' is the key of case '%s', so a value carrying it writes both keys and is read as neither case"
+                                          label
+                                          f.Name
+                                          other.Case)
+                              | _ -> ()
+
                           if not (List.isEmpty kc.Synthesised) && List.contains kc.Key synthesisedKeys then
                               fault
                                   (rp @ [ key "synthesised" ])

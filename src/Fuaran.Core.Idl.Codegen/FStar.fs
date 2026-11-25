@@ -34,8 +34,9 @@ open Fuaran.Core.Idl.Codegen.Types
 // mechanical shape rather than a research problem.
 //
 // THE REFUSAL IS TYPED, like every other refusal in this package: an IDL construct with no
-// wire-level meaning in the model (a closure in a wire-visible slot, a host codec whose
-// wire is not JSON, an op or a bare kind slot) is a `CodegenError.UnmodellableInFStar`
+// wire-level meaning in the model (a host codec whose wire is not JSON, an op or a bare kind
+// slot; a closure in a wire-visible slot is NOT one, the model carries it as its fixed
+// sentinel) is a `CodegenError.UnmodellableInFStar`
 // naming the construct and where it was reached — never a silently dropped member, which
 // would make the theorem a statement about a document nobody sends.
 //

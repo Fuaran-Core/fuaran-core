@@ -727,27 +727,15 @@ module internal FStarModel =
                         at
 
             let ofCase (case: IdlUnionCase) : Result<Pick list * Member list, CodegenError> =
-                let overlap =
-                    keyed
-                    |> List.tryFind (fun o ->
-                        o.Case <> case.Tag
-                        && case.Fields |> List.exists (fun g -> g.Opt <> HostOnly && g.Name = o.Key))
-
-                match overlap, keyed |> List.tryFind (fun k -> k.Case = case.Tag) with
-                | Some other, _ ->
-                    unmodellable
-                        (sprintf
-                            "a presence-keyed union '%s' whose case '%s' declares the member '%s', the key of case '%s': a value carrying it writes both keys, which the reading refuses, so its round trip does not hold"
-                            u.Name
-                            case.Tag
-                            other.Key
-                            other.Case)
-                        at
-                | None, None ->
+                // A case declaring another case's key as a member of its own has no round trip (a value
+                // carrying it writes both keys). `Declare.layoutErrors` refuses it (Phase 722, D285.6),
+                // and this target asks that check before it lays a declaration out, so none arrives here.
+                match keyed |> List.tryFind (fun k -> k.Case = case.Tag) with
+                | None ->
                     unmodellable
                         (sprintf "a presence-keyed union '%s' naming no key for its case '%s'" u.Name case.Tag)
                         at
-                | None, Some rule ->
+                | Some rule ->
                     fieldMembers idl subst (at + "." + case.Tag) case.Fields
                     |> Result.bind (fun own ->
                         Decl.synthesisedJson idl u rule

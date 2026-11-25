@@ -76,6 +76,25 @@ let private withUnion (name: string) (f: IdlUnion -> IdlUnion) : Idl =
     { LayoutIdl.layout with
         Unions = LayoutIdl.layout.Unions |> List.map (fun u -> if u.Name = name then f u else u) }
 
+/// `layout` with the case `RowKey` of `RowIdentity` also declaring `rowKeyField`, the key of the
+/// case `RowKeyField`, as a member of its own under `opt`.
+let private overlapping (opt: Optionality) : Idl =
+    withUnion "RowIdentity" (fun u ->
+        { u with
+            Cases =
+                u.Cases
+                |> List.map (fun c ->
+                    if c.Tag = "RowKey" then
+                        { c with
+                            Fields =
+                                c.Fields
+                                @ [ { c.Fields.Head with
+                                        Name = "rowKeyField"
+                                        Type = TStr
+                                        Opt = opt } ] }
+                    else
+                        c) })
+
 let private faults (idl: Idl) : string list =
     Declare.layoutErrors idl |> List.map VocabularyFault.describe
 
@@ -181,6 +200,32 @@ let declarationTests =
                                   k) }
 
               expectFault clash "the member 'pageSize' is on its object twice" "an inline member collides")
+
+          // Phase 722 (DECISIONS.md D285.6) — a value of such a case carrying the member writes both
+          // keys, and the D220.3 reading refuses two cases left: the declaration has a value its own
+          // reading does not read back, so it is refused where it is declared.
+          testCase
+              "a case declaring another case's key as a member of its own is refused, both cases and the key named"
+              (fun _ ->
+                  for opt in [ Optional; Required ] do
+                      expectFault
+                          (overlapping opt)
+                          "union 'RowIdentity', case 'RowKey': the member 'rowKeyField' is the key of case 'RowKeyField'"
+                          "both cases and the key are named"
+
+                      Expect.exists
+                          (Declare.errors (overlapping opt))
+                          (fun f -> (VocabularyFault.describe f).Contains "is the key of case 'RowKeyField'")
+                          "and the vocabulary is refused where every declaration fault is"
+
+                  // A host-only member is never on the wire, so it writes no second key.
+                  Expect.isFalse
+                      (faults (overlapping HostOnly)
+                       |> List.exists (fun f -> f.Contains "is the key of case"))
+                      "a host-only member of that name is not this fault"
+
+                  Expect.isEmpty (faults LayoutIdl.layout) "the layout vocabulary declares no such case"
+                  Expect.isEmpty (faults LayoutIdl.derived) "nor does the vocabulary the derived members are held over")
 
           testCase "a presence-keyed union's malformed rules are refused" (fun _ ->
               let badKey =
@@ -522,27 +567,16 @@ let backendTests =
                   "let pk_vkind__Grid__NoRowIdentity__Source__identity (#num #flt: eqtype) (x: vkind num flt)"
                   "one lemma per constructor and union states the reading off the encoded object")
 
+          // Phase 722 (D285.6) — `Declare.errors` refuses this union now. The target still refuses it
+          // when handed a value no declaration check has seen (the vocabulary here is built in memory
+          // and never passes through the artifact reader): it asks the check itself before it lays an
+          // inline declaration out (D284.7), and answers in the check's words.
           testCase
-              "the F* target refuses a case that declares another case's key, which the declaration check admits"
+              "the F* target refuses a case that declares another case's key, as the declaration check does"
               (fun _ ->
-                  let overlapping =
-                      withUnion "RowIdentity" (fun u ->
-                          { u with
-                              Cases =
-                                  u.Cases
-                                  |> List.map (fun c ->
-                                      if c.Tag = "RowKey" then
-                                          { c with
-                                              Fields =
-                                                  c.Fields
-                                                  @ [ { c.Fields.Head with
-                                                          Name = "rowKeyField"
-                                                          Type = TStr
-                                                          Opt = Optional } ] }
-                                      else
-                                          c) })
+                  let overlapping = overlapping Optional
 
-                  Expect.isEmpty (Declare.errors overlapping) "the declaration check admits it"
+                  Expect.isNonEmpty (Declare.errors overlapping) "the declaration check refuses it"
 
                   // A value of the case that carries the member writes both keys, and the reading refuses
                   // two cases left: the round trip is false of it, so no model of the union has it.
@@ -568,10 +602,18 @@ let backendTests =
                   | Some why ->
                       Expect.stringContains
                           why
-                          "a presence-keyed union 'RowIdentity' whose case 'RowKey' declares the member 'rowKeyField', the key of case 'RowKeyField'"
-                          "named"
+                          "union 'RowIdentity', case 'RowKey': the member 'rowKeyField' is the key of case 'RowKeyField'"
+                          "both cases and the key are named"
 
-                      Expect.stringContains why "its round trip does not hold" "with the reason")
+                      Expect.stringContains why "the declaration check refuses" "and the refusal is the declaration's"
+
+                  for emit in
+                      [ FStarTarget.vocabularyModule "M" overlapping [ "Grid" ]
+                        FStarTarget.proofsModule "MProofs" "M" overlapping [ "Grid" ] ] do
+                      Expect.stringContains
+                          (refusalOf emit)
+                          "is the key of case 'RowKeyField'"
+                          "no module is emitted for it")
 
           testCase "the F* target refuses a synthesised value the opaque numeric model cannot spell, by name" (fun _ ->
               let numbered =
