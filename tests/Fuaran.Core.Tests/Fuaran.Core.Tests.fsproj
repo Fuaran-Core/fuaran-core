@@ -489,6 +489,11 @@
     <Compile Include="IdlLayoutTypeScriptTests.fs" />
     <Compile Include="IdlRecordParamsTests.fs" />
     <Compile Include="IdlRecordInstantiationTests.fs" />
+    <!-- Phase 732 - the F# emitted for `ParameterisedRecordsIdl.derived` with every derivation
+         requested, and the codec-only module over its node-free declarations: committed, compiled
+         here and held to the generator by IdlRecordFSharpTests. -->
+    <Compile Include="ParameterisedRecordsDerivedGenerated.fs" />
+    <Compile Include="ParameterisedRecordsCodecGenerated.fs" />
     <Compile Include="IdlRecordFSharpTests.fs" />
     <!-- Phase 379 - Canonical and Codec<'T>: the committed bytes a declaration writes under each
          profile and the positive control, the collecting order and paths, the build-time refusals,

@@ -14,6 +14,8 @@ tests/Fuaran.Core.Tests/LayoutDerivedGenerated.fs
 tests/Fuaran.Core.Tests/LayoutCodecGenerated.fs
 tests/Fuaran.Core.Tests/ParameterisedRecordsGenerated.fs
 tests/Fuaran.Core.Tests/ParameterisedRecordsFlatGenerated.fs
+tests/Fuaran.Core.Tests/ParameterisedRecordsDerivedGenerated.fs
+tests/Fuaran.Core.Tests/ParameterisedRecordsCodecGenerated.fs
 src/Fuaran.Core.Function/CapabilitySeamCodec.fs
 src/Fuaran.Core.Function/PipelineSeamCodec.fs
 src/Fuaran.Core.Query/QuerySeamCodec.fs

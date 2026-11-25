@@ -67,11 +67,8 @@ module internal FSharpEncode =
 
     /// The explicit `<'T, …>` list a generic printer declares its type parameters with — the list
     /// polymorphic recursion needs (see [[unionEncoder]]) — or nothing for a declaration with none.
-    let explicitParams (ps: string list) : string =
-        if List.isEmpty ps then
-            ""
-        else
-            "<" + (ps |> List.map (fun p -> "'" + p) |> String.concat ", ") + ">"
+    /// It is [[declParams]] with no message parameter: a decoder pins `'Msg` to `obj`.
+    let explicitParams (ps: string list) : string = declParams Set.empty "" ps
 
     /// The codecs a reference hands a generic declaration's printer, one per argument, each printed
     /// by `p` and led by a space — nothing for a reference applying no argument.

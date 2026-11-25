@@ -298,6 +298,14 @@ module Regenerated =
     [<Literal>]
     let ParameterisedRecordsFlat = "ParameterisedRecordsFlatGenerated"
 
+    /// Phase 732 — the derived members over a parameterised record (`IdlRecordFSharpTests`).
+    [<Literal>]
+    let ParameterisedRecordsDerived = "ParameterisedRecordsDerivedGenerated"
+
+    /// Phase 732 — the codec-only module over parameterised records (`IdlRecordFSharpTests`).
+    [<Literal>]
+    let ParameterisedRecordsCodec = "ParameterisedRecordsCodecGenerated"
+
     [<Literal>]
     let Mini = "MiniGenerated"
 

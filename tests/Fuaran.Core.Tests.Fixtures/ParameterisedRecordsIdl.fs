@@ -219,3 +219,128 @@ let flatGeneratedFile =
 /// The plain structural module the generator emits for [[flat]].
 let generateFlat () : Result<string, CodegenError> =
     Gen.fsharpModule flatModuleName flat kindTags
+
+// ---------------------------------------------------------------------------
+// The derived members and the codec-only module over a parameterised record. `derived` is `idl` and
+// two more kinds, because the derivations read shapes `idl` does not hold: a union that holds itself
+// at a record's ARGUMENT (`Tree.Branch.kids: Kid<Tree> list`, `spare: Tagged<Tree>`), so its
+// fold must read the record at the instantiation; a generic record every member of which has a
+// value without the caller (`Tagged<T>`), so it has a default record; a declared default that is a
+// generic record's literal (`Outline.trail`); and a generic record holding a node beside a function
+// over the message (`Panel<T>` in `Frame`), so the keyed walk and the message map rebuild one.
+// `ParameterisedRecordsDerivedGenerated.fs` is the F# emitted for it with `derivations` requested,
+// and `ParameterisedRecordsCodecGenerated.fs` the codec-only module over its node-free declarations;
+// both are committed, compiled by the suite and held to the generator.
+// ---------------------------------------------------------------------------
+
+let private handler: IdlType =
+    TFn
+        { FSharp = "string -> 'Msg"
+          TypeScript = "(x: string) => Msg"
+          Placeholder = "(fun (_: string) -> box \"<closure>\")" }
+
+/// [[idl]] with the `Outline` and `Frame` kinds and what they reach.
+let derived: Idl =
+    { idl with
+        Records =
+            idl.Records
+            @ [ record
+                    "Tagged"
+                    [ "T" ]
+                    false
+                    [ field "tag" TStr (OmitDefault(VStr ""))
+                      field "items" (TList(TVar "T")) (OmitDefault(VList []))
+                      field "note" TStr Optional ]
+                record "Kid" [ "T" ] false [ field "name" TStr Required; field "child" (TVar "T") Required ]
+                record "Panel" [ "T" ] false [ field "body" TNode Required; field "meta" (TVar "T") Required ] ]
+        Unions =
+            idl.Unions
+            @ [ union
+                    "Tree"
+                    []
+                    [ case "Leaf" [ field "n" TInt Required ]
+                      case
+                          "Branch"
+                          [ field "kids" (TList(TRecord("Kid", [ TUnion("Tree", []) ]))) Required
+                            field "spare" (TRecord("Tagged", [ TUnion("Tree", []) ])) Optional ] ] ]
+        Kinds =
+            idl.Kinds
+            @ [ kind
+                    "Outline"
+                    [ field "tree" (TUnion("Tree", [])) Required
+                      field "trail" (TRecord("Tagged", [ TStr ])) (OmitDefault(VRecord [])) ]
+                kind
+                    "Frame"
+                    [ field "panel" (TRecord("Panel", [ TStr ])) Required
+                      field "rest" (TList TNode) Required
+                      field "onOpen" handler Required ] ] }
+
+/// Every derivation, over the declarations of [[derived]] that hold a parameterised record.
+let derivations: Derivation list =
+    [ Derivation.StructuralAccess
+      Derivation.KeyedPositions
+      Derivation.SlotsOf "Ranged"
+      Derivation.SlotsOf "Panel"
+      Derivation.SlotsOf "Tree"
+      Derivation.MapMsg
+      Derivation.Fold "Tree"
+      Derivation.Projections("Tree", [ "kids"; "n" ])
+      Derivation.Projections("Binding", [ "range"; "payload" ])
+      Derivation.DefaultRecords
+      Derivation.VocabularyConstants
+      Derivation.SpecDecoders ]
+
+/// Documents of the two further kinds, each in canonical (sorted) form: a tree three deep whose
+/// nested values sit behind a record's argument, with a trail away from its default; a leaf at the
+/// default trail; and a frame holding a node inside a generic record.
+let derivedCorpus: string list =
+    [ """{"id":"o1","kind":{"$type":"Outline","trail":{"items":["a","b"],"tag":"t"},"tree":{"$type":"Branch","kids":[{"child":{"$type":"Leaf","n":1},"name":"l"},{"child":{"$type":"Branch","kids":[{"child":{"$type":"Leaf","n":2},"name":"n"}]},"name":"m"}],"spare":{"items":[{"$type":"Leaf","n":3}],"note":"x"}}}}"""
+      """{"id":"o2","kind":{"$type":"Outline","tree":{"$type":"Leaf","n":7}}}"""
+      """{"id":"f1","kind":{"$type":"Frame","onOpen":"<closure>","panel":{"body":{"id":"b","kind":{"$type":"Outline","tree":{"$type":"Leaf","n":9}}},"meta":"m"},"rest":[{"id":"r","kind":{"$type":"Outline","tree":{"$type":"Leaf","n":8}}}]}}""" ]
+
+/// The module name the committed derived file declares.
+[<Literal>]
+let derivedModuleName = "Fuaran.Core.Tests.ParameterisedRecordsDerivedGenerated"
+
+/// The committed derived file, repository-relative.
+[<Literal>]
+let derivedGeneratedFile =
+    "tests/Fuaran.Core.Tests/ParameterisedRecordsDerivedGenerated.fs"
+
+/// The module text the generator emits for [[derived]], with [[derivations]] requested.
+let generateDerived () : Result<string, CodegenError> =
+    Gen.fsharpModuleDerived GenSupport.Empty derivations derivedModuleName derived (derived.Kinds |> List.map _.Tag)
+
+/// The codec-only request: every generic record that has a JSON value of its own and the unions
+/// holding one as roots (an inline record is no root, and `Panel` reaches a node, which a codec-only
+/// module does not print), each reached declaration at the host type the derived module declares.
+let codecRequest: CodecOnly =
+    { Roots =
+        [ "Ranged"
+          "Labelled"
+          "Series"
+          "Entry"
+          "Tagged"
+          "Kid"
+          "Binding"
+          "Shape"
+          "Tree" ]
+      HostTypes =
+        (derived.Unions |> List.map _.Name)
+        @ (derived.Records |> List.map _.Name)
+        @ (derived.Enums |> List.map _.Name)
+        |> List.map (fun n -> n, derivedModuleName + "." + n)
+        |> Map.ofList }
+
+/// The module name the committed codec-only file declares.
+[<Literal>]
+let codecModuleName = "Fuaran.Core.Tests.ParameterisedRecordsCodecGenerated"
+
+/// The committed codec-only file, repository-relative.
+[<Literal>]
+let codecGeneratedFile =
+    "tests/Fuaran.Core.Tests/ParameterisedRecordsCodecGenerated.fs"
+
+/// The codec-only module text the generator emits for [[codecRequest]].
+let generateCodec () : Result<string, CodegenError> =
+    Gen.fsharpCodecModule GenSupport.Empty codecRequest codecModuleName derived

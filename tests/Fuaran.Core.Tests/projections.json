@@ -172,6 +172,18 @@
       "heldBy": "IdlRecordFSharpTests"
     },
     {
+      "path": "tests/Fuaran.Core.Tests/ParameterisedRecordsDerivedGenerated.fs",
+      "switch": "FUARAN_REGEN",
+      "stem": "ParameterisedRecordsDerivedGenerated",
+      "heldBy": "IdlRecordFSharpTests"
+    },
+    {
+      "path": "tests/Fuaran.Core.Tests/ParameterisedRecordsCodecGenerated.fs",
+      "switch": "FUARAN_REGEN",
+      "stem": "ParameterisedRecordsCodecGenerated",
+      "heldBy": "IdlRecordFSharpTests"
+    },
+    {
       "path": "src/Fuaran.Core.Function/CapabilitySeamCodec.fs",
       "switch": "FUARAN_REGEN",
       "stem": "CapabilitySeamCodec",
