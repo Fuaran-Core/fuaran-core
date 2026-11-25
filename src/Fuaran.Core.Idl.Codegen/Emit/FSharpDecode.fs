@@ -58,7 +58,7 @@ module internal FSharpDecode =
           Var = fun v -> "dec" + v
           Named = fun n -> "dec" + n
           Node = "decNode"
-          Union = fun n args -> "(dec" + n + " " + String.concat " " (List.map snd args) + ")"
+          Generic = fun n args -> "(dec" + n + " " + String.concat " " (List.map snd args) + ")"
           List = sprintf "(dList %s)"
           Map = sprintf "(dMap %s)"
           // Phase 347 — the sentinel is checked (`dSentinel`), as the interpreter checks it.
@@ -143,6 +143,10 @@ module internal FSharpDecode =
                     | _, _, Error x -> Error x
                 | other -> Error(opVocabularySlot backend other) }
 
+    /// [[codecParams]] for a short-circuiting decoder: ` (decT: JVal -> Result<'T, DecodeError>)`.
+    let decCodecParams (ps: string list) : string =
+        codecParams "dec" (sprintf "JVal -> Result<%s, DecodeError>") ps
+
     /// Phase 524 — the F# printer of a member READ back out ([[MemberTraversal.decMember]]): a
     /// sentinel slot decodes to `()` or its `TFn` placeholder, a host-only member to its declared
     /// placeholder, an omit-at-default one to [[fsDefaultLit]]'s literal.
@@ -162,7 +166,7 @@ module internal FSharpDecode =
           HostOnly = fun f -> hostOnlyLit f |> Result.map (sprintf "Ok (%s)")
           DefaultLit = fsDefaultLit idl
           // Phase 474 — an inline field read from the object its members sit on.
-          Inline = fun o f -> inlineDecRead idl o f }
+          Inline = fun o f -> inlineDecRead (codecArgsOf decPrinter) idl o f }
 
     /// Nest one `Result.bind` per field over `final`, then close the lot. F# has
     /// no applicative sugar for this, and the generated file is Fantomas-exempt,
@@ -229,18 +233,9 @@ module internal FSharpDecode =
         : Result<string, CodegenError> =
         let msg, idl = decl.Msg, decl.Idl
 
-        let decArgs =
-            u.Params
-            |> List.map (fun p -> sprintf " (dec%s: JVal -> Result<'%s, DecodeError>)" p p)
-            |> String.concat ""
-
+        let decArgs = decCodecParams u.Params
         // Declared params stay generic; `'Msg` alone is pinned to `obj`.
-        let declArgs =
-            if List.isEmpty u.Params then
-                ""
-            else
-                "<" + (u.Params |> List.map (fun p -> "'" + p) |> String.concat ", ") + ">"
-
+        let declArgs = explicitParams u.Params
         let tyArgs = objParams msg u.Name u.Params
 
         let ctor (c: IdlUnionCase) =
@@ -332,10 +327,13 @@ module internal FSharpDecode =
             u
 
     /// An object's decoder — a kind's spec record or a declared record: its members read in
-    /// declaration order ([[fieldBinders]]), then the record built.
+    /// declaration order ([[fieldBinders]]), then the record built. Phase 732 — `pars` is the
+    /// declaration's own type parameters (a record's; a kind has none): one `decX` codec each, under
+    /// the explicit parameter list [[unionDecoder]] declares.
     let objectDecoder
         (decName: string)
         (typeName: string)
+        (pars: string list)
         (msg: Set<string>)
         (idl: Idl)
         (fields: IdlField list)
@@ -346,17 +344,19 @@ module internal FSharpDecode =
         fieldBinders idl fields
         |> Result.map (fun binders ->
             sprintf
-                "and private dec%s (j: JVal) : Result<%s%s, DecodeError> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
+                "and private dec%s%s%s (j: JVal) : Result<%s%s, DecodeError> =\n    dObj j |> Result.bind (fun __fs ->\n%s"
                 decName
+                (explicitParams pars)
+                (decCodecParams pars)
                 typeName
-                (objParams msg typeName [])
+                (objParams msg typeName pars)
                 (bindChain "    " binders ("Ok " + recordLit typeName assigns) 1))
 
     let specDecoder (msg: Set<string>) (idl: Idl) (k: IdlKind) : Result<string, CodegenError> =
-        objectDecoder (k.Tag + "Spec") (k.Tag + "Spec") msg idl k.Fields
+        objectDecoder (k.Tag + "Spec") (k.Tag + "Spec") [] msg idl k.Fields
 
     let recordDecoder (msg: Set<string>) (idl: Idl) (r: IdlRecord) : Result<string, CodegenError> =
-        objectDecoder r.Name r.Name msg idl r.Fields
+        objectDecoder r.Name r.Name r.Params msg idl r.Fields
 
     // -----------------------------------------------------------------------
     // Phase 377 — the COLLECTING decoders and the public per-spec entries, emitted on request
@@ -394,7 +394,7 @@ module internal FSharpDecode =
               { decPrinter with
                   Var = fun v -> "col" + v
                   Named = fun n -> "(__ov." + n + " __ov)"
-                  Union =
+                  Generic =
                       fun n args ->
                           let passed =
                               args
@@ -414,6 +414,47 @@ module internal FSharpDecode =
             Float = "(__ov.Float __ov)"
             Enum = fun n -> "(__ov." + n + " __ov)" }
 
+    /// Phase 635 (D248) — what a generic declaration's collecting decoder takes per type parameter:
+    /// the parameter's collecting decoder, then its witness. A generic union's and (Phase 732) a
+    /// generic record's, an inline one's member reader included.
+    let colCodecParams (ps: string list) : string =
+        ps
+        |> List.map (fun p ->
+            sprintf
+                " (col%s: JVal -> Result<'%s, DecodeError list>) (inst%s: %s<'%s>)"
+                p
+                p
+                p
+                FSharpCollectingRecord.InstantiationType
+                p)
+        |> String.concat ""
+
+    /// What a reference hands [[colCodecParams]]: per argument its collecting decoder, then its
+    /// witness, each led by a space. A witness that is a case applied to its identities is
+    /// parenthesised: it is one argument of a curried call here.
+    let colCodecArgsOf (msg: Set<string>) (args: IdlType list) : Result<string, CodegenError> =
+        let argument (witness: string) =
+            if witness.Contains "(" then
+                "(" + witness + ")"
+            else
+                witness
+
+        args
+        |> List.map (fun a ->
+            SlotTraversal.slotFn (colPrinter msg) a
+            |> Result.map (fun dec -> " " + dec + " " + argument (FSharpCollectingRecord.witnessOf msg a)))
+        |> sequenceR
+        |> Result.map (String.concat "")
+
+    /// Phase 460 — each type parameter's SHORT-CIRCUITING decoder, bound inside a generic
+    /// declaration's collecting decoder under the name the short-circuiting emitter gives its
+    /// parameter (`dec<V>`), so a placeholder that names it compiles in both decoders (the contract
+    /// is stated at [[decPrinter]]'s `TFn` arm).
+    let decBindings (ps: string list) : string =
+        ps
+        |> List.map (fun p -> sprintf "    let dec%s (__j: JVal) = cFirst (col%s __j)\n" p p)
+        |> String.concat ""
+
     /// The F# collecting member reader: [[memberDecPrinter]]'s presence, read through
     /// [[colPrinter]].
     let colMemberPrinter (msg: Set<string>) (idl: Idl) : MemberDecPrinter =
@@ -425,7 +466,7 @@ module internal FSharpDecode =
             Req = sprintf "cReqAt __ov __holder j %s %s %s"
             Opt = sprintf "cOptAt __ov __holder j %s %s %s"
             Def = sprintf "cDefAt __ov __holder j %s %s %s (%s)"
-            Inline = fun o f -> inlineColRead idl o f }
+            Inline = fun o f -> inlineColRead (colCodecArgsOf msg) idl o f }
 
     /// Phase 562 — the `__holder` a holder's member reads name to the record's `Absent`: the holder's
     /// F# name (`Owner`, `NoteSpec`, `Node`), or `Union.Case` for a union case. Bound only where a
@@ -485,35 +526,11 @@ module internal FSharpDecode =
         : Result<string, CodegenError> =
         let msg, idl = decl.Msg, decl.Idl
 
-        // Phase 635 — each parameter's decoder, then its witness (D248).
-        let colArgs =
-            u.Params
-            |> List.map (fun p ->
-                sprintf
-                    " (col%s: JVal -> Result<'%s, DecodeError list>) (inst%s: %s<'%s>)"
-                    p
-                    p
-                    p
-                    FSharpCollectingRecord.InstantiationType
-                    p)
-            |> String.concat ""
-
-        let declArgs =
-            if List.isEmpty u.Params then
-                ""
-            else
-                "<" + (u.Params |> List.map (fun p -> "'" + p) |> String.concat ", ") + ">"
-
+        let colArgs = colCodecParams u.Params
+        let declArgs = explicitParams u.Params
         let tyArgs = objParams msg u.Name u.Params
-
-        // Phase 460 — each type parameter's SHORT-CIRCUITING decoder, bound under the name the
-        // short-circuiting emitter gives its parameter (`dec<V>`), so a placeholder that names it
-        // compiles in both decoders (the contract is stated at [[decPrinter]]'s `TFn` arm); the
-        // refined case's twin below takes the same bindings.
-        let decBindings =
-            u.Params
-            |> List.map (fun p -> sprintf "    let dec%s (__j: JVal) = cFirst (col%s __j)\n" p p)
-            |> String.concat ""
+        // The refined case's twin below takes the same bindings.
+        let decBindings = decBindings u.Params
 
         let ctor (c: IdlUnionCase) =
             match c.Fields with
@@ -582,10 +599,12 @@ module internal FSharpDecode =
             u
 
     /// An object's collecting decoder — a kind's spec record or a declared record — from its
-    /// members as read.
+    /// members as read. Phase 732 — `pars` is the declaration's own type parameters (a record's): it
+    /// takes what a generic union's collecting decoder takes for each ([[colCodecParams]]).
     let colObjectDecoder
         (decName: string)
         (typeName: string)
+        (pars: string list)
         (msg: Set<string>)
         (fields: IdlField list)
         (members: (IdlField * string) list)
@@ -596,9 +615,12 @@ module internal FSharpDecode =
         let binders = members |> List.map (fun (f, e) -> ident f.Name, e)
 
         sprintf
-            "and private col%s (__ov: CollectingDecoders) (j: JVal) : Result<%s%s, DecodeError list> =\n%s    cObj j |> Result.bind (fun __fs ->\n%s)"
+            "and private col%s%s (__ov: CollectingDecoders)%s (j: JVal) : Result<%s%s, DecodeError list> =\n%s%s    cObj j |> Result.bind (fun __fs ->\n%s)"
             decName
+            (explicitParams pars)
+            (colCodecParams pars)
             typeName
-            (objParams msg typeName [])
+            (objParams msg typeName pars)
+            (decBindings pars)
             (holderBinding "    " decName members)
             (collectAll "        " binders ("Ok " + recordLit typeName assigns))

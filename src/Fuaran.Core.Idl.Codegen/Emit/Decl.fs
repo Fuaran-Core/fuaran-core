@@ -117,7 +117,7 @@ type internal Literal =
     /// A JSON value at a `TJson` slot (Phase 539) — every string well-formed and every number finite;
     /// admitted where the field's own type is the JSON slot, never nested.
     | Json of JVal
-    | Record of IdlRecord * authored: (string * IdlValue) list
+    | Record of IdlRecord * args: IdlType list * authored: (string * IdlValue) list
     | Union of IdlUnion * args: IdlType list * IdlUnionCase * authored: (string * IdlValue) list
     /// Phase 656 — a 64-bit integer (D251.3), read from its canonical decimal text.
     | Int64 of int64
@@ -309,15 +309,38 @@ module internal Decl =
           yield! idl.Records |> List.map _.Fields
           yield! idl.Unions |> List.collect (fun u -> u.Cases |> List.map _.Fields) ]
 
-    /// Whether any hosted slot in the vocabulary satisfies `pick`.
+    /// Whether any hosted slot in the vocabulary satisfies `pick`. Phase 732 — every case of the type
+    /// is named, with no wildcard: the wildcard is how a slot held in a tuple, a set or a keyed map
+    /// was not seen, and its helpers not emitted.
     let private declaresHostedWhere (pick: HostedCodec -> bool) (idl: Idl) : bool =
         let rec has (t: IdlType) =
             match t with
             | THosted h -> pick h
             | TList inner
-            | TMap inner -> has inner
-            | TUnion(_, args) -> args |> List.exists has
-            | _ -> false
+            | TMap inner
+            | TSet inner -> has inner
+            | TRecord(_, args)
+            | TUnion(_, args)
+            | TTuple args -> args |> List.exists has
+            | TKeyedMap(k, v) -> has k || has v
+            | TStr
+            | TInt
+            | TBool
+            | TFloat
+            | TEnum _
+            | TVar _
+            | TNode
+            | TKind
+            | TOp
+            | TClosure
+            | TOpaque
+            | TFn _
+            | TJson
+            | TInt64
+            | TDecimal
+            | TBytes
+            | TTimeOfDay
+            | TDuration -> false
 
         allFieldLists idl |> List.exists (List.exists (fun f -> has f.Type))
 
@@ -331,15 +354,37 @@ module internal Decl =
     /// The type names emitted generic in `'Msg` — union names, record names, `<Tag>Spec` names,
     /// plus `NodeKind` / `Node` when any kind qualifies.
     let msgCarrying (idl: Idl) : Set<string> =
+        // Phase 732 — every case of the type is named, with no wildcard (a holder inside a tuple, a
+        // set or a keyed map was not seen), and a record reference's arguments are read as a union
+        // reference's are.
         let rec mentions (seen: Set<string>) (t: IdlType) =
             match t with
             | TFn s -> s.FSharp.Contains "'Msg"
-            | TList inner -> mentions seen inner
-            | TMap vt -> mentions seen vt
+            | TList inner
+            | TMap inner
+            | TSet inner -> mentions seen inner
+            | TTuple args -> args |> List.exists (mentions seen)
+            | TKeyedMap(k, v) -> mentions seen k || mentions seen v
             | TNode -> seen.Contains "Node"
+            | TRecord(n, args)
             | TUnion(n, args) -> seen.Contains n || args |> List.exists (mentions seen)
-            | TRecord(n, _) -> seen.Contains n
-            | _ -> false
+            | TStr
+            | TInt
+            | TBool
+            | TFloat
+            | TEnum _
+            | TVar _
+            | TKind
+            | TOp
+            | TClosure
+            | TOpaque
+            | TJson
+            | THosted _
+            | TInt64
+            | TDecimal
+            | TBytes
+            | TTimeOfDay
+            | TDuration -> false
 
         let step (seen: Set<string>) =
             let fieldsMention (fs: IdlField list) =
@@ -417,10 +462,18 @@ module internal Decl =
                 | TFn s -> s.FSharp.Contains "->"
                 | _ -> false)
 
+        // Phase 732 — a record declaring a type parameter is generic as a message-carrying one is:
+        // whether a member held at the parameter compares is its argument's to say, so the record
+        // keeps the equality F# derives for it and takes no custom one.
         let generic (key: string) =
-            if key = "Node" then msg.Contains "Node"
-            elif key.StartsWith "R:" then msg.Contains(key.Substring 2)
-            else msg.Contains(key.Substring 2 + "Spec")
+            if key = "Node" then
+                msg.Contains "Node"
+            elif key.StartsWith "R:" then
+                msg.Contains(key.Substring 2)
+                || idl.Records
+                   |> List.exists (fun r -> r.Name = key.Substring 2 && not (List.isEmpty r.Params))
+            else
+                msg.Contains(key.Substring 2 + "Spec")
 
         let candidates =
             [ "Node"
@@ -452,7 +505,9 @@ module internal Decl =
             | TSet inner -> capable granted visiting inner
             | TTuple args -> args |> List.forall (capable granted visiting)
             | TKeyedMap(k, v) -> capable granted visiting k && capable granted visiting v
-            | TRecord(n, _) -> declCapable granted visiting ("R:" + n)
+            | TRecord(n, args) ->
+                args |> List.forall (capable granted visiting)
+                && declCapable granted visiting ("R:" + n)
             | TNode -> declCapable granted visiting "Node"
             | TUnion(n, args) ->
                 args |> List.forall (capable granted visiting)
@@ -518,7 +573,7 @@ module internal Decl =
         | TNode -> true
         | TList i
         | TMap i -> holdsIn hs i
-        | TRecord(n, _) -> hs.Contains n
+        | TRecord(n, args)
         | TUnion(n, args) -> hs.Contains n || List.exists (holdsIn hs) args
         | _ -> false
 
@@ -696,6 +751,7 @@ module internal Decl =
         | TKeyedMap _ -> true
         | TList i
         | TMap i -> widerType i
+        | TRecord(_, args)
         | TUnion(_, args) -> args |> List.exists widerType
         | THosted { Wire = Some w } -> widerType w
         | _ -> false
@@ -781,10 +837,10 @@ module internal Decl =
         | TSet _, VList [] -> Ok Literal.EmptySet
         | TKeyedMap _, VList [] -> Ok Literal.EmptyKeyedMap
         | TJson, VJson j when spellable j -> Ok(Literal.Json j)
-        | TRecord(n, _), VRecord authored ->
+        | TRecord(n, args), VRecord authored ->
             match CodegenLookup.tryRecord idl n with
-            | Some r -> Ok(Literal.Record(r, authored))
-            | None -> refuse ()
+            | Some r when List.length r.Params = List.length args -> Ok(Literal.Record(r, args, authored))
+            | _ -> refuse ()
         | TUnion(n, args), VUnion(tag, authored) ->
             match CodegenLookup.tryUnion idl n with
             | Some u when
@@ -906,10 +962,11 @@ module internal Decl =
                         |> Option.exists (fun u ->
                             u.Cases
                             |> List.exists (fun c -> c.Fields |> List.exists (fun f -> go (seen.Add n) f.Type)))))
-            | TRecord(n, _) ->
-                not (seen.Contains n)
-                && (tryRecord d n
-                    |> Option.exists (fun r -> r.Fields |> List.exists (fun f -> go (seen.Add n) f.Type)))
+            | TRecord(n, args) ->
+                List.exists (go seen) args
+                || (not (seen.Contains n)
+                    && (tryRecord d n
+                        |> Option.exists (fun r -> r.Fields |> List.exists (fun f -> go (seen.Add n) f.Type))))
             | TList i
             | TMap i -> go seen i
             | _ -> false
@@ -918,80 +975,6 @@ module internal Decl =
 
     let private refuse (construct: string) (principle: string) (alternative: string) : Result<'a, CodegenError> =
         Error(CodegenError.UnsupportedConstruct(construct, principle, alternative))
-
-    /// Whether a value of type `t` holds a value of the union `u`'s own instantiation — the
-    /// positions a fold over `u` descends — refusing a recursion the fold cannot follow (at other
-    /// type arguments, or through another union). `seen` is the records already entered.
-    /// Host-neutral: the F# and TypeScript folds read the same analysis.
-    let rec foldSelfIn (d: Decl) (u: IdlUnion) (seen: Set<string>) (t: IdlType) : Result<bool, CodegenError> =
-        match t with
-        | TUnion(n, args) when n = u.Name ->
-            if args = (u.Params |> List.map TVar) then
-                Ok true
-            else
-                refuse
-                    (sprintf "a fold over '%s', which recurses at other type arguments" u.Name)
-                    "the fold visits nested values of the union's own instantiation"
-                    "recurse at the declared type parameters, or do not request the fold"
-        | TUnion(n, _) when reaches d u.Name t ->
-            refuse
-                (sprintf "a fold over '%s', which recurses through the union '%s'" u.Name n)
-                "the fold descends lists, options, maps and records, and a recursion through another union would leave the nested values it holds unvisited"
-                "recurse through a list, an option, a map or a record, or do not request the fold"
-        | TList i
-        | TMap i -> foldSelfIn d u seen i
-        | TRecord(n, _) when not (seen.Contains n) ->
-            tryRecord d n
-            |> Option.map (fun r ->
-                r.Fields
-                |> List.map (fun f -> foldSelfIn d u (seen.Add n) f.Type)
-                |> sequenceR
-                |> Result.map (List.exists id))
-            |> Option.defaultValue (Ok false)
-        | _ -> Ok false
-
-    /// Every projected record's declared field types name declarations the module emits — a
-    /// type the module does not declare is one no derived member could walk, and would emit
-    /// source that does not compile. Checked whatever is requested; it changes no byte of an
-    /// admitted module, and is vacuous where there are no projections.
-    let projectionsDeclared (d: Decl) : Result<unit, CodegenError> =
-        let declared =
-            Set.unionMany
-                [ d.Unions |> List.map _.Name |> Set.ofList
-                  d.Records |> List.map _.Name |> Set.ofList
-                  d.Idl.Enums |> List.map _.Name |> Set.ofList ]
-
-        let rec names (t: IdlType) : string list =
-            match t with
-            | TEnum n
-            | TRecord(n, _) -> [ n ]
-            | TUnion(n, args) -> n :: List.collect names args
-            | TList i
-            | TMap i -> names i
-            | _ -> []
-
-        let undeclaredIn =
-            d.Projections
-            |> Map.toList
-            |> List.collect (fun (tag, p) ->
-                p.RecordFields
-                |> Option.defaultValue []
-                |> List.collect (fun f ->
-                    names f.Type
-                    |> List.filter (fun n -> not (declared.Contains n))
-                    |> List.map (fun n -> tag, f.Name, n)))
-
-        match undeclaredIn with
-        | [] -> Ok()
-        | (tag, field, n) :: _ ->
-            refuse
-                (sprintf "the projected record field '%s.%s' at the undeclared type '%s'" tag field n)
-                "a projected record's declared fields name declarations the module emits, so every derivation over them can walk what they hold"
-                "declare the field at a type the selected kinds reach, or correct the name"
-
-    // -----------------------------------------------------------------------
-    // fuaran#1068 — the instantiations of every GENERIC union, monomorphised.
-    // -----------------------------------------------------------------------
 
     /// The instance name of a type — for a non-generic declaration its own name, and for an
     /// instantiated generic union or record (Phase 732) the name plus its mangled arguments
@@ -1028,6 +1011,115 @@ module internal Decl =
         | TTuple args -> "tuple_" + (args |> List.map instName |> String.concat "_")
         | TSet inner -> "set_" + instName inner
         | TKeyedMap(k, v) -> "keyedMap_" + instName k + "_" + instName v
+
+    /// Phase 732 — a record's fields at the instantiation a reference applies: a member naming one
+    /// of the record's parameters is here at its argument. The declared fields where the reference
+    /// applies no argument, or one no binding can be made for.
+    let recordFieldsAt (r: IdlRecord) (args: IdlType list) : IdlField list =
+        match TypeParams.bindRecord r args with
+        | Some subst when not subst.IsEmpty ->
+            r.Fields
+            |> List.map (fun f ->
+                { f with
+                    Type = TypeParams.substitute subst f.Type })
+        | _ -> r.Fields
+
+    /// How many record instantiations deep [[foldSelfIn]] follows one path before it refuses the
+    /// record as one whose recursion grows its type argument.
+    [<Literal>]
+    let private foldDepth = 64
+
+    /// Whether a value of type `t` holds a value of the union `u`'s own instantiation — the
+    /// positions a fold over `u` descends — refusing a recursion the fold cannot follow (at other
+    /// type arguments, or through another union). `seen` is the records already entered, each by
+    /// its instance name ([[instName]]): a record is read at the instantiation the reference applies
+    /// (Phase 732), so a union held at a record's argument is found where the member naming the
+    /// parameter holds it. Host-neutral: the F# and TypeScript folds read the same analysis.
+    let rec foldSelfIn (d: Decl) (u: IdlUnion) (seen: Set<string>) (t: IdlType) : Result<bool, CodegenError> =
+        match t with
+        | TUnion(n, args) when n = u.Name ->
+            if args = (u.Params |> List.map TVar) then
+                Ok true
+            else
+                refuse
+                    (sprintf "a fold over '%s', which recurses at other type arguments" u.Name)
+                    "the fold visits nested values of the union's own instantiation"
+                    "recurse at the declared type parameters, or do not request the fold"
+        | TUnion(n, _) when reaches d u.Name t ->
+            refuse
+                (sprintf "a fold over '%s', which recurses through the union '%s'" u.Name n)
+                "the fold descends lists, options, maps and records, and a recursion through another union would leave the nested values it holds unvisited"
+                "recurse through a list, an option, a map or a record, or do not request the fold"
+        | TList i
+        | TMap i -> foldSelfIn d u seen i
+        | TRecord(n, _) when seen.Count >= foldDepth ->
+            refuse
+                (sprintf "a fold over '%s' through the record '%s', whose recursion grows its type argument" u.Name n)
+                "the fold reads a record at each instantiation on its path, and this record names a new one at every step"
+                "recurse at a fixed argument, or do not request the fold"
+        | TRecord(n, args) when not (seen.Contains(instName t)) ->
+            tryRecord d n
+            |> Option.map (fun r ->
+                recordFieldsAt r args
+                |> List.map (fun f -> foldSelfIn d u (seen.Add(instName t)) f.Type)
+                |> sequenceR
+                |> Result.map (List.exists id))
+            |> Option.defaultValue (Ok false)
+        | _ -> Ok false
+
+    /// Every projected record's declared field types name declarations the module emits — a
+    /// type the module does not declare is one no derived member could walk, and would emit
+    /// source that does not compile. Checked whatever is requested; it changes no byte of an
+    /// admitted module, and is vacuous where there are no projections.
+    let projectionsDeclared (d: Decl) : Result<unit, CodegenError> =
+        let declared =
+            Set.unionMany
+                [ d.Unions |> List.map _.Name |> Set.ofList
+                  d.Records |> List.map _.Name |> Set.ofList
+                  d.Idl.Enums |> List.map _.Name |> Set.ofList ]
+
+        let rec names (t: IdlType) : string list =
+            match t with
+            | TEnum n -> [ n ]
+            | TRecord(n, args)
+            | TUnion(n, args) -> n :: List.collect names args
+            | TList i
+            | TMap i -> names i
+            | _ -> []
+
+        let undeclaredIn =
+            d.Projections
+            |> Map.toList
+            |> List.collect (fun (tag, p) ->
+                p.RecordFields
+                |> Option.defaultValue []
+                |> List.collect (fun f ->
+                    names f.Type
+                    |> List.filter (fun n -> not (declared.Contains n))
+                    |> List.map (fun n -> tag, f.Name, n)))
+
+        match undeclaredIn with
+        | [] -> Ok()
+        | (tag, field, n) :: _ ->
+            refuse
+                (sprintf "the projected record field '%s.%s' at the undeclared type '%s'" tag field n)
+                "a projected record's declared fields name declarations the module emits, so every derivation over them can walk what they hold"
+                "declare the field at a type the selected kinds reach, or correct the name"
+
+    // -----------------------------------------------------------------------
+    // fuaran#1068 — the instantiations of every GENERIC union, monomorphised.
+    // -----------------------------------------------------------------------
+
+    /// The construct a backend names for a record reference no binding can be made for.
+    let private misappliedConstruct (name: string) (given: int) (declared: int) : string =
+        sprintf "a reference applying record '%s' to %d type argument(s) where it declares %d" name given declared
+
+    /// The refusal of a backend handed such a reference ([[misappliedConstruct]]).
+    let private misappliedRefusal (construct: string) : Result<'a, CodegenError> =
+        refuse
+            construct
+            "GP5: the refusal names the construct and thereby the set that IS supported"
+            "apply the record to as many arguments as it declares parameters — `Declare.errors` names every fault of the vocabulary"
 
     /// Every instantiation of a generic union and of a generic record (Phase 732) the vocabulary
     /// names on the wire, each keyed and ordered by instance name. ONE worklist over the wire fields
@@ -1094,14 +1186,7 @@ module internal Decl =
                     // reference no binding can be made for has no instantiation to name.
                     | Some(r, None) ->
                         if misapplied.IsNone then
-                            misapplied <-
-                                Some(
-                                    sprintf
-                                        "a reference applying record '%s' to %d type argument(s) where it declares %d"
-                                        n
-                                        (List.length args)
-                                        (List.length r.Params)
-                                )
+                            misapplied <- Some(misappliedConstruct n (List.length args) (List.length r.Params))
                     | None -> ()
             | _ -> ()
 
@@ -1156,14 +1241,7 @@ module internal Decl =
             )
         else
             match misapplied with
-            | Some construct ->
-                Error(
-                    CodegenError.UnsupportedConstruct(
-                        construct,
-                        "GP5: the refusal names the construct and thereby the set that IS supported",
-                        "apply the record to as many arguments as it declares parameters — `Declare.errors` names every fault of the vocabulary"
-                    )
-                )
+            | Some construct -> misappliedRefusal construct
             | None -> Ok(found |> Map.toList |> List.map snd, foundRecords |> Map.toList |> List.map snd)
 
     /// Every instantiation of a generic union the vocabulary names on the wire ([[instantiated]]).
@@ -1231,36 +1309,79 @@ module internal Decl =
                 )
             )
 
-    /// Phase 732 — the first record of the vocabulary that declares a type parameter, else the first
-    /// a reference applies to a type argument. The declaration, the artifact, the declaration check,
-    /// the interpreter and the JSON schema carry both; the F#, TypeScript and F* entries do not emit
-    /// one yet, so each asks this of the WHOLE vocabulary (its contracts' types included) and
-    /// refuses by the record's name ([[unparameterised]]). A backend drops the question when it
-    /// emits the record, and this goes with the last.
-    let parameterisedRecord (idl: Idl) : string option =
-        let rec applied (t: IdlType) : string option =
+    /// The first answer `pick` gives a record reference (its name and its arguments) anywhere in the
+    /// WHOLE vocabulary: every declared member's type and every contract method's, at any depth, a
+    /// reference's own arguments after the reference. Every case of the type is named.
+    let private firstRecordReference (pick: string -> IdlType list -> string option) (idl: Idl) : string option =
+        let rec walk (t: IdlType) : string option =
             match t with
-            | TRecord(n, (_ :: _)) -> Some n
+            | TRecord(n, args) -> pick n args |> Option.orElseWith (fun () -> args |> List.tryPick walk)
             | TList i
             | TMap i
-            | TSet i -> applied i
+            | TSet i -> walk i
             | TUnion(_, args)
-            | TTuple args -> args |> List.tryPick applied
-            | TKeyedMap(k, v) -> [ k; v ] |> List.tryPick applied
-            | THosted { Wire = Some w } -> applied w
-            | _ -> None
+            | TTuple args -> args |> List.tryPick walk
+            | TKeyedMap(k, v) -> [ k; v ] |> List.tryPick walk
+            | THosted h -> h.Wire |> Option.bind walk
+            | TStr
+            | TInt
+            | TBool
+            | TFloat
+            | TEnum _
+            | TVar _
+            | TNode
+            | TKind
+            | TOp
+            | TClosure
+            | TOpaque
+            | TFn _
+            | TJson
+            | TInt64
+            | TDecimal
+            | TBytes
+            | TTimeOfDay
+            | TDuration -> None
 
         let methodTypes =
             idl.Contracts
             |> List.collect _.Methods
             |> List.collect (fun m -> (m.Arguments |> List.map _.Type) @ Option.toList m.Result)
 
+        (allFieldLists idl |> List.collect (List.map _.Type)) @ methodTypes
+        |> List.tryPick walk
+
+    /// Phase 732 — what the F# entries ask of a vocabulary before they emit a record: that every
+    /// reference applies as many arguments as its record declares parameters. A backend is handed
+    /// an `Idl` value, not a declaration that was checked, and a reference no binding can be made
+    /// for has no generic type to name; it is refused by the record's name, in the sentence the JSON
+    /// schema refuses it in ([[instantiated]]).
+    let recordsAppliedIdl (idl: Idl) : Result<unit, CodegenError> =
+        let misapplied (name: string) (args: IdlType list) =
+            match CodegenLookup.tryRecord idl name with
+            | Some r when List.length r.Params <> List.length args ->
+                Some(misappliedConstruct name (List.length args) (List.length r.Params))
+            | _ -> None
+
+        match firstRecordReference misapplied idl with
+        | Some construct -> misappliedRefusal construct
+        | None -> Ok()
+
+    /// [[recordsAppliedIdl]] over a resolution, answering the resolution itself.
+    let recordsApplied (d: Decl) : Result<Decl, CodegenError> =
+        recordsAppliedIdl d.Idl |> Result.map (fun () -> d)
+
+    /// Phase 732 — the first record of the vocabulary that declares a type parameter, else the first
+    /// a reference applies to a type argument. The declaration, the artifact, the declaration check,
+    /// the interpreter, the JSON schema and the F# entries carry both; the TypeScript and F* entries
+    /// do not emit one yet, so each asks this of the WHOLE vocabulary (its contracts' types
+    /// included) and refuses by the record's name ([[unparameterised]]). A backend drops the
+    /// question when it emits the record, and this goes with the last.
+    let parameterisedRecord (idl: Idl) : string option =
         idl.Records
         |> List.tryFind (fun r -> not (List.isEmpty r.Params))
         |> Option.map _.Name
         |> Option.orElseWith (fun () ->
-            (allFieldLists idl |> List.collect (List.map _.Type)) @ methodTypes
-            |> List.tryPick applied)
+            firstRecordReference (fun n args -> if List.isEmpty args then None else Some n) idl)
 
     /// The construct a backend names when [[parameterisedRecord]] answers a record.
     let parameterisedRecordConstruct (name: string) : string =

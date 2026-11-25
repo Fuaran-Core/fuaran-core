@@ -32,11 +32,12 @@ module internal FSharpCodecOnly =
     [<Literal>]
     let private rootKind = "__codecOnlyRoots"
 
-    /// The declared type of a root named `name` — a union applied to its own parameters.
+    /// The declared type of a root named `name` — a union or (Phase 732) a record applied to its own
+    /// parameters.
     let private rootType (idl: Idl) (name: string) : IdlType option =
         match CodegenLookup.tryUnion idl name, CodegenLookup.tryRecord idl name, CodegenLookup.tryEnum idl name with
         | Some u, _, _ -> Some(TUnion(u.Name, u.Params |> List.map TVar))
-        | _, Some r, _ -> Some(TRecord(r.Name, []))
+        | _, Some r, _ -> Some(TRecord(r.Name, r.Params |> List.map TVar))
         | _, _, Some e -> Some(TEnum e.Name)
         | _ -> None
 
@@ -76,6 +77,7 @@ module internal FSharpCodecOnly =
         | TOp -> true
         | TList inner
         | TMap inner -> nodeIn inner
+        | TRecord(_, args)
         | TUnion(_, args) -> args |> List.exists nodeIn
         | THosted h -> h.Wire |> Option.exists nodeIn
         | _ -> false
@@ -89,8 +91,10 @@ module internal FSharpCodecOnly =
     /// The strict walker of a value of `t`.
     let rec private walker (t: IdlType) : string =
         match t with
-        | TRecord(n, _) -> "strict" + n
+        | TRecord(n, [])
         | TUnion(n, []) -> "strict" + n
+        // A generic declaration's walker takes one walker per argument, as its codecs take a codec.
+        | TRecord(n, args)
         | TUnion(n, args) -> "(strict" + n + " " + (args |> List.map walker |> String.concat " ") + ")"
         | TVar v -> "strict" + v
         | TList inner -> "(sList " + walker inner + ")"
@@ -173,8 +177,9 @@ module internal FSharpCodecOnly =
 
     let private recordWalker (idl: Idl) (r: IdlRecord) : string =
         sprintf
-            "and private strict%s (j: JVal) : Result<unit, DecodeError> =\n    match j with\n    | JObj __fs -> Decoder.members %s j%s\n    | _ -> Ok()"
+            "and private strict%s%s (j: JVal) : Result<unit, DecodeError> =\n    match j with\n    | JObj __fs -> Decoder.members %s j%s\n    | _ -> Ok()"
             r.Name
+            (walkerParams r.Params)
             (rosterLit idl [] r.Fields)
             (fieldWalks idl r.Fields)
 
@@ -258,24 +263,16 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
             else
                 "let encode"
 
-        match Decl.tryUnion decl name, Decl.tryRecord decl name with
-        | Some u, _ ->
-            let ty = u.Name + declParams msg u.Name u.Params
-
-            let encParams =
-                u.Params
-                |> List.map (fun p -> sprintf " (enc%s: '%s -> JVal)" p p)
-                |> String.concat ""
-
-            let decParams =
-                u.Params
-                |> List.map (fun p -> sprintf " (dec%s: JVal -> Result<'%s, DecodeError>)" p p)
-                |> String.concat ""
-
-            let noWalks = u.Params |> List.map (fun _ -> " sNone") |> String.concat ""
+        // A union's and a record's entries are one body over the declaration's parameters: each takes
+        // one codec per parameter and hands it on, and `strictDoc` is the strict reader's comment.
+        let declared (pars: string list) (strictDoc: string) =
+            let ty = name + declParams msg name pars
+            let encParams = encCodecParams pars
+            let decParams = decCodecParams pars
+            let noWalks = pars |> List.map (fun _ -> " sNone") |> String.concat ""
 
             [ sprintf "/// `%s` as a JSON value." name
-              sprintf "%s%s%s (v: %s) : JVal = enc%s%s v" writer name encParams ty name (codecArgs "enc" u.Params)
+              sprintf "%s%s%s (v: %s) : JVal = enc%s%s v" writer name encParams ty name (codecArgs "enc" pars)
               sprintf "/// `%s` read back; a refusal is the typed `DecodeError`." name
               sprintf
                   "let decode%s%s (j: JVal) : Result<%s, DecodeError> = dec%s%s j"
@@ -283,10 +280,8 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                   decParams
                   ty
                   name
-                  (codecArgs "dec" u.Params)
-              sprintf
-                  "/// `decode%s` under the strict-members reading: an undeclared member is `UndeclaredMember`\n/// at it. A type parameter's payload is its decoder's to police."
-                  name
+                  (codecArgs "dec" pars)
+              strictDoc
               sprintf
                   "let decode%sStrict%s (j: JVal) : Result<%s, DecodeError> =\n    strict%s%s j |> Result.bind (fun () -> dec%s%s j)"
                   name
@@ -295,23 +290,20 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                   name
                   noWalks
                   name
-                  (codecArgs "dec" u.Params) ]
+                  (codecArgs "dec" pars) ]
             |> String.concat "\n"
-        | _, Some r ->
-            let ty = r.Name + declParams msg r.Name []
 
-            [ sprintf "/// `%s` as a JSON value." name
-              sprintf "%s%s (v: %s) : JVal = enc%s v" writer name ty name
-              sprintf "/// `%s` read back; a refusal is the typed `DecodeError`." name
-              sprintf "let decode%s (j: JVal) : Result<%s, DecodeError> = dec%s j" name ty name
-              sprintf "/// `decode%s` under the strict-members reading." name
-              sprintf
-                  "let decode%sStrict (j: JVal) : Result<%s, DecodeError> =\n    strict%s j |> Result.bind (fun () -> dec%s j)"
-                  name
-                  ty
-                  name
-                  name ]
-            |> String.concat "\n"
+        let policed =
+            sprintf
+                "/// `decode%s` under the strict-members reading: an undeclared member is `UndeclaredMember`\n/// at it. A type parameter's payload is its decoder's to police."
+                name
+
+        match Decl.tryUnion decl name, Decl.tryRecord decl name with
+        | Some u, _ -> declared u.Params policed
+        // Phase 732 — a generic record's entries are a generic union's; one declaring no parameter
+        // keeps the comment it always had.
+        | _, Some r when not (List.isEmpty r.Params) -> declared r.Params policed
+        | _, Some _ -> declared [] (sprintf "/// `decode%s` under the strict-members reading." name)
         | _ ->
             [ sprintf "/// `%s` as a JSON value." name
               sprintf "%s%s (v: %s) : JVal = enc%s v" writer name name name
@@ -459,7 +451,7 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                         + "\n"
                         + ((decl.Enums |> List.map (fun e -> abbreviation e.Name []))
                            @ (decl.Unions |> List.map (fun u -> abbreviation u.Name u.Params))
-                           @ (decl.Records |> List.map (fun r -> abbreviation r.Name []))
+                           @ (decl.Records |> List.map (fun r -> abbreviation r.Name r.Params))
                            |> String.concat "\n") ]
                       decl.Enums |> List.map enumEncoder
                       [ encodeHelpers idl ]

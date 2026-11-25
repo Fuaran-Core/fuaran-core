@@ -773,7 +773,7 @@ module internal TypeScriptDerived =
             { tsDecPrinter with
                 Var = fun v -> "col" + v
                 Named = fun n -> "col" + n
-                Union = fun n args -> "((x) => col" + n + "(" + String.concat ", " (List.map snd args) + ", x))"
+                Generic = fun n args -> "((x) => col" + n + "(" + String.concat ", " (List.map snd args) + ", x))"
                 Node = "colNode"
                 List = fun c -> "cList(" + c + ")"
                 Map = fun c -> "cMap(" + c + ")" }
@@ -791,8 +791,8 @@ module internal TypeScriptDerived =
                 fun o f ->
                     match tsInlineOf idl f, f.Opt with
                     | Some(InlineSlot.Keyed(u, keyed)), Required ->
-                        Some(tsSpread ("dKeyed(colMembers" + u.Name + "(" + o + "), " + tsKeyedFirst keyed + ")"))
-                    | Some slot, _ -> Some(tsSpread ("colMembers" + tsInlineName slot + "(" + o + ")"))
+                        Some(Ok(tsSpread ("dKeyed(colMembers" + u.Name + "(" + o + "), " + tsKeyedFirst keyed + ")")))
+                    | Some slot, _ -> Some(Ok(tsSpread ("colMembers" + tsInlineName slot + "(" + o + ")")))
                     | None, _ -> None }
 
     /// Read every member in declaration order and then run each of `checks`, then build the object

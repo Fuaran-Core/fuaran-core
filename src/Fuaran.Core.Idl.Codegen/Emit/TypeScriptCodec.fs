@@ -364,7 +364,7 @@ module internal TypeScriptCodec =
               Var = fun v -> "enc" + v
               Named = fun n -> "enc" + n
               Node = "encodeNode"
-              Union = fun n args -> "((x) => enc" + n + "(" + String.concat ", " (List.map snd args) + ", x))"
+              Generic = fun n args -> "((x) => enc" + n + "(" + String.concat ", " (List.map snd args) + ", x))"
               List = fun e -> "((xs) => '[' + xs.map(" + e + ").join(',') + ']')"
               Map =
                 fun e ->
@@ -413,7 +413,7 @@ module internal TypeScriptCodec =
           Apply = fun e var -> e + "(" + var + ")"
           ListApplied = fun e var -> "'[' + " + var + ".map(" + e + ").join(',') + ']'"
           NodeApplied = fun var -> "encodeNode(" + var + ")"
-          UnionApplied = fun n args var -> "enc" + n + "(" + String.concat ", " args + ", " + var + ")"
+          GenericApplied = fun n args var -> "enc" + n + "(" + String.concat ", " args + ", " + var + ")"
           ClosureApplied = fun var -> closure + "(" + var + ")"
           OpaqueApplied = fun var -> opaque + "(" + var + ")" }
 
@@ -526,8 +526,8 @@ module internal TypeScriptCodec =
                 // A REQUIRED presence-keyed union holding no case is refused, as the interpreter
                 // refuses the absent member: the writer is told the member it writes for.
                 | Some(InlineSlot.Keyed(u, _)), Required ->
-                    Some(tsSpread ("encMembers" + u.Name + "(" + src + ", " + SourceLit.tsString f.Name + ")"))
-                | Some slot, _ -> Some(tsSpread ("encMembers" + tsInlineName slot + "(" + src + ")"))
+                    Some(Ok(tsSpread ("encMembers" + u.Name + "(" + src + ", " + SourceLit.tsString f.Name + ")")))
+                | Some slot, _ -> Some(Ok(tsSpread ("encMembers" + tsInlineName slot + "(" + src + ")")))
                 | None, _ -> None }
 
     /// A member read off the bound JS variable `recv` (`s` for a spec/record encoder, `n` for the
@@ -789,7 +789,7 @@ module internal TypeScriptCodec =
           Var = fun v -> "dec" + v
           Named = fun n -> "dec" + n
           Node = "decNode"
-          Union = fun n args -> "((x) => dec" + n + "(" + String.concat ", " (List.map snd args) + ", x))"
+          Generic = fun n args -> "((x) => dec" + n + "(" + String.concat ", " (List.map snd args) + ", x))"
           List = fun d -> "dList(" + d + ")"
           Map = fun d -> "dMap(" + d + ")"
           // The value carries nothing, so it decodes to `null`; but it is READ (Phase 347): the
@@ -899,8 +899,8 @@ module internal TypeScriptCodec =
             fun o f ->
                 match tsInlineOf idl f, f.Opt with
                 | Some(InlineSlot.Keyed(u, keyed)), Required ->
-                    Some(tsSpread ("dKeyed(decMembers" + u.Name + "(" + o + "), " + tsKeyedFirst keyed + ")"))
-                | Some slot, _ -> Some(tsSpread ("decMembers" + tsInlineName slot + "(" + o + ")"))
+                    Some(Ok(tsSpread ("dKeyed(decMembers" + u.Name + "(" + o + "), " + tsKeyedFirst keyed + ")")))
+                | Some slot, _ -> Some(Ok(tsSpread ("decMembers" + tsInlineName slot + "(" + o + ")")))
                 | None, _ -> None }
 
     let tsDecField (idl: Idl) (disc: string) (fields: IdlField list) (f: IdlField) : Result<string, CodegenError> =

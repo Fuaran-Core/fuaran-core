@@ -21,7 +21,7 @@ module Gen =
     let fsharpTypes (idl: Idl) : Result<string, CodegenError> =
         Decl.declared idl
         |> Decl.laidOut
-        |> Result.bind Decl.unparameterised
+        |> Result.bind Decl.recordsApplied
         |> Result.bind FSharpTypes.fsharpTypes
 
     /// Emit a compiling, self-contained F# encoder module (`moduleName`) for the named kinds,
@@ -35,7 +35,7 @@ module Gen =
         : Result<string, CodegenError> =
         Decl.resolve idl sup.KindProjections kindTags
         |> Decl.laidOut
-        |> Result.bind Decl.unparameterised
+        |> Result.bind Decl.recordsApplied
         |> Result.bind (FSharpCodec.fsharpModuleWith sup moduleName)
 
     /// `fsharpModuleWith` plus the requested structural derivations (Phase 374) and, under
@@ -51,7 +51,7 @@ module Gen =
         : Result<string, CodegenError> =
         Decl.resolve idl sup.KindProjections kindTags
         |> Decl.laidOut
-        |> Result.bind Decl.unparameterised
+        |> Result.bind Decl.recordsApplied
         |> Result.bind (FSharpCodec.fsharpModuleDerived sup derivations moduleName)
 
     /// The pre-945 entry — `fsharpModuleWith` under an empty declared-support record,
@@ -70,7 +70,7 @@ module Gen =
         (moduleName: string)
         (idl: Idl)
         : Result<string, CodegenError> =
-        Decl.unparameterisedIdl idl
+        Decl.recordsAppliedIdl idl
         |> Result.bind (fun () -> FSharpCodecOnly.fsharpCodecModule sup request moduleName idl)
 
     /// Phase 685 — `fsharpCodecModule` with a per-root visibility option: each root `internalWriters`
@@ -85,7 +85,7 @@ module Gen =
         (moduleName: string)
         (idl: Idl)
         : Result<string, CodegenError> =
-        Decl.unparameterisedIdl idl
+        Decl.recordsAppliedIdl idl
         |> Result.bind (fun () -> FSharpCodecOnly.fsharpCodecModuleWith sup request internalWriters moduleName idl)
 
     /// The JSON Schema (draft 2020-12) of the vocabulary's wire.
@@ -221,7 +221,7 @@ module Gen =
     /// An authored value as compilable F# source — the scaffold leg: an expression of type
     /// `Result<'T, DecodeError>` since Phase 384, a hosted slot's codec refusal its `Error`.
     let fsharpValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
-        Decl.unparameterisedIdl idl
+        Decl.recordsAppliedIdl idl
         |> Result.bind (fun () -> Scaffold.fsharpValue idl t v)
 
     /// The provenance header every scaffold leg emits.

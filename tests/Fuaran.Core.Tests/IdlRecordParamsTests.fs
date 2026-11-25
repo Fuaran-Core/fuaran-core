@@ -6,8 +6,8 @@ module Fuaran.Core.Tests.IdlRecordParamsTests
 //
 // This file holds the DECLARATION: what `Declare.errors` admits and refuses, each refusal in the
 // sentence the same fault of a union gets; what the artifact writes and reads; that a vocabulary
-// declaring no parameterised record writes neither new member; and that a backend which does not
-// emit a parameterised record yet refuses it by the record's name.
+// declaring no parameterised record writes neither new member; and which backend entries emit a
+// parameterised record and which refuse it yet, by the record's name.
 // ---------------------------------------------------------------------------
 
 open Expecto
@@ -180,14 +180,23 @@ let private fixtures: (string * Idl) list =
       "wider defaults", WiderDefaultsIdl.idl
       "classify base", IdlClassify.Fixtures.baseIdl ]
 
-/// One description per backend entry that emits a declaration or prints a value and does not emit a
-/// parameterised record yet, over `idl`. The JSON-schema entries emit one, and are held to the
-/// interpreter in `IdlSchemaValidatorTests`.
-let private backends (idl: Idl) : (string * Result<unit, string>) list =
+/// One description per backend entry that emits a declaration or prints a value, over `idl`, in two
+/// lists: the F# entries, which emit a parameterised record (held to the interpreter in
+/// `IdlRecordFSharpTests`), and the TypeScript and F* entries, which do not yet. The JSON-schema
+/// entries emit one, and are held to the interpreter in `IdlSchemaValidatorTests`.
+let private backends (idl: Idl) : (string * Result<unit, string>) list * (string * Result<unit, string>) list =
     let tags = idl.Kinds |> List.map _.Tag
 
     let describe (r: Result<'a, CodegenError>) =
         r |> Result.map ignore |> Result.mapError CodegenError.describe
+
+    // Every reached declaration at a host type, so the codec-only entry has nothing else to refuse.
+    let hostTypes =
+        (idl.Unions |> List.map _.Name)
+        @ (idl.Records |> List.map _.Name)
+        @ (idl.Enums |> List.map _.Name)
+        |> List.map (fun n -> n, "Boxed.Host." + n)
+        |> Map.ofList
 
     [ "fsharpTypes", describe (Gen.fsharpTypes idl)
       "fsharpModule", describe (Gen.fsharpModule "Boxed.Generated" idl tags)
@@ -196,13 +205,13 @@ let private backends (idl: Idl) : (string * Result<unit, string>) list =
       describe (
           Gen.fsharpCodecModule
               GenSupport.Empty
-              { Roots = [ "Box" ]
-                HostTypes = Map.empty }
+              { Roots = idl.Records |> List.filter (fun r -> not r.Inline) |> List.map _.Name
+                HostTypes = hostTypes }
               "Boxed.Codec"
               idl
       )
-      "fsharpValue", describe (Gen.fsharpValue idl TStr (VStr "x"))
-      "typescriptModule", describe (Gen.typescriptModule idl tags)
+      "fsharpValue", describe (Gen.fsharpValue idl TStr (VStr "x")) ],
+    [ "typescriptModule", describe (Gen.typescriptModule idl tags)
       "typescriptModuleDerived", describe (Gen.typescriptModuleDerived [] idl tags)
       "typescriptDeclarations", describe (Gen.typescriptDeclarations idl tags)
       "typescriptDeclarationsDerived", describe (Gen.typescriptDeclarationsDerived [] idl tags)
@@ -505,21 +514,41 @@ let tests =
                           "by the record's name"
                   | Ok schema -> failtestf "a schema naming an instantiation that does not exist: %s" schema)
 
-          testCase "a backend that does not emit a parameterised record yet refuses it by name" (fun _ ->
-              // A declared parameter, and separately an applied argument no declaration backs: a
-              // backend is handed an `Idl` value, not a declaration that was checked.
-              let applied =
-                  { boxed with
-                      Kinds = [ kind "Holder" [ f "shape" (TRecord("Shape", [ TStr ])) Required ] ]
-                      Unions = []
-                      Records = [ record "Shape" [] [ f "w" TInt Required ] ] }
+          testCase
+              "the F# entries emit a parameterised record; the TypeScript and F* entries refuse it by name"
+              (fun _ ->
+                  // A declared parameter, and separately an applied argument no declaration backs: a
+                  // backend is handed an `Idl` value, not a declaration that was checked.
+                  let applied =
+                      { boxed with
+                          Kinds = [ kind "Holder" [ f "shape" (TRecord("Shape", [ TStr ])) Required ] ]
+                          Unions = []
+                          Records = [ record "Shape" [] [ f "w" TInt Required ] ] }
 
-              for what, idl, named in [ "declared", boxed, "Box"; "applied", applied, "Shape" ] do
-                  for entry, answer in backends idl do
+                  let emitting, refusing = backends boxed
+                  Expect.equal (List.length emitting) 5 "the five F# entries"
+                  Expect.equal (List.length refusing) 7 "the five TypeScript entries and the two F* ones"
+
+                  for entry, answer in emitting do
+                      Expect.equal answer (Ok()) (sprintf "%s emits the parameterised records" entry)
+
+                  // A reference no binding can be made for has no generic type to name: every F# entry
+                  // refuses it by the record's name, in the sentence the JSON schema refuses it in.
+                  for entry, answer in fst (backends applied) do
                       match answer with
-                      | Ok() -> failtestf "%s (%s): emitted for a parameterised record" entry what
+                      | Ok() -> failtestf "%s: emitted for a reference no binding can be made for" entry
                       | Error description ->
                           Expect.stringContains
                               description
-                              (sprintf "a type-parameterised record ('%s')" named)
-                              (sprintf "%s (%s) names the record" entry what)) ]
+                              "a reference applying record 'Shape' to 1 type argument(s) where it declares 0"
+                              (sprintf "%s names the reference" entry)
+
+                  for what, idl, named in [ "declared", boxed, "Box"; "applied", applied, "Shape" ] do
+                      for entry, answer in snd (backends idl) do
+                          match answer with
+                          | Ok() -> failtestf "%s (%s): emitted for a parameterised record" entry what
+                          | Error description ->
+                              Expect.stringContains
+                                  description
+                                  (sprintf "a type-parameterised record ('%s')" named)
+                                  (sprintf "%s (%s) names the record" entry what)) ]

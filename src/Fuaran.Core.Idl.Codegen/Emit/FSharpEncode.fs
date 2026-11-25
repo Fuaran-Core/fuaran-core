@@ -53,6 +53,34 @@ module internal FSharpEncode =
                 (bind 0 parts)
                 n
 
+    /// The codecs a generic declaration's printer is handed, as its parameters: one per type
+    /// parameter, in declared order, each `(<prefix><P>: <codec type of 'P>)`. A generic union's and
+    /// (Phase 732) a generic record's encoder, decoders and member writers all take them this way.
+    let codecParams (prefix: string) (codecType: string -> string) (ps: string list) : string =
+        ps
+        |> List.map (fun p -> sprintf " (%s%s: %s)" prefix p (codecType ("'" + p)))
+        |> String.concat ""
+
+    /// [[codecParams]] for an encoder: ` (encT: 'T -> JVal)`.
+    let encCodecParams (ps: string list) : string =
+        codecParams "enc" (sprintf "%s -> JVal") ps
+
+    /// The explicit `<'T, …>` list a generic printer declares its type parameters with — the list
+    /// polymorphic recursion needs (see [[unionEncoder]]) — or nothing for a declaration with none.
+    let explicitParams (ps: string list) : string =
+        if List.isEmpty ps then
+            ""
+        else
+            "<" + (ps |> List.map (fun p -> "'" + p) |> String.concat ", ") + ">"
+
+    /// The codecs a reference hands a generic declaration's printer, one per argument, each printed
+    /// by `p` and led by a space — nothing for a reference applying no argument.
+    let codecArgsOf (p: SlotPrinter) (args: IdlType list) : Result<string, CodegenError> =
+        args
+        |> List.map (SlotTraversal.slotFn p)
+        |> sequenceR
+        |> Result.map (List.map (fun a -> " " + a) >> String.concat "")
+
     /// Phase 524 — the F# ENCODER printer over the one slot traversal ([[SlotTraversal]]): `JVal`
     /// constructors and `enc<Name>` functions.
     let encPrinter: AppliedPrinter =
@@ -72,7 +100,7 @@ module internal FSharpEncode =
               Var = fun v -> "enc" + v
               Named = fun n -> "enc" + n
               Node = "encNode"
-              Union = fun n args -> "(enc" + n + " " + String.concat " " (List.map snd args) + ")"
+              Generic = fun n args -> "(enc" + n + " " + String.concat " " (List.map snd args) + ")"
               List = sprintf "(fun __xs -> JArr(List.map %s __xs))"
               Map = sprintf "(fun __m -> JObj(Map.toList __m |> List.map (fun (k, v) -> k, %s v)))"
               // A closure/opaque codec ignores its argument and emits the fixed sentinel.
@@ -103,7 +131,7 @@ module internal FSharpEncode =
           Apply = sprintf "%s %s"
           ListApplied = sprintf "JArr(List.map %s %s)"
           NodeApplied = sprintf "encNode %s"
-          UnionApplied = fun n args var -> "(enc" + n + " " + String.concat " " args + ") " + var
+          GenericApplied = fun n args var -> "(enc" + n + " " + String.concat " " args + ") " + var
           ClosureApplied = fun _ -> "JStr \"<closure>\""
           OpaqueApplied = fun _ -> "JStr \"<opaque>\"" }
 
@@ -223,41 +251,69 @@ let private encFloat (f: float) : JVal =
         | [] -> SourceLit.fsString ""
 
     /// The F# piece laying an inline field's members onto the object being written, read from `src`.
-    let inlineEncPiece (idl: Idl) (src: string) (f: IdlField) : string option =
+    /// Phase 732 — an inline record applied to arguments is handed one encoder per argument, as a
+    /// generic union's encoder is: the holder's own parameter is the holder's encoder for it.
+    let inlineEncPiece (idl: Idl) (src: string) (f: IdlField) : Result<string, CodegenError> option =
         match Decl.inlineSlot idl f.Type, f.Opt with
-        | Some(InlineSlot.Record r), _ -> Some(sprintf "yield! encMembers%s %s" r.Decl.Name src)
+        | Some(InlineSlot.Record r), _ ->
+            codecArgsOf encPrinter.Slot r.Args
+            |> Result.map (fun args -> sprintf "yield! encMembers%s%s %s" r.Decl.Name args src)
+            |> Some
         | Some(InlineSlot.Keyed(u, _)), Optional ->
-            Some(sprintf "yield! (match %s with Some __v -> encMembers%s __v | None -> [])" src u.Name)
-        | Some(InlineSlot.Keyed(u, _)), _ -> Some(sprintf "yield! encMembers%s %s" u.Name src)
+            Some(Ok(sprintf "yield! (match %s with Some __v -> encMembers%s __v | None -> [])" src u.Name))
+        | Some(InlineSlot.Keyed(u, _)), _ -> Some(Ok(sprintf "yield! encMembers%s %s" u.Name src))
         | None, _ -> None
 
     /// The F# expression reading an inline field from the object `o` its members sit on.
-    let inlineDecRead (idl: Idl) (o: string) (f: IdlField) : string option =
+    /// `codecs` prints the codecs an inline record's arguments are read with (Phase 732), each led
+    /// by a space: the short-circuiting decoders.
+    let inlineDecRead
+        (codecs: IdlType list -> Result<string, CodegenError>)
+        (idl: Idl)
+        (o: string)
+        (f: IdlField)
+        : Result<string, CodegenError> option =
         match Decl.inlineSlot idl f.Type, f.Opt with
-        | Some(InlineSlot.Record r), _ -> Some(sprintf "decMembers%s %s" r.Decl.Name o)
-        | Some(InlineSlot.Keyed(u, _)), Optional -> Some(sprintf "decMembers%s %s" u.Name o)
+        | Some(InlineSlot.Record r), _ ->
+            codecs r.Args
+            |> Result.map (fun args -> sprintf "decMembers%s%s %s" r.Decl.Name args o)
+            |> Some
+        | Some(InlineSlot.Keyed(u, _)), Optional -> Some(Ok(sprintf "decMembers%s %s" u.Name o))
         | Some(InlineSlot.Keyed(u, keyed)), _ ->
             Some(
-                sprintf
-                    "(decMembers%s %s |> Result.bind (function Some __v -> Ok __v | None -> Error(Decoder.missing %s)))"
-                    u.Name
-                    o
-                    (keyedFirst keyed)
+                Ok(
+                    sprintf
+                        "(decMembers%s %s |> Result.bind (function Some __v -> Ok __v | None -> Error(Decoder.missing %s)))"
+                        u.Name
+                        o
+                        (keyedFirst keyed)
+                )
             )
         | None, _ -> None
 
-    /// The collecting twin of [[inlineDecRead]].
-    let inlineColRead (idl: Idl) (o: string) (f: IdlField) : string option =
+    /// The collecting twin of [[inlineDecRead]]; `codecs` prints each argument's collecting decoder
+    /// and its witness, as a generic union's collecting decoder is handed them.
+    let inlineColRead
+        (codecs: IdlType list -> Result<string, CodegenError>)
+        (idl: Idl)
+        (o: string)
+        (f: IdlField)
+        : Result<string, CodegenError> option =
         match Decl.inlineSlot idl f.Type, f.Opt with
-        | Some(InlineSlot.Record r), _ -> Some(sprintf "colMembers%s __ov j %s" r.Decl.Name o)
-        | Some(InlineSlot.Keyed(u, _)), Optional -> Some(sprintf "colMembers%s __ov j %s" u.Name o)
+        | Some(InlineSlot.Record r), _ ->
+            codecs r.Args
+            |> Result.map (fun args -> sprintf "colMembers%s __ov%s j %s" r.Decl.Name args o)
+            |> Some
+        | Some(InlineSlot.Keyed(u, _)), Optional -> Some(Ok(sprintf "colMembers%s __ov j %s" u.Name o))
         | Some(InlineSlot.Keyed(u, keyed)), _ ->
             Some(
-                sprintf
-                    "(colMembers%s __ov j %s |> Result.bind (function Some __v -> Ok __v | None -> Error [ Decoder.missing %s ]))"
-                    u.Name
-                    o
-                    (keyedFirst keyed)
+                Ok(
+                    sprintf
+                        "(colMembers%s __ov j %s |> Result.bind (function Some __v -> Ok __v | None -> Error [ Decoder.missing %s ]))"
+                        u.Name
+                        o
+                        (keyedFirst keyed)
+                )
             )
         | None, _ -> None
 
@@ -378,11 +434,7 @@ let private encFloat (f: float) : JVal =
         : Result<string, CodegenError> =
         let msg, idl = decl.Msg, decl.Idl
 
-        let encArgs =
-            u.Params
-            |> List.map (fun p -> sprintf " (enc%s: '%s -> JVal)" p p)
-            |> String.concat ""
-
+        let encArgs = encCodecParams u.Params
         let tyArgs = declParams msg u.Name u.Params
 
         let pat (c: IdlUnionCase) =
@@ -484,15 +536,19 @@ let private encFloat (f: float) : JVal =
     /// id` (omit-on-absence for optionals). `Canonical.write Rendering.CrossHost` Ordinal-sorts keys, so emission order is
     /// irrelevant. New for the real tier (`InvokeArg`, `FormField`, `FilterSpec`, `TabHeader`,
     /// `ColumnErased`, `ContentHash`, …).
+    ///
+    /// Phase 732 — a generic record takes one `encX : 'X -> JVal` codec per type parameter, as a
+    /// generic union does ([[unionEncoder]]).
     let recordEncoder (msg: Set<string>) (idl: Idl) (r: IdlRecord) : Result<string, CodegenError> =
-        let ps = declParams msg r.Name []
+        let ps = declParams msg r.Name r.Params
 
         objectPieces idl r.Fields
         |> Result.map (fun pieces ->
             sprintf
-                "and private enc%s%s (s: %s%s) : JVal =\n    JObj([ %s ] |> List.choose id)"
+                "and private enc%s%s%s (s: %s%s) : JVal =\n    JObj([ %s ] |> List.choose id)"
                 r.Name
                 ps
+                (encCodecParams r.Params)
                 r.Name
                 ps
                 pieces)

@@ -277,8 +277,8 @@ module internal Core =
             | TInt
             | TBool
             | TFloat
-            | TEnum _
-            | TRecord _ -> false
+            | TEnum _ -> false
+            | TRecord(_, args)
             | TUnion(_, args) -> args |> List.exists unreadable
             | TList inner
             | TMap inner -> unreadable inner
@@ -475,6 +475,8 @@ module internal Core =
         | TBool -> Ok "bool"
         | TFloat -> Ok "float"
         | TEnum n -> Ok n
+        // Phase 732 — a record reference applies its arguments as a union reference does.
+        | TRecord(n, args)
         | TUnion(n, args) -> args |> List.map fsType |> sequenceR |> Result.map (applied n)
         | TVar v -> Ok("'" + v)
         | TNode -> Ok(applied "Node" [])
@@ -503,7 +505,6 @@ module internal Core =
         | TJson -> Ok "JVal"
         // A hosted slot declares the real host type — that is its whole point.
         | THosted h -> Ok h.FSharp
-        | TRecord(n, _) -> Ok(applied n [])
         | TMap vt -> fsType vt |> Result.map (fun s -> "Map<string, " + s + ">")
         // Phase 639 (D251) — the wider data universe. The exact text-borne types bind to their
         // canonical text, as Core's own decimal cell does: no host type holds every decimal, and

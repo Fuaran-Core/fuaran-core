@@ -78,9 +78,14 @@ let rec valueKey (idl: Idl) (t: IdlType) (v: IdlValue) : string =
            |> List.map (fun (k, ev) -> Canonical.write Rendering.CrossHost (JStr k) + ":" + valueKey idl vt ev)
            |> String.concat ",")
         + "}"
-    | TRecord(n, _), VRecord fs ->
+    | TRecord(n, args), VRecord fs ->
         match idl.Records |> List.tryFind (fun r -> r.Name = n) with
-        | Some r -> "R" + n + "(" + fieldsKey idl Map.empty r.Fields fs + ")"
+        | Some r ->
+            // Phase 732 — a record's members are keyed at the reference's instantiation, as a
+            // union case's are.
+            match TypeParams.bindRecord r args with
+            | Some subst -> "R" + n + "(" + fieldsKey idl subst r.Fields fs + ")"
+            | None -> sprintf "?record %s applied to %d" n (List.length args)
         | None -> sprintf "?record %s" n
     | TUnion(n, args), VUnion(tag, fs) ->
         match idl.Unions |> List.tryFind (fun u -> u.Name = n) with
@@ -195,13 +200,15 @@ let rec private toIdl (hosted: Map<string, obj -> JVal>) (idl: Idl) (t: IdlType)
     | TList inner -> VList [ for x in (o :?> Collections.IEnumerable) -> recur inner x ]
     | TMap vt ->
         VMap [ for kv in (o :?> Collections.IEnumerable) -> unbox<string> (prop kv "Key"), recur vt (prop kv "Value") ]
-    | TRecord(n, _) ->
+    | TRecord(n, args) ->
         let r = idl.Records |> List.find (fun r -> r.Name = n)
+        // Phase 732 — the reference's binding, as the union arm below has.
+        let subst = TypeParams.bindRecord r args |> Option.defaultValue Map.empty
 
         if List.isEmpty r.Fields then
             VRecord []
         else
-            VRecord(fieldsOf hosted idl Map.empty r.Fields (fun f -> prop o (pascal f.Name)))
+            VRecord(fieldsOf hosted idl subst r.Fields (fun f -> prop o (pascal f.Name)))
     | TUnion(n, args) ->
         let u = idl.Unions |> List.find (fun u -> u.Name = n)
         let subst = TypeParams.bind u args |> Option.defaultValue Map.empty
@@ -431,10 +438,11 @@ let private tsLeg (idl: Idl) (rows: (IdlValue * IdlValue * string) list) : Map<i
 
 let private noNode = "node is not on PATH: the TypeScript leg did not run"
 
-/// One vocabulary through all three hosts. Returns every divergence, each naming the vector's
-/// index, the host and what differed — empty is the pass — and how many vectors reached the
-/// compiled and TypeScript legs.
-let private differential (c: Certified) (vectors: IdlValue list) : string list * int =
+/// One vocabulary through the interpreter and the compiled F# module, and through the TypeScript
+/// host where `typescript` asks for it. Returns every divergence, each naming the vector's index,
+/// the host and what differed — empty is the pass — and how many vectors reached the compiled leg
+/// (and the TypeScript one, where it ran).
+let private differentialOver (typescript: bool) (c: Certified) (vectors: IdlValue list) : string list * int =
     let idl = c.Idl
     let key = valueKey idl TNode
 
@@ -484,10 +492,18 @@ let private differential (c: Certified) (vectors: IdlValue list) : string list *
                   if projected <> key d then
                       sprintf "#%d compiled F# VALUE: interpreter %s, F# %s" i (key d) projected ])
 
+    // The TypeScript leg is generated and run only where it is asked for.
+    let tsResults =
+        if typescript then
+            Some(tsLeg idl (ok |> List.map (fun (_, v, bytes, d) -> v, d, bytes)))
+        else
+            None
+
     let tsFindings =
-        match tsLeg idl (ok |> List.map (fun (_, v, bytes, d) -> v, d, bytes)) with
-        | None -> [ noNode ]
-        | Some results ->
+        match tsResults with
+        | None -> []
+        | Some None -> [ noNode ]
+        | Some(Some results) ->
             ok
             |> List.mapi (fun row (i, _, bytes, _) ->
                 match results.TryFind row with
@@ -506,6 +522,9 @@ let private differential (c: Certified) (vectors: IdlValue list) : string list *
             |> List.concat
 
     interpFindings @ compiledFindings @ tsFindings, List.length ok
+
+/// One vocabulary through all three hosts ([[differentialOver]]).
+let private differential (c: Certified) (vectors: IdlValue list) : string list * int = differentialOver true c vectors
 
 let private report (name: string) (findings: string list) =
     if not (List.isEmpty findings) then
@@ -605,6 +624,101 @@ let private agreeOn (c: Certified) =
             report c.Name findings
 
             Expect.equal compared (2 * perVocabulary) "every vector reached all three hosts (none refused at encode)")
+
+// ---------------------------------------------------------------------------
+// Phase 732 — the parameterised records' vocabulary in the differential, in each wire configuration
+// the certification vocabularies above run (the default; and a `kind` discriminator, the kind merged
+// into the envelope, members in declared order). The interpreter and the compiled F# module are
+// held to one another by value and by bytes in both directions. The TypeScript backend does not
+// emit a parameterised record yet, so its leg is not run here: it refuses the vocabulary by the
+// record's name, which `IdlRecordParamsTests` pins.
+// ---------------------------------------------------------------------------
+
+/// The parameterised records' vocabulary under each wire configuration, with its compiled module.
+let private parameterised: (Certified * (string * IdlValue * string) list) list =
+    let compiled =
+        [ "default",
+          { Decode = fun s -> ParameterisedRecordsGenerated.decodeNode s |> Result.map box
+            Encode = fun o -> ParameterisedRecordsGenerated.encodeNode (unbox o)
+            Hosted = Map.empty }
+          "flat",
+          { Decode = fun s -> ParameterisedRecordsFlatGenerated.decodeNode s |> Result.map box
+            Encode = fun o -> ParameterisedRecordsFlatGenerated.encodeNode (unbox o)
+            Hosted = Map.empty } ]
+        |> Map.ofList
+
+    ParameterisedRecordsIdl.configurations
+    |> List.map (fun (name, idl, documents) ->
+        { Name = "parameterised records, " + name
+          Idl = idl
+          Compiled = compiled[name]
+          HostedDraw = Map.empty },
+        documents)
+
+[<Tests>]
+let parameterisedRecords =
+    testList
+        "Phase 732 — the interpreter and the compiled F# agree on a parameterised record, by VALUE and by BYTES"
+        [ for c, documents in parameterised do
+              testCase (sprintf "%s: every pinned document is written and read back alike" c.Name) (fun _ ->
+                  Expect.equal (List.length documents) 3 "one document per kind"
+
+                  for what, value, bytes in documents do
+                      Expect.equal
+                          (Encode.encode c.Idl value)
+                          (Ok bytes)
+                          (what + ": the interpreter writes the pinned bytes")
+
+                      match c.Compiled.Decode bytes with
+                      | Error e -> failtestf "%s: compiled F# refused %s: %s" what bytes (DecodeError.render e)
+                      | Ok typed ->
+                          Expect.equal
+                              (c.Compiled.Encode typed)
+                              bytes
+                              (what + ": compiled F# re-writes the pinned bytes")
+
+                          Expect.equal
+                              (valueKey c.Idl TNode (toIdl c.Compiled.Hosted c.Idl TNode typed))
+                              (valueKey c.Idl TNode value)
+                              (what + ": and holds the authored value"))
+
+              testCase (sprintf "%s: every drawn and adversarial vector agrees, and none is refused" c.Name) (fun _ ->
+                  let vectors = vectorsFor c.Idl c.HostedDraw (seedOf c.Name) perVocabulary
+                  let findings, compared = differentialOver false c vectors
+                  report c.Name findings
+
+                  // A differential both sides refuse alike proves nothing: every vector answered a
+                  // value on the interpreter and reached the compiled module.
+                  Expect.equal
+                      (List.length vectors)
+                      (2 * perVocabulary)
+                      "the drawn vectors and their adversarial twins"
+
+                  Expect.equal compared (List.length vectors) "every vector was written, read back and compared")
+
+          testCase "the vectors reach every instantiation of the parameterised records" (fun _ ->
+              // Non-degeneracy: the draw holds a value at each record the vocabulary applies, the
+              // inline ones among them (by a member only they put on the wire).
+              let wires =
+                  let idl = ParameterisedRecordsIdl.idl
+
+                  vectorsFor idl Map.empty (seedOf "parameterised records, default") perVocabulary
+                  |> List.choose (fun v -> Encode.encode idl v |> Result.toOption)
+                  |> String.concat "\n"
+
+              for token in
+                  [ "\"range\":{"
+                    "\"marks\":[{"
+                    "\"window\":{"
+                    "\"series\":{\"points\":[{"
+                    "\"sort\":{"
+                    "\"$type\":\"Bounded\",\"range\":{"
+                    "\"$type\":\"Local\",\"initial\":"
+                    "\"stateKey\":"
+                    "\"pageSize\":"
+                    "\"cursor\":"
+                    "\"extent\":{" ] do
+                  Expect.stringContains wires token (sprintf "some vector carries %s" token)) ]
 
 [<Tests>]
 let threeWay =

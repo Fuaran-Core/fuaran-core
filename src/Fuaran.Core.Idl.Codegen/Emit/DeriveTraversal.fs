@@ -147,10 +147,13 @@ module internal Derive =
 
     // ---- the keyed walk (emission 2) ----
 
-    let private throughArgument (u: string) : Result<'a, CodegenError> =
+    /// `what` is `union` or `record` (Phase 732): one sentence for both.
+    let private throughArgument (what: string) (name: string) : Result<'a, CodegenError> =
         refuse
-            (sprintf "a node held through a type argument of the generic union '%s'" u)
-            "the keyed walk is derived per declaration, and a generic union's argument has no one declaration to derive it from"
+            (sprintf "a node held through a type argument of the generic %s '%s'" what name)
+            (sprintf
+                "the keyed walk is derived per declaration, and a generic %s's argument has no one declaration to derive it from"
+                what)
             "hold the node in a non-generic record or union, or do not request KeyedPositions"
 
     /// The walk over the nodes a value of type `t` at `e` holds, in declaration order (`d` names the
@@ -168,8 +171,9 @@ module internal Derive =
         | TNode -> Ok(p.Node e)
         | TList i -> positions p hs i x (d + 1) |> Result.map (p.List e x)
         | TMap i -> positions p hs i (p.MapItem e x) (d + 1) |> Result.map (fun b -> p.Map e x b d)
-        | TRecord(n, _) -> Ok(p.Named n e)
-        | TUnion(n, args) when args |> List.exists (Decl.holdsIn hs) -> throughArgument n
+        | TRecord(n, args) when args |> List.exists (Decl.holdsIn hs) -> throughArgument "record" n
+        | TUnion(n, args) when args |> List.exists (Decl.holdsIn hs) -> throughArgument "union" n
+        | TRecord(n, _)
         | TUnion(n, _) -> Ok(p.Named n e)
         | _ -> Ok(p.Other e)
 
@@ -269,12 +273,14 @@ module internal Derive =
         | TMap i ->
             fold p ctx u i (p.MapItem e x) s (d + 1)
             |> Result.map (fun b -> p.Map e x s b st)
-        | TRecord(n, _) ->
+        // Phase 732 — a record is folded at the instantiation the reference applies, so a member
+        // naming a parameter is walked at its argument.
+        | TRecord(n, args) ->
             let fs =
                 Decl.tryRecord ctx n
-                |> Option.map _.Fields
+                |> Option.map (fun r -> Decl.recordFieldsAt r args)
                 |> Option.defaultValue []
-                |> List.filter (fun f -> Decl.foldSelfIn ctx u (Set.singleton n) f.Type = Ok true)
+                |> List.filter (fun f -> Decl.foldSelfIn ctx u (Set.singleton (Decl.instName t)) f.Type = Ok true)
 
             foldMembers p ctx u fs (p.Access e) st (d + 1)
         | _ -> Ok st

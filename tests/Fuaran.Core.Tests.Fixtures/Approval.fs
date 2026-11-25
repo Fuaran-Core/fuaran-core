@@ -290,6 +290,14 @@ module Regenerated =
     [<Literal>]
     let LayoutCodec = "LayoutCodecGenerated"
 
+    /// Phase 732 — the parameterised records' module (`IdlRecordFSharpTests`).
+    [<Literal>]
+    let ParameterisedRecords = "ParameterisedRecordsGenerated"
+
+    /// Phase 732 — the same vocabulary's module in the second wire configuration.
+    [<Literal>]
+    let ParameterisedRecordsFlat = "ParameterisedRecordsFlatGenerated"
+
     [<Literal>]
     let Mini = "MiniGenerated"
 

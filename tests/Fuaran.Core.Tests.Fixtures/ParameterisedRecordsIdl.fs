@@ -27,6 +27,7 @@ module Fuaran.Core.Tests.ParameterisedRecordsIdl
 // ---------------------------------------------------------------------------
 
 open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
 
 let private field (name: string) (t: IdlType) (opt: Optionality) : IdlField =
     { Name = name
@@ -161,3 +162,60 @@ let documents: (string * IdlValue * string) list =
             "sort", VRecord [ "key", VStr "name"; "value", VEnum "desc" ] ]
       ),
       "{\"id\":\"g\",\"kind\":{\"$type\":\"Grid\",\"cursor\":\"c\",\"pageSize\":20,\"series\":{\"points\":[{\"label\":\"p\",\"value\":0.5}]},\"sort\":{\"key\":\"name\",\"value\":\"desc\"},\"title\":{\"label\":\"t\",\"value\":\"v\"}}}" ]
+
+// ---------------------------------------------------------------------------
+// The F# backend over the vocabulary. `ParameterisedRecordsGenerated.fs` is the module emitted for
+// `idl` with the collecting decoders requested, committed, compiled by the suite and held to the
+// generator.
+// ---------------------------------------------------------------------------
+
+/// The module name the committed generated file declares.
+[<Literal>]
+let moduleName = "Fuaran.Core.Tests.ParameterisedRecordsGenerated"
+
+/// The committed generated file, repository-relative.
+[<Literal>]
+let generatedFile = "tests/Fuaran.Core.Tests/ParameterisedRecordsGenerated.fs"
+
+/// The module text the generator emits for `idl`, with the collecting decoders requested.
+let generate () : Result<string, CodegenError> =
+    Gen.fsharpModuleDerived GenSupport.Empty [ Derivation.SpecDecoders ] moduleName idl kindTags
+
+// ---------------------------------------------------------------------------
+// The second wire configuration the three-host differential runs (the document and score
+// vocabularies'): a `kind` discriminator, the kind merged into the node envelope, members in declared
+// order. `ParameterisedRecordsFlatGenerated.fs` is the plain structural module emitted for it.
+// ---------------------------------------------------------------------------
+
+/// [[idl]] under the second wire configuration.
+let flat: Idl =
+    { idl with
+        Wire =
+            { Discriminator = "kind"
+              NodeEnvelope = NodeEnvelopeShape.FlatKind
+              KeyOrder = KeyOrder.Declared } }
+
+/// The bytes the interpreter writes for each of [[documents]] under [[flat]], in their order.
+let flatBytes: string list =
+    [ "{\"kind\":\"Slider\",\"id\":\"s\",\"range\":{\"low\":0.5,\"high\":9.5,\"steps\":[1.5,2.5]},\"marks\":[{\"label\":\"a\",\"value\":1.5}],\"binding\":{\"kind\":\"Local\",\"initial\":2.5,\"stateKey\":\"k\"},\"shape\":{\"kind\":\"Span\",\"extent\":{\"low\":0.5,\"high\":1.5}}}"
+      "{\"kind\":\"Stepper\",\"id\":\"p\",\"range\":{\"low\":1,\"high\":9},\"window\":{\"label\":\"w\",\"value\":{\"low\":2,\"high\":4}},\"binding\":{\"kind\":\"Bounded\",\"range\":{\"low\":1,\"high\":3}}}"
+      "{\"kind\":\"Grid\",\"id\":\"g\",\"pageSize\":20,\"cursor\":\"c\",\"title\":{\"label\":\"t\",\"value\":\"v\"},\"series\":{\"points\":[{\"label\":\"p\",\"value\":0.5}]},\"sort\":{\"key\":\"name\",\"value\":\"desc\"}}" ]
+
+/// Every wire configuration the vocabulary is pinned in: its name, the vocabulary under it, and
+/// each document as what it shows, the authored value and the bytes pinned for it.
+let configurations: (string * Idl * (string * IdlValue * string) list) list =
+    [ "default", idl, documents
+      "flat", flat, List.map2 (fun (what, value, _) bytes -> what, value, bytes) documents flatBytes ]
+
+/// The module name the committed generated file of [[flat]] declares.
+[<Literal>]
+let flatModuleName = "Fuaran.Core.Tests.ParameterisedRecordsFlatGenerated"
+
+/// The committed generated file of [[flat]], repository-relative.
+[<Literal>]
+let flatGeneratedFile =
+    "tests/Fuaran.Core.Tests/ParameterisedRecordsFlatGenerated.fs"
+
+/// The plain structural module the generator emits for [[flat]].
+let generateFlat () : Result<string, CodegenError> =
+    Gen.fsharpModule flatModuleName flat kindTags

@@ -546,7 +546,7 @@ module internal FStarModel =
                     unmodellable
                         (sprintf "a declared JSON default holding a number the opaque numeric model cannot spell: %A" v)
                         where
-            | Literal.Record(r, authored) ->
+            | Literal.Record(r, _, authored) ->
                 variantFor idl Map.empty (where + " (default)") r.Fields authored
                 |> Result.bind (fun (picks, ms) ->
                     ctorLit idl where (ctorName (slotName (SRecord r.Name)) ("Mk" + variantSuffix picks)) ms authored)

@@ -212,18 +212,20 @@ module internal FSharpTypes =
 
         // Phase 303 — a declaration with NO fields has no record form (F# refuses `{ }`, FS3863),
         // so it is the single-case marker type `R = | R`; [[Core.recordLit]] spells its value.
-        let declBody (typeName: string) (fields: IdlField list) (decls: string) =
+        // Phase 732 — `pars` is the declaration's own type parameters: a record's, none for a kind.
+        let declBody (typeName: string) (pars: string list) (fields: IdlField list) (decls: string) =
             if List.isEmpty fields then
-                sprintf "%s%s =\n    | %s" typeName (declParams msg typeName []) typeName
+                sprintf "%s%s =\n    | %s" typeName (declParams msg typeName pars) typeName
             else
-                sprintf "%s%s =\n    {\n%s\n    }" typeName (declParams msg typeName []) decls
+                sprintf "%s%s =\n    {\n%s\n    }" typeName (declParams msg typeName pars) decls
 
         let recordBody (r: IdlRecord) =
             fieldDecls r.Name r.Fields
             |> Result.map (fun fields ->
                 typeComment r.Name r.Annotations,
                 (obsoleteAttr r.Annotations |> Option.toList) @ eqAttr ("R:" + r.Name),
-                declBody r.Name r.Fields fields + eqMembers ("R:" + r.Name) r.Name r.Fields)
+                declBody r.Name r.Params r.Fields fields
+                + eqMembers ("R:" + r.Name) r.Name r.Fields)
 
         let specBody (k: IdlKind) =
             // Phase 119 — the kind's own declared annotations: the doc block joins
@@ -248,7 +250,7 @@ module internal FSharpTypes =
                 |> Result.map (fun fields ->
                     comment,
                     attrs @ eqAttr ("S:" + k.Tag),
-                    declBody (k.Tag + "Spec") k.Fields fields
+                    declBody (k.Tag + "Spec") [] k.Fields fields
                     + eqMembers ("S:" + k.Tag) (k.Tag + "Spec") k.Fields)
 
         // Phase 705 — each case carries its kind's authored DOC, under its support block at

@@ -122,13 +122,13 @@ module internal FSharpCodec =
                   Union = fun read u -> colUnionDecoder sup.CaseRefines decl read u
                   NodeKind = colNodeKindDecl
                   Node = colNodeDecl
-                  Record = fun r members -> colObjectDecoder r.Name r.Name msg r.Fields members
+                  Record = fun r members -> colObjectDecoder r.Name r.Name r.Params msg r.Fields members
                   // A projected kind's decoder is the projection's short-circuiting one, lifted.
                   ReadsSpec = fun k -> not (projected k)
                   Spec =
                     fun k members ->
                         match members with
-                        | Some ms -> colObjectDecoder (k.Tag + "Spec") (k.Tag + "Spec") msg k.Fields ms
+                        | Some ms -> colObjectDecoder (k.Tag + "Spec") (k.Tag + "Spec") [] msg k.Fields ms
                         | None -> sprintf "and private col%sSpec (j: JVal) =\n    cOne (dec%sSpec j)" k.Tag k.Tag }
                 (ordinary decl)
             |> Result.bind (fun group -> inlineCols |> Result.map (fun cols -> String.concat "\n\n" (group :: cols)))

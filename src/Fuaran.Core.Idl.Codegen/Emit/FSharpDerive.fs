@@ -81,8 +81,12 @@ module internal FSharpDerive =
     /// The host type text of a declared record / union name in this module.
     let private declT (ctx: Decl) (name: string) (ps: string list) = name + declParams ctx.Msg name ps
 
-    let private unionParams (ctx: Decl) (name: string) =
-        Decl.tryUnion ctx name |> Option.map _.Params |> Option.defaultValue []
+    /// The type parameters the union or (Phase 732) the record named `name` declares.
+    let private declaredParams (ctx: Decl) (name: string) =
+        Decl.tryUnion ctx name
+        |> Option.map _.Params
+        |> Option.orElseWith (fun () -> Decl.tryRecord ctx name |> Option.map _.Params)
+        |> Option.defaultValue []
 
     /// The union-case pattern binding every field positionally: `U.Tag(__f0, __f1)`, or `U.Tag`.
     let private casePattern (u: IdlUnion) (c: IdlUnionCase) =
@@ -134,14 +138,23 @@ module internal FSharpDerive =
         let mapField (f: IdlField) e = Derive.positionsOf mapper hs f e
 
         let recordHelpers (r: IdlRecord, fs: IdlField list) =
-            let t = declT ctx r.Name []
+            let t = declT ctx r.Name r.Params
+
+            // Phase 732 — a generic record's helpers declare their type parameters explicitly, as a
+            // union's do: one is called at more than one instantiation inside this recursive group.
+            // A record declaring none keeps the inferred form it always had.
+            let gen =
+                if List.isEmpty r.Params then
+                    ""
+                else
+                    declParams ctx.Msg r.Name r.Params
 
             let lister =
                 fs
                 |> List.map (fun f -> collectField f ("v." + pascal f.Name))
                 |> sequenceR
                 |> Result.map (fun xs ->
-                    sprintf "and private nodesIn%s (v: %s) : %s list =\n    %s" r.Name t node (appendAll xs))
+                    sprintf "and private nodesIn%s%s (v: %s) : %s list =\n    %s" r.Name gen t node (appendAll xs))
 
             let mapper =
                 fs
@@ -159,8 +172,9 @@ module internal FSharpDerive =
                         |> String.concat "; "
 
                     sprintf
-                        "and private mapNodesIn%s (f: %s -> %s) (v: %s) : %s =\n%s    { v with %s }"
+                        "and private mapNodesIn%s%s (f: %s -> %s) (v: %s) : %s =\n%s    { v with %s }"
                         r.Name
+                        gen
                         node
                         node
                         t
@@ -382,7 +396,7 @@ module internal FSharpDerive =
     // -----------------------------------------------------------------------
 
     let slotsDecl (ctx: Decl) (typeName: string) : Result<string, CodegenError> =
-        let generic = unionParams ctx typeName |> List.isEmpty |> not
+        let generic = declaredParams ctx typeName |> List.isEmpty |> not
 
         let declared =
             ctx.Unions |> List.exists (fun u -> u.Name = typeName)
@@ -578,7 +592,7 @@ module internal FSharpDerive =
                     if
                         m.Success
                         && ctx.Msg.Contains m.Groups[1].Value
-                        && List.isEmpty (unionParams ctx m.Groups[1].Value)
+                        && List.isEmpty (declaredParams ctx m.Groups[1].Value)
                     then
                         Ok(sprintf "%s f (%s)" (mapperName m.Groups[1].Value) e)
                     else
@@ -590,8 +604,8 @@ module internal FSharpDerive =
         | TList i
         | TMap i -> mentionsMsg ctx i
         | TNode -> ctx.Msg.Contains "Node"
+        | TRecord(n, args)
         | TUnion(n, args) -> ctx.Msg.Contains n || List.exists (mentionsMsg ctx) args
-        | TRecord(n, _) -> ctx.Msg.Contains n
         | _ -> false
 
     let rec private mapMsgE
@@ -614,12 +628,13 @@ module internal FSharpDerive =
             | TMap i ->
                 mapMsgE ctx where i x (d + 1)
                 |> Result.map (fun b -> sprintf "Map.map (fun _ %s -> %s) %s" x b e)
-            | TRecord(n, _) -> Ok(sprintf "%s f %s" (mapperName n) e)
+            | TRecord(n, args)
             | TUnion(n, args) when args |> List.exists (mentionsMsg ctx) ->
                 refuse
                     (sprintf "the message map through a type argument of '%s' at %s" n where)
                     "the message map is derived per declaration, and a type argument carrying the message parameter has no one declaration to derive it from"
                     "carry the message parameter in a non-generic declaration, or do not request MapMsg"
+            | TRecord(n, _)
             | TUnion(n, _) -> Ok(sprintf "%s f %s" (mapperName n) e)
             | TFn s -> mapSig ctx where s.FSharp e d
             | _ -> Ok e
@@ -658,20 +673,21 @@ module internal FSharpDerive =
                     (declT ctx name ps)
                     (to2 name ps)
 
-            let recordMapper (typeName: string) (where: string) (fs: IdlField list) =
+            // `pars` is the declaration's own type parameters (Phase 732: a record's; a kind has none).
+            let recordMapper (typeName: string) (pars: string list) (where: string) (fs: IdlField list) =
                 fs
                 |> List.map (fun f ->
                     mapMsgField ctx (where + "." + f.Name) f ("v." + pascal f.Name)
                     |> Result.map (fun b -> sprintf "%s = %s" (pascal f.Name) b))
                 |> sequenceR
                 |> Result.map (fun assigns ->
-                    header typeName [] "v"
-                    + sprintf "\n    (%s: %s)" (recordLit (to2 typeName []) assigns) (to2 typeName []))
+                    header typeName pars "v"
+                    + sprintf "\n    (%s: %s)" (recordLit (to2 typeName pars) assigns) (to2 typeName pars))
 
             let records =
                 ctx.Records
                 |> List.filter (fun r -> ctx.Msg.Contains r.Name)
-                |> List.map (fun r -> recordMapper r.Name r.Name r.Fields)
+                |> List.map (fun r -> recordMapper r.Name r.Params r.Name r.Fields)
 
             let specs =
                 ctx.Kinds
@@ -686,7 +702,7 @@ module internal FSharpDerive =
                             (sprintf "the message map over the projected kind '%s'" k.Tag)
                             "a projected kind's record is verbatim host source, so the generator cannot construct it"
                             "supply the projected kind's map through the declared support, or do not request MapMsg"
-                    | None -> recordMapper (k.Tag + "Spec") k.Tag k.Fields)
+                    | None -> recordMapper (k.Tag + "Spec") [] k.Tag k.Fields)
 
             let unions =
                 ctx.Unions
@@ -886,7 +902,9 @@ module internal FSharpDerive =
                     |> Result.map (fun e -> sprintf "%s = %s" (pascal f.Name) e))
                 |> sequenceR
                 |> Result.map (fun assigns ->
-                    let gen = declParams ctx.Msg r.Name []
+                    // A record's own type parameters (Phase 732); a kind's spec declares none.
+                    let gen =
+                        declParams ctx.Msg r.Name (if r.Kind.IsSome then [] else declaredParams ctx r.Name)
 
                     sprintf
                         "/// `%s` with every field at the value a caller need not pass.\nlet default%s%s: %s%s =\n    %s"
@@ -1140,6 +1158,11 @@ module internal FSharpDerive =
 /// vocabulary instantiates a generic union at, carrying the identity both ways between that type
 /// and `'T`, so a host's one generic decoder can build a value that depends on the instantiation
 /// without asking the runtime for a type (which Fable erases inside a generic body).
+///
+/// Phase 732 — a generic RECORD is a generic declaration as a generic union is: it has a seam, not
+/// a field per instantiation, and each argument it is applied to is witnessed. An inline generic
+/// record has no seam (an inline declaration has no slot), and its arguments are witnessed too: its
+/// member reader takes each beside its decoder.
 module internal FSharpCollectingRecord =
 
     /// The witness type's name in the generated module.
@@ -1148,7 +1171,7 @@ module internal FSharpCollectingRecord =
 
     /// The case a concrete argument type is witnessed by, and that type as the collecting decoders
     /// read it (`'Msg` pinned to `obj`): named by the type, a list or map by its element and a
-    /// generic union by its arguments. `None` for an argument that names no closed, message-free F#
+    /// generic union or record by its arguments. `None` for an argument that names no closed, message-free F#
     /// type the record can carry: a type parameter (witnessed by the enclosing decoder's own
     /// witness), anything built over one, a sentinel, a hosted slot, or a message-carrying type.
     let rec instantiationCase (msg: Set<string>) (t: IdlType) : (string * string) option =
@@ -1161,8 +1184,9 @@ module internal FSharpCollectingRecord =
         | TFloat -> Some("Float", "float")
         | TBool -> Some("Bool", "bool")
         | TEnum n -> Some(n, n)
-        | TRecord(n, _)
+        | TRecord(n, [])
         | TUnion(n, []) -> plain n
+        | TRecord(n, args)
         | TUnion(n, args) when not (msg.Contains n) ->
             args
             |> List.map (instantiationCase msg)
@@ -1226,7 +1250,7 @@ module internal FSharpCollectingRecord =
                   if List.isEmpty u.Params && not (Decl.isKeyed u) then
                       yield u.Name, u.Name + objParams msg u.Name []
               for r in records do
-                  if not r.Inline then
+                  if not r.Inline && List.isEmpty r.Params then
                       yield r.Name, r.Name + objParams msg r.Name []
               for k in kinds do
                   if not (projected k) then
@@ -1242,23 +1266,33 @@ module internal FSharpCollectingRecord =
         // generic in the union's parameters: an F# record field cannot be generic, and one field per
         // instantiation would make a host restate its policy once per instantiation the vocabulary
         // uses (and could not name an instantiation over a type parameter).
-        let generic =
-            unions
-            |> List.filter (fun u -> not (List.isEmpty u.Params) && not (Decl.isKeyed u))
+        //
+        // Phase 732 — a generic record's slot is the same seam: each generic declaration here is its
+        // name and its parameters, the unions first and then the records.
+        let genericRecords = records |> List.filter (fun r -> not (List.isEmpty r.Params))
 
-        let seamName (u: IdlUnion) = "Collecting" + u.Name
+        let generic: (string * string list) list =
+            (unions
+             |> List.filter (fun u -> not (List.isEmpty u.Params) && not (Decl.isKeyed u))
+             |> List.map (fun u -> u.Name, u.Params))
+            @ (genericRecords
+               |> List.filter (fun r -> not r.Inline)
+               |> List.map (fun r -> r.Name, r.Params))
+
+        let seamName (name: string) = "Collecting" + name
 
         // Phase 635 (D248) — every argument a generic union is instantiated at, anywhere a declared
         // member's type reaches (a superset of the collecting group's call sites, so each witness a
         // call site prints has its case). A type parameter is witnessed by the enclosing decoder's
-        // own witness; an argument no case names is witnessed by `Open`.
-        let genericNames = generic |> List.map _.Name |> Set.ofList
+        // own witness; an argument no case names is witnessed by `Open`. Phase 732 — and every
+        // argument a generic record is applied to, an inline one's included.
+        let witnessed =
+            (generic |> List.map fst) @ (genericRecords |> List.map _.Name) |> Set.ofList
 
         let rec arguments (t: IdlType) : IdlType list =
             match t with
-            | TUnion(n, args) ->
-                (if genericNames.Contains n then args else [])
-                @ (args |> List.collect arguments)
+            | TRecord(n, args)
+            | TUnion(n, args) -> (if witnessed.Contains n then args else []) @ (args |> List.collect arguments)
             | TList inner
             | TMap inner -> arguments inner
             | _ -> []
@@ -1296,13 +1330,12 @@ module internal FSharpCollectingRecord =
         // type named `String`, `Int`, `Float`, `Bool` or `Absent`, or two that print alike) are refused
         // at generation rather than emitted as a module that does not compile; so is a vocabulary type
         // named as a generic union's seam.
-        let fieldNames =
-            (slots |> List.map fst) @ (generic |> List.map _.Name) @ [ "Absent" ]
+        let fieldNames = (slots |> List.map fst) @ (generic |> List.map fst) @ [ "Absent" ]
 
         // Phase 635 — the witness type is named beside the seams.
         let seams =
-            (generic |> List.map seamName)
-            @ (if List.isEmpty generic then [] else [ InstantiationType ])
+            (generic |> List.map (fst >> seamName))
+            @ (if Set.isEmpty witnessed then [] else [ InstantiationType ])
 
         let typeNames =
             Set.ofList (
@@ -1326,18 +1359,26 @@ module internal FSharpCollectingRecord =
                     |> Option.map (fun (case, _) ->
                         sprintf "two instantiations witnessed by one case '%s.%s'" InstantiationType case)
 
-        let genericSig (u: IdlUnion) =
+        let genericSig (name: string, pars: string list) =
             let decoders =
-                u.Params
+                pars
                 |> List.map (fun p -> sprintf "(JVal -> Result<'%s, DecodeError list>) * %s<'%s>" p InstantiationType p)
                 |> String.concat " * "
 
             sprintf
                 "Decode<%s> : CollectingDecoders * %s * JVal -> Result<%s%s, DecodeError list>"
-                (u.Params |> List.map (fun p -> "'" + p) |> String.concat ", ")
+                (pars |> List.map (fun p -> "'" + p) |> String.concat ", ")
                 decoders
-                u.Name
-                (objParams msg u.Name u.Params)
+                name
+                (objParams msg name pars)
+
+        // The witness type's comment names a record only where the vocabulary witnesses one, so a
+        // vocabulary declaring no generic record reads the lines it always did.
+        let witnessedWhat =
+            if List.isEmpty genericRecords then
+                "a generic union's parameter"
+            else
+                "a generic union's or record's parameter"
 
         let recordTypeDecl =
             "/// Phase 541 — the collecting decoders a host may override, one per type the vocabulary reaches\n"
@@ -1356,21 +1397,23 @@ module internal FSharpCollectingRecord =
                        ty)
                |> String.concat "\n")
             + (generic
-               |> List.map (fun u -> sprintf "\n      %s: %s" u.Name (seamName u))
+               |> List.map (fun (name, _) -> sprintf "\n      %s: %s" name (seamName name))
                |> String.concat "")
             + "\n      Absent: CollectingDecoders -> string -> string -> JVal -> Result<JVal option, DecodeError list> }"
             + (generic
-               |> List.map (fun u ->
+               |> List.map (fun (name, pars) ->
                    sprintf
                        "\n\n/// Phase 562 — the collecting decoder of `%s` at every instantiation, from its argument decoders.\nand %s =\n    abstract %s"
-                       u.Name
-                       (seamName u)
-                       (genericSig u))
+                       name
+                       (seamName name)
+                       (genericSig (name, pars)))
                |> String.concat "")
-            + (if List.isEmpty generic then
+            + (if Set.isEmpty witnessed then
                    ""
                else
-                   "\n\n/// Phase 635 — the witness of one instantiation of a generic union's parameter, passed beside its\n"
+                   sprintf
+                       "\n\n/// Phase 635 — the witness of one instantiation of %s, passed beside its\n"
+                       witnessedWhat
                    + "/// decoder: a case per concrete type the vocabulary instantiates one at, carrying the identity both\n"
                    + "/// ways between that type and `'T`, so a host builds a value that depends on the instantiation\n"
                    + "/// without a runtime type test; `Open` for an argument no case names (one built over a type parameter).\n"
@@ -1403,21 +1446,16 @@ module internal FSharpCollectingRecord =
                    sprintf "%s%s = col%s" (if i = 0 then "    { " else "      ") field field)
                |> String.concat "\n")
             + (generic
-               |> List.map (fun u ->
-                   let ps =
-                       u.Params
-                       |> List.collect (fun p -> [ "col" + p; "inst" + p ])
-                       |> String.concat ", "
+               |> List.map (fun (name, pars) ->
+                   let passed = pars |> List.collect (fun p -> [ "col" + p; "inst" + p ])
 
                    sprintf
                        "\n      %s =\n        { new %s with\n            member _.Decode(__ov, %s, j) = col%s __ov %s j }"
-                       u.Name
-                       (seamName u)
-                       ps
-                       u.Name
-                       (u.Params
-                        |> List.collect (fun p -> [ "col" + p; "inst" + p ])
-                        |> String.concat " "))
+                       name
+                       (seamName name)
+                       (String.concat ", " passed)
+                       name
+                       (String.concat " " passed))
                |> String.concat "")
             + "\n      Absent = colAbsent }"
 

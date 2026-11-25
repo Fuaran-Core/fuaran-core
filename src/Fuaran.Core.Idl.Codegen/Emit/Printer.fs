@@ -40,12 +40,13 @@ type internal SlotPrinter =
         Enum: string -> string
         /// A type variable's codec, by the variable's name.
         Var: string -> string
-        /// A declared name's codec — a non-generic union, a record.
+        /// A declared name's codec — a union or a record applied to no argument.
         Named: string -> string
         Node: string
-        /// A generic union's codec, by name, over its argument codecs, each beside the argument's
-        /// type (Phase 635: the collecting printer prints a per-instantiation witness from it).
-        Union: string -> (IdlType * string) list -> string
+        /// A generic declaration's codec — a union or (Phase 732) a record applied to arguments — by
+        /// name, over its argument codecs, each beside the argument's type (Phase 635: the collecting
+        /// printer prints a per-instantiation witness from it).
+        Generic: string -> (IdlType * string) list -> string
         /// A list's codec over its element codec.
         List: string -> string
         /// A string-keyed map's codec over its value codec.
@@ -75,8 +76,8 @@ type internal AppliedPrinter =
         ListApplied: string -> string -> string
         /// A node value encoded.
         NodeApplied: string -> string
-        /// A generic union's encoder, by name over its argument encoders, applied to a value.
-        UnionApplied: string -> string list -> string -> string
+        /// A generic declaration's encoder, by name over its argument encoders, applied to a value.
+        GenericApplied: string -> string list -> string -> string
         /// A closure slot's sentinel for a value.
         ClosureApplied: string -> string
         /// An opaque slot's sentinel for a value.
@@ -95,12 +96,14 @@ module internal SlotTraversal =
         | TFloat -> Ok p.Float
         | TEnum n -> Ok(p.Enum n)
         | TVar v -> Ok(p.Var v)
+        | TRecord(n, [])
         | TUnion(n, []) -> Ok(p.Named n)
+        | TRecord(n, args)
         | TUnion(n, args) ->
             args
             |> List.map (fun a -> slotFn p a |> Result.map (fun s -> a, s))
             |> sequenceR
-            |> Result.map (p.Union n)
+            |> Result.map (p.Generic n)
         | TNode -> Ok p.Node
         // Phase 195 — the op vocabulary is REFUSED AS DATA rather than thrown at. See
         // [[opVocabularySlot]] for why the arm exists and what it says.
@@ -117,7 +120,6 @@ module internal SlotTraversal =
             | HostedSlot.Verbatim s -> Ok s
             | HostedSlot.Through(wire, wrap) -> slotFn p wire |> Result.map wrap
             | HostedSlot.Refused e -> Error e
-        | TRecord(n, _) -> Ok(p.Named n)
         | TMap vt -> slotFn p vt |> Result.map p.Map
         | TInt64
         | TDecimal
@@ -133,11 +135,12 @@ module internal SlotTraversal =
         match t with
         | TList inner -> slotFn p.Slot inner |> Result.map (fun e -> p.ListApplied e var)
         | TNode -> Ok(p.NodeApplied var)
+        | TRecord(n, (_ :: _ as args))
         | TUnion(n, (_ :: _ as args)) ->
             args
             |> List.map (slotFn p.Slot)
             |> sequenceR
-            |> Result.map (fun a -> p.UnionApplied n a var)
+            |> Result.map (fun a -> p.GenericApplied n a var)
         | TClosure
         | TFn _ -> Ok(p.ClosureApplied var)
         | TOpaque -> Ok(p.OpaqueApplied var)
@@ -203,8 +206,9 @@ type internal MemberDecPrinter =
         /// The declared default `d` at `t`, as the literal the decoder restores.
         DefaultLit: IdlType -> IdlValue -> Result<string, CodegenError>
         /// Phase 474 — a field holding an INLINE declaration ([[InlineSlot]]), read from the object
-        /// `o` its members sit on, or `None` for any other field.
-        Inline: string -> IdlField -> string option
+        /// `o` its members sit on, or `None` for any other field. Phase 732 — a `Result`: an inline
+        /// record applied to arguments is read with one codec per argument, which can be refused.
+        Inline: string -> IdlField -> Result<string, CodegenError> option
     }
 
 /// The one traversal over a member's presence when it is READ, printed by a [[MemberDecPrinter]].
@@ -222,7 +226,7 @@ module internal MemberTraversal =
         let o = p.Object fields f
 
         match p.Inline o f with
-        | Some e when f.Opt <> HostOnly -> Ok e
+        | Some e when f.Opt <> HostOnly -> e
         | _ ->
 
             match f.Type with
@@ -377,7 +381,8 @@ type internal MemberEncPrinter =
                 -> Result<string -> string, CodegenError>
         /// Phase 474 — a field holding an INLINE declaration ([[InlineSlot]]), its value read from
         /// `src`: the piece that lays its members onto the object, or `None` for any other field.
-        Inline: string -> IdlField -> string option
+        /// Phase 732 — a `Result`, as the reader's is.
+        Inline: string -> IdlField -> Result<string, CodegenError> option
     }
 
 /// The one traversal over a member's presence when it is WRITTEN, printed by a [[MemberEncPrinter]]
@@ -410,7 +415,7 @@ module internal MemberEncTraversal =
         let piece =
             match f.Opt, p.Inline src f with
             | HostOnly, _ -> Ok(MemberPiece.Conditional p.Absent)
-            | _, Some laid -> Ok(MemberPiece.Conditional laid)
+            | _, Some laid -> laid |> Result.map MemberPiece.Conditional
             | _ ->
 
                 match f.Opt with
@@ -624,8 +629,9 @@ module internal LiteralTraversal =
 
                 Ok(p.Enum src n case wire)
             | Literal.EmptyList -> Ok(p.EmptyList src)
-            | Literal.Record(r, authored) ->
-                members p idl src Map.empty r.Fields authored |> Result.map (p.Record src r)
+            | Literal.Record(r, args, authored) ->
+                let subst = TypeParams.bindRecord r args |> Option.defaultValue Map.empty
+                members p idl src subst r.Fields authored |> Result.map (p.Record src r)
             | Literal.Union(u, args, c, authored) ->
                 // The DECLARED fields decide the arity, never the authored ones: `Slot.Fixed` is a
                 // one-argument constructor whatever an `IdlValue` happens to carry (Phase 124).
@@ -736,12 +742,15 @@ module internal ValueTraversal =
 
                         members p idl (sprintf "union case '%s.%s'" name tag) subst c.Fields fields
                         |> Result.map (p.Union u c)
-            | TRecord(name, _), VRecord fields ->
+            | TRecord(name, args), VRecord fields ->
                 match CodegenLookup.tryRecord idl name with
                 | None -> mismatch (sprintf "a value of the undeclared record '%s'" name)
                 | Some r ->
-                    members p idl ("record '" + name + "'") Map.empty r.Fields fields
-                    |> Result.map (p.Record r)
+                    match TypeParams.bindRecord r args with
+                    | None -> mismatch (sprintf "record '%s' applied to %d type arguments" name (List.length args))
+                    | Some subst ->
+                        members p idl ("record '" + name + "'") subst r.Fields fields
+                        |> Result.map (p.Record r)
             // fuaran#698 — the enveloped form. The envelope's members and the kind's go through the
             // SAME presence rule, so the two halves of a node cannot drift.
             | TNode, VNode(id, kindTag, fields) -> node p idl id [] kindTag fields

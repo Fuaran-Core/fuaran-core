@@ -101,15 +101,17 @@ module internal FSharpInline =
         )
 
     /// An inline record's member writer: its members' pieces, read off `s`.
+    /// Phase 732 — a generic one takes one encoder per type parameter, as [[recordEncoder]] does.
     let inlineRecordEncoder (msg: Set<string>) (idl: Idl) (r: IdlRecord) : Result<string, CodegenError> =
-        let ps = declParams msg r.Name []
+        let ps = declParams msg r.Name r.Params
 
         objectPieces idl r.Fields
         |> Result.map (fun pieces ->
             sprintf
-                "and private encMembers%s%s (s: %s%s) : (string * JVal) option list =\n    [ %s ]"
+                "and private encMembers%s%s%s (s: %s%s) : (string * JVal) option list =\n    [ %s ]"
                 r.Name
                 ps
+                (encCodecParams r.Params)
                 r.Name
                 ps
                 pieces)
@@ -183,10 +185,12 @@ module internal FSharpInline =
         fieldBinders idl r.Fields
         |> Result.map (fun binders ->
             sprintf
-                "and private decMembers%s (__fs: (string * JVal) list) : Result<%s%s, DecodeError> =\n%s"
+                "and private decMembers%s%s%s (__fs: (string * JVal) list) : Result<%s%s, DecodeError> =\n%s"
                 r.Name
+                (explicitParams r.Params)
+                (decCodecParams r.Params)
                 r.Name
-                (objParams msg r.Name [])
+                (objParams msg r.Name r.Params)
                 (bindChain "    " binders ("Ok " + recordLit r.Name assigns) 0))
 
     /// A presence-keyed union's reader: the case `dPick` names, its members, then its synthesised
@@ -230,10 +234,13 @@ module internal FSharpInline =
         let binders = members |> List.map (fun (f, e) -> ident f.Name, e)
 
         sprintf
-            "and private colMembers%s (__ov: CollectingDecoders) (j: JVal) (__fs: (string * JVal) list) : Result<%s%s, DecodeError list> =\n%s%s"
+            "and private colMembers%s%s (__ov: CollectingDecoders)%s (j: JVal) (__fs: (string * JVal) list) : Result<%s%s, DecodeError list> =\n%s%s%s"
             r.Name
+            (explicitParams r.Params)
+            (colCodecParams r.Params)
             r.Name
-            (objParams msg r.Name [])
+            (objParams msg r.Name r.Params)
+            (decBindings r.Params)
             (holderBinding "    " r.Name members)
             (collectAll "    " binders ("Ok " + recordLit r.Name assigns))
 
