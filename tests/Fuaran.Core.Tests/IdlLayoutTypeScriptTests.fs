@@ -274,6 +274,35 @@ let shapeTests =
                     "colMembers" ] do
                   Expect.isFalse (text.Contains helper) (sprintf "the flat twin's module carries no %s" helper))
 
+          // Phase 722 (DECISIONS.md D284.3) — the constants name the keys of this host's object.
+          testCase "the vocabulary constants name the host object's keys: an inline declaration's members" (fun _ ->
+              let keys =
+                  """["Grid", new Set(["caption", "columns", "pageSize", "pageStateKey", "rowKey", "rowKeyField", "source", "staticRows"])]"""
+
+              let constants (idl: Idl) =
+                  emitted (Gen.typescriptModuleDerived [ Derivation.VocabularyConstants ] idl (tagsOf idl))
+
+              Expect.stringContains
+                  (constants LayoutIdl.layout)
+                  keys
+                  "the members the grid's object carries, and no field that holds a declaration"
+
+              // The reshape is the host's, never the wire's: the flat twin answers the same keys.
+              Expect.stringContains (constants LayoutIdl.flat) keys "the flat twin"
+
+              // The F# host's value keeps the grouping field, and its constant names that field.
+              Expect.stringContains
+                  (emitted (
+                      Gen.fsharpModuleDerived
+                          GenSupport.Empty
+                          [ Derivation.VocabularyConstants ]
+                          "M"
+                          LayoutIdl.layout
+                          (tagsOf LayoutIdl.layout)
+                  ))
+                  """"Grid", set [ "columns"; "paging"; "identity"; "rows"; "caption" ]"""
+                  "the F# host names its own value's fields")
+
           testCase "a derived member over an inline declaration is refused by name" (fun _ ->
               let tags = tagsOf LayoutIdl.layout
 

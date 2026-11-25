@@ -610,17 +610,32 @@ module internal TypeScriptDerived =
 
         let c = Derive.constants ctx
 
+        // Phase 722 (DECISIONS.md D284) — this host's object for a kind or an op IS its wire object,
+        // so an inline declaration's members are keys of it and the field that holds the declaration
+        // is not: the names are the keys `typescriptDeclarations` types for the owner. The F# host's
+        // value keeps the grouping field, and its constant names that field.
+        let hostKeys (owners: IdlKind list) =
+            owners
+            |> List.map (fun o ->
+                o.Tag,
+                o.Fields
+                |> List.collect (fun f ->
+                    match tsInlineOf ctx.Idl f with
+                    | Some(InlineSlot.Record r) -> r.Fields |> List.map _.Name
+                    | Some(InlineSlot.Keyed(u, _)) -> Decl.keyedRoster u
+                    | None -> [ f.Name ]))
+
         [ "// Phase 380 — VOCABULARY CONSTANTS. The kind tags of each declared category."
           "const kindCategories = " + mapLit c.Categories + ";"
           ""
           "// The wire field names of each kind."
-          "const kindFieldNames = " + mapLit c.KindFields + ";"
+          "const kindFieldNames = " + mapLit (hostKeys ctx.Kinds) + ";"
           ""
           "// The wire field names of the node envelope."
           "const envelopeFieldNames = " + setLit c.Envelope + ";"
           ""
           "// The wire field names of each tree op."
-          "const opFieldNames = " + mapLit c.OpFields + ";" ]
+          "const opFieldNames = " + mapLit (hostKeys ctx.Idl.Ops) + ";" ]
         |> String.concat "\n",
         [ "kindCategories"; "kindFieldNames"; "envelopeFieldNames"; "opFieldNames" ]
 
