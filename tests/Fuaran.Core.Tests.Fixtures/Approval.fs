@@ -282,6 +282,10 @@ module Regenerated =
     [<Literal>]
     let Layout = "LayoutGenerated"
 
+    /// Phase 722 — the derived members over an inline declaration (`IdlLayoutTypeScriptTests`).
+    [<Literal>]
+    let LayoutDerived = "LayoutDerivedGenerated"
+
     [<Literal>]
     let Mini = "MiniGenerated"
 

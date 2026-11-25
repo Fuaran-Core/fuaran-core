@@ -16,8 +16,8 @@ module Fuaran.Core.Tests.IdlLayoutTypeScriptTests
 //   * the declaration file states the members where the wire holds them, an authored value is
 //     printed in that shape, and the keyed walk reads and rebuilds a node an inline declaration
 //     holds;
-//   * what this host still refuses is refused by name: a derived member over a declaration of
-//     which it holds no value.
+//   * a slot enumerator, a fold and a projection over an inline declaration answer what the F#
+//     derivation answers, value for value, and are refused only where it refuses (D285).
 //
 // The executed tests need `node` on PATH and are skipped without it, as the other TypeScript
 // agreement tests are.
@@ -29,6 +29,7 @@ open Fuaran.Core.Idl
 open Fuaran.Core.Idl.Codegen.Types
 
 module Gen' = Fuaran.Core.Tests.LayoutGenerated
+module D = Fuaran.Core.Tests.LayoutDerivedGenerated
 
 let private emitted (r: Result<string, CodegenError>) : string =
     match r with
@@ -301,26 +302,276 @@ let shapeTests =
                           (tagsOf LayoutIdl.layout)
                   ))
                   """"Grid", set [ "columns"; "paging"; "identity"; "rows"; "caption" ]"""
-                  "the F# host names its own value's fields")
+                  "the F# host names its own value's fields") ]
 
-          testCase "a derived member over an inline declaration is refused by name" (fun _ ->
-              let tags = tagsOf LayoutIdl.layout
+// ---------------------------------------------------------------------------
+// Phase 722 (DECISIONS.md D285) — the derived members over an inline declaration. Each host is run
+// over `LayoutIdl.derived`: the committed F# module `LayoutDerivedGenerated` and the TypeScript
+// module the same requests emit, under node. A value is compared as the BYTES its own host's
+// encoder writes for a node holding it, so the comparison is each host's codec's, not a rendering
+// of this file's: the F# value is set into a blank node, the TypeScript value is spread into one.
+// ---------------------------------------------------------------------------
 
-              for request, named in
-                  [ Derivation.SlotsOf "Paging", "'Paging'"
-                    Derivation.SlotsOf "GridRows", "'GridRows'"
-                    Derivation.Projections("RowIdentity", [ "rowKeyField" ]), "'RowIdentity'"
-                    Derivation.Fold "RowIdentity", "'RowIdentity'" ] do
-                  for r in
-                      [ Gen.typescriptModuleDerived [ request ] LayoutIdl.layout tags
-                        Gen.typescriptDeclarationsDerived [ request ] LayoutIdl.layout tags ] do
-                      match r with
-                      | Error(CodegenError.UnsupportedConstruct(what, why, _)) ->
-                          Expect.stringContains what "a derived member over the inline declaration" "what"
-                          Expect.stringContains what named "the declaration is named"
-                          Expect.stringContains why "no value of the declaration's type" "the reason"
-                      | other -> failtestf "%A was not refused by name: %A" request other
+let private blankGrid: D.GridSpec =
+    { Columns = []
+      Paging = ({ PageSize = None; PageStateKey = None }: D.Paging)
+      Identity = None
+      Rows = D.GridRows.Source(D.Feed.State "k")
+      Caption = None }
 
-              Expect.isOk
-                  (Gen.typescriptModuleDerived [ Derivation.SlotsOf "Field" ] LayoutIdl.layout tags)
-                  "a tagged union holding a record payload still has slots") ]
+let private enc (k: D.NodeKind) : string =
+    D.encodeNode ({ Id = "x"; Kind = k }: D.Node)
+
+let private showPaging (p: D.Paging) =
+    enc (D.NodeKind.Grid { blankGrid with Paging = p })
+
+let private showIdentity (r: D.RowIdentity) =
+    enc (D.NodeKind.Grid { blankGrid with Identity = Some r })
+
+let private showRows (r: D.GridRows) =
+    enc (D.NodeKind.Grid { blankGrid with Rows = r })
+
+let private showField (f: D.Field) =
+    enc (D.NodeKind.Form({ Field = f }: D.FormSpec))
+
+let private showChain (c: D.Chain) =
+    enc (D.NodeKind.Outline({ Chain = c; Tree = D.Tree.Leaf 0 }: D.OutlineSpec))
+
+let private showTree (t: D.Tree) =
+    enc (D.NodeKind.Outline({ Chain = D.Chain.Stop ""; Tree = t }: D.OutlineSpec))
+
+let private opt (show: 'a -> string) (o: 'a option) : string =
+    match o with
+    | Some v -> show v
+    | None -> "none"
+
+let private slots (show: 'a -> string) (xs: (string * 'a) list) : string =
+    xs |> List.map (fun (name, v) -> name + "=" + show v) |> String.concat ";"
+
+/// Every derived member's answer over one node, by the F# host.
+let private fsharpAnswers (n: D.Node) : string list =
+    [ yield "paging " + slots showPaging (D.slotsOfPaging n)
+      yield "identity " + slots showIdentity (D.slotsOfRowIdentity n)
+      yield "rows " + slots showRows (D.slotsOfGridRows n)
+      yield "field " + slots showField (D.slotsOfField n)
+      yield "chain " + slots showChain (D.slotsOfChain n)
+      yield "tree " + slots showTree (D.slotsOfTree n)
+      for _, v in D.slotsOfRowIdentity n do
+          yield "rowKey " + opt (fun () -> "closure") (D.RowIdentity.rowKey v)
+          yield "rowKeyField " + opt id (D.RowIdentity.rowKeyField v)
+      for _, v in D.slotsOfGridRows n do
+          yield "source " + opt (D.GridRows.Source >> showRows) (D.GridRows.source v)
+
+          yield
+              "staticRows "
+              + opt (D.GridRows.StaticRows >> showRows) (D.GridRows.staticRows v)
+      for _, v in D.slotsOfField n do
+          yield "payload " + opt (D.Field.Text >> showField) (D.Field.payload v)
+          yield "on " + opt (fun (b: bool) -> if b then "true" else "false") (D.Field.on v)
+      for _, v in D.slotsOfChain n do
+          yield "link " + opt (D.Chain.Link >> showChain) (D.Chain.link v)
+          yield "stop " + opt id (D.Chain.stop v)
+
+          yield
+              "foldChain "
+              + (D.Chain.fold (fun acc c -> acc @ [ showChain c ]) [] v |> String.concat ";")
+      for _, v in D.slotsOfTree n do
+          yield "branch " + opt (D.Tree.Branch >> showTree) (D.Tree.payload v)
+          yield "n " + opt (fun (i: int) -> string i) (D.Tree.n v)
+
+          yield
+              "foldTree "
+              + (D.Tree.fold (fun acc t -> acc @ [ showTree t ]) [] v |> String.concat ";") ]
+
+/// The same answers by the TypeScript host, one line a document; then one line saying whether a
+/// member handed the HOLDER answers what it answers handed the slot's value, and whether each
+/// inline value is its declaration's members alone.
+let private derivedHarness (docs: string list) : string =
+    [ "const RowIdentity = RowIdentity$, GridRows = GridRows$, Field = Field$, Chain = Chain$, Tree = Tree$;"
+      "const __enc = (kind) => encodeNode({ id: 'x', kind: kind });"
+      "const __grid = { $type: 'Grid', columns: [] };"
+      "const __rows = { source: { $type: 'State', key: 'k' } };"
+      "const showPaging = (v) => __enc({ ...__grid, ...__rows, ...v });"
+      "const showIdentity = (v) => __enc({ ...__grid, ...__rows, ...v });"
+      "const showRows = (v) => __enc({ ...__grid, ...v });"
+      "const showField = (v) => __enc({ $type: 'Form', field: v });"
+      "const showChain = (v) => __enc({ $type: 'Outline', tree: { $type: 'Leaf', n: 0 }, ...v });"
+      "const showTree = (v) => __enc({ $type: 'Outline', stop: '', tree: v });"
+      "const opt = (show, v) => (v === undefined ? 'none' : show(v));"
+      "const slots = (show, xs) => xs.map(([name, v]) => name + '=' + show(v)).join(';');"
+      "const collect = (show) => (acc, v) => acc.concat([show(v)]);"
+      "const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);"
+      "for (const d of [" + (docs |> List.map js |> String.concat ", ") + "]) {"
+      "  const n = decodeNode(d).value;"
+      "  const out = [];"
+      "  out.push('paging ' + slots(showPaging, slotsOfPaging(n)));"
+      "  out.push('identity ' + slots(showIdentity, slotsOfRowIdentity(n)));"
+      "  out.push('rows ' + slots(showRows, slotsOfGridRows(n)));"
+      "  out.push('field ' + slots(showField, slotsOfField(n)));"
+      "  out.push('chain ' + slots(showChain, slotsOfChain(n)));"
+      "  out.push('tree ' + slots(showTree, slotsOfTree(n)));"
+      "  let held = true;"
+      "  const alone = (v, keys) => Object.keys(v).every((k) => keys.indexOf(k) >= 0);"
+      "  for (const [, v] of slotsOfPaging(n)) held = held && alone(v, ['pageSize', 'pageStateKey']);"
+      "  for (const [, v] of slotsOfRowIdentity(n)) {"
+      "    out.push('rowKey ' + opt(() => 'closure', RowIdentity.rowKey(v)));"
+      "    out.push('rowKeyField ' + opt((s) => s, RowIdentity.rowKeyField(v)));"
+      "    held = held && alone(v, ['rowKey', 'rowKeyField']) && same(RowIdentity.rowKey(n.kind), RowIdentity.rowKey(v)) && same(RowIdentity.rowKeyField(n.kind), RowIdentity.rowKeyField(v));"
+      "  }"
+      "  for (const [, v] of slotsOfGridRows(n)) {"
+      "    out.push('source ' + opt((f) => showRows({ source: f }), GridRows.source(v)));"
+      "    out.push('staticRows ' + opt((t) => showRows({ staticRows: t }), GridRows.staticRows(v)));"
+      "    held = held && alone(v, ['source', 'staticRows']) && same(GridRows.source(n.kind), GridRows.source(v)) && same(GridRows.staticRows(n.kind), GridRows.staticRows(v));"
+      "  }"
+      "  for (const [, v] of slotsOfField(n)) {"
+      "    out.push('payload ' + opt((p) => showField({ $type: 'Text', ...p }), Field.payload(v)));"
+      "    out.push('on ' + opt((b) => (b ? 'true' : 'false'), Field.on(v)));"
+      "    held = held && (Field.payload(v) === undefined || alone(Field.payload(v), ['value', 'placeholder']));"
+      "  }"
+      "  for (const [, v] of slotsOfChain(n)) {"
+      "    out.push('link ' + opt((b) => showChain({ link: b }), Chain.link(v)));"
+      "    out.push('stop ' + opt((s) => s, Chain.stop(v)));"
+      "    out.push('foldChain ' + Chain.fold(collect(showChain), [], v).join(';'));"
+      "    held = held && alone(v, ['link', 'stop']) && same(Chain.fold(collect(showChain), [], n.kind), Chain.fold(collect(showChain), [], v)) && same(Chain.link(n.kind), Chain.link(v));"
+      "  }"
+      "  for (const [, v] of slotsOfTree(n)) {"
+      "    out.push('branch ' + opt((p) => showTree({ $type: 'Branch', ...p }), Tree.payload(v)));"
+      "    out.push('n ' + opt((i) => String(i), Tree.n(v)));"
+      "    out.push('foldTree ' + Tree.fold(collect(showTree), [], v).join(';'));"
+      "    held = held && (Tree.payload(v) === undefined || alone(Tree.payload(v), ['kids', 'note']));"
+      "  }"
+      "  console.log(out.join(' | '));"
+      "  console.log('held ' + held);"
+      "}" ]
+    |> String.concat "\n"
+
+[<Tests>]
+let derivedTests =
+    let idl = LayoutIdl.derived
+    let tags = tagsOf idl
+    let docs = LayoutIdl.corpus @ LayoutIdl.derivedCorpus
+
+    testList
+        "Phase 722 the TypeScript derived members over an inline declaration"
+        [ testCase "the committed LayoutDerivedGenerated.fs is what the generator emits (byte for byte)" (fun _ ->
+              let generated = emitted (LayoutIdl.generateDerived ())
+              let path = Snapshots.repoFile LayoutIdl.derivedGeneratedFile
+
+              Approval.write Approval.Regen Approval.Regenerated.LayoutDerived path generated
+              |> ignore
+
+              Expect.equal
+                  generated
+                  (System.IO.File.ReadAllText path)
+                  "regenerate with: FUARAN_REGEN=LayoutDerivedGenerated, running IdlLayoutTypeScriptTests")
+
+          testCase "every slot, fold and projection answers what the F# derivation answers" (fun _ ->
+              let text = emitted (Gen.typescriptModuleDerived LayoutIdl.derivations idl tags)
+
+              let expected =
+                  docs
+                  |> List.map (fun d ->
+                      match D.decodeNode d with
+                      | Ok n -> fsharpAnswers n |> String.concat " | "
+                      | Error e -> failtestf "the generated F# module refused %s: %s" d (DecodeError.render e))
+
+              // The corpus is not vacuous: each inline shape is held by some document, both cases of a
+              // presence-keyed union are answered, and each fold visits a nested value.
+              let all = String.concat "\n" expected
+
+              for needle in
+                  [ "paging paging="
+                    "identity identity="
+                    "rowKey closure"
+                    "rowKeyField id"
+                    "staticRows {"
+                    "source {"
+                    "payload {"
+                    "link {"
+                    "stop now"
+                    "branch {"
+                    "n 7" ] do
+                  Expect.stringContains all needle "the F# host answers this member over the corpus"
+
+              let visits =
+                  match D.decodeNode LayoutIdl.derivedCorpus[0] with
+                  | Ok n ->
+                      D.slotsOfChain n
+                      |> List.sumBy (fun (_, v) -> D.Chain.fold (fun c _ -> c + 1) 0 v),
+                      D.slotsOfTree n |> List.sumBy (fun (_, v) -> D.Tree.fold (fun c _ -> c + 1) 0 v)
+                  | Error _ -> 0, 0
+
+              Expect.equal visits (3, 5) "the folds visit every nested value: three of the chain, five of the tree"
+
+              match IdlDeriveTests.runTsModule text (derivedHarness docs) with
+              | None -> skiptest "node not on PATH — the executed TypeScript derived agreement is skipped"
+              | Some lines ->
+                  Expect.equal (List.length lines) (2 * List.length docs) "two lines a document"
+
+                  docs
+                  |> List.iteri (fun i d ->
+                      Expect.equal lines[2 * i] expected[i] (sprintf "the two hosts answer alike over %s" d)
+
+                      Expect.equal
+                          lines[2 * i + 1]
+                          "held true"
+                          (sprintf
+                              "a holder answers as the value it holds, and an inline value is its members alone, over %s"
+                              d)))
+
+          testCase "the declaration file declares every derived member over the declaration's own type" (fun _ ->
+              let text =
+                  emitted (Gen.typescriptDeclarationsDerived LayoutIdl.derivations idl tags)
+
+              for line in
+                  [ "export declare function slotsOfPaging(n: Node): Array<[string, Paging]>;"
+                    "export declare function slotsOfRowIdentity(n: Node): Array<[string, RowIdentity]>;"
+                    "  fold<S>(folder: (state: S, v: Chain) => S, state: S, v: Chain): S;"
+                    "  rowKeyField(v: RowIdentity): string | undefined;"
+                    "  payload(v: Field): TextPayload | undefined;" ] do
+                  Expect.stringContains text line "declared")
+
+          // D285.4 — no refusal of this host's own is left: a request is refused exactly where the F#
+          // derivation refuses it, in its words.
+          testCase "a request the F# derivation refuses is refused here in the same words, and no other" (fun _ ->
+              let fsharp (request: Derivation) =
+                  Gen.fsharpModuleDerived GenSupport.Empty [ request ] "M" idl tags
+                  |> Result.map ignore
+
+              let typescript (request: Derivation) =
+                  [ Gen.typescriptModuleDerived [ request ] idl tags |> Result.map ignore
+                    Gen.typescriptDeclarationsDerived [ request ] idl tags |> Result.map ignore ]
+
+              for request, reason in
+                  [ Derivation.Fold "Paging", "a union derivation is generated over a union"
+                    Derivation.Projections("Paging", [ "pageSize" ]), "a union derivation is generated over a union"
+                    Derivation.Fold "RowIdentity", "a fold is derived for a union whose cases contain the union itself"
+                    Derivation.Fold "GridRows", "a fold is derived for a union whose cases contain the union itself"
+                    Derivation.SlotsOf "TextPayload", "no selected kind or envelope field is declared at this one"
+                    Derivation.SlotsOf "BranchPayload", "no selected kind or envelope field is declared at this one"
+                    Derivation.Projections("Chain", [ "label" ]),
+                    "a projection reads a field the union's cases declare" ] do
+                  match fsharp request with
+                  | Error(CodegenError.UnsupportedConstruct(_, why, _)) as refusal ->
+                      Expect.stringContains why reason "the F# derivation's reason"
+
+                      for answer in typescript request do
+                          Expect.equal (sprintf "%A" answer) (sprintf "%A" refusal) (sprintf "%A" request)
+                  | other -> failtestf "the F# derivation did not refuse %A: %A" request other
+
+              for request in LayoutIdl.derivations do
+                  Expect.isOk (fsharp request) (sprintf "the F# derivation emits %A" request)
+
+                  for answer in typescript request do
+                      Expect.isOk answer (sprintf "and so does this host: %A" request))
+
+          testCase "a vocabulary with no inline declaration reads no inline value" (fun _ ->
+              let requests =
+                  [ Derivation.SlotsOf "Field"
+                    Derivation.Projections("Field", [ "on"; "value" ]) ]
+
+              let text =
+                  emitted (Gen.typescriptModuleDerived requests LayoutIdl.flat (tagsOf LayoutIdl.flat))
+
+              for helper in [ "heldMembers"; "valMembers"; "ePick" ] do
+                  Expect.isFalse (text.Contains helper) (sprintf "the flat twin's derived module carries no %s" helper)) ]

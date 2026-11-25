@@ -58,6 +58,113 @@ module internal TypeScriptDerived =
           yield indent + "}" ]
         |> String.concat "\n"
 
+    // -----------------------------------------------------------------------
+    // Phase 722 (DECISIONS.md D285) — a derived member over an INLINE declaration. This host holds
+    // the wire shape, where the declaration's members are its holder's own keys, and a holder's
+    // type is its own members intersected with the declaration's (D283.1): the holder is a value of
+    // the declaration's member type. So a derived member reads the declaration off its holder, and
+    // where it answers the declaration's value it answers the declaration's own members rebuilt
+    // alone (`valMembers<Name>(holder)`), which is what the F# host's value of the type holds.
+    // -----------------------------------------------------------------------
+
+    /// Where the member `f` of the value bound to `recv` is read from: its own key, or, for a
+    /// member holding an inline declaration, the holder itself.
+    let private tsHeldAt (idl: Idl) (recv: string) (f: IdlField) : string =
+        match tsInlineOf idl f with
+        | Some _ -> recv
+        | None -> tsProp recv f.Name
+
+    /// The expression a union's case is switched on over the value bound to `v`, and a case's
+    /// label under it: a tagged union's discriminator and wire tag; a presence-keyed union's case
+    /// as `ePick` reads it from the keys `v` carries, by index.
+    let private tsCaseOf (disc: string) (u: IdlUnion) : string * (IdlUnionCase -> string) =
+        match u.Discrimination with
+        | UnionDiscrimination.Tagged -> tsDiscProp disc "v", (fun c -> SourceLit.tsString (u.WireTagOf c.Tag))
+        | UnionDiscrimination.ByPresence keyed ->
+            "ePick(v, " + tsPickRules keyed + ")",
+            (fun c ->
+                keyed
+                |> List.tryFindIndex (fun k -> k.Case = c.Tag)
+                |> Option.defaultValue -1
+                |> string)
+
+    /// The value of the inline declaration `slot`, read off the holder bound to `recv`.
+    let private tsInlineValue (slot: InlineSlot) (recv: string) : string =
+        "valMembers" + tsInlineName slot + "(" + recv + ")"
+
+    /// The helper every `valMembers<Name>` rebuilds through.
+    let private tsHeldMembersHelper: string =
+        [ "// Phase 722 — the value of an inline declaration: its own members, read off the object holding"
+          "// it and rebuilt alone. A presence-keyed union's is the picked case's (`undefined` for no case)."
+          "const heldMembers = (h, keys) => {"
+          "  const o = {};"
+          "  for (const k of keys) { if (h[k] !== undefined) o[k] = h[k]; }"
+          "  return o;"
+          "};" ]
+        |> String.concat "\n"
+
+    /// `valMembers<Name>(h)` for one inline declaration: an inline record's members, or the
+    /// members of the case a presence-keyed union's holder carries. A member a case SYNTHESISES is
+    /// the codec's (D283.3) and is no part of the value.
+    let private tsInlineValueDecl (slot: InlineSlot) : string =
+        let keys (fs: IdlField list) =
+            "["
+            + (fs |> List.map (fun f -> SourceLit.tsString f.Name) |> String.concat ", ")
+            + "]"
+
+        match slot with
+        | InlineSlot.Record r ->
+            sprintf "function valMembers%s(h) {\n  return heldMembers(h, %s);\n}" r.Name (keys r.Fields)
+        | InlineSlot.Keyed(u, keyed) ->
+            let arms =
+                keyed
+                |> List.mapi (fun i k ->
+                    let fs =
+                        u.Cases
+                        |> List.tryFind (fun c -> c.Tag = k.Case)
+                        |> Option.map _.Fields
+                        |> Option.defaultValue []
+
+                    sprintf "    case %d: return heldMembers(h, %s);" i (keys fs))
+
+            sprintf "function valMembers%s(h) {\n  switch (ePick(h, %s)) {\n" u.Name (tsPickRules keyed)
+            + String.concat "\n" (arms @ [ "    default: return undefined;" ])
+            + "\n  }\n}"
+
+    /// The inline declarations whose value a requested slot enumerator, fold or projection reads
+    /// off a holder, in declaration order (records, then unions).
+    let private tsInlineValuesRead (ctx: Decl) (requests: Derivation list) : InlineSlot list =
+        let idl = ctx.Idl
+
+        let held (fs: IdlField list) (reads: IdlField -> bool) =
+            fs |> List.filter reads |> List.choose (tsInlineOf idl)
+
+        let read =
+            requests
+            |> List.collect (fun r ->
+                match r with
+                | Derivation.SlotsOf t ->
+                    held ((ctx.Kinds |> List.collect _.Fields) @ idl.NodeFields) (fun f ->
+                        (Derive.slotPosition t f).IsSome)
+                | Derivation.Fold n ->
+                    Decl.tryUnion ctx n
+                    |> Option.filter Decl.isKeyed
+                    |> Option.bind (fun u -> Decl.inlineSlot idl (TUnion(u.Name, u.Params |> List.map TVar)))
+                    |> Option.toList
+                | Derivation.Projections(n, fields) ->
+                    Decl.tryUnion ctx n
+                    |> Option.map (fun u ->
+                        held (u.Cases |> List.collect _.Fields) (fun f -> List.contains f.Name fields))
+                    |> Option.defaultValue []
+                | _ -> [])
+            |> List.map tsInlineName
+            |> Set.ofList
+
+        (ctx.Records |> List.map (fun r -> TRecord r.Name))
+        @ (ctx.Unions |> List.map (fun u -> TUnion(u.Name, u.Params |> List.map TVar)))
+        |> List.choose (Decl.inlineSlot idl)
+        |> List.filter (fun slot -> read.Contains(tsInlineName slot))
+
     /// Emission 1 — public `wireTag`, `allWireTags`, `children`, `withChildren` (kids first, so
     /// `withChildren(children(n), n)` is `n` rebuilt), and `nodeWitness` over them: the four members
     /// of Core's `NodeWitness`, as a plain object, since this host has no Core runtime to type it.
@@ -176,13 +283,10 @@ module internal TypeScriptDerived =
         let mapField (f: IdlField) e = Derive.positionsOf tsMapper hs f e
 
         // Phase 722 — this host holds the wire shape, so a member holding an inline declaration is
-        // read from its holder ([[tsMemberAt]]) and its rebuilt members are SPREAD into the
+        // read from its holder ([[tsHeldAt]]) and its rebuilt members are SPREAD into the
         // holder's; an inline declaration's mapper therefore answers the rebuilt members alone,
         // never a copy of the holder, which a second inline member's spread would overwrite.
-        let at (recv: string) (f: IdlField) : string =
-            match tsInlineOf ctx.Idl f with
-            | Some _ -> recv
-            | None -> tsProp recv f.Name
+        let at = tsHeldAt ctx.Idl
 
         // The holder is always there, so an inline member is walked as a required one: an optional
         // presence-keyed union with no case present answers no node from its own functions.
@@ -234,22 +338,8 @@ module internal TypeScriptDerived =
             // A tagged union's case is its discriminator; a presence-keyed union's `v` is its holder,
             // its case the one `ePick` reads from the holder's keys, by index, and its mapper answers
             // the rebuilt members alone.
-            let tag, caseLit, whole, unmapped =
-                match u.Discrimination with
-                | UnionDiscrimination.Tagged ->
-                    tsDiscProp ctx.Idl.Wire.Discriminator "v",
-                    (fun (c: IdlUnionCase) -> SourceLit.tsString (u.WireTagOf c.Tag)),
-                    "...v, ",
-                    "v"
-                | UnionDiscrimination.ByPresence keyed ->
-                    "ePick(v, " + tsPickRules keyed + ")",
-                    (fun (c: IdlUnionCase) ->
-                        keyed
-                        |> List.tryFindIndex (fun k -> k.Case = c.Tag)
-                        |> Option.defaultValue -1
-                        |> string),
-                    "",
-                    "{}"
+            let tag, caseLit = tsCaseOf ctx.Idl.Wire.Discriminator u
+            let whole, unmapped = if Decl.isKeyed u then "", "{}" else "...v, ", "v"
 
             let listerArms =
                 holding
@@ -401,16 +491,24 @@ module internal TypeScriptDerived =
 
             Derive.slotPosition typeName f
             |> Option.map (fun at ->
-                let direct =
-                    if at.List then
-                        sprintf "%s.map((__v) => [%s, __v])" e key
-                    else
-                        sprintf "[[%s, %s]]" key e
+                match tsInlineOf ctx.Idl f with
+                // Phase 722 (D285) — an inline declaration's value is read off its holder, under the
+                // name of the field that holds it; an optional presence-keyed union with no case
+                // present is the absent slot.
+                | Some slot when at.Optional ->
+                    sprintf "((__v) => (__v === undefined ? [] : [[%s, __v]]))(%s)" key (tsInlineValue slot owner)
+                | Some slot -> sprintf "[[%s, %s]]" key (tsInlineValue slot owner)
+                | None ->
+                    let direct =
+                        if at.List then
+                            sprintf "%s.map((__v) => [%s, __v])" e key
+                        else
+                            sprintf "[[%s, %s]]" key e
 
-                if at.Optional then
-                    sprintf "(%s === undefined ? [] : %s)" e direct
-                else
-                    direct)
+                    if at.Optional then
+                        sprintf "(%s === undefined ? [] : %s)" e direct
+                    else
+                        direct)
 
         let arms =
             ctx.Kinds
@@ -442,17 +540,20 @@ module internal TypeScriptDerived =
         (ctx: Decl)
         (requests: Derivation list)
         : Result<(IdlUnion * bool * string list * (string * string list)) list, CodegenError> =
-        let disc = ctx.Idl.Wire.Discriminator
+        let idl = ctx.Idl
+        let disc = idl.Wire.Discriminator
 
         let foldMember (u: IdlUnion) =
             let self = u.Name + "$"
+            let tag, caseLit = tsCaseOf disc u
 
             let folder: FoldPrinter =
                 { Self = fun st e -> sprintf "%s.fold(folder, %s, %s)" self st e
                   List = fun e x s b st -> sprintf "%s.reduce((%s, %s) => %s, %s)" e s x b st
                   MapItem = fun e x -> sprintf "%s[%s]" e x
                   Map = fun e x s b st -> sprintf "Object.keys(%s).sort().reduce((%s, %s) => %s, %s)" e s x b st
-                  Access = fun e f -> tsProp e f.Name
+                  // Phase 722 (D285) — a member holding an inline declaration is its holder.
+                  Access = tsHeldAt idl
                   OptionalVar = fun e _ -> e
                   Optional = fun e _ b st -> sprintf "(%s === undefined ? %s : %s)" e st b
                   StepState = fun d _ _ -> sprintf "__c%d" d
@@ -471,19 +572,31 @@ module internal TypeScriptDerived =
             |> Result.bind (fun recursive ->
                 recursive
                 |> List.map (fun (c, fs) ->
-                    Derive.foldMembers folder ctx u (List.map snd fs) (tsProp "v" << _.Name) "state" 0
-                    |> Result.map (sprintf "      case %s: return %s;" (SourceLit.tsString (u.WireTagOf c.Tag))))
+                    Derive.foldMembers folder ctx u (List.map snd fs) (tsHeldAt idl "v") "state" 0
+                    |> Result.map (sprintf "      case %s: return %s;" (caseLit c)))
                 |> sequenceR)
             |> Result.map (fun arms ->
+                // Phase 722 (D285) — a presence-keyed union's `v` is the object holding it: the folder
+                // takes the union's own members, and a holder carrying no case folds nothing.
+                let visit =
+                    match Decl.inlineSlot idl (TUnion(u.Name, u.Params |> List.map TVar)) with
+                    | Some slot ->
+                        [ "    const __u = " + tsInlineValue slot "v" + ";"
+                          "    if (__u === undefined) return state;"
+                          "    state = folder(state, __u);" ]
+                    | None -> [ "    state = folder(state, v);" ]
+
                 [ sprintf "  // Fold `folder` over this value and every nested `%s` it holds, in preorder." u.Name
-                  "  fold(folder, state, v) {"
-                  "    state = folder(state, v);"
-                  "    switch (" + tsDiscProp disc "v" + ") {" ]
+                  "  fold(folder, state, v) {" ]
+                @ visit
+                @ [ "    switch (" + tag + ") {" ]
                 @ arms
                 @ [ "      default: return state;"; "    }"; "  }," ]
                 |> String.concat "\n")
 
         let projectionMember (u: IdlUnion) (field: string) =
+            let tag, caseLit = tsCaseOf disc u
+
             Derive.projectionPlan u field
             |> Result.map (fun (carriers, total) ->
                 [ yield
@@ -495,13 +608,16 @@ module internal TypeScriptDerived =
                            else
                                "where the case carries one (`undefined` where it does not)")
                   yield "  " + SourceLit.tsKey field + "(v) {"
-                  yield "    switch (" + tsDiscProp disc "v" + ") {"
-                  for c, _, _ in carriers do
+                  yield "    switch (" + tag + ") {"
+                  // Phase 722 (D285) — a field holding an inline declaration answers its value.
+                  for c, _, f in carriers do
                       yield
                           sprintf
                               "      case %s: return %s;"
-                              (SourceLit.tsString (u.WireTagOf c.Tag))
-                              (tsProp "v" field)
+                              (caseLit c)
+                              (match tsInlineOf idl f with
+                               | Some slot -> tsInlineValue slot "v"
+                               | None -> tsProp "v" field)
                   yield "      default: return undefined;"
                   yield "    }"
                   yield "  }," ]
@@ -1108,6 +1224,14 @@ const cEveryOf = (read) => {
                        [ tsKeyedDecl disc flat ctx |> Result.map (fun e -> part e keyedDecls) ]
                    else
                        [])
+                  (match tsInlineValuesRead ctx requests with
+                   | [] -> []
+                   | read ->
+                       [ Ok(
+                             part
+                                 (String.concat "\n\n" (tsHeldMembersHelper :: List.map tsInlineValueDecl read), [])
+                                 []
+                         ) ])
                   slots
                   |> List.map (fun t -> Ok(part (tsSlotsDecl disc flat ctx t) (slotsDecls ctx t)))
                   (if has Derivation.DefaultRecords then

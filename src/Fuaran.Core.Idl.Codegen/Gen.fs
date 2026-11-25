@@ -135,16 +135,7 @@ module Gen =
 
     /// Phase 689 (DECISIONS.md D278) — the per-kind table lookup is emitted by the F# backend only, so the
     /// TypeScript backend refuses a `Derivation.KindTable` request by name rather than export nothing for it.
-    ///
-    /// Phase 722 (DECISIONS.md D283) — and it refuses a slot enumerator, a fold or a projection over an
-    /// INLINE declaration (an inline record, a presence-keyed union): this host holds a value in its
-    /// wire shape, where an inline declaration's members are its holder's own, so no value of the
-    /// declaration's type exists for the member to take or answer.
-    let private tsDerives (idl: Idl) (derivations: Derivation list) : Result<unit, CodegenError> =
-        let inlineNamed (n: string) =
-            (idl.Records |> List.exists (fun r -> r.Name = n && r.Inline))
-            || (idl.Unions |> List.exists (fun u -> u.Name = n && Decl.isKeyed u))
-
+    let private tsDerives (derivations: Derivation list) : Result<unit, CodegenError> =
         match
             derivations
             |> List.tryPick (fun d ->
@@ -155,16 +146,6 @@ module Gen =
                             sprintf "the kind table `%s`" n,
                             "GP5: a backend applies a derivation or refuses it by name, never ignores it",
                             "emit the table's lookup with the F# backend (`fsharpModuleDerived`)"
-                        )
-                    )
-                | Derivation.SlotsOf n
-                | Derivation.Fold n
-                | Derivation.Projections(n, _) when inlineNamed n ->
-                    Some(
-                        CodegenError.UnsupportedConstruct(
-                            sprintf "a derived member over the inline declaration '%s'" n,
-                            "this host holds the wire shape, where an inline declaration's members are its holder's own: there is no value of the declaration's type",
-                            "read the members from the holder, or derive the member with the F# backend, whose host holds the value"
                         )
                     )
                 | _ -> None)
@@ -189,7 +170,7 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        tsDerives idl derivations
+        tsDerives derivations
         |> Result.bind (fun () -> tsCodecAdmits idl)
         |> Result.bind (fun () ->
             TypeScriptDerived.typescriptModuleDerived derivations (Decl.resolve idl Map.empty kindTags))
@@ -213,7 +194,7 @@ module Gen =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        tsDerives idl derivations
+        tsDerives derivations
         |> Result.bind (fun () ->
             TypeScriptDerived.typescriptDeclarationsDerived derivations (Decl.resolve idl Map.empty kindTags))
 

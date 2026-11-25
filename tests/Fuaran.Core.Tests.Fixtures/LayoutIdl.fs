@@ -193,3 +193,86 @@ let generate () : Result<string, CodegenError> =
         moduleName
         layout
         (layout.Kinds |> List.map _.Tag)
+
+// ---------------------------------------------------------------------------
+// Phase 722 (DECISIONS.md D285) — the derived members over an inline declaration, on both hosts.
+//
+// `derived` is `layout` and one more kind, `Outline`, whose two unions hold themselves, because a
+// fold is derived for a self-recursive union and `layout` declares none: `Chain` is presence-keyed
+// and holds itself through an ordinary record (`LinkBox`, on whose object the nested union's
+// members sit), and `Tree` is tagged and holds itself through a record payload (`BranchPayload`).
+// `LayoutDerivedGenerated.fs` is the F# emitted for it with every slot enumerator, fold and
+// projection of `derivations` requested, committed and held to the generator;
+// `IdlLayoutTypeScriptTests` runs it beside the TypeScript module the same requests emit.
+// ---------------------------------------------------------------------------
+
+/// `layout` with the `Outline` kind and its two self-recursive unions.
+let derived: Idl =
+    { layout with
+        Kinds =
+            layout.Kinds
+            @ [ kind
+                    "Outline"
+                    [ field "chain" (TUnion("Chain", [])) Required
+                      field "tree" (TUnion("Tree", [])) Required ] ]
+        Unions =
+            layout.Unions
+            @ [ union
+                    "Chain"
+                    (UnionDiscrimination.ByPresence
+                        [ { Case = "Link"
+                            Key = "link"
+                            Synthesised = [] }
+                          { Case = "Stop"
+                            Key = "stop"
+                            Synthesised = [] } ])
+                    [ case "Link" [ field "link" (TRecord "LinkBox") Required ]
+                      case "Stop" [ field "stop" TStr Required ] ]
+                union
+                    "Tree"
+                    UnionDiscrimination.Tagged
+                    [ case "Leaf" [ field "n" TInt Required ]
+                      case "Branch" [ field "payload" (TRecord "BranchPayload") Required ] ] ]
+        Records =
+            layout.Records
+            @ [ record "LinkBox" false [ field "label" TStr Required; field "next" (TUnion("Chain", [])) Optional ]
+                record
+                    "BranchPayload"
+                    true
+                    [ field "kids" (TList(TUnion("Tree", []))) Required
+                      field "note" TStr Optional ] ] }
+
+/// Every slot enumerator, fold and projection the two hosts are held to each other over.
+let derivations: Derivation list =
+    [ Derivation.SlotsOf "Paging"
+      Derivation.SlotsOf "RowIdentity"
+      Derivation.SlotsOf "GridRows"
+      Derivation.SlotsOf "Field"
+      Derivation.SlotsOf "Chain"
+      Derivation.SlotsOf "Tree"
+      Derivation.Fold "Chain"
+      Derivation.Fold "Tree"
+      Derivation.Projections("RowIdentity", [ "rowKey"; "rowKeyField" ])
+      Derivation.Projections("GridRows", [ "source"; "staticRows" ])
+      Derivation.Projections("Field", [ "payload"; "on" ])
+      Derivation.Projections("Chain", [ "link"; "stop" ])
+      Derivation.Projections("Tree", [ "payload"; "n" ]) ]
+
+/// Documents of the `Outline` kind, each in canonical (sorted) form: a chain of two links and a
+/// tree three deep; neither union nested; a link whose box holds no further case.
+let derivedCorpus: string list =
+    [ """{"id":"o1","kind":{"$type":"Outline","link":{"label":"a","link":{"label":"b","stop":"z"}},"tree":{"$type":"Branch","kids":[{"$type":"Leaf","n":1},{"$type":"Branch","kids":[{"$type":"Leaf","n":2}],"note":"inner"},{"$type":"Leaf","n":3}]}}}"""
+      """{"id":"o2","kind":{"$type":"Outline","stop":"now","tree":{"$type":"Leaf","n":7}}}"""
+      """{"id":"o3","kind":{"$type":"Outline","link":{"label":"open"},"tree":{"$type":"Branch","kids":[]}}}""" ]
+
+/// The module name the committed derived file declares.
+[<Literal>]
+let derivedModuleName = "Fuaran.Core.Tests.LayoutDerivedGenerated"
+
+/// The committed derived file, repository-relative.
+[<Literal>]
+let derivedGeneratedFile = "tests/Fuaran.Core.Tests/LayoutDerivedGenerated.fs"
+
+/// The module text the generator emits for `derived`, with `derivations` requested.
+let generateDerived () : Result<string, CodegenError> =
+    Gen.fsharpModuleDerived GenSupport.Empty derivations derivedModuleName derived (derived.Kinds |> List.map _.Tag)
