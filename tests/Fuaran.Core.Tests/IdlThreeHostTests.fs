@@ -628,10 +628,9 @@ let private agreeOn (c: Certified) =
 // ---------------------------------------------------------------------------
 // Phase 732 — the parameterised records' vocabulary in the differential, in each wire configuration
 // the certification vocabularies above run (the default; and a `kind` discriminator, the kind merged
-// into the envelope, members in declared order). The interpreter and the compiled F# module are
-// held to one another by value and by bytes in both directions. The TypeScript backend does not
-// emit a parameterised record yet, so its leg is not run here: it refuses the vocabulary by the
-// record's name, which `IdlRecordParamsTests` pins.
+// into the envelope, members in declared order). The interpreter, the compiled F# module and the
+// generated TypeScript module (run under node) are held to one another by value and by bytes in both
+// directions.
 // ---------------------------------------------------------------------------
 
 /// The parameterised records' vocabulary under each wire configuration, with its compiled module.
@@ -658,7 +657,7 @@ let private parameterised: (Certified * (string * IdlValue * string) list) list 
 [<Tests>]
 let parameterisedRecords =
     testList
-        "Phase 732 — the interpreter and the compiled F# agree on a parameterised record, by VALUE and by BYTES"
+        "Phase 732 — the interpreter, the compiled F# and the generated TypeScript agree on a parameterised record, by VALUE and by BYTES"
         [ for c, documents in parameterised do
               testCase (sprintf "%s: every pinned document is written and read back alike" c.Name) (fun _ ->
                   Expect.equal (List.length documents) 3 "one document per kind"
@@ -680,15 +679,37 @@ let parameterisedRecords =
                           Expect.equal
                               (valueKey c.Idl TNode (toIdl c.Compiled.Hosted c.Idl TNode typed))
                               (valueKey c.Idl TNode value)
-                              (what + ": and holds the authored value"))
+                              (what + ": and holds the authored value")
+
+                  // The TypeScript module writes each authored value to the pinned bytes, reads the
+                  // pinned bytes to the authored value, and writes what it read to the same bytes.
+                  match tsLeg c.Idl (documents |> List.map (fun (_, value, bytes) -> value, value, bytes)) with
+                  | None -> skiptest "node not on PATH — the TypeScript leg of the pinned documents cannot run"
+                  | Some results ->
+                      Expect.equal results.Count (List.length documents) "the TypeScript leg answered every document"
+
+                      documents
+                      |> List.iteri (fun row (what, _, bytes) ->
+                          Expect.equal results[row].Authored bytes (what + ": TypeScript writes the pinned bytes")
+
+                          Expect.equal
+                              results[row].Decoded
+                              (Ok(bytes, true))
+                              (what
+                               + ": TypeScript reads the pinned bytes to the authored value and re-writes them")))
 
               testCase (sprintf "%s: every drawn and adversarial vector agrees, and none is refused" c.Name) (fun _ ->
                   let vectors = vectorsFor c.Idl c.HostedDraw (seedOf c.Name) perVocabulary
-                  let findings, compared = differentialOver false c vectors
+                  let findings, compared = differentialOver true c vectors
+
+                  if findings = [ noNode ] then
+                      skiptest "node not on PATH — the three-way differential's TypeScript leg cannot run"
+
                   report c.Name findings
 
-                  // A differential both sides refuse alike proves nothing: every vector answered a
-                  // value on the interpreter and reached the compiled module.
+                  // A differential every side refuses alike proves nothing: every vector answered a
+                  // value on the interpreter and reached the compiled module and the TypeScript one
+                  // (a row TypeScript refuses or does not answer is a finding above).
                   Expect.equal
                       (List.length vectors)
                       (2 * perVocabulary)

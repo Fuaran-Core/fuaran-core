@@ -169,7 +169,7 @@ module Gen =
     let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
         tsCodecAdmits idl
         |> Result.bind (fun () -> Decl.laidOut (Decl.resolve idl Map.empty kindTags))
-        |> Result.bind Decl.unparameterised
+        |> Result.bind Decl.recordsApplied
         |> Result.bind TypeScriptCodec.typescriptModule
 
     /// Phase 380 — `typescriptModule` plus the requested derivations, the TypeScript host's
@@ -192,7 +192,7 @@ module Gen =
 
     /// A TypeScript value literal for an authored value of a declared type.
     let typescriptValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
-        Decl.unparameterisedIdl idl
+        Decl.recordsAppliedIdl idl
         |> Result.bind (fun () -> TypeScriptDeclarations.typescriptValue idl t v)
 
     /// The TypeScript type declarations for the named kinds.

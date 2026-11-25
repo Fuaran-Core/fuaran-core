@@ -210,12 +210,12 @@ let private backends (idl: Idl) : (string * Result<unit, string>) list * (string
               "Boxed.Codec"
               idl
       )
-      "fsharpValue", describe (Gen.fsharpValue idl TStr (VStr "x")) ],
-    [ "typescriptModule", describe (Gen.typescriptModule idl tags)
-      "typescriptModuleDerived", describe (Gen.typescriptModuleDerived [] idl tags)
+      "fsharpValue", describe (Gen.fsharpValue idl TStr (VStr "x"))
+      "typescriptModule", describe (Gen.typescriptModule idl tags)
+      "typescriptValue", describe (Gen.typescriptValue idl TStr (VStr "x")) ],
+    [ "typescriptModuleDerived", describe (Gen.typescriptModuleDerived [] idl tags)
       "typescriptDeclarations", describe (Gen.typescriptDeclarations idl tags)
       "typescriptDeclarationsDerived", describe (Gen.typescriptDeclarationsDerived [] idl tags)
-      "typescriptValue", describe (Gen.typescriptValue idl TStr (VStr "x"))
       "FStarTarget.vocabularyModule", describe (FStarTarget.vocabularyModule "Boxed" idl tags)
       "FStarTarget.proofsModule", describe (FStarTarget.proofsModule "Boxed" "BoxedProofs" idl tags) ]
 
@@ -526,8 +526,8 @@ let tests =
                           Records = [ record "Shape" [] [ f "w" TInt Required ] ] }
 
                   let emitting, refusing = backends boxed
-                  Expect.equal (List.length emitting) 5 "the five F# entries"
-                  Expect.equal (List.length refusing) 7 "the five TypeScript entries and the two F* ones"
+                  Expect.equal (List.length emitting) 7 "the five F# entries and two TypeScript ones"
+                  Expect.equal (List.length refusing) 5 "three TypeScript entries and the two F* ones"
 
                   for entry, answer in emitting do
                       Expect.equal answer (Ok()) (sprintf "%s emits the parameterised records" entry)

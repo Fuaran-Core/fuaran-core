@@ -60,6 +60,21 @@ module internal TypeScriptCodec =
         | InlineSlot.Record r -> r.Decl.Name
         | InlineSlot.Keyed(u, _) -> u.Name
 
+    /// The codecs a generic declaration's function takes ahead of its value, as JS parameters: one
+    /// per type parameter in declared order, each `<prefix><P>, `, and nothing for a declaration with
+    /// none. A generic union's and (Phase 732) a generic record's encoder, decoder and inline member
+    /// functions all take them this way.
+    let tsCodecParams (prefix: string) (ps: string list) : string =
+        ps |> List.map (fun p -> prefix + p + ", ") |> String.concat ""
+
+    /// The codecs a reference hands a generic declaration's function ahead of the value: one per
+    /// argument in position, each printed by `p` and followed by a comma ([[tsCodecParams]]).
+    let tsCodecArgs (p: SlotPrinter) (args: IdlType list) : Result<string, CodegenError> =
+        args
+        |> List.map (SlotTraversal.slotFn p)
+        |> sequenceR
+        |> Result.map (List.map (fun a -> a + ", ") >> String.concat "")
+
     /// Where the member `f` of the value bound to `recv` is read from: its own key, or, for a
     /// member holding an inline declaration, the holder itself.
     let tsMemberAt (idl: Idl) (recv: string) (f: IdlField) : string =
@@ -75,6 +90,18 @@ module internal TypeScriptCodec =
     /// Whether a member read is [[tsSpread]]'s.
     let tsIsSpread (e: string) : bool =
         e.StartsWith("...", System.StringComparison.Ordinal)
+
+    /// A member's inline RECORD as the call of its member function `<prefix>Members<Name>`, spread
+    /// into the holder: the function is handed one codec per argument of the reference
+    /// ([[tsCodecArgs]]), so a holder passing its own parameter down passes its own codec, then `over`.
+    let tsInlineRecordCall
+        (prefix: string)
+        (p: SlotPrinter)
+        (r: InlineRecord)
+        (over: string)
+        : Result<string, CodegenError> =
+        tsCodecArgs p r.Args
+        |> Result.map (fun args -> tsSpread (prefix + "Members" + r.Decl.Name + "(" + args + over + ")"))
 
     /// A presence-keyed union's rules as a literal: each case's key and the members it synthesises.
     let tsPickRules (keyed: KeyedCase list) : string =
@@ -334,9 +361,10 @@ module internal TypeScriptCodec =
                 |> Option.map (fun f -> TypeParams.substitute subst f.Type)
 
             match owner, value with
-            | TRecord(n, _), _ ->
+            | TRecord(n, args), _ ->
                 CodegenLookup.tryRecord idl n
-                |> Option.bind (fun r -> typeIn Map.empty r.Fields)
+                |> Option.bind (fun r ->
+                    typeIn (TypeParams.bindRecord r args |> Option.defaultValue Map.empty) r.Fields)
             | TUnion(n, args), VUnion(tag, _) ->
                 CodegenLookup.tryUnion idl n
                 |> Option.bind (fun u ->
@@ -527,7 +555,9 @@ module internal TypeScriptCodec =
                 // refuses the absent member: the writer is told the member it writes for.
                 | Some(InlineSlot.Keyed(u, _)), Required ->
                     Some(Ok(tsSpread ("encMembers" + u.Name + "(" + src + ", " + SourceLit.tsString f.Name + ")")))
-                | Some slot, _ -> Some(Ok(tsSpread ("encMembers" + tsInlineName slot + "(" + src + ")")))
+                | Some(InlineSlot.Keyed(u, _)), _ -> Some(Ok(tsSpread ("encMembers" + u.Name + "(" + src + ")")))
+                // Phase 732 — an inline record applied to arguments is handed one encoder per argument.
+                | Some(InlineSlot.Record r), _ -> Some(tsInlineRecordCall "enc" tsEncPrinter.Slot r src)
                 | None, _ -> None }
 
     /// A member read off the bound JS variable `recv` (`s` for a spec/record encoder, `n` for the
@@ -626,10 +656,7 @@ module internal TypeScriptCodec =
         let idl = decl.Idl
         let member' = tsMemberEncPrinter idl disc
 
-        let argList =
-            match u.Params with
-            | [] -> "v"
-            | ps -> (ps |> List.map (fun p -> "enc" + p) |> String.concat ", ") + ", v"
+        let argList = tsCodecParams "enc" u.Params + "v"
 
         let arm (c: IdlUnionCase) (body: string) =
             let ann =
@@ -687,7 +714,9 @@ module internal TypeScriptCodec =
             tsFieldAnnotationHeader r.Name r.Fields
             + "function enc"
             + r.Name
-            + "(s) {\n  return plain(["
+            + "("
+            + tsCodecParams "enc" r.Params
+            + "s) {\n  return plain(["
             + pieces
             + "]);\n}")
 
@@ -698,7 +727,9 @@ module internal TypeScriptCodec =
             tsFieldAnnotationHeader r.Name r.Fields
             + "function encMembers"
             + r.Name
-            + "(s) {\n  return ["
+            + "("
+            + tsCodecParams "enc" r.Params
+            + "s) {\n  return ["
             + pieces
             + "];\n}")
 
@@ -900,7 +931,9 @@ module internal TypeScriptCodec =
                 match tsInlineOf idl f, f.Opt with
                 | Some(InlineSlot.Keyed(u, keyed)), Required ->
                     Some(Ok(tsSpread ("dKeyed(decMembers" + u.Name + "(" + o + "), " + tsKeyedFirst keyed + ")")))
-                | Some slot, _ -> Some(Ok(tsSpread ("decMembers" + tsInlineName slot + "(" + o + ")")))
+                | Some(InlineSlot.Keyed(u, _)), _ -> Some(Ok(tsSpread ("decMembers" + u.Name + "(" + o + ")")))
+                // Phase 732 — an inline record applied to arguments is handed one decoder per argument.
+                | Some(InlineSlot.Record r), _ -> Some(tsInlineRecordCall "dec" tsDecPrinter r o)
                 | None, _ -> None }
 
     let tsDecField (idl: Idl) (disc: string) (fields: IdlField list) (f: IdlField) : Result<string, CodegenError> =
@@ -957,10 +990,7 @@ module internal TypeScriptCodec =
     let tsUnionDecoder (decl: Decl) (disc: string) (u: IdlUnion) =
         let idl = decl.Idl
 
-        let argList =
-            match u.Params with
-            | [] -> "j"
-            | ps -> (ps |> List.map (fun p -> "dec" + p) |> String.concat ", ") + ", j"
+        let argList = tsCodecParams "dec" u.Params + "j"
 
         let arm (c: IdlUnionCase) (members: (IdlField * string) list) =
             let ann =
@@ -1034,6 +1064,7 @@ module internal TypeScriptCodec =
         (disc: string)
         (header: string)
         (name: string)
+        (pars: string list)
         (extra: (string * string) list)
         (fields: IdlField list)
         =
@@ -1042,12 +1073,14 @@ module internal TypeScriptCodec =
             header
             + "function dec"
             + name
-            + "(j) {\n  const fs = dObj(j);\n  return "
+            + "("
+            + tsCodecParams "dec" pars
+            + "j) {\n  const fs = dObj(j);\n  return "
             + obj
             + ";\n}")
 
     let tsRecordDecoder (idl: Idl) (disc: string) (r: IdlRecord) =
-        tsObjectDecoder idl disc (tsFieldAnnotationHeader r.Name r.Fields) r.Name [] r.Fields
+        tsObjectDecoder idl disc (tsFieldAnnotationHeader r.Name r.Fields) r.Name r.Params [] r.Fields
 
     /// Phase 722 — an inline record's member reader: its members read from the holding object `fs`.
     let tsInlineRecordDecoder (idl: Idl) (disc: string) (r: IdlRecord) =
@@ -1056,7 +1089,9 @@ module internal TypeScriptCodec =
             tsFieldAnnotationHeader r.Name r.Fields
             + "function decMembers"
             + r.Name
-            + "(fs) {\n  return "
+            + "("
+            + tsCodecParams "dec" r.Params
+            + "fs) {\n  return "
             + obj
             + ";\n}")
 
@@ -1123,6 +1158,7 @@ module internal TypeScriptCodec =
             disc
             (tsKindAnnotationHeader k)
             (k.Tag + "Spec")
+            []
             [ tsDiscKey disc, SourceLit.tsString k.Tag ]
             k.Fields
 
