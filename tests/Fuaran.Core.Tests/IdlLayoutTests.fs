@@ -13,7 +13,8 @@ module Fuaran.Core.Tests.IdlLayoutTests
 //      short-circuiting and the collecting form) and the interpreter answering alike.
 //   4. THE OTHER BACKENDS — the JSON schema states the inline members on the holding object; the
 //      TypeScript backend lays them out and the F* target models them (Phase 722), each refusing by
-//      name what it cannot express; the codec-only module refuses by name.
+//      name what it cannot express; the codec-only module lays them out with the structural
+//      module's emitter and refuses one only as a root (Phase 722, D285).
 //   5. THE CLASSIFIER — an inline layout that moves is a wire break.
 // ---------------------------------------------------------------------------
 
@@ -24,6 +25,7 @@ open Fuaran.Core.Idl
 open Fuaran.Core.Idl.Codegen.Types
 
 module Gen' = Fuaran.Core.Tests.LayoutGenerated
+module C = Fuaran.Core.Tests.LayoutCodecGenerated
 
 let private parse (s: string) : JVal =
     match Json.parse s with
@@ -639,15 +641,202 @@ let backendTests =
                   Expect.isGreaterThan (List.length layout) 50 (name + ": a module was emitted")
                   Expect.equal layout (body (emitted (emit LayoutIdl.flat))) name)
 
-          testCase "the codec-only module refuses an inline declaration, by name" (fun _ ->
-              let request: CodecOnly =
-                  { Roots = [ "Field" ]
-                    HostTypes = Map.ofList [ "Field", "Fuaran.Core.Tests.LayoutGenerated.Field"; "TextPayload", "T" ] }
+          // D285.5 — the one refusal an inline declaration keeps in the codec-only module is the
+          // wire's: a root's entries write and read one JSON value, and it has none of its own.
+          testCase "the codec-only module refuses an inline declaration as a ROOT, and only there" (fun _ ->
+              for root, named in [ "Paging", "'Paging'"; "Chain", "'Chain'" ] do
+                  let request =
+                      { LayoutIdl.codecRequest with
+                          Roots = [ root ] }
 
-              Expect.stringContains
-                  (refusalOf (Gen.fsharpCodecModule GenSupport.Empty request "M" LayoutIdl.layout))
-                  "the inline record 'TextPayload'"
-                  "named") ]
+                  match Gen.fsharpCodecModule GenSupport.Empty request "M" LayoutIdl.derived with
+                  | Error(CodegenError.UnsupportedConstruct(what, why, _)) ->
+                      Expect.stringContains what "a codec-only root" "what"
+                      Expect.stringContains what named "the root is named"
+                      Expect.stringContains why "an inline declaration has none of its own" "the reason is the wire's"
+                  | other -> failtestf "the root %s was not refused by name: %A" root other
+
+              Expect.isOk (LayoutIdl.generateCodec ()) "a declaration that HOLDS one is a root") ]
+
+// ---------------------------------------------------------------------------
+// Phase 722 (DECISIONS.md D285) — the CODEC-ONLY module over inline declarations: the committed
+// `LayoutCodecGenerated`, whose roots are the declarations of `LayoutIdl.derived` that hold one.
+// ---------------------------------------------------------------------------
+
+/// A root's three entries over a JSON value, each answer as its re-encoding or its refusal.
+let private codecEntries
+    : (string * IdlType * (JVal -> Result<JVal, DecodeError>) * (JVal -> Result<JVal, DecodeError>)) list =
+    [ "GridBox",
+      TRecord "GridBox",
+      (C.decodeGridBox >> Result.map C.encodeGridBox),
+      (C.decodeGridBoxStrict >> Result.map C.encodeGridBox)
+      "LinkBox",
+      TRecord "LinkBox",
+      (C.decodeLinkBox >> Result.map C.encodeLinkBox),
+      (C.decodeLinkBoxStrict >> Result.map C.encodeLinkBox)
+      "Tree",
+      TUnion("Tree", []),
+      (C.decodeTree >> Result.map C.encodeTree),
+      (C.decodeTreeStrict >> Result.map C.encodeTree)
+      "Field",
+      TUnion("Field", []),
+      (C.decodeField >> Result.map C.encodeField),
+      (C.decodeFieldStrict >> Result.map C.encodeField) ]
+
+/// Values of the four roots, each in canonical form: every inline shape, both cases of each
+/// presence-keyed union, the synthesised placeholder, and a nested holder.
+let private codecCorpus: (string * string) list =
+    [ "GridBox", """{"source":{"$type":"State","key":"rows"}}"""
+      "GridBox",
+      """{"pageSize":10,"pageStateKey":"p","rowKeyField":"id","source":{"$type":"Static","value":[1]},"title":"t"}"""
+      "GridBox",
+      """{"rowKey":"<closure>","source":{"$type":"Static","value":[]},"staticRows":{"headers":["h"],"rows":[["1"]]}}"""
+      "LinkBox", """{"label":"a","link":{"label":"b","stop":"z"}}"""
+      "LinkBox", """{"label":"open"}"""
+      "Tree", """{"$type":"Branch","kids":[{"$type":"Leaf","n":1},{"$type":"Branch","kids":[],"note":"inner"}]}"""
+      "Field", """{"$type":"Text","placeholder":"type here","value":"v"}"""
+      "Field", """{"$type":"Check","on":true}""" ]
+
+/// Values a reading refuses: an undeclared member beside an inline record's, beside a keyed case's,
+/// inside the case a holder's reading picks, inside a nested holder and beside a record payload's
+/// (the strict reading's own); then the D220.3 reading's refusals, which both readings give.
+let private codecRefused: (string * string) list =
+    [ "GridBox", """{"pageSize":1,"pageSizes":2,"source":{"$type":"State","key":"k"}}"""
+      "GridBox", """{"source":{"$type":"State","key":"k","extra":1}}"""
+      "GridBox", """{"source":{"$type":"Static","value":[]},"staticRows":{"headers":[],"rows":[],"extra":1}}"""
+      "LinkBox", """{"label":"a","link":{"label":"b","stop":"z","extra":1}}"""
+      "Tree", """{"$type":"Branch","kids":[{"$type":"Branch","kids":[],"extra":1}]}"""
+      "Field", """{"$type":"Text","value":"v","on":true}"""
+      "GridBox", """{"rowKey":"<closure>","rowKeyField":"id","source":{"$type":"State","key":"k"}}"""
+      "GridBox", """{"staticRows":{"headers":[],"rows":[]}}"""
+      "GridBox", """{"pageSize":1}"""
+      "LinkBox", """{"label":"a","link":{"label":"b"},"stop":"z"}""" ]
+
+[<Tests>]
+let codecOnlyTests =
+    let idl = LayoutIdl.derived
+
+    let entry (root: string) =
+        codecEntries |> List.find (fun (n, _, _, _) -> n = root)
+
+    let rendered (r: Result<JVal, DecodeError>) : string =
+        match r with
+        | Ok j -> "ok " + Canonical.write Rendering.CrossHost j
+        | Error e -> "refused " + DecodeError.codeName e.Code + " " + DecodePath.render e.Path
+
+    /// The interpreter's verdict under a reading: accepted, or the refusal by code and path.
+    let interpreter (read: Idl -> IdlType -> JVal -> Result<IdlValue, DecodeError>) (t: IdlType) (j: JVal) =
+        match read idl t j with
+        | Ok _ -> "ok"
+        | Error e -> rendered (Error e)
+
+    let verdict (answer: string) =
+        if answer.StartsWith "ok " then "ok" else answer
+
+    /// A node of `derived` holding the root's value, in canonical form: the interpreter's public
+    /// entries read and write a node, so its bytes for a value are read off the node that holds it.
+    let held (root: string) (doc: string) : string =
+        match root with
+        | "GridBox" ->
+            sprintf """{"id":"n","kind":{"$type":"Outline","box":%s,"stop":"s","tree":{"$type":"Leaf","n":0}}}""" doc
+        | "LinkBox" -> sprintf """{"id":"n","kind":{"$type":"Outline","link":%s,"tree":{"$type":"Leaf","n":0}}}""" doc
+        | "Tree" -> sprintf """{"id":"n","kind":{"$type":"Outline","stop":"s","tree":%s}}""" doc
+        | _ -> sprintf """{"id":"n","kind":{"$type":"Form","field":%s}}""" doc
+
+    testList
+        "Phase 722 the codec-only module lays out inline declarations"
+        [ testCase "the committed LayoutCodecGenerated.fs is what the generator emits (byte for byte)" (fun _ ->
+              let generated = emitted (LayoutIdl.generateCodec ())
+              let path = Snapshots.repoFile LayoutIdl.codecGeneratedFile
+
+              Approval.write Approval.Regen Approval.Regenerated.LayoutCodec path generated
+              |> ignore
+
+              Expect.equal
+                  generated
+                  (File.ReadAllText path)
+                  "regenerate with: FUARAN_REGEN=LayoutCodecGenerated, running IdlLayoutTests")
+
+          testCase "every value is re-written unchanged, and the bytes are the interpreter's" (fun _ ->
+              for root, doc in codecCorpus do
+                  let _, t, plain, strict = entry root
+                  let j = parse doc
+
+                  Expect.equal (rendered (plain j)) ("ok " + doc) (root + " round-trips " + doc)
+                  Expect.equal (rendered (strict j)) ("ok " + doc) (root + " round-trips under the strict reading")
+
+                  Expect.equal (interpreter Decode.valueDetailed t j) "ok" "the interpreter reads the value"
+
+                  Expect.equal
+                      (interpreted idl (held root doc))
+                      (held root doc)
+                      "the interpreter writes the same bytes for the value, on the node that holds it")
+
+          testCase "every refusal is the interpreter's, by code and path, under both readings" (fun _ ->
+              for root, doc in codecRefused do
+                  let _, t, plain, strict = entry root
+                  let j = parse doc
+
+                  Expect.equal
+                      (rendered (strict j))
+                      (interpreter Decode.valueStrictDetailed t j)
+                      (root + " under the strict reading: " + doc)
+
+                  Expect.stringStarts (rendered (strict j)) "refused " (root + " is refused: " + doc)
+
+                  Expect.equal
+                      (verdict (rendered (plain j)))
+                      (interpreter Decode.valueDetailed t j)
+                      (root + " under the plain reading: " + doc)
+
+              // The first six are the strict reading's own: the plain reading accepts them.
+              let undeclared =
+                  codecRefused
+                  |> List.filter (fun (root, doc) ->
+                      let _, _, _, strict = entry root
+                      (rendered (strict (parse doc))).StartsWith "refused UndeclaredMember")
+
+              Expect.equal
+                  (List.length undeclared)
+                  6
+                  "six undeclared members, each met inside or beside an inline declaration")
+
+          // The SAME emitter: each inline declaration's member writer and reader in the codec-only
+          // module is, byte for byte, the block the structural module prints for it.
+          testCase "an inline declaration's writer and reader are the structural module's, block for block" (fun _ ->
+              let structural = emitted (LayoutIdl.generateDerived ())
+              let codecOnly = emitted (LayoutIdl.generateCodec ())
+
+              let block (text: string) (name: string) : string =
+                  let start = text.IndexOf("private " + name + " ", System.StringComparison.Ordinal)
+
+                  if start < 0 then
+                      failtestf "no %s in the module" name
+
+                  let stop = text.IndexOf("\n\n", start, System.StringComparison.Ordinal)
+                  text.Substring(start, (if stop < 0 then text.Length else stop) - start)
+
+              for declaration in [ "Paging"; "TextPayload"; "BranchPayload"; "RowIdentity"; "GridRows"; "Chain" ] do
+                  for prefix in [ "encMembers"; "decMembers" ] do
+                      let name = prefix + declaration
+                      Expect.isGreaterThan (block structural name).Length 40 (name + " is a block")
+                      Expect.equal (block codecOnly name) (block structural name) name)
+
+          // Byte identity for a vocabulary with no inline declaration is held by the drift guards of
+          // the committed codec-only modules (the seam codecs); this pins that none of the inline
+          // machinery is printed for one.
+          testCase "a vocabulary with no inline declaration prints none of the inline machinery" (fun _ ->
+              let request: CodecOnly =
+                  { Roots = [ "Field"; "StaticTable"; "Feed" ]
+                    HostTypes = Map.ofList [ "Field", "H.Field"; "StaticTable", "H.StaticTable"; "Feed", "H.Feed" ] }
+
+              let text =
+                  emitted (Gen.fsharpCodecModule GenSupport.Empty request "M" LayoutIdl.flat)
+
+              for helper in [ "dPick"; "dSynth"; "encMembers"; "decMembers" ] do
+                  Expect.isFalse
+                      (text.Contains helper)
+                      (sprintf "the flat twin's codec-only module carries no %s" helper)) ]
 
 [<Tests>]
 let classifierTests =

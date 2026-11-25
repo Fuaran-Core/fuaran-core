@@ -1139,7 +1139,7 @@ let private encFloat (f: float) : JVal =
         |> String.concat "\n"
 
     /// The `dPick` rules literal of a presence-keyed union.
-    let private pickRules (keyed: KeyedCase list) : string =
+    let pickRules (keyed: KeyedCase list) : string =
         "[ "
         + (keyed
            |> List.map (fun k ->
@@ -1557,6 +1557,25 @@ let private encFloat (f: float) : JVal =
     let private fsharpStamp (idl: Idl) (body: string) : string =
         Stamp.generated (CommentStyle.Line "//") "F# structural layer" [ idl ] body
 
+    // Phase 722 (DECISIONS.md D285) — which emitter prints a declaration, decided ONCE for the
+    // structural and the codec-only module: an inline declaration (a presence-keyed union, an inline
+    // record) writes and reads member pieces of its holder, any other declaration its own object.
+    let unionEncoderOf typedName doc (decl: Decl) (u: IdlUnion) =
+        match u.Discrimination with
+        | UnionDiscrimination.ByPresence keyed -> keyedEncoder decl.Msg decl.Idl u keyed
+        | UnionDiscrimination.Tagged -> unionEncoder typedName doc decl u
+
+    let recordEncoderOf msg idl (r: IdlRecord) =
+        (if r.Inline then inlineRecordEncoder else recordEncoder) msg idl r
+
+    let unionDecoderOf doc refines (decl: Decl) (u: IdlUnion) =
+        match u.Discrimination with
+        | UnionDiscrimination.ByPresence keyed -> keyedDecoder decl.Msg decl.Idl u keyed
+        | UnionDiscrimination.Tagged -> unionDecoder doc refines decl u
+
+    let recordDecoderOf msg idl (r: IdlRecord) =
+        (if r.Inline then inlineRecordDecoder else recordDecoder) msg idl r
+
     /// The F# module emission before [[normalizeEol]] — see `fsharpModuleWith`, the public
     /// entry point, which is this composed with it.
     let fsharpModuleUnnormalised
@@ -1677,19 +1696,8 @@ let private encFloat (f: float) : JVal =
 
         // encNode + every union / record / spec encoder form one mutually-recursive group.
         let recGroup =
-            (encNodeDecl
-             :: (unions
-                 |> List.map (fun u ->
-                     // Phase 474 — a presence-keyed union writes member pieces, not an object.
-                     match u.Discrimination with
-                     | UnionDiscrimination.ByPresence keyed -> keyedEncoder msg idl u keyed
-                     | UnionDiscrimination.Tagged -> unionEncoder typedName doc decl u))
-             @ (records
-                |> List.map (fun r ->
-                    if r.Inline then
-                        inlineRecordEncoder msg idl r
-                    else
-                        recordEncoder msg idl r))
+            (encNodeDecl :: (unions |> List.map (unionEncoderOf typedName doc decl))
+             @ (records |> List.map (recordEncoderOf msg idl))
              @ (kinds
                 |> List.map (fun k ->
                     // fuaran#945 — a projected kind's encoder is the projection's, verbatim.
@@ -1777,17 +1785,8 @@ let private encFloat (f: float) : JVal =
 
             (Ok decNodeKindDecl
              :: decNodeDecl
-             :: (unions
-                 |> List.map (fun u ->
-                     match u.Discrimination with
-                     | UnionDiscrimination.ByPresence keyed -> keyedDecoder msg idl u keyed
-                     | UnionDiscrimination.Tagged -> unionDecoder doc sup.CaseRefines decl u))
-             @ (records
-                |> List.map (fun r ->
-                    if r.Inline then
-                        inlineRecordDecoder msg idl r
-                    else
-                        recordDecoder msg idl r))
+             :: (unions |> List.map (unionDecoderOf doc sup.CaseRefines decl))
+             @ (records |> List.map (recordDecoderOf msg idl))
              @ (kinds
                 |> List.map (fun k ->
                     // fuaran#945 — a projected kind's decoder is the projection's, verbatim.

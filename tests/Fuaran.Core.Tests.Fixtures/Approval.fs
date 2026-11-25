@@ -286,6 +286,10 @@ module Regenerated =
     [<Literal>]
     let LayoutDerived = "LayoutDerivedGenerated"
 
+    /// Phase 722 — the codec-only module over inline declarations (`IdlLayoutTests`).
+    [<Literal>]
+    let LayoutCodec = "LayoutCodecGenerated"
+
     [<Literal>]
     let Mini = "MiniGenerated"
 

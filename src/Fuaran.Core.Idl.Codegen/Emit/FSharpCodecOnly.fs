@@ -14,6 +14,11 @@ open Fuaran.Core.Idl.Emit.FSharpCodec
 /// is matched and built through the abbreviation, which F# resolves whether or not the host type
 /// requires qualified access — and the module adds a public entry per root and a STRICT reader
 /// beside each decoder.
+///
+/// Phase 722 (DECISIONS.md D285) — an inline declaration the roots reach is laid out on the object
+/// holding it by the emitter the structural module prints it with ([[FSharpCodec.unionEncoderOf]]
+/// and its three siblings), and the strict readers walk its members on that object, as the
+/// interpreter's strict walk does. An inline declaration is no ROOT: it has no JSON value of its own.
 module internal FSharpCodecOnly =
 
     let private refuse (construct: string) (principle: string) (alternative: string) : Result<'a, CodegenError> =
@@ -111,15 +116,42 @@ module internal FSharpCodecOnly =
         | _ -> "sNone"
 
     /// The walks of an object's fields after its members check, bound in declared order.
-    let private fieldWalks (idl: Idl) (fields: IdlField list) : string =
+    ///
+    /// Phase 722 (D285) — an inline declaration's members are the object's own, so its fields are
+    /// walked on the same object ([[Decode.valueStrictDetailed]]'s `strictFields`): an inline record's
+    /// each, a presence-keyed union's those of the case `dPick` reads. A reading that refuses is left
+    /// to the decoder that follows the check, which refuses it in its own words.
+    let rec private fieldWalks (idl: Idl) (fields: IdlField list) : string =
         fields
-        |> List.filter (fun f -> f.Opt <> HostOnly && walker f.Type <> "sNone")
+        |> List.filter (fun f -> f.Opt <> HostOnly)
         |> List.map (fun f ->
-            sprintf
-                " |> Result.bind (fun () -> sMember %s %s %s)"
-                (SourceLit.fsString f.Name)
-                (memberView idl fields f |> Option.defaultValue "__fs")
-                (walker f.Type))
+            match Decl.inlineSlot idl f.Type with
+            | Some(InlineSlot.Record r) -> fieldWalks idl r.Fields
+            | Some(InlineSlot.Keyed(u, keyed)) ->
+                let arms =
+                    keyed
+                    |> List.mapi (fun i k ->
+                        u.Cases
+                        |> List.tryFind (fun c -> c.Tag = k.Case)
+                        |> Option.map (fun c -> i, fieldWalks idl c.Fields))
+                    |> List.choose id
+                    |> List.filter (fun (_, walks) -> walks <> "")
+                    |> List.map (fun (i, walks) -> sprintf " | Ok(Some %d) -> Ok()%s" i walks)
+
+                if List.isEmpty arms then
+                    ""
+                else
+                    sprintf
+                        " |> Result.bind (fun () -> match dPick __fs %s with%s | _ -> Ok())"
+                        (pickRules keyed)
+                        (String.concat "" arms)
+            | None when walker f.Type <> "sNone" ->
+                sprintf
+                    " |> Result.bind (fun () -> sMember %s %s %s)"
+                    (SourceLit.fsString f.Name)
+                    (memberView idl fields f |> Option.defaultValue "__fs")
+                    (walker f.Type)
+            | None -> "")
         |> String.concat ""
 
     // D129 — it reaches `Fuaran.Core.Idl`'s internal lowering, so no caller may inline it.
@@ -327,6 +359,20 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                     (internalWriters |> List.find (fun n -> not (List.contains n request.Roots))))
                 "only a root has a public writer to keep internal"
                 "name a root of the request"
+        // Phase 722 (D285) — the one refusal an inline declaration keeps here, and it is the wire's:
+        // a root's entries write and read ONE JSON value, and an inline declaration has none.
+        | None when
+            roots
+            |> List.exists (fun (_, t) -> t |> Option.bind (Decl.inlineSlot idl) |> Option.isSome)
+            ->
+            refuse
+                (sprintf
+                    "a codec-only root '%s', which is an inline declaration"
+                    (roots
+                     |> List.find (fun (_, t) -> t |> Option.bind (Decl.inlineSlot idl) |> Option.isSome)
+                     |> fst))
+                "a root's entries write and read one JSON value, and an inline declaration has none of its own: its members are keys of the object that holds it (D220.1)"
+                "name the record or union that holds it as a root"
         | None when not sup.KindProjections.IsEmpty || sup.TypeSplice.IsSome ->
             refuse
                 "a kind projection or a type splice in a codec-only module"
@@ -348,11 +394,6 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                 names |> List.tryFind (fun n -> not (request.HostTypes.ContainsKey n)),
                 fieldTypes |> List.tryFind (fun f -> nodeIn f.Type)
             with
-            | _ when not (List.isEmpty (Decl.inlineDeclarations decl)) ->
-                refuse
-                    (sprintf "a codec-only module reaching %s" (List.head (Decl.inlineDeclarations decl)))
-                    "a codec-only module prints over host-declared types, which lay out no inline declaration (Phase 474)"
-                    "generate the structural module, which lays it out"
             | Some n, _ ->
                 refuse
                     (sprintf "a codec-only module reaching '%s' with no host type" n)
@@ -380,14 +421,14 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                     sprintf "type %s%s = %s%s" name args request.HostTypes[name] args
 
                 let encoders =
-                    (decl.Unions |> List.map (unionEncoder typedName doc decl))
-                    @ (decl.Records |> List.map (recordEncoder decl.Msg idl))
+                    (decl.Unions |> List.map (unionEncoderOf typedName doc decl))
+                    @ (decl.Records |> List.map (recordEncoderOf decl.Msg idl))
                     @ (sup.EncodeSplice |> Option.toList |> List.map Ok)
                     |> sequenceR
 
                 let decoders =
-                    (decl.Unions |> List.map (unionDecoder doc sup.CaseRefines decl))
-                    @ (decl.Records |> List.map (recordDecoder decl.Msg idl))
+                    (decl.Unions |> List.map (unionDecoderOf doc sup.CaseRefines decl))
+                    @ (decl.Records |> List.map (recordDecoderOf decl.Msg idl))
                     @ (sup.DecodeSplice |> Option.toList |> List.map Ok)
                     |> sequenceR
 
@@ -395,9 +436,13 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                 | Error e, _
                 | _, Error e -> Error e
                 | Ok encs, Ok decs ->
+                    // An inline declaration has no object, so no walker of its own: its holder's
+                    // walker reads its members ([[fieldWalks]]).
                     let walkers =
-                        (decl.Unions |> List.map (unionWalker idl))
-                        @ (decl.Records |> List.map (recordWalker idl))
+                        (decl.Unions |> List.filter (Decl.isKeyed >> not) |> List.map (unionWalker idl))
+                        @ (decl.Records
+                           |> List.filter (fun r -> not r.Inline)
+                           |> List.map (recordWalker idl))
 
                     [ [ sprintf "%s\nmodule %s\n\nopen Fuaran.Core" (moduleDoc request internalWriters) moduleName ]
                       [ "// Phase 550 — the host declares every type; each is named here by abbreviation."
@@ -419,6 +464,10 @@ let private sMember (name: string) (fs: (string * JVal) list) (w: JVal -> Result
                       (if decl.HostedFormat then [ fsFormatHelper ] else [])
                       (if declaresCanonicalFormAnywhere idl then
                            [ canonicalFormHelpers ]
+                       else
+                           [])
+                      (if decl.Unions |> List.exists Decl.isKeyed then
+                           [ keyedHelpers ]
                        else
                            [])
                       decl.Enums |> List.map enumDecoder

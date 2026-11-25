@@ -201,6 +201,8 @@ let generate () : Result<string, CodegenError> =
 // fold is derived for a self-recursive union and `layout` declares none: `Chain` is presence-keyed
 // and holds itself through an ordinary record (`LinkBox`, on whose object the nested union's
 // members sit), and `Tree` is tagged and holds itself through a record payload (`BranchPayload`).
+// `GridBox` is an ordinary record holding the grid's three inline declarations, so each of them
+// is reached from a declaration a codec-only module can name as a root.
 // `LayoutDerivedGenerated.fs` is the F# emitted for it with every slot enumerator, fold and
 // projection of `derivations` requested, committed and held to the generator;
 // `IdlLayoutTypeScriptTests` runs it beside the TypeScript module the same requests emit.
@@ -214,7 +216,8 @@ let derived: Idl =
             @ [ kind
                     "Outline"
                     [ field "chain" (TUnion("Chain", [])) Required
-                      field "tree" (TUnion("Tree", [])) Required ] ]
+                      field "tree" (TUnion("Tree", [])) Required
+                      field "box" (TRecord "GridBox") Optional ] ]
         Unions =
             layout.Unions
             @ [ union
@@ -240,7 +243,14 @@ let derived: Idl =
                     "BranchPayload"
                     true
                     [ field "kids" (TList(TUnion("Tree", []))) Required
-                      field "note" TStr Optional ] ] }
+                      field "note" TStr Optional ]
+                record
+                    "GridBox"
+                    false
+                    [ field "paging" (TRecord "Paging") Required
+                      field "identity" (TUnion("RowIdentity", [])) Optional
+                      field "rows" (TUnion("GridRows", [])) Required
+                      field "title" TStr Optional ] ] }
 
 /// Every slot enumerator, fold and projection the two hosts are held to each other over.
 let derivations: Derivation list =
@@ -276,3 +286,30 @@ let derivedGeneratedFile = "tests/Fuaran.Core.Tests/LayoutDerivedGenerated.fs"
 /// The module text the generator emits for `derived`, with `derivations` requested.
 let generateDerived () : Result<string, CodegenError> =
     Gen.fsharpModuleDerived GenSupport.Empty derivations derivedModuleName derived (derived.Kinds |> List.map _.Tag)
+
+// ---------------------------------------------------------------------------
+// Phase 722 (DECISIONS.md D285) — the CODEC-ONLY module over inline declarations. Its roots are the
+// declarations of `derived` that HOLD one (an inline declaration has no JSON value of its own, so
+// it is no root), and every reached declaration's host type is the one `LayoutDerivedGenerated`
+// declares. `LayoutCodecGenerated.fs` is the module emitted, committed and held to the generator.
+// ---------------------------------------------------------------------------
+
+/// The codec-only request: the holders as roots, each declaration at its generated host type.
+let codecRequest: CodecOnly =
+    { Roots = [ "GridBox"; "LinkBox"; "Tree"; "Field" ]
+      HostTypes =
+        (derived.Unions |> List.map _.Name) @ (derived.Records |> List.map _.Name)
+        |> List.map (fun n -> n, derivedModuleName + "." + n)
+        |> Map.ofList }
+
+/// The module name the committed codec-only file declares.
+[<Literal>]
+let codecModuleName = "Fuaran.Core.Tests.LayoutCodecGenerated"
+
+/// The committed codec-only file, repository-relative.
+[<Literal>]
+let codecGeneratedFile = "tests/Fuaran.Core.Tests/LayoutCodecGenerated.fs"
+
+/// The codec-only module text the generator emits for `codecRequest`.
+let generateCodec () : Result<string, CodegenError> =
+    Gen.fsharpCodecModule GenSupport.Empty codecRequest codecModuleName derived

@@ -335,10 +335,24 @@ let private showField (f: D.Field) =
     enc (D.NodeKind.Form({ Field = f }: D.FormSpec))
 
 let private showChain (c: D.Chain) =
-    enc (D.NodeKind.Outline({ Chain = c; Tree = D.Tree.Leaf 0 }: D.OutlineSpec))
+    enc (
+        D.NodeKind.Outline(
+            { Chain = c
+              Tree = D.Tree.Leaf 0
+              Box = None }
+            : D.OutlineSpec
+        )
+    )
 
 let private showTree (t: D.Tree) =
-    enc (D.NodeKind.Outline({ Chain = D.Chain.Stop ""; Tree = t }: D.OutlineSpec))
+    enc (
+        D.NodeKind.Outline(
+            { Chain = D.Chain.Stop ""
+              Tree = t
+              Box = None }
+            : D.OutlineSpec
+        )
+    )
 
 let private opt (show: 'a -> string) (o: 'a option) : string =
     match o with
