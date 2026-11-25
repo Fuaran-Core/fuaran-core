@@ -61,3 +61,17 @@ type VectorModel =
         /// The interpreter's canonical bytes, one node per vector.
         Wires: string list
     }
+
+/// Phase 722 — one generated model's DECODE vectors for [[vectorsModuleWith]]: documents the model's
+/// decoder is evaluated on by the normaliser, so that what ties the model's reading of a document to
+/// the interpreter's is checked on concrete documents.
+type DecodeVectors =
+    {
+        /// The model, and the documents the interpreter ACCEPTS: for each, the model's `dec_node`
+        /// answers the model value of what the interpreter decodes the bytes to.
+        Read: VectorModel
+        /// Documents the interpreter REFUSES: the model's `dec_node` refuses each. A document is
+        /// carried verbatim (an integer as the model's `num`), since a refused document has no
+        /// slot walk; one holding a number that is not an integer is refused, naming the vector.
+        Refused: string list
+    }

@@ -1025,57 +1025,14 @@ module internal FStarProofs =
                     line ""
                 | _ -> ()
 
-            // Phase 722 (D220.3) — the other half of a presence-keyed union's guarantee. The round
-            // trip says the decoder ACCEPTS what the encoder writes; this says what it accepts at
-            // all: a constructor only where the reading of the document's own keys picked that
-            // constructor's case, with each member that case synthesises present at its declared
-            // value. Two cases left, or none where one is required, is the answer of no constructor,
-            // so such a document is refused, and two constructors of one holder are never both an
-            // answer for one document. Stated over EVERY input, not over encodings.
-            let held =
-                families
-                |> List.choose (fun (typeName, _, ctors) ->
-                    match ctors |> List.filter (fun k -> not k.Picks.IsEmpty) with
-                    | [] -> None
-                    | holding -> Some(typeName, holding))
-
-            if not held.IsEmpty then
-                line "(* ======================================================================================"
-                line "   3a. THE READING DECIDES. For EVERY input, a decoder answers a constructor holding a"
-                line "       case of a presence-keyed union only where that union's reading of the input's own"
-                line "       keys (D220.3) picked that case, and every member the case SYNTHESISES is present at"
-                line "       its declared value. Two cases left is the answer of no constructor, and neither is"
-                line "       none left where the union is required: such a document is REFUSED, and no document"
-                line "       is read as two constructors of one holder."
-                line "   ====================================================================================== *)"
-                line ""
-
-            for typeName, holding in held do
-                line (sprintf "let dec_%s_reads (#num #flt: eqtype) (el: jval num flt)" typeName)
-                line (sprintf "  : Lemma (ensures (match dec_%s #num #flt el with" typeName)
-
-                for k in holding do
-                    line (
-                        sprintf
-                            "                    | Ok (%s) -> %s"
-                            (String.concat
-                                " "
-                                (k.CtorName :: (k.Lead |> List.map (fun _ -> "_"))
-                                 @ (k.Members |> List.map (fun _ -> "_"))))
-                            ((k.Picks
-                              |> List.map (fun (pick, _) ->
-                                  sprintf "%s #num #flt el == %s" (pickFunction pick.Union) (pickAnswer pick)))
-                             @ (k.Members
-                                |> List.choose (fun m ->
-                                    match m.Slot with
-                                    | SConst wire -> Some(sprintf "get_prop %s el == Ok %s" (lit m.Name) wire)
-                                    | _ -> None))
-                             |> String.concat " /\\ ")
-                    )
-
-                line "                    | _ -> True))"
-                line "  = ()"
-                line ""
+            // Phase 722 — NO theorem is emitted here about which documents a presence-keyed holder's
+            // decoder accepts. One was (`dec_<T>_reads`: an accepted document's constructor is the one
+            // the reading picked), and it was the decoder's own guard restated: each arm of the decoder
+            // tests `pick_u_<union> el = <case>` in its own `if`, so the lemma held by one unfolding and
+            // would have held of any reading function whatever. What ties the reading to the
+            // interpreter's is evidence of another kind: the decode vectors (`FStarTarget.vectorsModuleWith`),
+            // where the normaliser evaluates the decoder on documents the interpreter wrote and on
+            // documents it refuses, and the suite's pin of the reading's text.
 
             line "(* ======================================================================================"
             line "   4. TOTALITY. That the decoders type-check at `Tot` is the termination proof; what the"

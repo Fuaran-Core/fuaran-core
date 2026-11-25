@@ -333,52 +333,61 @@ module internal FStarVectors =
         | _ -> Set.empty
 
 
-    /// The implementation of `FStarTarget.vectorsModule` — the published entry, which carries its contract.
-    let vectorsModule (moduleName: string) (models: VectorModel list) : Result<string, CodegenError> =
+    /// The implementation of `FStarTarget.vectorsModule` and `vectorsModuleWith` — the published
+    /// entries, which carry the contract.
+    let vectorsModule
+        (moduleName: string)
+        (models: VectorModel list)
+        (decode: DecodeVectors list)
+        : Result<string, CodegenError> =
+        // The kinds the committed model declares: every kind the target can express.
+        let modelledTags (vm: VectorModel) =
+            partition vm.Idl |> List.filter _.Refusal.IsNone |> List.map _.Tag
+
+        // One accepted vector's two definitions, named `<b>_<v><i>` and `<b>_<e><i>`: the model value
+        // of what the interpreter decodes the bytes to, and the `jval` the bytes parse to.
+        let definitions (vm: VectorModel) (mdl: Model) (vName: string) (eName: string) (i: int) (wire: string) =
+            let q = vm.Prefix + "."
+            // A top-level F* binding must start lower-case; the abbreviation must not.
+            let b = vm.Prefix.ToLowerInvariant()
+            let modelled = Set.ofList (modelledTags vm)
+            let where = sprintf "%s vector %d" vm.Model i
+
+            match Decode.decode vm.Idl wire, Json.parse wire with
+            | Error m, _ -> unmodellable ("a wire the interpreter refuses: " + m) where
+            | _, Error m -> unmodellable ("a wire that does not parse: " + m) where
+            | Ok v, _ when not (Set.isSubset (nodeTags v) modelled) ->
+                unmodellable
+                    ("a node of a kind the model does not declare ("
+                     + (Set.difference (nodeTags v) modelled |> String.concat ", ")
+                     + ")")
+                    where
+            | Ok v, Ok j ->
+                match valueTerm vm.Idl mdl q where SNode v, wireTerm vm.Idl mdl where SNode j with
+                | Error e, _
+                | _, Error e -> Error e
+                | Ok vt, Ok jt ->
+                    Ok(
+                        sprintf
+                            "let %s_%s%d : %snode int string =\n  %s\n\nlet %s_%s%d : jval int string =\n  %s\n"
+                            b
+                            vName
+                            i
+                            q
+                            vt
+                            b
+                            eName
+                            i
+                            jt
+                    )
+
         let block (vm: VectorModel) : Result<string, CodegenError> =
             let q = vm.Prefix + "."
-
-            // The kinds the committed model declares: every kind the target can express.
-            let modelledTags =
-                partition vm.Idl |> List.filter _.Refusal.IsNone |> List.map _.Tag
-
-            let modelled = Set.ofList modelledTags
-            // A top-level F* binding must start lower-case; the abbreviation must not.
             let b = vm.Prefix.ToLowerInvariant()
 
             // Phase 525 — the terms read the members of the model itself, not a re-resolution.
-            model vm.Idl modelledTags
-            |> Result.bind (fun mdl ->
-                vm.Wires
-                |> List.mapi (fun i wire ->
-                    let where = sprintf "%s vector %d" vm.Model i
-
-                    match Decode.decode vm.Idl wire, Json.parse wire with
-                    | Error m, _ -> unmodellable ("a wire the interpreter refuses: " + m) where
-                    | _, Error m -> unmodellable ("a wire that does not parse: " + m) where
-                    | Ok v, _ when not (Set.isSubset (nodeTags v) modelled) ->
-                        unmodellable
-                            ("a node of a kind the model does not declare ("
-                             + (Set.difference (nodeTags v) modelled |> String.concat ", ")
-                             + ")")
-                            where
-                    | Ok v, Ok j ->
-                        match valueTerm vm.Idl mdl q where SNode v, wireTerm vm.Idl mdl where SNode j with
-                        | Error e, _
-                        | _, Error e -> Error e
-                        | Ok vt, Ok jt ->
-                            Ok(
-                                sprintf
-                                    "let %s_v%d : %snode int string =\n  %s\n\nlet %s_e%d : jval int string =\n  %s\n"
-                                    b
-                                    i
-                                    q
-                                    vt
-                                    b
-                                    i
-                                    jt
-                            ))
-                |> sequenceR)
+            model vm.Idl (modelledTags vm)
+            |> Result.bind (fun mdl -> vm.Wires |> List.mapi (definitions vm mdl "v" "e") |> sequenceR)
             |> Result.map (fun defs ->
                 let facts =
                     vm.Wires
@@ -388,8 +397,56 @@ module internal FStarVectors =
                 String.concat "\n" defs
                 + sprintf "\nlet %s_vectors_agree : unit =\n%s\n" b (if facts = "" then "  ()" else facts))
 
-        models
-        |> List.map block
+        // Phase 722 — the DECODE facts: the model's `dec_node` on a document the interpreter reads,
+        // and on one it refuses.
+        let decodeBlock (dv: DecodeVectors) : Result<string, CodegenError> =
+            let vm = dv.Read
+            let q = vm.Prefix + "."
+            let b = vm.Prefix.ToLowerInvariant()
+
+            // A refused document has no slot walk, so it is carried verbatim; a number that is not an
+            // integer would need its slot's float carrier, and is refused by name.
+            let rec integral (j: JVal) =
+                match j with
+                | JFloat _ -> false
+                | JArr xs -> xs |> List.forall integral
+                | JObj fs -> fs |> List.forall (snd >> integral)
+                | _ -> true
+
+            let refused (i: int) (wire: string) =
+                let where = sprintf "%s refused vector %d" vm.Model i
+
+                match Decode.decode vm.Idl wire, Json.parse wire with
+                | Ok _, _ -> unmodellable "a document the interpreter accepts, named as one it refuses" where
+                | _, Error m -> unmodellable ("a wire that does not parse: " + m) where
+                | Error _, Ok j when not (integral j) ->
+                    unmodellable "a refused document holding a number that is not an integer" where
+                | Error _, Ok j ->
+                    jsonTerm where j
+                    |> Result.map (fun jt -> sprintf "let %s_dr%d : jval int string =\n  %s\n" b i jt)
+
+            model vm.Idl (modelledTags vm)
+            |> Result.bind (fun mdl ->
+                (vm.Wires |> List.mapi (definitions vm mdl "dv" "de"))
+                @ (dv.Refused |> List.mapi refused)
+                |> sequenceR)
+            |> Result.map (fun defs ->
+                let facts =
+                    (vm.Wires
+                     |> List.mapi (fun i _ -> sprintf "  assert_norm (%sdec_node %s_de%d == Ok %s_dv%d)" q b i b i))
+                    @ (dv.Refused
+                       |> List.mapi (fun i _ -> sprintf "  assert_norm (Error? (%sdec_node %s_dr%d))" q b i))
+                    |> String.concat ";\n"
+
+                String.concat "\n" defs
+                + sprintf "\nlet %s_decode_agree : unit =\n%s\n" b (if facts = "" then "  ()" else facts))
+
+        // A model named only by its decode vectors is opened too.
+        let opened =
+            models @ (decode |> List.map _.Read)
+            |> List.distinctBy (fun vm -> vm.Prefix, vm.Model)
+
+        (models |> List.map block) @ (decode |> List.map decodeBlock)
         |> sequenceR
         |> Result.map (fun blocks ->
             let header =
@@ -408,13 +465,23 @@ module internal FStarVectors =
                   "   generated model and the interpreter agree on every vector, or this module does not"
                   "   check. What the facts cannot see, by construction: the float LAYOUT (`flt` is opaque to"
                   "   the model) and the WIRE_FORMAT section-7 sentinels (a non-finite float is spelled as a"
-                  "   string the model's float slot does not carry) — the three-way differential covers both."
-                  "*)"
-                  "module " + moduleName
-                  ""
-                  "open WireDecode" ]
-                @ (models |> List.map (fun vm -> "module " + vm.Prefix + " = " + vm.Model))
+                  "   string the model's float slot does not carry) — the three-way differential covers both." ]
+                @ (if List.isEmpty decode then
+                       []
+                   else
+                       [ ""
+                         "   DECODE facts (Phase 722), for the models that name them (`<prefix>_decode_agree`): the"
+                         "   normaliser evaluates the model's `dec_node` on the `jval` a document's bytes parse to."
+                         "   For a document the interpreter READS, the answer is `Ok` of the model value of what the"
+                         "   interpreter decodes; for a document the interpreter REFUSES, it is an `Error`. These"
+                         "   hold the model's reading of a document to the interpreter's on the documents given:"
+                         "   which case of a presence-keyed union the keys present pick, and that two cases left,"
+                         "   or a synthesised member absent or at another value, is refused. The generated round"
+                         "   trip speaks only of what the encoder writes. A refused document is carried verbatim,"
+                         "   and the facts state THAT the model refuses, not the refusal's code or path." ])
+                @ [ "*)"; "module " + moduleName; ""; "open WireDecode" ]
+                @ (opened |> List.map (fun vm -> "module " + vm.Prefix + " = " + vm.Model))
                 |> String.concat "\n"
 
             header + "\n\n" + String.concat "\n" blocks
-            |> fstarStamp "F* vectors" (models |> List.map _.Idl))
+            |> fstarStamp "F* vectors" (opened |> List.map _.Idl))

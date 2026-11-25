@@ -84,15 +84,6 @@ let private shape (e: DecodeError) : string =
 let private grid (members: string) : string =
     sprintf """{"id":"g","kind":{"$type":"Grid","columns":[]%s}}""" members
 
-/// Documents the layout refuses, one per rule of the D220.3 reading and one inside an inline member.
-let private refused: string list =
-    [ grid ""","rowKey":"<closure>","rowKeyField":"id","source":{"$type":"State","key":"k"}"""
-      grid ""","source":{"$type":"State","key":"k"},"staticRows":{"headers":[],"rows":[]}"""
-      grid ""","staticRows":{"headers":[],"rows":[]}"""
-      grid ""
-      grid ""","pageSize":"ten","source":{"$type":"State","key":"k"}"""
-      """{"id":"f","kind":{"$type":"Form","field":{"$type":"Text","placeholder":3,"value":"v"}}}""" ]
-
 /// A document with several defects, for the collecting order: two inline members' and a case's
 /// own, then the member the case synthesises.
 let private manyDefects: string =
@@ -240,7 +231,7 @@ let agreementTests =
                   "the inline members stand where the flat members stood")
 
           testCase "every refusal is the interpreter's, by code and path" (fun _ ->
-              for doc, first, every in answers LayoutIdl.layout refused do
+              for doc, first, every in answers LayoutIdl.layout LayoutIdl.refused do
                   let expected =
                       match Decode.decodeDetailed LayoutIdl.layout doc with
                       | Error e -> "refused " + shape e

@@ -247,9 +247,106 @@ let vectorModels () : VectorModel list =
                 |> List.filter (fun w -> FStarTarget.vectorsModule "Probe" [ one w ] |> Result.isOk)
                 |> List.truncate vectorsPerModel })
 
+// ---------------------------------------------------------------------------
+// Phase 722 — the DECODE vectors. The facts above have the normaliser evaluate each model's ENCODER.
+// A presence-keyed union's reading is a function of the DECODER (which case the keys present pick,
+// and that two cases left is refused), and the generated round trip speaks only of documents the
+// encoder writes, so nothing above evaluates it on a document. These do: the inline-declaration
+// models' `dec_node` on documents the interpreter wrote, and on documents the interpreter refuses.
+// ---------------------------------------------------------------------------
+
+/// A document as the interpreter writes it: read, then written.
+let private interpreterWrote (idl: Idl) (doc: string) : string =
+    match Decode.decode idl doc |> Result.bind (Encode.encode idl) with
+    | Ok s -> s
+    | Error m -> failwithf "the interpreter did not rewrite %s: %s" doc m
+
+/// What a holders document exercises: its kind, and each case of a presence-keyed union whose key
+/// it carries. `P` is `p` with neither case that synthesises it; `B` is `x` without `kc`, which
+/// synthesises it.
+let holdersCoverage (doc: string) : string list =
+    let has (key: string) =
+        doc.Contains(Canonical.write Rendering.CrossHost (JStr key) + ":")
+
+    let tag =
+        [ "G"; "H"; "I" ]
+        |> List.tryFind (fun t -> doc.Contains("\"$type\":\"" + t + "\""))
+        |> Option.defaultValue "?"
+
+    [ if has "ka" then
+          "A"
+      if has "x" && not (has "kc") then
+          "B"
+      if has "kc" then
+          "C"
+      if has "p" && not (has "q") && not (has "r") then
+          "P"
+      if has "q" then
+          "Q"
+      if has "r" then
+          "R"
+      if has "sk" then
+          "S" ]
+    |> List.map (fun c -> tag + "/" + c)
+
+/// Every (kind, case) pair the holders decode vectors reach: the three cases of `K` and the four of
+/// `K3` under `G` (a kind's own fields) and `H` (a plain record and a tagged case), and the four of
+/// `K3` under `I` (a type-parameterised union's case).
+let holdersCovered: string list =
+    [ for tag, cases in
+          [ "G", [ "A"; "B"; "C"; "P"; "Q"; "R"; "S" ]
+            "H", [ "A"; "B"; "C"; "P"; "Q"; "R"; "S" ]
+            "I", [ "P"; "Q"; "R"; "S" ] ] do
+          for c in cases -> tag + "/" + c ]
+
+/// The holders documents the decode facts read: drawn by the sampler, written by the interpreter,
+/// each kept for a (kind, case) pair no earlier one reaches, in the draw's seeded order.
+let holdersDecodeWires () : string list =
+    let one (w: string) : DecodeVectors =
+        { Read =
+            { Model = "LayoutHoldersVocabulary"
+              Prefix = "H"
+              Idl = LayoutIdl.holders
+              Wires = [ w ] }
+          Refused = [] }
+
+    vectorsFor LayoutIdl.holders Map.empty (seedOf "holders") 400
+    |> List.choose (fun v -> Encode.encode LayoutIdl.holders v |> Result.toOption)
+    |> List.distinct
+    |> List.filter (fun w -> not (hostileKey w))
+    |> List.fold
+        (fun (kept: string list, covered: Set<string>) w ->
+            let adds = holdersCoverage w |> List.filter (fun c -> not (covered.Contains c))
+
+            if
+                List.isEmpty adds
+                || FStarTarget.vectorsModuleWith "Probe" [] [ one w ] |> Result.isError
+            then
+                kept, covered
+            else
+                kept @ [ w ], Set.union covered (Set.ofList adds))
+        ([], Set.empty)
+    |> fst
+
+/// The decode vectors of the certification set: the layout vocabulary's corpus and the documents
+/// it refuses, and the holders vocabulary's drawn documents and the documents it refuses.
+let decodeVectors () : DecodeVectors list =
+    [ { Read =
+          { Model = "LayoutVocabulary"
+            Prefix = "L"
+            Idl = LayoutIdl.layout
+            Wires = LayoutIdl.corpus |> List.map (interpreterWrote LayoutIdl.layout) }
+        Refused = LayoutIdl.refused }
+      { Read =
+          { Model = "LayoutHoldersVocabulary"
+            Prefix = "H"
+            Idl = LayoutIdl.holders
+            Wires = holdersDecodeWires () }
+        Refused = LayoutIdl.holdersRefused } ]
+
 /// The facts module the generator writes for the certification set.
 let vectorsText () : Result<string, CodegenError> =
-    FStarTarget.vectorsModule vectorsModuleName (vectorModels ())
+    FStarTarget.vectorsModuleWith vectorsModuleName (vectorModels ()) (decodeVectors ())
 
 let vectorsFile () =
     Snapshots.repoFile ("proofs/" + vectorsModuleName + ".fst")

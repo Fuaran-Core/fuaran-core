@@ -3,7 +3,9 @@
    vocabulary: sha256:587bb7678b2b29ba684110454ffbc42eb3f4bad98388f4cdd0d8ad4523627a36
    vocabulary: sha256:48d2a518690b3f650a2a80e6fed48a571996ff40df48a630fd3a0f35f44927dc
    vocabulary: sha256:bac3a017bb023ec8dbc71cf0b971e374bf14a4c42911dca757d839d54296b931
-   emission: sha256:a8e45306695b8338fd7cf2963ffbf56e0279557c1921eb926721b8b97db3b7b0
+   vocabulary: sha256:bb16a7799ad1395b528bdc2713c76f93b0761fcfb9d8e3e43ce5b2d42896194c
+   vocabulary: sha256:f79a9d5698e83ca274feef4986b1d8dd9ae8cc02ce3f25eb04a33a6e2465e611
+   emission: sha256:c5fd0d20e9309e3ba190b738bc81c87a892b05a35d87a3e79bb3589fbee9b73a
 *)
 (*
    VocabularyVectors — the interpreter's vectors over the generated models (Phase 303).
@@ -19,6 +21,16 @@
    check. What the facts cannot see, by construction: the float LAYOUT (`flt` is opaque to
    the model) and the WIRE_FORMAT section-7 sentinels (a non-finite float is spelled as a
    string the model's float slot does not carry) — the three-way differential covers both.
+
+   DECODE facts (Phase 722), for the models that name them (`<prefix>_decode_agree`): the
+   normaliser evaluates the model's `dec_node` on the `jval` a document's bytes parse to.
+   For a document the interpreter READS, the answer is `Ok` of the model value of what the
+   interpreter decodes; for a document the interpreter REFUSES, it is an `Error`. These
+   hold the model's reading of a document to the interpreter's on the documents given:
+   which case of a presence-keyed union the keys present pick, and that two cases left,
+   or a synthesised member absent or at another value, is refused. The generated round
+   trip speaks only of what the encoder writes. A refused document is carried verbatim,
+   and the facts state THAT the model refuses, not the refusal's code or path.
 *)
 module VocabularyVectors
 
@@ -26,6 +38,8 @@ open WireDecode
 module D = DocVocabulary
 module S = ScoreVocabulary
 module R = Vocabulary
+module L = LayoutVocabulary
+module H = LayoutHoldersVocabulary
 
 let d_v0 : D.node int string =
   (D.C__node__Document "a\"b" (Some "back\\slash") (D.C__e_locale__EnUS) (D.C__e_numbering__DecimalNumbering) ([(D.C__node__Table "node-1" None ([(D.C__node__Row "a\"b" (true) ([]))]))]))
@@ -284,3 +298,198 @@ let r_vectors_agree : unit =
   assert_norm (R.enc_node r_v9 == r_e9);
   assert_norm (R.enc_node r_v10 == r_e10);
   assert_norm (R.enc_node r_v11 == r_e11)
+
+let l_dv0 : L.node int string =
+  (L.C__node__Node "g1" (L.C__vkind__Grid__NoRowIdentity__Source None (["a"]) None None ((L.C__u_feed__State ("rows")))))
+
+let l_de0 : jval int string =
+  (JObj [("id", (JStr "g1")); ("kind", (JObj [("$type", (JStr "Grid")); ("columns", (JArr [(JStr "a")])); ("source", (JObj [("$type", (JStr "State")); ("key", (JStr "rows"))]))]))])
+
+let l_dv1 : L.node int string =
+  (L.C__node__Node "g2" (L.C__vkind__Grid__RowKeyField__Source (Some "c") ([]) (Some 10) (Some "p") ("id") ((L.C__u_feed__Static ((JArr [(JInt 1); (JInt 2)]))))))
+
+let l_de1 : jval int string =
+  (JObj [("id", (JStr "g2")); ("kind", (JObj [("$type", (JStr "Grid")); ("caption", (JStr "c")); ("columns", (JArr [])); ("pageSize", (JInt 10)); ("pageStateKey", (JStr "p")); ("rowKeyField", (JStr "id")); ("source", (JObj [("$type", (JStr "Static")); ("value", (JArr [(JInt 1); (JInt 2)]))]))]))])
+
+let l_dv2 : L.node int string =
+  (L.C__node__Node "g3" (L.C__vkind__Grid__RowKey__StaticRows None (["x"; "y"]) None None (()) () ((L.C__r_static_table__Mk (["h"]) ([["1"]])))))
+
+let l_de2 : jval int string =
+  (JObj [("id", (JStr "g3")); ("kind", (JObj [("$type", (JStr "Grid")); ("columns", (JArr [(JStr "x"); (JStr "y")])); ("rowKey", (JStr "<closure>")); ("source", (JObj [("$type", (JStr "Static")); ("value", (JArr []))])); ("staticRows", (JObj [("headers", (JArr [(JStr "h")])); ("rows", (JArr [(JArr [(JStr "1")])]))]))]))])
+
+let l_dv3 : L.node int string =
+  (L.C__node__Node "g4" (L.C__vkind__Grid__NoRowIdentity__StaticRows None ([]) (Some 3) None () ((L.C__r_static_table__Mk ([]) ([])))))
+
+let l_de3 : jval int string =
+  (JObj [("id", (JStr "g4")); ("kind", (JObj [("$type", (JStr "Grid")); ("columns", (JArr [])); ("pageSize", (JInt 3)); ("source", (JObj [("$type", (JStr "Static")); ("value", (JArr []))])); ("staticRows", (JObj [("headers", (JArr [])); ("rows", (JArr []))]))]))])
+
+let l_dv4 : L.node int string =
+  (L.C__node__Node "f1" (L.C__vkind__Form ((L.C__u_field__Text (Some "type here") ("v")))))
+
+let l_de4 : jval int string =
+  (JObj [("id", (JStr "f1")); ("kind", (JObj [("$type", (JStr "Form")); ("field", (JObj [("$type", (JStr "Text")); ("placeholder", (JStr "type here")); ("value", (JStr "v"))]))]))])
+
+let l_dv5 : L.node int string =
+  (L.C__node__Node "f2" (L.C__vkind__Form ((L.C__u_field__Text None ("")))))
+
+let l_de5 : jval int string =
+  (JObj [("id", (JStr "f2")); ("kind", (JObj [("$type", (JStr "Form")); ("field", (JObj [("$type", (JStr "Text")); ("value", (JStr ""))]))]))])
+
+let l_dv6 : L.node int string =
+  (L.C__node__Node "f3" (L.C__vkind__Form ((L.C__u_field__Check (Some "ok") (true)))))
+
+let l_de6 : jval int string =
+  (JObj [("id", (JStr "f3")); ("kind", (JObj [("$type", (JStr "Form")); ("field", (JObj [("$type", (JStr "Check")); ("label", (JStr "ok")); ("on", (JBool true))]))]))])
+
+let l_dr0 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "Grid")); ("columns", (JArr [])); ("rowKey", (JStr "<closure>")); ("rowKeyField", (JStr "id")); ("source", (JObj [("$type", (JStr "State")); ("key", (JStr "k"))]))]))])
+
+let l_dr1 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "Grid")); ("columns", (JArr [])); ("source", (JObj [("$type", (JStr "State")); ("key", (JStr "k"))])); ("staticRows", (JObj [("headers", (JArr [])); ("rows", (JArr []))]))]))])
+
+let l_dr2 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "Grid")); ("columns", (JArr [])); ("staticRows", (JObj [("headers", (JArr [])); ("rows", (JArr []))]))]))])
+
+let l_dr3 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "Grid")); ("columns", (JArr []))]))])
+
+let l_dr4 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "Grid")); ("columns", (JArr [])); ("pageSize", (JStr "ten")); ("source", (JObj [("$type", (JStr "State")); ("key", (JStr "k"))]))]))])
+
+let l_dr5 : jval int string =
+  (JObj [("id", (JStr "f")); ("kind", (JObj [("$type", (JStr "Form")); ("field", (JObj [("$type", (JStr "Text")); ("placeholder", (JInt 3)); ("value", (JStr "v"))]))]))])
+
+let l_decode_agree : unit =
+  assert_norm (L.dec_node l_de0 == Ok l_dv0);
+  assert_norm (L.dec_node l_de1 == Ok l_dv1);
+  assert_norm (L.dec_node l_de2 == Ok l_dv2);
+  assert_norm (L.dec_node l_de3 == Ok l_dv3);
+  assert_norm (L.dec_node l_de4 == Ok l_dv4);
+  assert_norm (L.dec_node l_de5 == Ok l_dv5);
+  assert_norm (L.dec_node l_de6 == Ok l_dv6);
+  assert_norm (Error? (L.dec_node l_dr0));
+  assert_norm (Error? (L.dec_node l_dr1));
+  assert_norm (Error? (L.dec_node l_dr2));
+  assert_norm (Error? (L.dec_node l_dr3));
+  assert_norm (Error? (L.dec_node l_dr4));
+  assert_norm (Error? (L.dec_node l_dr5))
+
+let h_dv0 : H.node int string =
+  (H.C__node__Node "" (H.C__vkind__G__C__S (true) () (false) None ("new\nline") () ("accent-é")))
+
+let h_de0 : jval int string =
+  (JObj [("id", (JStr "")); ("kind", (JObj [("$type", (JStr "G")); ("ab", (JBool true)); ("kb", (JStr "seven")); ("kc", (JBool false)); ("sk", (JStr "new\nline")); ("x", (JStr "sx")); ("zi", (JStr "accent-é"))]))])
+
+let h_dv1 : H.node int string =
+  (H.C__node__Node "n" (H.C__vkind__H (Some (H.C__r_r2__Mk__A (false) ("plain") (Some "") (Some "new\nline") (Some "new\nline") ("accent-é"))) ((H.C__u_t__One (true) (Some "new\nline") ("quote\" inside")))))
+
+let h_de1 : jval int string =
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "H")); ("rec", (JObj [("ab", (JBool false)); ("ka", (JStr "plain")); ("s", (JStr "")); ("shared", (JStr "new\nline")); ("tail", (JStr "new\nline")); ("zi", (JStr "accent-é"))])); ("t", (JObj [("$type", (JStr "One")); ("ab", (JBool true)); ("s", (JStr "new\nline")); ("zi", (JStr "quote\" inside"))]))]))])
+
+let h_dv2 : H.node int string =
+  (H.C__node__Node "n" (H.C__vkind__I ((H.C__u_box__str__Full__R ("new\nline") () ("astral-😀")))))
+
+let h_de2 : jval int string =
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "I")); ("b", (JObj [("$type", (JStr "Full")); ("item", (JStr "new\nline")); ("p", (JStr "2")); ("r", (JStr "astral-😀"))]))]))])
+
+let h_dv3 : H.node int string =
+  (H.C__node__Node "" (H.C__vkind__H (Some (H.C__r_r2__Mk__C (false) () (true) None (Some "astral-😀") () ("five"))) ((H.C__u_t__One (false) (Some "ctrl\u0001here") ("five")))))
+
+let h_de3 : jval int string =
+  (JObj [("id", (JStr "")); ("kind", (JObj [("$type", (JStr "H")); ("rec", (JObj [("ab", (JBool false)); ("kb", (JStr "seven")); ("kc", (JBool true)); ("tail", (JStr "astral-😀")); ("x", (JStr "sx"))])); ("t", (JObj [("$type", (JStr "One")); ("ab", (JBool false)); ("s", (JStr "ctrl\u0001here"))]))]))])
+
+let h_dv4 : H.node int string =
+  (H.C__node__Node "n" (H.C__vkind__G__B__R (false) ("plain") () ("") None None ("new\nline") ("ctrl\u0001here")))
+
+let h_de4 : jval int string =
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "G")); ("ab", (JBool false)); ("kb", (JStr "plain")); ("p", (JStr "2")); ("r", (JStr "")); ("x", (JStr "new\nline")); ("zi", (JStr "ctrl\u0001here"))]))])
+
+let h_dv5 : H.node int string =
+  (H.C__node__Node "a\"b" (H.C__vkind__H (Some (H.C__r_r2__Mk__B (true) ("plain") None (Some "quote\" inside") (Some "") ("plain") ("five"))) ((H.C__u_t__Two__S ("quote\" inside") ("quote\" inside")))))
+
+let h_de5 : jval int string =
+  (JObj [("id", (JStr "a\"b")); ("kind", (JObj [("$type", (JStr "H")); ("rec", (JObj [("ab", (JBool true)); ("kb", (JStr "plain")); ("shared", (JStr "quote\" inside")); ("tail", (JStr "")); ("x", (JStr "plain"))])); ("t", (JObj [("$type", (JStr "Two")); ("n", (JStr "quote\" inside")); ("sk", (JStr "quote\" inside"))]))]))])
+
+let h_dv6 : H.node int string =
+  (H.C__node__Node "node-1" (H.C__vkind__I ((H.C__u_box__str__Full__S ("accent-é") ("astral-😀")))))
+
+let h_de6 : jval int string =
+  (JObj [("id", (JStr "node-1")); ("kind", (JObj [("$type", (JStr "I")); ("b", (JObj [("$type", (JStr "Full")); ("item", (JStr "accent-é")); ("sk", (JStr "astral-😀"))]))]))])
+
+let h_dv7 : H.node int string =
+  (H.C__node__Node "a\"b" (H.C__vkind__G__A__Q (true) ("tab\there") () ("ctrl\u0001here") (Some "quote\" inside") (Some "accent-é") ("new\nline")))
+
+let h_de7 : jval int string =
+  (JObj [("id", (JStr "a\"b")); ("kind", (JObj [("$type", (JStr "G")); ("ab", (JBool true)); ("ka", (JStr "tab\there")); ("p", (JStr "1")); ("q", (JStr "ctrl\u0001here")); ("s", (JStr "quote\" inside")); ("shared", (JStr "accent-é")); ("zi", (JStr "new\nline"))]))])
+
+let h_dv8 : H.node int string =
+  (H.C__node__Node "" (H.C__vkind__G__A__P (true) ("quote\" inside") ("astral-😀") None (Some "astral-😀") ("back\\slash")))
+
+let h_de8 : jval int string =
+  (JObj [("id", (JStr "")); ("kind", (JObj [("$type", (JStr "G")); ("ab", (JBool true)); ("ka", (JStr "quote\" inside")); ("p", (JStr "astral-😀")); ("shared", (JStr "astral-😀")); ("zi", (JStr "back\\slash"))]))])
+
+let h_dv9 : H.node int string =
+  (H.C__node__Node "" (H.C__vkind__I ((H.C__u_box__str__Full__Q ("ctrl\u0001here") () ("new\nline")))))
+
+let h_de9 : jval int string =
+  (JObj [("id", (JStr "")); ("kind", (JObj [("$type", (JStr "I")); ("b", (JObj [("$type", (JStr "Full")); ("item", (JStr "ctrl\u0001here")); ("p", (JStr "1")); ("q", (JStr "new\nline"))]))]))])
+
+let h_dv10 : H.node int string =
+  (H.C__node__Node "node-1" (H.C__vkind__H (Some (H.C__r_r2__Mk__C (false) () (true) (Some "") (Some "") () ("quote\" inside"))) ((H.C__u_t__Two__R ("ctrl\u0001here") () ("plain")))))
+
+let h_de10 : jval int string =
+  (JObj [("id", (JStr "node-1")); ("kind", (JObj [("$type", (JStr "H")); ("rec", (JObj [("ab", (JBool false)); ("kb", (JStr "seven")); ("kc", (JBool true)); ("s", (JStr "")); ("tail", (JStr "")); ("x", (JStr "sx")); ("zi", (JStr "quote\" inside"))])); ("t", (JObj [("$type", (JStr "Two")); ("n", (JStr "ctrl\u0001here")); ("p", (JStr "2")); ("r", (JStr "plain"))]))]))])
+
+let h_dv11 : H.node int string =
+  (H.C__node__Node "a\"b" (H.C__vkind__H (Some (H.C__r_r2__Mk__A (true) ("accent-é") None (Some "new\nline") (Some "") ("five"))) ((H.C__u_t__Two__Q ("plain") () ("ctrl\u0001here")))))
+
+let h_de11 : jval int string =
+  (JObj [("id", (JStr "a\"b")); ("kind", (JObj [("$type", (JStr "H")); ("rec", (JObj [("ab", (JBool true)); ("ka", (JStr "accent-é")); ("shared", (JStr "new\nline")); ("tail", (JStr ""))])); ("t", (JObj [("$type", (JStr "Two")); ("n", (JStr "plain")); ("p", (JStr "1")); ("q", (JStr "ctrl\u0001here"))]))]))])
+
+let h_dv12 : H.node int string =
+  (H.C__node__Node "a\"b" (H.C__vkind__H (Some (H.C__r_r2__Mk__A (false) ("ctrl\u0001here") (Some "plain") None None ("five"))) ((H.C__u_t__Two__P ("astral-😀") ("accent-é")))))
+
+let h_de12 : jval int string =
+  (JObj [("id", (JStr "a\"b")); ("kind", (JObj [("$type", (JStr "H")); ("rec", (JObj [("ab", (JBool false)); ("ka", (JStr "ctrl\u0001here")); ("s", (JStr "plain"))])); ("t", (JObj [("$type", (JStr "Two")); ("n", (JStr "astral-😀")); ("p", (JStr "accent-é"))]))]))])
+
+let h_dv13 : H.node int string =
+  (H.C__node__Node "n" (H.C__vkind__I ((H.C__u_box__str__Full__P ("plain") ("plain")))))
+
+let h_de13 : jval int string =
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "I")); ("b", (JObj [("$type", (JStr "Full")); ("item", (JStr "plain")); ("p", (JStr "plain"))]))]))])
+
+let h_dr0 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "G")); ("ab", (JBool true)); ("ka", (JStr "a")); ("kb", (JStr "b")); ("x", (JStr "x"))]))])
+
+let h_dr1 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "G")); ("ab", (JBool true)); ("ka", (JStr "a")); ("p", (JStr "1")); ("sk", (JStr "s"))]))])
+
+let h_dr2 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "G")); ("ab", (JBool true)); ("ka", (JStr "a")); ("p", (JStr "1")); ("q", (JStr "q")); ("r", (JStr "r"))]))])
+
+let h_dr3 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "G")); ("ab", (JBool true)); ("ka", (JStr "a")); ("p", (JStr "2")); ("q", (JStr "q"))]))])
+
+let h_dr4 : jval int string =
+  (JObj [("id", (JStr "h")); ("kind", (JObj [("$type", (JStr "H")); ("rec", (JObj [("ab", (JBool true))])); ("t", (JObj [("$type", (JStr "Two")); ("n", (JStr "n"))]))]))])
+
+let h_decode_agree : unit =
+  assert_norm (H.dec_node h_de0 == Ok h_dv0);
+  assert_norm (H.dec_node h_de1 == Ok h_dv1);
+  assert_norm (H.dec_node h_de2 == Ok h_dv2);
+  assert_norm (H.dec_node h_de3 == Ok h_dv3);
+  assert_norm (H.dec_node h_de4 == Ok h_dv4);
+  assert_norm (H.dec_node h_de5 == Ok h_dv5);
+  assert_norm (H.dec_node h_de6 == Ok h_dv6);
+  assert_norm (H.dec_node h_de7 == Ok h_dv7);
+  assert_norm (H.dec_node h_de8 == Ok h_dv8);
+  assert_norm (H.dec_node h_de9 == Ok h_dv9);
+  assert_norm (H.dec_node h_de10 == Ok h_dv10);
+  assert_norm (H.dec_node h_de11 == Ok h_dv11);
+  assert_norm (H.dec_node h_de12 == Ok h_dv12);
+  assert_norm (H.dec_node h_de13 == Ok h_dv13);
+  assert_norm (Error? (H.dec_node h_dr0));
+  assert_norm (Error? (H.dec_node h_dr1));
+  assert_norm (Error? (H.dec_node h_dr2));
+  assert_norm (Error? (H.dec_node h_dr3));
+  assert_norm (Error? (H.dec_node h_dr4))

@@ -177,6 +177,122 @@ let corpus: string list =
       """{"id":"f2","kind":{"$type":"Form","field":{"$type":"Text","value":""}}}"""
       """{"id":"f3","kind":{"$type":"Form","field":{"$type":"Check","label":"ok","on":true}}}""" ]
 
+/// Documents the layout REFUSES, one per rule of the D220.3 reading and one inside each kind of
+/// inline member: both keys of one union present; a synthesised member at another value; the
+/// synthesised member absent; a required union with no key present; a defect in an inline record's
+/// member; a defect in a record payload's member.
+let refused: string list =
+    let grid (members: string) : string =
+        sprintf """{"id":"g","kind":{"$type":"Grid","columns":[]%s}}""" members
+
+    [ grid ""","rowKey":"<closure>","rowKeyField":"id","source":{"$type":"State","key":"k"}"""
+      grid ""","source":{"$type":"State","key":"k"},"staticRows":{"headers":[],"rows":[]}"""
+      grid ""","staticRows":{"headers":[],"rows":[]}"""
+      grid ""
+      grid ""","pageSize":"ten","source":{"$type":"State","key":"k"}"""
+      """{"id":"f","kind":{"$type":"Form","field":{"$type":"Text","placeholder":3,"value":"v"}}}""" ]
+
+// ---------------------------------------------------------------------------
+// Phase 722 — the HOLDERS vocabulary: every place a presence-keyed union can stand that `layout`
+// does not reach, and unions of more than two cases. `layout` holds its two unions on a KIND, and
+// each has two cases. The F* target also emits a model and a proof script for the forms below, and
+// each is in the certification set so that a prover has checked what the generator emits:
+//   * a plain (not inline) RECORD holding one (`R2.k`), beside an inline record;
+//   * a TAGGED CASE holding one (`T.Two.k3`), beside a record-payload case;
+//   * a TYPE-PARAMETERISED union holding one (`Box<T>.Full.pick`), instantiated at a string;
+//   * a union of THREE cases one of which synthesises another's key and a member (`K`), with a
+//     member name two cases share;
+//   * a union of FOUR cases with one key (`p`) that TWO cases synthesise, at different values (`K3`).
+// The names are terse on purpose: they are the generated lemma names' stems, and the proof scripts
+// were measured over exactly these.
+// ---------------------------------------------------------------------------
+
+/// The holders vocabulary.
+let holders: Idl =
+    let keyed (name: string) (rules: (string * string * (string * IdlValue) list) list) (cases: IdlUnionCase list) =
+        union
+            name
+            (UnionDiscrimination.ByPresence(rules |> List.map (fun (c, k, s) -> { Case = c; Key = k; Synthesised = s })))
+            cases
+
+    let full =
+        base'
+            [ kind
+                  "G"
+                  [ field "r" (TRecord "R1") Required
+                    field "u" (TUnion("K", [])) Required
+                    field "o" (TUnion("K3", [])) Optional ]
+              kind "H" [ field "t" (TUnion("T", [])) Required; field "rec" (TRecord "R2") Optional ]
+              kind "I" [ field "b" (TUnion("Box", [ TStr ])) Required ] ]
+            [ keyed
+                  "K"
+                  [ ("A", "ka", [])
+                    ("B", "kb", [])
+                    ("C", "kc", [ ("kb", VStr "seven"); ("x", VStr "sx") ]) ]
+                  [ case "A" [ field "shared" TStr Optional; field "ka" TStr Required ]
+                    case
+                        "B"
+                        [ field "x" TStr Required
+                          field "kb" TStr Required
+                          field "shared" TStr Optional ]
+                    case "C" [ field "kc" TBool Required ] ]
+              keyed
+                  "K3"
+                  [ ("P", "p", [])
+                    ("Q", "q", [ ("p", VStr "1") ])
+                    ("R", "r", [ ("p", VStr "2") ])
+                    ("S", "sk", []) ]
+                  [ case "P" [ field "p" TStr Required ]
+                    case "Q" [ field "q" TStr Required ]
+                    case "R" [ field "r" TStr Required ]
+                    case "S" [ field "sk" TStr Required ] ]
+              union
+                  "T"
+                  UnionDiscrimination.Tagged
+                  [ case "One" [ field "payload" (TRecord "R1") Required ]
+                    case "Two" [ field "n" TStr Required; field "k3" (TUnion("K3", [])) Optional ] ]
+              { union
+                    "Box"
+                    UnionDiscrimination.Tagged
+                    [ case "Full" [ field "item" (TVar "T") Required; field "pick" (TUnion("K3", [])) Optional ]
+                      case "Empty" [] ] with
+                  Params = [ "T" ] } ]
+            [ record
+                  "R1"
+                  true
+                  [ field "zi" TStr (OmitDefault(VStr "five"))
+                    field "s" TStr Optional
+                    field "ab" TBool Required ]
+              record
+                  "R2"
+                  false
+                  [ field "inner" (TRecord "R1") Required
+                    field "k" (TUnion("K", [])) Required
+                    field "tail" TStr Optional ] ]
+
+    // `base'` adds the layout's feed and table, which this vocabulary does not use.
+    { full with
+        Unions = full.Unions |> List.filter (fun u -> u.Name <> "Feed")
+        Records = full.Records |> List.filter (fun r -> r.Name <> "StaticTable") }
+
+/// Documents the holders vocabulary REFUSES, one per reading rule the layout's two-case unions do
+/// not reach: two unrelated keys of the three-case union; the four-case union's `p` beside a key
+/// that does not synthesise it; the two cases that both synthesise `p`, present together; a
+/// synthesising case whose `p` is the OTHER synthesising case's value; and a required union held
+/// by a plain record with no key present.
+let holdersRefused: string list =
+    let g (members: (string * string) list) : string =
+        members
+        |> List.map (fun (k, v) -> sprintf ",\"%s\":\"%s\"" k v)
+        |> String.concat ""
+        |> sprintf "{\"id\":\"g\",\"kind\":{\"$type\":\"G\",\"ab\":true%s}}"
+
+    [ g [ "ka", "a"; "kb", "b"; "x", "x" ]
+      g [ "ka", "a"; "p", "1"; "sk", "s" ]
+      g [ "ka", "a"; "p", "1"; "q", "q"; "r", "r" ]
+      g [ "ka", "a"; "p", "2"; "q", "q" ]
+      """{"id":"h","kind":{"$type":"H","rec":{"ab":true},"t":{"$type":"Two","n":"n"}}}""" ]
+
 /// The module name the committed generated file declares.
 [<Literal>]
 let moduleName = "Fuaran.Core.Tests.LayoutGenerated"

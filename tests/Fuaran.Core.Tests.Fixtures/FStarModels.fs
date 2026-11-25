@@ -109,8 +109,25 @@ let generated: Generated list =
               @ remedyLines
             Proves =
               [ "F* BACKEND over the INLINE declarations: a holder of a presence-keyed union has one"
-                "constructor per choice of case, the round trip is a theorem about each, and a decoder"
-                "answers one only where the reading of the document's own keys picked its case." ] } } ]
+                "constructor per choice of case, and the round trip is a theorem about each. That the"
+                "reading is the interpreter's is held by the decode vectors, not by a theorem." ] } }
+      // Phase 722 — the holders the layout vocabulary does not reach. The generator emits a proof
+      // script for each of these forms, and a generator must not emit a script no prover has
+      // checked: a plain record holding a presence-keyed union, a tagged case holding one, a
+      // type-parameterised union holding one, and unions of three and four cases with a key two
+      // cases synthesise.
+      { Module = "LayoutHoldersVocabulary"
+        Idl = LayoutIdl.holders
+        Provenance =
+          { Origin =
+              [ "the INLINE-DECLARATION HOLDERS vocabulary — `tests/Fuaran.Core.Tests.Fixtures/LayoutIdl.fs`,"
+                "authored for the holders of a presence-keyed union the layout vocabulary does not reach:"
+                "an ordinary record, a tagged case, a type-parameterised union, and unions of three and"
+                "four cases, one with a key two cases synthesise (fuaran-core Phase 722)." ]
+              @ remedyLines
+            Proves =
+              [ "F* BACKEND over every HOLDER of a presence-keyed union: one constructor of the holder"
+                "per choice of case whatever the holder is, and the round trip a theorem about each." ] } } ]
 
 let modelPath (g: Generated) =
     Path.Combine(repoRoot, "proofs", g.Module + ".fst")

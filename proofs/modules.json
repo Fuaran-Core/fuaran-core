@@ -530,7 +530,31 @@
       "fastestSeconds": 30,
       "fastestPhase": "fuaran-core#722",
       "phase": "fuaran-core#722",
-      "note": "Phase 722 - the generated ROUND TRIP over `LayoutVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type, each constructor of a holder of a presence-keyed union included), `dec_node_total`, and `dec_vkind_reads`: for EVERY input the decoder answers a constructor only where the reading of the input's own keys picked its case and each member that case synthesises is present at its declared value. One `pk_` lemma per constructor and union states the reading off the encoded object, beside the lookups the linear presence split already emits."
+      "note": "Phase 722 - the generated ROUND TRIP over `LayoutVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type, each constructor of a holder of a presence-keyed union included) and `dec_node_total`. One `pk_` lemma per constructor and union states the reading off the encoded object, beside the lookups the linear presence split already emits."
+    },
+    {
+      "module": "LayoutHoldersVocabulary",
+      "kind": "generated",
+      "opens": [ "WireDecode" ],
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
+      "budgetSeconds": 30,
+      "measuredSeconds": 15,
+      "fastestSeconds": 15,
+      "fastestPhase": "fuaran-core#722",
+      "phase": "fuaran-core#722",
+      "note": "Phase 722 - the GENERATED model of the HOLDERS vocabulary (`tests/Fuaran.Core.Tests.Fixtures/LayoutIdl.fs`, `holders`): the holders of a presence-keyed union the layout vocabulary does not reach (a plain record, a tagged case, a type-parameterised union's case) and unions of three and of four cases, the second with a key two cases synthesise. In the leg because the generator emits a proof script for each of these forms, and none is to be emitted unchecked. All three of its kinds are modelled. Carries the `--ext context_pruning` option inside the generated file, like every generated model."
+    },
+    {
+      "module": "LayoutHoldersVocabularyProofs",
+      "kind": "generated",
+      "opens": [ "WireDecode", "LayoutHoldersVocabulary" ],
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
+      "budgetSeconds": 180,
+      "measuredSeconds": 86,
+      "fastestSeconds": 85,
+      "fastestPhase": "fuaran-core#722",
+      "phase": "fuaran-core#722",
+      "note": "Phase 722 - the generated ROUND TRIP over `LayoutHoldersVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type: every constructor of each holder, under every choice of case of the three-case and the four-case union) and `dec_node_total`, by the walk and the lemma shapes of `LayoutVocabularyProofs`. The widest module of the generated set: a kind holding both unions has fifteen constructors."
     },
     {
       "module": "Relation",
@@ -619,14 +643,14 @@
     {
       "module": "VocabularyVectors",
       "kind": "generated",
-      "opens": [ "WireDecode", "Vocabulary", "DocVocabulary", "ScoreVocabulary" ],
+      "opens": [ "WireDecode", "Vocabulary", "DocVocabulary", "ScoreVocabulary", "LayoutVocabulary", "LayoutHoldersVocabulary" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 20,
       "measuredSeconds": 3,
       "fastestSeconds": 0.99,
       "fastestPhase": "fuaran-core#504",
       "phase": "fuaran-core#303",
-      "note": "Phase 303 — the reference interpreter's vectors as NORMALISER facts over the three generated vocabulary models: for each vector the three-way differential draws (twelve per model, the drawn and the adversarial ones, hostile map keys sorted first), `assert_norm` that the model's `enc_node`, applied to the model value of what the interpreter DECODES the bytes to, normalises to the `jval` the bytes PARSE to. Emitted by `FStarTarget.vectorsModule` from the fixtures library (`render fstar`); held to a fresh generation by `IdlThreeHostTests`. Opens Vocabulary, DocVocabulary and ScoreVocabulary, which the leg checks first in their own clocks; checked, not extracted. SEEDED from the phase's `check.ps1 -Runs 1 -Since HEAD` cone run (seven modules in, the three models before it): 3s. A first `-Modules` leg measured 34s three times, and those are NOT this module's cost — under the selector the models it opens were re-verified inside its clock, the case `Normalize`'s note names — so they are not seeds. By `seeding`'s rule the budget is the 20s minimum; by `floorSeeding`'s the floor is 0, the fastest genuine cold run being under 5s. The facts are discharged by the normaliser, so the cost grows with the vectors' size, not with Z3."
+      "note": "Phase 303 — the reference interpreter's vectors as NORMALISER facts over the three generated vocabulary models: for each vector the three-way differential draws (twelve per model, the drawn and the adversarial ones, hostile map keys sorted first), `assert_norm` that the model's `enc_node`, applied to the model value of what the interpreter DECODES the bytes to, normalises to the `jval` the bytes PARSE to. Emitted by `FStarTarget.vectorsModule` from the fixtures library (`render fstar`); held to a fresh generation by `IdlThreeHostTests`. Opens Vocabulary, DocVocabulary and ScoreVocabulary, which the leg checks first in their own clocks; checked, not extracted. SEEDED from the phase's `check.ps1 -Runs 1 -Since HEAD` cone run (seven modules in, the three models before it): 3s. A first `-Modules` leg measured 34s three times, and those are NOT this module's cost — under the selector the models it opens were re-verified inside its clock, the case `Normalize`'s note names — so they are not seeds. By `seeding`'s rule the budget is the 20s minimum; by `floorSeeding`'s the floor is 0, the fastest genuine cold run being under 5s. The facts are discharged by the normaliser, so the cost grows with the vectors' size, not with Z3. Phase 722 adds DECODE facts over the two inline-declaration models (`l_decode_agree`, `h_decode_agree`: `dec_node` evaluated on documents the interpreter reads and on documents it refuses), emitted by `FStarTarget.vectorsModuleWith`; the module opens those two models as well, which the leg checks first in their own clocks."
     },
     {
       "module": "PropagationOps",

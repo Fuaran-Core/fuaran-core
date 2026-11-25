@@ -808,7 +808,8 @@ let backendTests =
 
               Expect.stringContains model "source:(unit)" "the constructor carries nothing for it"
 
-              // The proofs state both halves: the round trip, and that the reading decides.
+              // The proofs state the round trip, a lemma per constructor and union for the reading off
+              // the encoded object. No theorem restates the decoder's own guard as a second guarantee.
               let proofs =
                   emitted (
                       FStarTarget.proofsModule
@@ -818,13 +819,7 @@ let backendTests =
                           (kindTags LayoutIdl.layout)
                   )
 
-              Expect.stringContains proofs "let dec_vkind_reads (#num #flt: eqtype) (el: jval num flt)" "stated"
-
-              Expect.stringContains
-                  proofs
-                  ("| Ok (C__vkind__Grid__RowKey__StaticRows _ _ _ _ _ _ _) -> pick_u_row_identity #num #flt el == PK__u_row_identity__RowKey /\\ pick_u_grid_rows #num #flt el == PK__u_grid_rows__StaticRows /\\ get_prop \"source\" el == Ok "
-                   + declared)
-                  "an accepted document's constructor is the one its keys pick, its synthesised member as declared"
+              Expect.isFalse (proofs.Contains "_reads (#num") "the decoder's guard is not restated as a theorem"
 
               Expect.stringContains
                   proofs
@@ -909,24 +904,126 @@ let backendTests =
                       "the synthesised member 'source' of union 'GridRows' case 'StaticRows'"
                       "named")
 
-          testCase "the F* vectors state each corpus document at the constructor its keys pick" (fun _ ->
-              let facts =
-                  emitted (
-                      FStarTarget.vectorsModule
-                          "LayoutVectors"
-                          [ { Model = "LayoutModel"
-                              Prefix = "L"
-                              Idl = LayoutIdl.layout
-                              Wires = LayoutIdl.corpus } ]
-                  )
+          // The DECODE facts of the committed vectors module (`proofs/VocabularyVectors.fst`, held to
+          // this text by `IdlThreeHostTests` and checked by the proof leg): the normaliser evaluates the
+          // layout model's `dec_node` on each corpus document, and the answer is the value whose
+          // constructor is the one the document's keys pick; and on each document the interpreter
+          // refuses, where it is an `Error`.
+          testCase
+              "the F* decode vectors read each corpus document at the constructor its keys pick, and refuse what the interpreter refuses"
+              (fun _ ->
+                  let facts = (emitted (CertificationVectors.vectorsText ())).Replace("\r\n", "\n")
 
-              for ctor in
-                  [ "L.C__vkind__Grid__NoRowIdentity__Source"
-                    "L.C__vkind__Grid__RowKeyField__Source"
-                    "L.C__vkind__Grid__RowKey__StaticRows"
-                    "L.C__vkind__Grid__NoRowIdentity__StaticRows"
-                    "L.C__vkind__Form" ] do
-                  Expect.stringContains facts ctor ctor)
+                  let definition (name: string) : string =
+                      let head = sprintf "let %s : " name
+
+                      match facts.IndexOf(head, System.StringComparison.Ordinal) with
+                      | -1 -> failtestf "the vectors module defines no %s" name
+                      | at -> facts.Substring(at, facts.IndexOf("\n\n", at, System.StringComparison.Ordinal) - at)
+
+                  // The constructor each corpus document's keys pick, in corpus order: read off the
+                  // interpreter's own value, never off the generated text.
+                  let picked (doc: string) : string =
+                      let caseOf (name: string) (fields: (string * IdlValue) list) =
+                          match fields |> List.tryFind (fun (n, _) -> n = name) with
+                          | Some(_, VUnion(c, _)) -> Some c
+                          | _ -> None
+
+                      match Decode.decodeDetailed LayoutIdl.layout doc with
+                      | Ok(VNode(_, "Grid", fields)) ->
+                          sprintf
+                              "L.C__vkind__Grid__%s__%s"
+                              (caseOf "identity" fields |> Option.defaultValue "NoRowIdentity")
+                              (caseOf "rows" fields |> Option.defaultValue "?")
+                      | Ok(VNode(_, "Form", _)) -> "L.C__vkind__Form"
+                      | other -> failtestf "not a layout node: %A" other
+
+                  let constructors = LayoutIdl.corpus |> List.map picked
+
+                  // The corpus is not vacuous for the reading: each case of each union, and no case.
+                  for needle in
+                      [ "NoRowIdentity"
+                        "__RowKey__"
+                        "__RowKeyField__"
+                        "__Source"
+                        "__StaticRows"
+                        "Form" ] do
+                      Expect.exists
+                          constructors
+                          (fun (c: string) -> c.Contains needle)
+                          (needle + " is picked by some document")
+
+                  constructors
+                  |> List.iteri (fun i ctor ->
+                      Expect.stringContains
+                          (definition (sprintf "l_dv%d" i))
+                          ("(" + ctor + " ")
+                          (sprintf "document %d is read at the constructor its keys pick" i)
+
+                      Expect.stringContains
+                          facts
+                          (sprintf "  assert_norm (L.dec_node l_de%d == Ok l_dv%d)" i i)
+                          (sprintf "and the decoder is evaluated on document %d" i))
+
+                  Expect.isGreaterThan (List.length LayoutIdl.refused) 5 "one document per refusal of the reading"
+
+                  LayoutIdl.refused
+                  |> List.iteri (fun i doc ->
+                      Expect.isError (Decode.decodeDetailed LayoutIdl.layout doc) "the interpreter refuses it"
+
+                      Expect.stringContains
+                          facts
+                          (sprintf "  assert_norm (Error? (L.dec_node l_dr%d))" i)
+                          (sprintf "the decoder is evaluated on refused document %d" i)))
+
+          // Phase 722 — the holders vocabulary: the forms the generator emits a proof script for and the
+          // layout vocabulary does not reach. Its model and proofs are in the certification set, and its
+          // decode vectors read every case of both unions under every holder.
+          testCase
+              "the holders vocabulary is modelled whole, and its decode vectors reach every case under every holder"
+              (fun _ ->
+                  Expect.isEmpty (Declare.errors LayoutIdl.holders) "well-formed"
+
+                  for v in FStarTarget.partition LayoutIdl.holders do
+                      Expect.isNone v.Refusal (v.Tag + " is modelled")
+
+                  let model =
+                      (emitted (FStarTarget.vocabularyModule "M" LayoutIdl.holders (kindTags LayoutIdl.holders)))
+                          .Replace("\r\n", "\n")
+
+                  // The four-case union's reading: `p` is synthesised by TWO cases, so `P` is left only
+                  // where neither is present, and the chain refuses two left at every step.
+                  for line in
+                      [ "  let c0 = p0 && not (p1 || p2) in"
+                        "  if c0 then (if c1 || c2 || c3 then PB__u_k3 else PK__u_k3__P) else"
+                        "  if c1 then (if c2 || c3 then PB__u_k3 else PK__u_k3__Q) else" ] do
+                      Expect.stringContains model (line + "\n") line
+
+                  let wires = CertificationVectors.holdersDecodeWires ()
+
+                  let reached =
+                      wires |> List.collect CertificationVectors.holdersCoverage |> Set.ofList
+
+                  Expect.equal
+                      (Set.difference (Set.ofList CertificationVectors.holdersCovered) reached)
+                      Set.empty
+                      "each case of the three-case union under a kind and a plain record, and of the four-case union under a kind, a tagged case and a type-parameterised union"
+
+                  for doc in LayoutIdl.holdersRefused do
+                      Expect.isError (Decode.decodeDetailed LayoutIdl.holders doc) "the interpreter refuses it"
+
+                  let facts = emitted (CertificationVectors.vectorsText ())
+
+                  wires
+                  |> List.iteri (fun i _ ->
+                      Expect.stringContains
+                          facts
+                          (sprintf "  assert_norm (H.dec_node h_de%d == Ok h_dv%d)" i i)
+                          "read")
+
+                  LayoutIdl.holdersRefused
+                  |> List.iteri (fun i _ ->
+                      Expect.stringContains facts (sprintf "  assert_norm (Error? (H.dec_node h_dr%d))" i) "refused"))
 
           testCase "the F* model of a record-payload kind is its flat twin's, line for line" (fun _ ->
               // The stamp lines name the vocabulary, and the header's line for `Grid` says why each

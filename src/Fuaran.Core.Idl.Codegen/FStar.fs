@@ -151,7 +151,25 @@ module FStarTarget =
     /// cannot express (an unmodelled kind, a non-finite float, a string F* cannot spell, a
     /// transparent union), is REFUSED naming the vector — never dropped; the caller selects.
     let vectorsModule (moduleName: string) (models: VectorModel list) : Result<string, CodegenError> =
-        FStarVectors.vectorsModule moduleName models
+        FStarVectors.vectorsModule moduleName models []
+
+    /// Phase 722 — [[vectorsModule]] with DECODE facts beside the encode facts: for each of
+    /// `decode`, one top-level `<prefix>_decode_agree` asserting that the model's `dec_node`,
+    /// applied to the `jval` a document's bytes parse to, normalises to `Ok` of the model value of
+    /// what the interpreter decodes those bytes to, and that it refuses (`Error?`) every document
+    /// the interpreter refuses. The encode facts say the model WRITES what the interpreter writes;
+    /// these say it READS what the interpreter reads, and refuses what it refuses, on the documents
+    /// given. They are what holds a presence-keyed union's reading in the model (which case the keys
+    /// present pick, and that two cases left is refused) to the interpreter's: the generated round
+    /// trip speaks only of what the encoder writes. A document named as read that the interpreter
+    /// refuses, or as refused that it accepts, is REFUSED naming the vector. With `decode` empty
+    /// the module is [[vectorsModule]]'s, byte for byte.
+    let vectorsModuleWith
+        (moduleName: string)
+        (models: VectorModel list)
+        (decode: DecodeVectors list)
+        : Result<string, CodegenError> =
+        FStarVectors.vectorsModule moduleName models decode
 
     /// Phase 644 (DECISIONS.md D260.14) — the vocabulary whose model is the model of a contract's
     /// TYPES. It is `idl` with one kind more for each method of `contract`: `<Method>Arguments`,

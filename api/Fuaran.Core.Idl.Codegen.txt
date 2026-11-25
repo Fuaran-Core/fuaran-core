@@ -20,6 +20,7 @@ ctor Fuaran.Core.Idl.Codegen.Types.Classification..ctor(Fuaran.Core.Idl.Codegen.
 ctor Fuaran.Core.Idl.Codegen.Types.CodecOnly..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>)
 ctor Fuaran.Core.Idl.Codegen.Types.ConstraintSnap..ctor(System.String, Microsoft.FSharp.Core.FSharpOption`1<System.Tuple`2<System.Double, System.Double>>, System.String)
 ctor Fuaran.Core.Idl.Codegen.Types.ContractSnap..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.MethodSnap>, System.String)
+ctor Fuaran.Core.Idl.Codegen.Types.DecodeVectors..ctor(Fuaran.Core.Idl.Codegen.Types.VectorModel, Microsoft.FSharp.Collections.FSharpList`1<System.String>)
 ctor Fuaran.Core.Idl.Codegen.Types.EnumSnap..ctor(Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>)
 ctor Fuaran.Core.Idl.Codegen.Types.FieldSnap..ctor(System.String, System.String, Fuaran.Core.Idl.Codegen.Types.WireType, Fuaran.Core.Idl.Codegen.Types.HostSurface, Fuaran.Core.Idl.Codegen.Types.PresenceSnap, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, System.String, System.Boolean)
 ctor Fuaran.Core.Idl.Codegen.Types.GenSupport..ctor(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.KindProjection>, Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.KindTable>)
@@ -190,6 +191,7 @@ method Fuaran.Core.Idl.FStarTarget.proofKinds(Fuaran.Core.Idl.Idl) : Microsoft.F
 method Fuaran.Core.Idl.FStarTarget.proofsModule(System.String, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.FStarTarget.proofsModuleFrom(Fuaran.Core.Idl.Codegen.Types.Provenance, System.String, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.FStarTarget.vectorsModule(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.VectorModel>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
+method Fuaran.Core.Idl.FStarTarget.vectorsModuleWith(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.VectorModel>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.Codegen.Types.DecodeVectors>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.FStarTarget.vocabularyModule(System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.FStarTarget.vocabularyModuleFrom(Fuaran.Core.Idl.Codegen.Types.Provenance, System.String, Fuaran.Core.Idl.Idl, Microsoft.FSharp.Collections.FSharpList`1<System.String>) : Microsoft.FSharp.Core.FSharpResult`2<System.String, Fuaran.Core.Idl.CodegenError>
 method Fuaran.Core.Idl.Gen.contractArgumentSchemas(Fuaran.Core.Idl.Idl) : Microsoft.FSharp.Core.FSharpResult`2<Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, System.String>>, Fuaran.Core.Idl.CodegenError>
@@ -251,6 +253,8 @@ record-field Fuaran.Core.Idl.Codegen.Types.ConstraintSnap.Kind #0 : System.Strin
 record-field Fuaran.Core.Idl.Codegen.Types.ConstraintSnap.Text #2 : System.String
 record-field Fuaran.Core.Idl.Codegen.Types.ContractSnap.ContractDoc #1 : System.String
 record-field Fuaran.Core.Idl.Codegen.Types.ContractSnap.Methods #0 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.Codegen.Types.MethodSnap>
+record-field Fuaran.Core.Idl.Codegen.Types.DecodeVectors.Read #0 : Fuaran.Core.Idl.Codegen.Types.VectorModel
+record-field Fuaran.Core.Idl.Codegen.Types.DecodeVectors.Refused #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.Idl.Codegen.Types.EnumSnap.CaseAliases #3 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>>
 record-field Fuaran.Core.Idl.Codegen.Types.EnumSnap.CaseAnnotations #2 : Microsoft.FSharp.Collections.FSharpMap`2<System.String, System.String>
 record-field Fuaran.Core.Idl.Codegen.Types.EnumSnap.HostCases #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
@@ -421,6 +425,7 @@ type Fuaran.Core.Idl.Codegen.Types.Classification (record)
 type Fuaran.Core.Idl.Codegen.Types.CodecOnly (record)
 type Fuaran.Core.Idl.Codegen.Types.ConstraintSnap (record)
 type Fuaran.Core.Idl.Codegen.Types.ContractSnap (record)
+type Fuaran.Core.Idl.Codegen.Types.DecodeVectors (record)
 type Fuaran.Core.Idl.Codegen.Types.Derivation (union)
 type Fuaran.Core.Idl.Codegen.Types.Derivation+Fold (type)
 type Fuaran.Core.Idl.Codegen.Types.Derivation+KindTable (type)

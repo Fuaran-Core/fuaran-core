@@ -14,7 +14,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## Summary
 
-438 rows: 260 offered, 1 a host's own proof, 177 uncovered (proved 105, tested 31, assumed 39, policy 2).
+440 rows: 260 offered, 1 a host's own proof, 179 uncovered (proved 107, tested 31, assumed 39, policy 2).
 
 ## Offers, by model
 
@@ -75,9 +75,13 @@ Grouped by model. Each group is a candidate vector family or oracle function.
 
 - `JsonDocument` (3): `lossless-reader-rebuilds-the-parse`, `document-decodes-soundly-through-the-layer`, `document-decoder-refusals-resolve`
 
+- `LayoutHoldersVocabulary` (1): `layout-holders-vocabulary-generated-model`
+
+- `LayoutHoldersVocabularyProofs` (1): `layout-holders-vocabulary-round-trip`
+
 - `LayoutVocabulary` (1): `layout-vocabulary-generated-model`
 
-- `LayoutVocabularyProofs` (2): `layout-vocabulary-round-trip`, `layout-vocabulary-reading-decides`
+- `LayoutVocabularyProofs` (1): `layout-vocabulary-round-trip`
 
 - `Limits` (1): `wire-resource-limits`
 
@@ -111,7 +115,7 @@ Grouped by model. Each group is a candidate vector family or oracle function.
 
 - `VocabularyProofs` (1): `vocabulary-round-trip`
 
-- `VocabularyVectors` (1): `vocabulary-vectors-agree`
+- `VocabularyVectors` (2): `layout-vocabulary-decode-vectors`, `vocabulary-vectors-agree`
 
 - `WireVersioning` (6): `evolution-classify-sound`, `evolution-additive-monotone`, `evolution-preserve-exact`, `evolution-unknown-transport-only`, `evolution-bump-refuses-at-the-edge`, `evolution-field-additive-monotone`
 
