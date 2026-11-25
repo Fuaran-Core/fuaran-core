@@ -384,6 +384,15 @@ let idlFStarTargetTests =
 
           // ---- the refusals ------------------------------------------------
 
+          // An empty kind selection has no round trip to state: a refusal, never an exception.
+          testCase "a proofs module over no kind is a NAMED refusal, not an exception"
+          <| fun _ ->
+              match FStarTarget.proofsModule "MProofs" "M" MiniIdl.miniIdl [] with
+              | Error(CodegenError.UnmodellableInFStar(what, where)) ->
+                  Expect.stringContains what "no kind" "the refusal names the empty selection"
+                  Expect.equal where "the kind selection" "and where"
+              | other -> failtestf "expected a refusal, got %A" (Result.map String.length other)
+
           testCase "a tree-op slot is a NAMED refusal, not a dropped member"
           <| fun _ ->
               match refusalOf TOp with

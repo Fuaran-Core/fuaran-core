@@ -771,9 +771,18 @@ module internal FStarProofs =
         (idl: Idl)
         (kindTags: string list)
         : Result<string, CodegenError> =
-        match model idl kindTags with
-        | Error e -> Error e
-        | Ok c ->
+        match kindTags, model idl kindTags with
+        // The module's theorems are the round trip of each selected kind and of the node holding
+        // one. A selection naming none has nothing to state: refused, never an exception.
+        | [], _ ->
+            Error(
+                CodegenError.UnmodellableInFStar(
+                    "a proofs module over no kind (its theorems are the round trip of each selected kind)",
+                    "the kind selection"
+                )
+            )
+        | _, Error e -> Error e
+        | _, Ok c ->
 
             let out = System.Text.StringBuilder()
             let line (s: string) = out.Append(s).Append(nl) |> ignore
