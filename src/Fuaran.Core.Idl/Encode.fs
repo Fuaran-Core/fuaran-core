@@ -114,8 +114,8 @@ module Encode =
         // [[HostedCodec]]); a declared wire form (Phase 252) is checked on DECODE, the direction a
         // document arrives from.
         | (WireForm.Verbatim | WireForm.Hosted _), VJson j -> verbatim j
-        | WireForm.Record r, VRecord fields -> encodeFields idl r.Fields fields |> Result.map JObj
-        | WireForm.Undeclared(Undeclared.Record name), VRecord _ -> Error(sprintf "unknown record '%s'" name)
+        | WireForm.Record r, VRecord fields -> encodeFields idl r.Decl.Fields fields |> Result.map JObj
+        | WireForm.Undeclared(Undeclared.Record(name, _)), VRecord _ -> Error(sprintf "unknown record '%s'" name)
         | WireForm.Map vt, VMap entries ->
             let rec go acc =
                 function

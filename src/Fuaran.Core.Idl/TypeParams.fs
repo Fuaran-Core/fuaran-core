@@ -27,13 +27,21 @@ module TypeParams =
         | TList inner -> TList(substitute subst inner)
         | TMap inner -> TMap(substitute subst inner)
         | TUnion(n, args) -> TUnion(n, List.map (substitute subst) args)
+        | TRecord(n, args) -> TRecord(n, List.map (substitute subst) args)
         | other -> other
 
-    /// The substitution an instantiation `TUnion(u.Name, args)` binds — each parameter keyed
-    /// by its name to the argument at its position — or `None` when the counts differ, so no
-    /// caller ever zips two lists of different length.
-    let bind (u: IdlUnion) (args: IdlType list) : Map<string, IdlType> option =
-        if List.length u.Params = List.length args then
-            Some(Map.ofList (List.zip u.Params args))
+    /// Each parameter keyed by its name to the argument at its position, or `None` when the
+    /// counts differ, so no caller ever zips two lists of different length.
+    let private bindNames (pars: string list) (args: IdlType list) : Map<string, IdlType> option =
+        if List.length pars = List.length args then
+            Some(Map.ofList (List.zip pars args))
         else
             None
+
+    /// The substitution an instantiation `TUnion(u.Name, args)` binds — each parameter keyed
+    /// by its name to the argument at its position — or `None` when the counts differ.
+    let bind (u: IdlUnion) (args: IdlType list) : Map<string, IdlType> option = bindNames u.Params args
+
+    /// The substitution an instantiation `TRecord(r.Name, args)` binds (Phase 732), as [[bind]]
+    /// answers a union's.
+    let bindRecord (r: IdlRecord) (args: IdlType list) : Map<string, IdlType> option = bindNames r.Params args

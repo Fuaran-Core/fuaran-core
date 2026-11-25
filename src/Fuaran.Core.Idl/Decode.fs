@@ -133,8 +133,8 @@ module Decode =
                         DecodeCode.OutOfRange
                         ("a '" + HostedFormat.name fmt + "' string")
                         (Canonical.write Rendering.CrossHost j))
-        | WireForm.Record r, JObj fs -> decodeFields idl r.Fields fs |> Result.map VRecord
-        | WireForm.Undeclared(Undeclared.Record name), JObj _ ->
+        | WireForm.Record r, JObj fs -> decodeFields idl r.Decl.Fields fs |> Result.map VRecord
+        | WireForm.Undeclared(Undeclared.Record(name, _)), JObj _ ->
             err DecodeCode.SchemaFault ("a declared record '" + name + "'") (sprintf "record '%s'" name)
         | WireForm.Map vt, JObj fs ->
             let rec go acc =
@@ -418,7 +418,7 @@ module Decode =
         let disc = idl.Wire.Discriminator
 
         match WireForm.ofType idl t, j with
-        | WireForm.Record r, JObj fs -> strictObject idl [] r.Fields j fs
+        | WireForm.Record r, JObj fs -> strictObject idl [] r.Decl.Fields j fs
         | WireForm.Union { Decl = { Discrimination = UnionDiscrimination.ByPresence keyed } as u }, JObj fs ->
             Decoder.members (WireForm.keyedRoster u) j
             |> Result.bind (fun () ->

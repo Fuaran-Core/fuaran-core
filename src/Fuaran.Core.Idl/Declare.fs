@@ -178,13 +178,13 @@ module Declare =
             | WireForm.Bool
             | WireForm.Float
             | WireForm.Enum _
-            | WireForm.Text _
-            | WireForm.Record _ -> None
+            | WireForm.Text _ -> None
+            | WireForm.Record r -> r.Args |> List.tryPick readable
             | WireForm.Union u -> u.Args |> List.tryPick readable
             | WireForm.Tuple components -> components |> List.tryPick readable
             | WireForm.Set inner -> readable inner
             | WireForm.KeyedMap(k, v) -> [ k; v ] |> List.tryPick readable
-            | WireForm.Undeclared(Undeclared.Enum n | Undeclared.Record n | Undeclared.Union(n, _)) ->
+            | WireForm.Undeclared(Undeclared.Enum n | Undeclared.Record(n, _) | Undeclared.Union(n, _)) ->
                 Some(sprintf "names '%s', which the vocabulary does not declare" n)
             | WireForm.List inner
             | WireForm.Map inner -> readable inner
@@ -197,6 +197,7 @@ module Declare =
             | TMap inner
             | TSet inner -> hostedIn inner
             | TUnion(_, args)
+            | TRecord(_, args)
             | TTuple args -> args |> List.collect hostedIn
             | TKeyedMap(k, v) -> hostedIn k @ hostedIn v
             | _ -> []
@@ -254,7 +255,7 @@ module Declare =
 
         let inlineRecordOf (t: IdlType) : IdlRecord option =
             match WireForm.ofType idl t with
-            | WireForm.Record r when r.Inline -> Some r
+            | WireForm.Record r when r.Decl.Inline -> Some r.Decl
             | _ -> None
 
         let describe (t: IdlType) : string option =
@@ -270,6 +271,7 @@ module Declare =
             | TMap i
             | TSet i -> i :: nested i
             | TUnion(_, args)
+            | TRecord(_, args)
             | TTuple args -> args @ (args |> List.collect nested)
             | TKeyedMap(k, v) -> [ k; v ] @ nested k @ nested v
             | THosted { Wire = Some w } -> w :: nested w
@@ -716,14 +718,16 @@ module Declare =
     /// error, so a hand-edited artifact never reaches an emitter. The checks beyond the
     /// three it unions:
     ///
-    /// - **references** — every `TEnum` / `TRecord` / `TUnion` name resolves, every union is
-    ///   applied to as many type arguments as it declares parameters, and a `TVar` names a
-    ///   parameter of the union whose case declares it;
+    /// - **references** — every `TEnum` / `TRecord` / `TUnion` name resolves, every union and
+    ///   every record is applied to as many type arguments as it declares parameters, and a `TVar`
+    ///   names a parameter of the union whose case declares it or of the record that declares it
+    ///   (Phase 732), so none reaches the wire unsubstituted;
     /// - **cases** (Phase 713) — an enum or a union declares at least one case: one with none has
     ///   no value, so a slot of its type could never be written or read, and it is refused here,
     ///   by its name, rather than where something first samples it;
     /// - **duplicates** — kind tags, op tags, type names (enums, unions and records share
-    ///   one namespace in every generated host), case tags, type parameters, field names
+    ///   one namespace in every generated host), case tags, a union's or a record's type
+    ///   parameters, field names
     ///   within one owner, and default entries;
     /// - **defaults** — an `OmitDefault` value, and an [[IdlDefault]] addressing a declared
     ///   field, are values the GUARDED encoder writes at the slot's type (Phase 520: checked
@@ -770,6 +774,7 @@ module Declare =
             | TMap inner
             | TSet inner -> mentionsVar inner
             | TUnion(_, args)
+            | TRecord(_, args)
             | TTuple args -> args |> List.exists mentionsVar
             | TKeyedMap(k, v) -> mentionsVar k || mentionsVar v
             | _ -> false
@@ -787,10 +792,11 @@ module Declare =
             | TTuple args -> args |> List.exists (holdsTree seen)
             | TKeyedMap(k, v) -> holdsTree seen k || holdsTree seen v
             | THosted { Wire = Some w } -> holdsTree seen w
-            | TRecord n when not (Set.contains ("r:" + n) seen) ->
-                match IdlLookup.tryRecord idl n with
-                | Some r -> r.Fields |> List.exists (fun f -> holdsTree (Set.add ("r:" + n) seen) f.Type)
-                | None -> false
+            | TRecord(n, args) when not (Set.contains ("r:" + n) seen) ->
+                args |> List.exists (holdsTree seen)
+                || (match IdlLookup.tryRecord idl n with
+                    | Some r -> r.Fields |> List.exists (fun f -> holdsTree (Set.add ("r:" + n) seen) f.Type)
+                    | None -> false)
             | TUnion(n, args) when not (Set.contains ("u:" + n) seen) ->
                 args |> List.exists (holdsTree seen)
                 || (match IdlLookup.tryUnion idl n with
@@ -801,34 +807,58 @@ module Declare =
                     | None -> false)
             | _ -> false
 
+        // The parameters of an owner that declares none (a kind, an op, the node envelope, a contract's
+        // method): a type variable there names no parameter, and is refused in the words it always was.
+        let noParams: string * string list = "union", []
+
+        // A reference that applies a union or a record to another number of type arguments than it
+        // declares parameters (Phase 732: one sentence for both).
+        let arityFault
+            (path: PathSegment list)
+            (at: string)
+            (what: string)
+            (name: string)
+            (args: IdlType list)
+            (declared: string list)
+            : VocabularyFault =
+            fault
+                path
+                (sprintf
+                    "%s: applies %s '%s' to %d type argument(s); it declares %d"
+                    at
+                    what
+                    name
+                    (List.length args)
+                    (List.length declared))
+
+        // `pars`: what the field's owner is, and the type parameters it declares ([[noParams]] for an
+        // owner that declares none).
         let rec typeErrors
             (path: PathSegment list)
             (at: string)
-            (pars: string list)
+            (pars: string * string list)
             (t: IdlType)
             : VocabularyFault list =
             match WireForm.ofType idl t with
             | WireForm.Undeclared(Undeclared.Enum n) ->
                 [ fault path (sprintf "%s: names enum '%s', which the vocabulary does not declare" at n) ]
-            | WireForm.Undeclared(Undeclared.Record n) ->
-                [ fault path (sprintf "%s: names record '%s', which the vocabulary does not declare" at n) ]
+            | WireForm.Undeclared(Undeclared.Record(n, args)) ->
+                fault path (sprintf "%s: names record '%s', which the vocabulary does not declare" at n)
+                :: (args |> List.collect (typeErrors path at pars))
             | WireForm.Undeclared(Undeclared.Union(n, args)) ->
                 fault path (sprintf "%s: names union '%s', which the vocabulary does not declare" at n)
                 :: (args |> List.collect (typeErrors path at pars))
+            | WireForm.Record r ->
+                let inner = r.Args |> List.collect (typeErrors path at pars)
+
+                match r.Binding with
+                | None -> arityFault path at "record" r.Name r.Args r.Decl.Params :: inner
+                | Some _ -> inner
             | WireForm.Union u ->
                 let inner = u.Args |> List.collect (typeErrors path at pars)
 
                 match u.Binding with
-                | None ->
-                    fault
-                        path
-                        (sprintf
-                            "%s: applies union '%s' to %d type argument(s); it declares %d"
-                            at
-                            u.Name
-                            (List.length u.Args)
-                            (List.length u.Decl.Params))
-                    :: inner
+                | None -> arityFault path at "union" u.Name u.Args u.Decl.Params :: inner
                 | Some binding ->
                     match transparentField u with
                     | Some f when
@@ -844,8 +874,10 @@ module Declare =
                                 f.Name)
                         :: inner
                     | _ -> inner
-            | WireForm.Unbound v when not (List.contains v pars) ->
-                [ fault path (sprintf "%s: type variable '%s' is not a parameter of the union declaring it" at v) ]
+            | WireForm.Unbound v when not (List.contains v (snd pars)) ->
+                [ fault
+                      path
+                      (sprintf "%s: type variable '%s' is not a parameter of the %s declaring it" at v (fst pars)) ]
             | WireForm.List inner
             | WireForm.Map inner -> typeErrors path at pars inner
             // Phase 639 (D251) — a tuple has at least two components, and a set's element and a keyed
@@ -936,7 +968,7 @@ module Declare =
         let fieldErrors
             (owner: string)
             (fieldAt: int -> PathSegment list)
-            (pars: string list)
+            (pars: string * string list)
             (fields: IdlField list)
             : VocabularyFault list =
             [ yield!
@@ -1138,7 +1170,7 @@ module Declare =
                       (sprintf "%s: the category carries a line break, a control character or ill-formed UTF-16" label)
 
               yield! annotationErrors owner label k.Annotations
-              yield! fieldErrors label (fun j -> owner @ [ key "fields"; item j ]) [] k.Fields
+              yield! fieldErrors label (fun j -> owner @ [ key "fields"; item j ]) noParams k.Fields
               yield! keyedErrors (what = "kind") label (fun j -> owner @ [ key "fields"; item j ]) k.Fields ]
 
         [ yield! wireShapeErrors idl
@@ -1196,8 +1228,16 @@ module Declare =
               yield! kindErrors "op" [ key "ops"; item i ] o
 
           for i, r in List.indexed idl.Records do
-              yield! fieldErrors (sprintf "record '%s'" r.Name) (recordField i) [] r.Fields
-              yield! keyedErrors false (sprintf "record '%s'" r.Name) (recordField i) r.Fields
+              let owner = sprintf "record '%s'" r.Name
+
+              yield!
+                  nameErrors
+                      (owner + ": type parameter")
+                      (r.Params
+                       |> List.mapi (fun p n -> [ key "records"; item i; key "params"; item p ], n))
+
+              yield! fieldErrors owner (recordField i) ("record", r.Params) r.Fields
+              yield! keyedErrors false owner (recordField i) r.Fields
 
           for i, u in List.indexed idl.Unions do
               let owner = sprintf "union '%s'" u.Name
@@ -1266,7 +1306,7 @@ module Declare =
               for c, case in List.indexed u.Cases do
                   let caseOwner = sprintf "union '%s' case '%s'" u.Name case.Tag
                   yield! annotationErrors (at @ [ key "cases"; item c ]) caseOwner case.Annotations
-                  yield! fieldErrors caseOwner (caseField i c) u.Params case.Fields
+                  yield! fieldErrors caseOwner (caseField i c) ("union", u.Params) case.Fields
                   yield! keyedErrors false caseOwner (caseField i c) case.Fields
 
           for i, e in List.indexed idl.Enums do
@@ -1295,7 +1335,7 @@ module Declare =
                           (sprintf "%s case '%s'" owner c)
                           a
 
-          yield! fieldErrors "the node envelope" envelopeField [] idl.NodeFields
+          yield! fieldErrors "the node envelope" envelopeField noParams idl.NodeFields
           yield! keyedErrors false "the node envelope" envelopeField idl.NodeFields
 
           // The envelope's reserved names (Phase 292 amendment): `id` beside the node's own
@@ -1396,11 +1436,11 @@ module Declare =
                           typeErrors
                               (mAt @ [ key "arguments"; item k; key "type" ])
                               (sprintf "%s: argument '%s'" at a.Name)
-                              []
+                              noParams
                               a.Type
 
                   match m.Result with
-                  | Some t -> yield! typeErrors (mAt @ [ key "result" ]) (at + ": its result") [] t
+                  | Some t -> yield! typeErrors (mAt @ [ key "result" ]) (at + ": its result") noParams t
                   | None -> ()
 
           for path, f in Contract.faults idl do

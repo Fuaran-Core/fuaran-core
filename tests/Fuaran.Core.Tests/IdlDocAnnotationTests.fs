@@ -72,7 +72,7 @@ let docIdl: Idl =
               [ f "label" TStr Required |> withDoc hostileDoc
                 f "src" (TUnion("Src", [])) Optional
                 f "tone" (TEnum "Tone") Required
-                f "pair" (TRecord "Pair") Optional ] } ]
+                f "pair" (TRecord("Pair", [])) Optional ] } ]
       Unions =
         [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
             Name = "Src"
@@ -101,6 +101,7 @@ let docIdl: Idl =
           |> annotate [ "Loud", doc "<'T> is not a tag here: Option<'T> & friends." ] ]
       Records =
         [ { Name = "Pair"
+            Params = []
             Fields =
               [ f "left" TStr Required |> withDoc "The left half, < the right."
                 f "right" TStr Required ]
@@ -359,6 +360,7 @@ let tests =
                   { undocumented with
                       Records =
                           [ { Name = "Pair"
+                              Params = []
                               Fields = [ f "left" TStr Required |> withDoc " \r\n\t "; f "right" TStr Required ]
                               Annotations = Annotations.Empty
                               Inline = false } ] }

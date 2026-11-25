@@ -39,7 +39,7 @@ module ContractProjection =
     /// union applied to no argument, and the canonical type text of every other.
     let private documentOf (t: IdlType) : ValueSpace =
         match t with
-        | TRecord name
+        | TRecord(name, [])
         | TUnion(name, []) -> Document(Some name)
         | other -> Document(typeText other)
 

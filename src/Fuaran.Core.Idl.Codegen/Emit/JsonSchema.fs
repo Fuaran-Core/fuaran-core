@@ -202,7 +202,7 @@ module internal JsonSchema =
             | s, _ -> s
         | TJson
         | THosted _ -> JBool true
-        | TRecord n -> JObj [ "$ref", JStr("#/$defs/" + n) ]
+        | TRecord(n, _) -> JObj [ "$ref", JStr("#/$defs/" + n) ]
         | TMap vt -> JObj [ "type", JStr "object"; "additionalProperties", schemaOf vt ]
 
     /// The wire-visible fields of a declaration. A [[HostOnly]] field is never on

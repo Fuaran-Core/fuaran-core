@@ -1132,7 +1132,7 @@ module internal Projected =
     /// and a message-carrying trigger.
     let gateWire =
         [ req "body" TNode
-          req "steps" (TList(TRecord "Step"))
+          req "steps" (TList(TRecord("Step", [])))
           opt "rule" rule
           req "trigger" trigger ]
 
@@ -1163,6 +1163,7 @@ module internal Projected =
                 Discrimination = UnionDiscrimination.Tagged } ]
           Records =
             [ { Name = "Step"
+                Params = []
                 Fields = [ req "label" TStr; req "body" TNode ]
                 Annotations = Annotations.Empty
                 Inline = false } ]
@@ -1187,7 +1188,7 @@ module internal Projected =
     /// The record's fields at their host shapes: `rule` REQUIRED where the wire's is optional.
     let recordFields =
         [ req "body" TNode
-          req "steps" (TList(TRecord "Step"))
+          req "steps" (TList(TRecord("Step", [])))
           req "rule" rule
           req "trigger" trigger ]
 
@@ -1390,7 +1391,7 @@ let projectedKindTests =
               let sup =
                   Projected.supportWith
                       (Some Projected.gateMap)
-                      (Some(Projected.recordFields @ [ Projected.req "owner" (TRecord "Owner") ]))
+                      (Some(Projected.recordFields @ [ Projected.req "owner" (TRecord("Owner", [])) ]))
 
               Expect.equal
                   (fst (Projected.refusal (Gen.fsharpModuleWith sup "Projected" Projected.idl Projected.tags)))
@@ -1507,10 +1508,11 @@ module private DeclLaws =
             Records =
                 MiniIdl.miniIdl.Records
                 @ [ { Name = "Style"
+                      Params = []
                       Fields = [ field "tone" (TEnum "Tone") Required ]
                       Annotations = Annotations.Empty
                       Inline = false } ]
-            NodeFields = [ field "style" (TRecord "Style") Optional ] }
+            NodeFields = [ field "style" (TRecord("Style", [])) Optional ] }
 
     /// Every vocabulary the suite carries ahead of this file, named.
     let vocabularies () : (string * Idl) list =
@@ -1537,7 +1539,7 @@ module private DeclLaws =
     let rec named (t: IdlType) : string list =
         match t with
         | TEnum n
-        | TRecord n -> [ n ]
+        | TRecord(n, _) -> [ n ]
         | TUnion(n, args) -> n :: List.collect named args
         | TList i
         | TMap i -> named i
@@ -1566,7 +1568,7 @@ module private DeclLaws =
             | TList i
             | TMap i -> mentions i
             | TEnum n
-            | TRecord n -> [ n ]
+            | TRecord(n, _) -> [ n ]
             | _ -> []
 
         let fieldsOfName (n: string) : IdlField list =
@@ -1822,7 +1824,7 @@ let declLaws =
               Expect.equal (Decl.instName (TUnion("Binding", [ TFloat ]))) "Binding_float" "generic"
 
               Expect.equal
-                  (Decl.instName (TUnion("Binding", [ TList(TRecord "SelectOption") ])))
+                  (Decl.instName (TUnion("Binding", [ TList(TRecord("SelectOption", [])) ])))
                   "Binding_list_SelectOption"
                   "nested")
 
@@ -2766,6 +2768,7 @@ module private Hooks =
                     Discrimination = UnionDiscrimination.Tagged } ]
             Records =
                 [ { Name = "Owner"
+                    Params = []
                     Fields = [ NullChecked.field "name" TStr Required ]
                     Annotations = Annotations.Empty
                     Inline = false } ]
@@ -2777,7 +2780,7 @@ module private Hooks =
                         NullChecked.field "count" (binding TInt) Required
                         NullChecked.field "all" (TList(binding TBool)) Required
                         NullChecked.field "tags" (binding (TList TStr)) Required
-                        NullChecked.field "owner" (binding (TRecord "Owner")) Required
+                        NullChecked.field "owner" (binding (TRecord("Owner", []))) Required
                         NullChecked.field "pair" (TUnion("Pair", [ TInt ])) Required ] ] }
 
     /// The host as a consuming tier writes it: a bare `"=<cell>"` is a selection whose cell is read
@@ -3129,6 +3132,7 @@ let collectingHookTests =
                   { Hooks.genericIdl with
                       Records =
                           [ { Name = "CollectingBinding"
+                              Params = []
                               Fields = []
                               Annotations = Annotations.Empty
                               Inline = false } ]
@@ -3136,7 +3140,7 @@ let collectingHookTests =
                           Hooks.genericIdl.Kinds
                           @ [ NullChecked.kind
                                   "Holder"
-                                  [ NullChecked.field "r" (TRecord "CollectingBinding") Required ] ] }
+                                  [ NullChecked.field "r" (TRecord("CollectingBinding", [])) Required ] ] }
 
               match
                   Gen.fsharpModuleDerived GenSupport.Empty [ Derivation.SpecDecoders ] "M" seam [ "Text"; "Holder" ]
@@ -3272,6 +3276,7 @@ let instantiationWitnessTests =
                       Records =
                           Hooks.witnessIdl.Records
                           @ [ { Name = "Instantiation"
+                                Params = []
                                 Fields = []
                                 Annotations = Annotations.Empty
                                 Inline = false } ]
@@ -3279,7 +3284,8 @@ let instantiationWitnessTests =
                           Hooks.witnessIdl.Kinds
                           |> List.map (fun k ->
                               { k with
-                                  Fields = k.Fields @ [ NullChecked.field "i" (TRecord "Instantiation") Required ] }) }
+                                  Fields =
+                                      k.Fields @ [ NullChecked.field "i" (TRecord("Instantiation", [])) Required ] }) }
                   "Instantiation"
 
               // A record named as the case another instantiation prints to (`FloatList` beside `float list`).
@@ -3288,6 +3294,7 @@ let instantiationWitnessTests =
                       Records =
                           Hooks.witnessIdl.Records
                           @ [ { Name = "FloatList"
+                                Params = []
                                 Fields = []
                                 Annotations = Annotations.Empty
                                 Inline = false } ]
@@ -3299,7 +3306,7 @@ let instantiationWitnessTests =
                                       k.Fields
                                       @ [ NullChecked.field
                                               "list"
-                                              (TUnion("Binding", [ TRecord "FloatList" ]))
+                                              (TUnion("Binding", [ TRecord("FloatList", []) ]))
                                               Required ] }) }
                   "Instantiation.FloatList") ]
 

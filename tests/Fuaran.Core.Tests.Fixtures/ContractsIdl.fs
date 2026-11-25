@@ -60,7 +60,7 @@ let everyType: (string * IdlType) list =
       "blob", TBytes
       "at", TTimeOfDay
       "wait", TDuration
-      "paging", TRecord "Paging"
+      "paging", TRecord("Paging", [])
       "filter", TUnion("Filter", [])
       "items", TList TInt
       "byName", TMap TStr
@@ -96,25 +96,25 @@ let orders: IdlContract =
     { Name = "orders"
       Doc = Some "Read and place orders."
       Methods =
-        [ { method "get" [ arg "id" TStr ] (Some(TRecord "Order")) [ "reader" ] with
+        [ { method "get" [ arg "id" TStr ] (Some(TRecord("Order", []))) [ "reader" ] with
               ReadPolicy = MethodReadPolicy.Cached 30
               Idempotent = true
               Doc = Some "One order by its id." }
           { method
                 "list"
-                [ { arg "paging" (TRecord "Paging") with
+                [ { arg "paging" (TRecord("Paging", [])) with
                       Doc = Some "Which page." }
                   { arg "limit" TInt with
                       Opt = OmitDefault(VInt 20)
                       Constraint = Some(ArgumentConstraint.IntBetween(1, 100)) }
                   { arg "status" (TEnum "Status") with
                       Opt = Optional } ]
-                (Some(TList(TRecord "Order")))
+                (Some(TList(TRecord("Order", []))))
                 [ "reader" ] with
               Record = { Arguments = true; Result = false } }
           { method
                 "place"
-                [ arg "order" (TRecord "Order")
+                [ arg "order" (TRecord("Order", []))
                   { arg "note" TStr with
                       Opt = Optional
                       Constraint = Some(ArgumentConstraint.LengthBetween(0, 200)) } ]
@@ -130,7 +130,7 @@ let orders: IdlContract =
               Effect = writing
               Idempotent = true
               Serves = [ 2 ] }
-          { method "watch" [ arg "filter" (TUnion("Filter", [])) ] (Some(TRecord "Order")) [ "reader" ] with
+          { method "watch" [ arg "filter" (TUnion("Filter", [])) ] (Some(TRecord("Order", []))) [ "reader" ] with
               Shape = MethodShape.Stream
               Effect =
                   { Host = ReadsHost
@@ -177,10 +177,12 @@ let idl: Idl =
       Enums = [ Declare.enumOf "Status" [ "Open"; "Closed" ] ]
       Records =
         [ { Name = "Order"
+            Params = []
             Fields = [ field "id" TStr Required; field "total" TDecimal Required ]
             Annotations = Annotations.Empty
             Inline = false }
           { Name = "Paging"
+            Params = []
             Fields = [ field "pageSize" TInt Required; field "pageStateKey" TStr Required ]
             Annotations = Annotations.Empty
             Inline = false } ]

@@ -37,6 +37,7 @@ let private printers: (string * (Idl -> Result<string, CodegenError>)) list =
         { v with
             Records =
                 [ { Name = "Box"
+                    Params = []
                     Fields = v.Kinds.Head.Fields
                     Annotations = Annotations.Empty
                     Inline = false } ] }

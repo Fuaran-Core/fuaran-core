@@ -217,7 +217,7 @@ let declarationTests =
                                 Annotations = Annotations.Empty
                                 Fields =
                                   [ { Name = "pages"
-                                      Type = TList(TRecord "Paging")
+                                      Type = TList(TRecord("Paging", []))
                                       Opt = Required
                                       Aliases = []
                                       Keyed = false
@@ -250,7 +250,7 @@ let declarationTests =
                                       Fields =
                                           r.Fields
                                           @ [ { Name = "paging"
-                                                Type = TRecord "Paging"
+                                                Type = TRecord("Paging", [])
                                                 Opt = Required
                                                 Aliases = []
                                                 Keyed = false
@@ -1125,11 +1125,11 @@ let backendTests =
 let private codecEntries
     : (string * IdlType * (JVal -> Result<JVal, DecodeError>) * (JVal -> Result<JVal, DecodeError>)) list =
     [ "GridBox",
-      TRecord "GridBox",
+      TRecord("GridBox", []),
       (C.decodeGridBox >> Result.map C.encodeGridBox),
       (C.decodeGridBoxStrict >> Result.map C.encodeGridBox)
       "LinkBox",
-      TRecord "LinkBox",
+      TRecord("LinkBox", []),
       (C.decodeLinkBox >> Result.map C.encodeLinkBox),
       (C.decodeLinkBoxStrict >> Result.map C.encodeLinkBox)
       "Tree",

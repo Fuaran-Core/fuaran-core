@@ -60,7 +60,7 @@ let rec rewrite (idl: Idl) (f: IdlType -> IdlValue -> IdlValue option) (t: IdlTy
         match t, v with
         | TList it, VList xs -> VList(xs |> List.map (recur it))
         | TMap vt, VMap entries -> VMap(entries |> List.map (fun (k, ev) -> k, recur vt ev))
-        | TRecord n, VRecord fs ->
+        | TRecord(n, _), VRecord fs ->
             match idl.Records |> List.tryFind (fun r -> r.Name = n) with
             | Some r -> VRecord(fields Map.empty r.Fields fs)
             | None -> v

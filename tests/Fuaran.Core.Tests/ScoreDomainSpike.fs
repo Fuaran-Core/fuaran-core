@@ -251,7 +251,7 @@ let tests =
               let rec referenced t =
                   match t with
                   | TEnum n -> [ Choice1Of2 n ]
-                  | TRecord n -> [ Choice2Of2 n ]
+                  | TRecord(n, _) -> [ Choice2Of2 n ]
                   | TList inner
                   | TMap inner -> referenced inner
                   | _ -> []

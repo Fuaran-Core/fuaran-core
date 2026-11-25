@@ -566,7 +566,7 @@ let shapeTests =
                       let f = grid.Fields |> List.find (fun f -> f.Name = name)
 
                       match f.Type with
-                      | TRecord r ->
+                      | TRecord(r, _) ->
                           match idl.Records |> List.tryFind (fun d -> d.Name = r && d.Inline) with
                           | Some d -> d.Fields |> List.map _.Name
                           | None -> [ name ]

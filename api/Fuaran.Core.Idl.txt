@@ -39,7 +39,7 @@ ctor Fuaran.Core.Idl.IdlEnum..ctor(System.String, Microsoft.FSharp.Collections.F
 ctor Fuaran.Core.Idl.IdlField..ctor(System.String, Fuaran.Core.Idl.IdlType, Fuaran.Core.Idl.Optionality, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.PresenceCondition>, Fuaran.Core.Idl.Annotations, System.Boolean)
 ctor Fuaran.Core.Idl.IdlKind..ctor(System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Fuaran.Core.Idl.Annotations)
 ctor Fuaran.Core.Idl.IdlMethod..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlArgument>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.IdlType>, Fuaran.Core.Idl.MethodShape, Fuaran.Core.EffectClass, System.Boolean, Fuaran.Core.Idl.MethodReadPolicy, System.Boolean, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Fuaran.Core.Idl.MethodRecord, Microsoft.FSharp.Core.FSharpOption`1<System.String>, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.MethodRateLimit>, Microsoft.FSharp.Collections.FSharpList`1<System.Int32>, Microsoft.FSharp.Core.FSharpOption`1<System.String>)
-ctor Fuaran.Core.Idl.IdlRecord..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Fuaran.Core.Idl.Annotations, System.Boolean)
+ctor Fuaran.Core.Idl.IdlRecord..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Fuaran.Core.Idl.Annotations, System.Boolean)
 ctor Fuaran.Core.Idl.IdlUnion..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<System.String>, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlUnionCase>, Fuaran.Core.Idl.Annotations, Fuaran.Core.Idl.UnionTagRule, Fuaran.Core.Idl.UnionDiscrimination)
 ctor Fuaran.Core.Idl.IdlUnionCase..ctor(System.String, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>, Fuaran.Core.Idl.Annotations, Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.HostedCodec>)
 ctor Fuaran.Core.Idl.KeyedCase..ctor(System.String, System.String, Microsoft.FSharp.Collections.FSharpList`1<System.Tuple`2<System.String, Fuaran.Core.Idl.IdlValue>>)
@@ -248,6 +248,7 @@ method Fuaran.Core.Idl.SourceLit.tsString(System.String) : System.String
 method Fuaran.Core.Idl.SourceLit.tsStringSingle(System.String) : System.String
 method Fuaran.Core.Idl.TransparentUnion.tag(Fuaran.Core.Idl.HardenPolicy, Fuaran.Core.Idl.IdlUnion) : Microsoft.FSharp.Core.FSharpOption`1<System.String>
 method Fuaran.Core.Idl.TypeParams.bind(Fuaran.Core.Idl.IdlUnion, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlType>) : Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.IdlType>>
+method Fuaran.Core.Idl.TypeParams.bindRecord(Fuaran.Core.Idl.IdlRecord, Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlType>) : Microsoft.FSharp.Core.FSharpOption`1<Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.IdlType>>
 method Fuaran.Core.Idl.TypeParams.substitute(Microsoft.FSharp.Collections.FSharpMap`2<System.String, Fuaran.Core.Idl.IdlType>, Fuaran.Core.Idl.IdlType) : Fuaran.Core.Idl.IdlType
 method Fuaran.Core.Idl.UnionTagRule.Apply(System.String) : System.String
 method Fuaran.Core.Idl.VocabularyFaultModule.describe(Fuaran.Core.Idl.VocabularyFault) : System.String
@@ -342,10 +343,11 @@ record-field Fuaran.Core.Idl.IdlMethod.Record #9 : Fuaran.Core.Idl.MethodRecord
 record-field Fuaran.Core.Idl.IdlMethod.Result #2 : Microsoft.FSharp.Core.FSharpOption`1<Fuaran.Core.Idl.IdlType>
 record-field Fuaran.Core.Idl.IdlMethod.Serves #12 : Microsoft.FSharp.Collections.FSharpList`1<System.Int32>
 record-field Fuaran.Core.Idl.IdlMethod.Shape #3 : Fuaran.Core.Idl.MethodShape
-record-field Fuaran.Core.Idl.IdlRecord.Annotations #2 : Fuaran.Core.Idl.Annotations
-record-field Fuaran.Core.Idl.IdlRecord.Fields #1 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>
-record-field Fuaran.Core.Idl.IdlRecord.Inline #3 : System.Boolean
+record-field Fuaran.Core.Idl.IdlRecord.Annotations #3 : Fuaran.Core.Idl.Annotations
+record-field Fuaran.Core.Idl.IdlRecord.Fields #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlField>
+record-field Fuaran.Core.Idl.IdlRecord.Inline #4 : System.Boolean
 record-field Fuaran.Core.Idl.IdlRecord.Name #0 : System.String
+record-field Fuaran.Core.Idl.IdlRecord.Params #1 : Microsoft.FSharp.Collections.FSharpList`1<System.String>
 record-field Fuaran.Core.Idl.IdlUnion.Annotations #3 : Fuaran.Core.Idl.Annotations
 record-field Fuaran.Core.Idl.IdlUnion.Cases #2 : Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlUnionCase>
 record-field Fuaran.Core.Idl.IdlUnion.Discrimination #5 : Fuaran.Core.Idl.UnionDiscrimination
@@ -576,7 +578,7 @@ union-case Fuaran.Core.Idl.IdlType.NewTHosted #13(Item: Fuaran.Core.Idl.HostedCo
 union-case Fuaran.Core.Idl.IdlType.NewTKeyedMap #22(key: Fuaran.Core.Idl.IdlType, value: Fuaran.Core.Idl.IdlType)
 union-case Fuaran.Core.Idl.IdlType.NewTList #8(Item: Fuaran.Core.Idl.IdlType)
 union-case Fuaran.Core.Idl.IdlType.NewTMap #15(valueType: Fuaran.Core.Idl.IdlType)
-union-case Fuaran.Core.Idl.IdlType.NewTRecord #14(recordName: System.String)
+union-case Fuaran.Core.Idl.IdlType.NewTRecord #14(recordName: System.String, args: Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlType>)
 union-case Fuaran.Core.Idl.IdlType.NewTSet #23(element: Fuaran.Core.Idl.IdlType)
 union-case Fuaran.Core.Idl.IdlType.NewTTuple #21(components: Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlType>)
 union-case Fuaran.Core.Idl.IdlType.NewTUnion #5(unionName: System.String, args: Microsoft.FSharp.Collections.FSharpList`1<Fuaran.Core.Idl.IdlType>)

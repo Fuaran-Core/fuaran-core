@@ -896,6 +896,7 @@ let declarationTests =
                           Records =
                               RefusalCornersIdl.idl.Records
                               @ [ { Name = name
+                                    Params = []
                                     Fields = []
                                     Annotations = Annotations.Empty
                                     Inline = false } ]
@@ -906,7 +907,7 @@ let declarationTests =
                                       Fields =
                                           k.Fields
                                           @ [ { Name = "extra"
-                                                Type = TRecord name
+                                                Type = TRecord(name, [])
                                                 Opt = Optional
                                                 Aliases = []
                                                 Keyed = false

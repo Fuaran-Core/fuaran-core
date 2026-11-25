@@ -364,6 +364,7 @@ let tests =
                   { empty with
                       Records =
                           [ { Name = "Accessibility"
+                              Params = []
                               Fields =
                                 [ f
                                       "liveRegion"
@@ -383,6 +384,7 @@ let tests =
                       Enums = [ Declare.enumWith "LiveRegionKind" [ "Polite", "polite" ] ]
                       Records =
                           [ { Name = "Accessibility"
+                              Params = []
                               Fields = [ f "liveRegion" (TEnum "LiveRegionKind") Optional ]
                               Annotations = Annotations.Empty
                               Inline = false } ] }
@@ -1193,6 +1195,7 @@ let private typed (family: string) (typeAnn: Annotations) (fieldAnn: Annotations
                 Discrimination = UnionDiscrimination.Tagged } ]
         Records =
             [ { Name = "Span"
+                Params = []
                 Fields =
                   [ { f "value" TStr Required with
                         Annotations = fieldAnn } ]
@@ -1271,6 +1274,7 @@ let typeAnnotationTests =
                       Records =
                           plain.Records
                           @ [ { Name = "Extra"
+                                Params = []
                                 Fields = [ f "n" TInt Required ]
                                 Annotations = Annotations.Empty
                                 Inline = false } ] }
@@ -1285,6 +1289,7 @@ let typeAnnotationTests =
                       Records =
                           plain.Records
                           @ [ { Name = "Extra"
+                                Params = []
                                 Fields = [ f "n" TInt Required ]
                                 Annotations = marked
                                 Inline = false } ] }

@@ -36,6 +36,7 @@ let private field (name: string) (t: IdlType) (opt: Optionality) : IdlField =
 
 let private record (name: string) (isInline: bool) (fields: IdlField list) : IdlRecord =
     { Name = name
+      Params = []
       Fields = fields
       Annotations = Annotations.Empty
       Inline = isInline }
@@ -97,7 +98,7 @@ let layout: Idl =
         [ kind
               "Grid"
               [ field "columns" (TList TStr) Required
-                field "paging" (TRecord "Paging") Required
+                field "paging" (TRecord("Paging", [])) Required
                 field "identity" (TUnion("RowIdentity", [])) Optional
                 field "rows" (TUnion("GridRows", [])) Required
                 field "caption" TStr Optional ]
@@ -123,11 +124,11 @@ let layout: Idl =
                       Key = "staticRows"
                       Synthesised = [ ("source", staticSource) ] } ])
               [ case "Source" [ field "source" (TUnion("Feed", [])) Required ]
-                case "StaticRows" [ field "staticRows" (TRecord "StaticTable") Required ] ]
+                case "StaticRows" [ field "staticRows" (TRecord("StaticTable", [])) Required ] ]
           union
               "Field"
               UnionDiscrimination.Tagged
-              [ case "Text" [ field "payload" (TRecord "TextPayload") Required ]
+              [ case "Text" [ field "payload" (TRecord("TextPayload", [])) Required ]
                 case "Check" [ field "on" TBool Required; field "label" TStr Optional ] ] ]
         [ record "Paging" true [ field "pageSize" TInt Optional; field "pageStateKey" TStr Optional ]
           record "TextPayload" true [ field "value" TStr Required; field "placeholder" TStr Optional ] ]
@@ -143,7 +144,7 @@ let flat: Idl =
                 field "rowKey" TClosure Optional
                 field "rowKeyField" TStr Optional
                 field "source" (TUnion("Feed", [])) Required
-                field "staticRows" (TRecord "StaticTable") Optional
+                field "staticRows" (TRecord("StaticTable", [])) Optional
                 field "caption" TStr Optional ]
           kind "Form" [ field "field" (TUnion("Field", [])) Required ] ]
         [ union
@@ -219,10 +220,13 @@ let holders: Idl =
         base'
             [ kind
                   "G"
-                  [ field "r" (TRecord "R1") Required
+                  [ field "r" (TRecord("R1", [])) Required
                     field "u" (TUnion("K", [])) Required
                     field "o" (TUnion("K3", [])) Optional ]
-              kind "H" [ field "t" (TUnion("T", [])) Required; field "rec" (TRecord "R2") Optional ]
+              kind
+                  "H"
+                  [ field "t" (TUnion("T", [])) Required
+                    field "rec" (TRecord("R2", [])) Optional ]
               kind "I" [ field "b" (TUnion("Box", [ TStr ])) Required ] ]
             [ keyed
                   "K"
@@ -249,7 +253,7 @@ let holders: Idl =
               union
                   "T"
                   UnionDiscrimination.Tagged
-                  [ case "One" [ field "payload" (TRecord "R1") Required ]
+                  [ case "One" [ field "payload" (TRecord("R1", [])) Required ]
                     case "Two" [ field "n" TStr Required; field "k3" (TUnion("K3", [])) Optional ] ]
               { union
                     "Box"
@@ -266,7 +270,7 @@ let holders: Idl =
               record
                   "R2"
                   false
-                  [ field "inner" (TRecord "R1") Required
+                  [ field "inner" (TRecord("R1", [])) Required
                     field "k" (TUnion("K", [])) Required
                     field "tail" TStr Optional ] ]
 
@@ -346,7 +350,7 @@ let derived: Idl =
                     "Outline"
                     [ field "chain" (TUnion("Chain", [])) Required
                       field "tree" (TUnion("Tree", [])) Required
-                      field "box" (TRecord "GridBox") Optional ] ]
+                      field "box" (TRecord("GridBox", [])) Optional ] ]
         Unions =
             layout.Unions
             @ [ union
@@ -358,13 +362,13 @@ let derived: Idl =
                           { Case = "Stop"
                             Key = "stop"
                             Synthesised = [] } ])
-                    [ case "Link" [ field "link" (TRecord "LinkBox") Required ]
+                    [ case "Link" [ field "link" (TRecord("LinkBox", [])) Required ]
                       case "Stop" [ field "stop" TStr Required ] ]
                 union
                     "Tree"
                     UnionDiscrimination.Tagged
                     [ case "Leaf" [ field "n" TInt Required ]
-                      case "Branch" [ field "payload" (TRecord "BranchPayload") Required ] ] ]
+                      case "Branch" [ field "payload" (TRecord("BranchPayload", [])) Required ] ] ]
         Records =
             layout.Records
             @ [ record "LinkBox" false [ field "label" TStr Required; field "next" (TUnion("Chain", [])) Optional ]
@@ -376,7 +380,7 @@ let derived: Idl =
                 record
                     "GridBox"
                     false
-                    [ field "paging" (TRecord "Paging") Required
+                    [ field "paging" (TRecord("Paging", [])) Required
                       field "identity" (TUnion("RowIdentity", [])) Optional
                       field "rows" (TUnion("GridRows", [])) Required
                       field "title" TStr Optional ] ] }

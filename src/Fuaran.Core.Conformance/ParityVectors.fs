@@ -417,7 +417,7 @@ let private shapeVocab: Fuaran.Core.Idl.Idl =
                 "Panel"
                 [ sField "children" (Fuaran.Core.Idl.TList Fuaran.Core.Idl.TNode) req
                   sField "meta" (Fuaran.Core.Idl.TMap Fuaran.Core.Idl.TJson) opt
-                  sField "at" (Fuaran.Core.Idl.TRecord "Point") req
+                  sField "at" (Fuaran.Core.Idl.TRecord("Point", [])) req
                   sField "held" (Fuaran.Core.Idl.TUnion("Box", [ Fuaran.Core.Idl.TFloat ])) req
                   sField
                       "when"
@@ -432,6 +432,7 @@ let private shapeVocab: Fuaran.Core.Idl.Idl =
           [ Fuaran.Core.Idl.Declare.enumOf "Tone" [ "Low"; "Mid"; "High" ] ] with
         Records =
             [ { Name = "Point"
+                Params = []
                 Fields =
                   [ sField "x" Fuaran.Core.Idl.TFloat req
                     sField "label" Fuaran.Core.Idl.TStr opt ]

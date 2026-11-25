@@ -174,11 +174,12 @@ let build (vectors: DecodeVector list) : Idl * (int * DecodeVector) list * (Deco
 
                 records.Add
                     { Name = name
+                      Params = []
                       Fields = fields shape
                       Annotations = Annotations.Empty
                       Inline = false }
 
-                TRecord name
+                TRecord(name, [])
             | Some "tagged" ->
                 let name = fresh "U"
 

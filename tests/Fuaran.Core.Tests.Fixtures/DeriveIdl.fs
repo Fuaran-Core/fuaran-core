@@ -81,7 +81,7 @@ let deriveIdl: Idl =
                 case "AllOf" [ req "rules" (TList rule) ]
                 case "Not" [ req "rule" rule ]
                 case "Maybe" [ opt "inner" rule ]
-                case "Guarded" [ req "guard" (TRecord "Guard") ]
+                case "Guarded" [ req "guard" (TRecord("Guard", [])) ]
                 case "Named" [ req "rules" (TMap rule) ] ]
             Annotations = Annotations.Empty
             Discrimination = UnionDiscrimination.Tagged }
@@ -89,10 +89,14 @@ let deriveIdl: Idl =
             Name = "Trigger"
             Params = []
             Cases =
-              [ case "Timer" [ req "owner" (TRecord "Owner"); req "every" TInt; req "fire" (handler "int") ]
+              [ case
+                    "Timer"
+                    [ req "owner" (TRecord("Owner", []))
+                      req "every" TInt
+                      req "fire" (handler "int") ]
                 case
                     "Signal"
-                    [ req "owner" (TRecord "Owner")
+                    [ req "owner" (TRecord("Owner", []))
                       req "name" TStr
                       req "fire" (handler "string") ]
                 case "Manual" [ req "label" TStr ] ]
@@ -106,16 +110,19 @@ let deriveIdl: Idl =
             Discrimination = UnionDiscrimination.Tagged } ]
       Records =
         [ { Name = "Owner"
+            Params = []
             Fields =
               [ opt "name" TStr
                 field "priority" (TEnum "Priority") (OmitDefault(VEnum "Normal")) ]
             Annotations = Annotations.Empty
             Inline = false }
           { Name = "Branch"
+            Params = []
             Fields = [ req "label" TStr; req "body" TNode ]
             Annotations = Annotations.Empty
             Inline = false }
           { Name = "Guard"
+            Params = []
             Fields = [ req "rule" rule; opt "note" TStr ]
             Annotations = Annotations.Empty
             Inline = false } ]
@@ -125,12 +132,12 @@ let deriveIdl: Idl =
               "structure"
               [ req "title" TStr
                 req "children" (TList TNode)
-                opt "owner" (TRecord "Owner")
+                opt "owner" (TRecord("Owner", []))
                 opt "estimate" (TUnion("Measure", [])) ]
           kind
               "Choice"
               "structure"
-              [ req "branches" (TList(TRecord "Branch"))
+              [ req "branches" (TList(TRecord("Branch", [])))
                 req "otherwise" TNode
                 req "rule" rule ]
           kind
@@ -141,7 +148,7 @@ let deriveIdl: Idl =
                 req "trigger" (TUnion("Trigger", []))
                 opt "hint" TNode
                 req "extras" (TMap TNode)
-                req "owner" (TRecord "Owner") ]
+                req "owner" (TRecord("Owner", [])) ]
           kind "Attempt" "structure" [ req "body" TNode; keyed "recovery" TNode ]
           kind
               "Note"

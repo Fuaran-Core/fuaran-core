@@ -885,7 +885,7 @@ module private SecondVocabulary =
                     field "quantity" TInt (OmitDefault(VInt 1))
                     field "category" (TEnum "Category") Required
                     field "status" (TUnion("Status", [])) (OmitDefault(VUnion("Unpacked", [])))
-                    field "weight" (TRecord "Weight") Optional
+                    field "weight" (TRecord("Weight", [])) Optional
                     field
                         "onPacked"
                         (TFn
@@ -916,6 +916,7 @@ module private SecondVocabulary =
             [ Declare.enumWith "Category" [ "Clothing", "clothing"; "Documents", "documents"; "FirstAid", "first-aid" ] ]
           Records =
             [ { Name = "Weight"
+                Params = []
                 Fields =
                   [ field "grams" TInt Required
                     field "approximate" TBool (OmitDefault(VBool false)) ]

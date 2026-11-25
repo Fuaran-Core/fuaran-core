@@ -100,7 +100,7 @@ let refIdl: Idl =
               "Embed"
               "meta"
               [ req "componentId" TStr
-                opt "contentHash" (TRecord "ContentHash")
+                opt "contentHash" (TRecord("ContentHash", []))
                 req "moduleId" TStr
                 // HostOnly: declared on the host, absent from every encoding. Its type
                 // must be a `TFn` — that is what carries the decoder's placeholder.
@@ -126,7 +126,7 @@ let refIdl: Idl =
               "data"
               [ req "label" (TUnion("Text", []))
                 omit "level" (TEnum "Level") (VEnum "low")
-                opt "origin" (TRecord "Point")
+                opt "origin" (TRecord("Point", []))
                 req "raw" TOpaque
                 req "series" series
                 // Phase 124 — the VALUE-CARRYING union default. `Slot.Fixed` takes a payload, so
@@ -196,10 +196,12 @@ let refIdl: Idl =
           Declare.enumOf "Strictness" [ "StrictReplay"; "AdvisoryWarning" ] ]
       Records =
         [ { Name = "ContentHash"
+            Params = []
             Fields = [ req "hash" TStr; req "strictness" (TEnum "Strictness") ]
             Annotations = Annotations.Empty
             Inline = false }
           { Name = "Point"
+            Params = []
             Fields = [ req "x" TFloat; req "y" TFloat ]
             Annotations = Annotations.Empty
             Inline = false } ]

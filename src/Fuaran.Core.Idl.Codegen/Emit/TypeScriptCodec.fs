@@ -334,7 +334,7 @@ module internal TypeScriptCodec =
                 |> Option.map (fun f -> TypeParams.substitute subst f.Type)
 
             match owner, value with
-            | TRecord n, _ ->
+            | TRecord(n, _), _ ->
                 CodegenLookup.tryRecord idl n
                 |> Option.bind (fun r -> typeIn Map.empty r.Fields)
             | TUnion(n, args), VUnion(tag, _) ->

@@ -82,7 +82,7 @@ type IdlType =
     /// A discriminator-tagged object of the named [[IdlUnion]], applied to exactly as many
     /// type arguments as it declares parameters (any other count is refused).
     | TUnion of unionName: string * args: IdlType list
-    /// A reference to a type parameter of the enclosing union. Substituted away at every
+    /// A reference to a type parameter of the enclosing union or record. Substituted away at every
     /// instantiation; one that reaches the encoder or decoder unsubstituted is refused.
     | TVar of paramName: string
     /// A node — `id` plus a kind body tagged from [[Idl]]'s `Kinds`, laid out as the
@@ -124,8 +124,10 @@ type IdlType =
     /// fields and **no `$type` tag** (`SelectOption`, `FormField`, `FilterSpec`,
     /// `TabHeader`, a capability-invoke arg …). Distinct from [[TUnion]] (which
     /// tags each case with `$type`) and [[TNode]] (which carries `id` + `kind`).
-    /// Names a record declared in [[Idl]]'s `Records`.
-    | TRecord of recordName: string
+    /// Names a record declared in [[Idl]]'s `Records`, applied to exactly as many type arguments
+    /// as it declares parameters (any other count is refused), as a [[TUnion]] is. A record that
+    /// declares none is `TRecord(name, [])`, the one spelling of that reference (Phase 732).
+    | TRecord of recordName: string * args: IdlType list
     /// A string-keyed map (`Map<string, 'V>`) rendered as a JSON object whose keys
     /// are the *authored* map keys (Ordinal-sorted by the canonical renderer), not
     /// a fixed field set — `Custom`'s `props`, `FragmentRef`'s `args`, i18n arg
@@ -833,6 +835,11 @@ and IdlRecord =
     {
         /// The type name [[TRecord]] refers to; shares one namespace with enum and union names.
         Name: string
+        /// The type parameter names, in order (Phase 732): a [[TRecord]]'s arguments bind to them
+        /// by position, and a field names one as [[TVar]], as a union case's field does. Empty for
+        /// a non-generic record, which is every record declared before the slot existed; the
+        /// artifact then omits it.
+        Params: string list
         /// The record's fields; a field-less record is well-formed.
         Fields: IdlField list
         /// What is true ABOUT the record as a TYPE (Phase 542) — see [[IdlField.Annotations]].

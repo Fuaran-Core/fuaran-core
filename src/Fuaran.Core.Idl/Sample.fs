@@ -279,8 +279,8 @@ module Sample =
             |> distinctBy idl k fst
             |> List.map (fun (kv, vv) -> VList [ kv; vv ])
             |> VList
-        | WireForm.Record rc -> VRecord(sampleFields idl r (depth - 1) rc.Fields)
-        | WireForm.Undeclared(Undeclared.Record name) ->
+        | WireForm.Record rc -> VRecord(sampleFields idl r (depth - 1) rc.Decl.Fields)
+        | WireForm.Undeclared(Undeclared.Record(name, _)) ->
             refuse ("record '" + name + "'") "the vocabulary does not declare it"
         | WireForm.Union u ->
             // At the depth floor prefer a nullary case when one exists, so a

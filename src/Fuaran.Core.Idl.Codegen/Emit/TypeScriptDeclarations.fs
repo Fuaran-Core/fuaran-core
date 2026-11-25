@@ -234,7 +234,7 @@ module internal TypeScriptDeclarations =
         | TFloat -> Ok "number"
         | TBool -> Ok "boolean"
         | TEnum n
-        | TRecord n
+        | TRecord(n, _)
         | TUnion(n, []) -> Ok n
         | TUnion(n, args) ->
             args

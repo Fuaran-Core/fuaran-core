@@ -310,7 +310,7 @@ let refused =
               let bad =
                   withMethod "get" (fun m ->
                       { m with
-                          Result = Some(TRecord "Missing") })
+                          Result = Some(TRecord("Missing", [])) })
 
               let faults = Declare.errors bad |> List.map VocabularyFault.describe
 

@@ -41,6 +41,7 @@ let private recordIdl (fields: IdlField list) : Idl =
             Annotations = Annotations.Empty } ]
       Records =
         [ { Name = "R"
+            Params = []
             Fields = fields
             Annotations = Annotations.Empty
             Inline = false } ]
@@ -317,7 +318,7 @@ let declaration =
               admitted (sprintf "a field of type '%s'" tag) t
 
           refused "a set of floats (NaN equals nothing)" (TSet TFloat)
-          refused "a set of records (an object's text depends on a key order)" (TSet(TRecord "R"))
+          refused "a set of records (an object's text depends on a key order)" (TSet(TRecord("R", [])))
           refused "a map keyed by strings, which is `map`" (TKeyedMap(TStr, TInt))
           refused "a keyed map keyed by floats" (TKeyedMap(TFloat, TInt))
           refused "a tuple of one component" (TTuple [ TInt ])

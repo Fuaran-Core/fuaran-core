@@ -427,6 +427,20 @@ module Artifact =
               Default = false
               Omits = not }
 
+        /// Phase 732 — a record that declares no type parameter writes no `params`.
+        let recordParams: Omission<string list> =
+            { Owner = "a record"
+              Key = "params"
+              Default = []
+              Omits = List.isEmpty }
+
+        /// Phase 732 — a record reference that applies no type argument writes no `args`.
+        let recordArgs: Omission<IdlType list> =
+            { Owner = "a record reference"
+              Key = "args"
+              Default = []
+              Omits = List.isEmpty }
+
         /// Phase 550 — a host surface (a hosted slot's, a case codec's) whose decode answers a
         /// sentence writes no `refusal`.
         let hostedRefusal: Omission<HostedRefusal> =
@@ -461,6 +475,8 @@ module Artifact =
           Omit.discrimination.Owner, Omit.discrimination.Key
           Omit.synthesised.Owner, Omit.synthesised.Key
           Omit.recordInline.Owner, Omit.recordInline.Key
+          Omit.recordParams.Owner, Omit.recordParams.Key
+          Omit.recordArgs.Owner, Omit.recordArgs.Key
           Omit.contracts.Owner, Omit.contracts.Key
           Omit.methodShape.Owner, Omit.methodShape.Key
           Omit.methodDestination.Owner, Omit.methodDestination.Key
@@ -664,14 +680,17 @@ module Artifact =
                       | _ -> None)
                       TEnum
                       Codec.string
-                  single
+                  Codec.case
                       "record"
-                      "name"
                       (function
-                      | TRecord n -> Some n
+                      | TRecord(n, args) -> Some(n, args)
                       | _ -> None)
                       TRecord
-                      Codec.string
+                      (Codec.record (fun n args -> n, args)
+                       |> Codec.field "name" fst Codec.string
+                       // Phase 732 — positional, never sorted; omitted where the reference applies
+                       // none, so a reference written before the member existed keeps its bytes.
+                       |> omitting Omit.recordArgs snd (Codec.list self))
                   single
                       "var"
                       "name"
@@ -1222,14 +1241,17 @@ module Artifact =
         Codec.narrow resolve spell entry
 
     let private record: Codec<IdlRecord> =
-        (Codec.record (fun name fs ann isInline ->
+        (Codec.record (fun name ps fs ann isInline ->
             ({ Name = name
+               Params = ps
                Fields = fs
                Annotations = ann
                Inline = isInline }
             : IdlRecord))
         : CodecFields<IdlRecord, _>)
         |> Codec.field "name" _.Name Codec.string
+        // Phase 732 — positional, never sorted; omitted for a record that declares none.
+        |> omitting Omit.recordParams _.Params (Codec.list Codec.string)
         |> Codec.field "fields" _.Fields fields
         // Phase 542 — the record's OWN annotations.
         |> annotated _.Annotations

@@ -77,9 +77,10 @@ module private Law =
           "added omit-at-default field", oldIdl, noteWith (fun fs -> fs @ [ fld "caption" TStr (OmitDefault(VStr "")) ])
           "added optional field of a new record type",
           oldIdl,
-          { noteWith (fun fs -> fs @ [ fld "meta" (TRecord "Meta") Optional ]) with
+          { noteWith (fun fs -> fs @ [ fld "meta" (TRecord("Meta", [])) Optional ]) with
               Records =
                   [ { Name = "Meta"
+                      Params = []
                       Fields = [ fld "tag" TStr Required ]
                       Annotations = ann
                       Inline = false } ] }
@@ -240,6 +241,7 @@ let private withUndecided (before: Idl, after: Idl) : Idl * Idl =
             Records =
                 idl.Records
                 @ [ { Name = "Access"
+                      Params = []
                       Fields = [ Fixtures.fld "region" ty Optional ]
                       Annotations = Fixtures.ann
                       Inline = false } ]

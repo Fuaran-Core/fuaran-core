@@ -282,10 +282,11 @@ let private silentPaths: (string * Idl) list =
       { probeIdl with
           Records =
               [ { Name = "Bag"
+                  Params = []
                   Fields = [ badMapField ]
                   Annotations = Annotations.Empty
                   Inline = false } ]
-          Kinds = [ oneKind [ field "bag" (TRecord "Bag") Required ] ] }
+          Kinds = [ oneKind [ field "bag" (TRecord("Bag", [])) Required ] ] }
       "union-case field",
       { probeIdl with
           Unions =
@@ -1406,7 +1407,7 @@ let rec private drawValue
 
                     VUnion(c.Tag, fields), r
             | _ -> VUnion("Missing", []), r
-        | TRecord n ->
+        | TRecord(n, _) ->
             match idl.Records |> List.tryFind (fun rc -> rc.Name = n) with
             | Some rc when depth > 0 ->
                 let fields, r =

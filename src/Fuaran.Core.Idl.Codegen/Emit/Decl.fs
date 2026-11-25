@@ -225,7 +225,7 @@ module internal Decl =
                             for f in c.Fields do
                                 visit f.Type
                     | None -> ()
-            | TRecord n ->
+            | TRecord(n, _) ->
                 if records.Add n then
                     match CodegenLookup.tryRecord idl n with
                     | Some r ->
@@ -254,7 +254,7 @@ module internal Decl =
 
             for r in idl.Records do
                 if text.Contains r.Name then
-                    visit (TRecord r.Name)
+                    visit (TRecord(r.Name, []))
 
             for u in idl.Unions do
                 if text.Contains u.Name then
@@ -312,7 +312,7 @@ module internal Decl =
             | TMap vt -> mentions seen vt
             | TNode -> seen.Contains "Node"
             | TUnion(n, args) -> seen.Contains n || args |> List.exists (mentions seen)
-            | TRecord n -> seen.Contains n
+            | TRecord(n, _) -> seen.Contains n
             | _ -> false
 
         let step (seen: Set<string>) =
@@ -426,7 +426,7 @@ module internal Decl =
             | TSet inner -> capable granted visiting inner
             | TTuple args -> args |> List.forall (capable granted visiting)
             | TKeyedMap(k, v) -> capable granted visiting k && capable granted visiting v
-            | TRecord n -> declCapable granted visiting ("R:" + n)
+            | TRecord(n, _) -> declCapable granted visiting ("R:" + n)
             | TNode -> declCapable granted visiting "Node"
             | TUnion(n, args) ->
                 args |> List.forall (capable granted visiting)
@@ -492,7 +492,7 @@ module internal Decl =
         | TNode -> true
         | TList i
         | TMap i -> holdsIn hs i
-        | TRecord n -> hs.Contains n
+        | TRecord(n, _) -> hs.Contains n
         | TUnion(n, args) -> hs.Contains n || List.exists (holdsIn hs) args
         | _ -> false
 
@@ -550,7 +550,7 @@ module internal Decl =
         | TOp -> "op"
         | TVar v -> "var_" + v
         | TEnum n -> "enum_" + n
-        | TRecord n -> "record_" + n
+        | TRecord(n, _) -> "record_" + n
         | TList inner -> "list_" + wireKey inner
         | TMap vt -> "map_" + wireKey vt
         | TUnion(n, args) -> "union_" + n + "(" + (args |> List.map wireKey |> String.concat ",") + ")"
@@ -609,7 +609,7 @@ module internal Decl =
 
                     for k in kinds do
                         visitFields k.Fields
-            | TRecord n ->
+            | TRecord(n, _) ->
                 if seen.Add(wireKey t) then
                     order.Add t
                     CodegenLookup.tryRecord idl n |> Option.iter (fun r -> visitFields r.Fields)
@@ -755,7 +755,7 @@ module internal Decl =
         | TSet _, VList [] -> Ok Literal.EmptySet
         | TKeyedMap _, VList [] -> Ok Literal.EmptyKeyedMap
         | TJson, VJson j when spellable j -> Ok(Literal.Json j)
-        | TRecord n, VRecord authored ->
+        | TRecord(n, _), VRecord authored ->
             match CodegenLookup.tryRecord idl n with
             | Some r -> Ok(Literal.Record(r, authored))
             | None -> refuse ()
@@ -880,7 +880,7 @@ module internal Decl =
                         |> Option.exists (fun u ->
                             u.Cases
                             |> List.exists (fun c -> c.Fields |> List.exists (fun f -> go (seen.Add n) f.Type)))))
-            | TRecord n ->
+            | TRecord(n, _) ->
                 not (seen.Contains n)
                 && (tryRecord d n
                     |> Option.exists (fun r -> r.Fields |> List.exists (fun f -> go (seen.Add n) f.Type)))
@@ -914,7 +914,7 @@ module internal Decl =
                 "recurse through a list, an option, a map or a record, or do not request the fold"
         | TList i
         | TMap i -> foldSelfIn d u seen i
-        | TRecord n when not (seen.Contains n) ->
+        | TRecord(n, _) when not (seen.Contains n) ->
             tryRecord d n
             |> Option.map (fun r ->
                 r.Fields
@@ -938,7 +938,7 @@ module internal Decl =
         let rec names (t: IdlType) : string list =
             match t with
             | TEnum n
-            | TRecord n -> [ n ]
+            | TRecord(n, _) -> [ n ]
             | TUnion(n, args) -> n :: List.collect names args
             | TList i
             | TMap i -> names i
@@ -987,7 +987,7 @@ module internal Decl =
         | TKind -> "NodeKind"
         | TOp -> "TreeOp"
         | TEnum n
-        | TRecord n -> n
+        | TRecord(n, _) -> n
         | TVar v -> v
         | TList inner -> "list_" + instName inner
         | TMap vt -> "map_" + instName vt
@@ -1141,6 +1141,57 @@ module internal Decl =
                     "correct the declaration — `Declare.errors` names every fault of the vocabulary"
                 )
             )
+
+    /// Phase 732, first round — the first record of the vocabulary that declares a type parameter,
+    /// else the first a reference applies to a type argument. The declaration, the artifact and the
+    /// declaration check carry both; no backend emits one yet, so each asks this of the WHOLE
+    /// vocabulary (its contracts' types included) and refuses by the record's name
+    /// ([[unparameterised]]). A backend drops the question in the round that emits the record.
+    let parameterisedRecord (idl: Idl) : string option =
+        let rec applied (t: IdlType) : string option =
+            match t with
+            | TRecord(n, (_ :: _)) -> Some n
+            | TList i
+            | TMap i
+            | TSet i -> applied i
+            | TUnion(_, args)
+            | TTuple args -> args |> List.tryPick applied
+            | TKeyedMap(k, v) -> [ k; v ] |> List.tryPick applied
+            | THosted { Wire = Some w } -> applied w
+            | _ -> None
+
+        let methodTypes =
+            idl.Contracts
+            |> List.collect _.Methods
+            |> List.collect (fun m -> (m.Arguments |> List.map _.Type) @ Option.toList m.Result)
+
+        idl.Records
+        |> List.tryFind (fun r -> not (List.isEmpty r.Params))
+        |> Option.map _.Name
+        |> Option.orElseWith (fun () ->
+            (allFieldLists idl |> List.collect (List.map _.Type)) @ methodTypes
+            |> List.tryPick applied)
+
+    /// The construct a backend names when [[parameterisedRecord]] answers a record.
+    let parameterisedRecordConstruct (name: string) : string =
+        sprintf "a type-parameterised record ('%s')" name
+
+    /// [[parameterisedRecord]] as the refusal of a backend that answers `UnsupportedConstruct`.
+    let unparameterisedIdl (idl: Idl) : Result<unit, CodegenError> =
+        match parameterisedRecord idl with
+        | None -> Ok()
+        | Some name ->
+            Error(
+                CodegenError.UnsupportedConstruct(
+                    parameterisedRecordConstruct name,
+                    "GP5: the refusal names the construct and thereby the set that IS supported",
+                    "declare the record at each argument it is applied to, as a record of its own"
+                )
+            )
+
+    /// [[unparameterisedIdl]] over a resolution, answering the resolution itself.
+    let unparameterised (d: Decl) : Result<Decl, CodegenError> =
+        unparameterisedIdl d.Idl |> Result.map (fun () -> d)
 
     /// A presence-keyed union's roster — see [[WireForm.keyedRoster]].
     [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]

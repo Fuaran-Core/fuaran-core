@@ -333,7 +333,7 @@ let private defaultedFamilyIdl: Idl =
                 Category = "Display"
                 Fields =
                   [ field "items" (TList TNode) (OmitDefault(VList []))
-                    field "at" (TRecord "Pt") (OmitDefault(VRecord [ "x", VStr "o" ]))
+                    field "at" (TRecord("Pt", [])) (OmitDefault(VRecord [ "x", VStr "o" ]))
                     field "src" (TUnion("Src", [])) (OmitDefault(VUnion("Lit", [ "text", VStr "" ])))
                     field "flag" TBool (OmitDefault(VBool false))
                     field "note" TStr Optional ]
@@ -344,6 +344,7 @@ let private defaultedFamilyIdl: Idl =
                 Annotations = Annotations.Empty } ]
         Records =
             [ { Name = "Pt"
+                Params = []
                 Fields = [ field "x" TStr Required ]
                 Annotations = Annotations.Empty
                 Inline = false } ]
@@ -501,7 +502,7 @@ let idlFStarTargetTests =
                     fun () -> reached (tinyIdl (TVar "T") Required) onlyTag
                     "an undeclared record",
                     "undeclared record",
-                    (fun () -> reached (tinyIdl (TRecord "Missing") Required) onlyTag)
+                    (fun () -> reached (tinyIdl (TRecord("Missing", [])) Required) onlyTag)
                     "an undeclared union",
                     "undeclared union",
                     fun () -> reached (tinyIdl (TUnion("Missing", [])) Required) onlyTag

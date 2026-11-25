@@ -591,7 +591,7 @@ module internal FSharpDerive =
         | TMap i -> mentionsMsg ctx i
         | TNode -> ctx.Msg.Contains "Node"
         | TUnion(n, args) -> ctx.Msg.Contains n || List.exists (mentionsMsg ctx) args
-        | TRecord n -> ctx.Msg.Contains n
+        | TRecord(n, _) -> ctx.Msg.Contains n
         | _ -> false
 
     let rec private mapMsgE
@@ -614,7 +614,7 @@ module internal FSharpDerive =
             | TMap i ->
                 mapMsgE ctx where i x (d + 1)
                 |> Result.map (fun b -> sprintf "Map.map (fun _ %s -> %s) %s" x b e)
-            | TRecord n -> Ok(sprintf "%s f %s" (mapperName n) e)
+            | TRecord(n, _) -> Ok(sprintf "%s f %s" (mapperName n) e)
             | TUnion(n, args) when args |> List.exists (mentionsMsg ctx) ->
                 refuse
                     (sprintf "the message map through a type argument of '%s' at %s" n where)
@@ -1161,7 +1161,7 @@ module internal FSharpCollectingRecord =
         | TFloat -> Some("Float", "float")
         | TBool -> Some("Bool", "bool")
         | TEnum n -> Some(n, n)
-        | TRecord n
+        | TRecord(n, _)
         | TUnion(n, []) -> plain n
         | TUnion(n, args) when not (msg.Contains n) ->
             args

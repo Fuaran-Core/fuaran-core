@@ -117,7 +117,7 @@ module internal SlotTraversal =
             | HostedSlot.Verbatim s -> Ok s
             | HostedSlot.Through(wire, wrap) -> slotFn p wire |> Result.map wrap
             | HostedSlot.Refused e -> Error e
-        | TRecord n -> Ok(p.Named n)
+        | TRecord(n, _) -> Ok(p.Named n)
         | TMap vt -> slotFn p vt |> Result.map p.Map
         | TInt64
         | TDecimal
@@ -736,7 +736,7 @@ module internal ValueTraversal =
 
                         members p idl (sprintf "union case '%s.%s'" name tag) subst c.Fields fields
                         |> Result.map (p.Union u c)
-            | TRecord name, VRecord fields ->
+            | TRecord(name, _), VRecord fields ->
                 match CodegenLookup.tryRecord idl name with
                 | None -> mismatch (sprintf "a value of the undeclared record '%s'" name)
                 | Some r ->

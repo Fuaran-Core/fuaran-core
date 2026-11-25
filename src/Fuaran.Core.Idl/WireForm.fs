@@ -13,8 +13,9 @@ type internal Undeclared =
     /// `TUnion(name, args)` — the arguments are kept because the depth floor and the validator read
     /// them whether or not the union resolves.
     | Union of name: string * args: IdlType list
-    /// `TRecord name`.
-    | Record of name: string
+    /// `TRecord(name, args)` — the arguments are kept because the validator reads them whether or not
+    /// the record resolves.
+    | Record of name: string * args: IdlType list
 
 /// A union reference resolved against the vocabulary (Phase 513): the declaration, the binding its
 /// arguments make, and the case the vocabulary declares transparent. The three facts the encoder,
@@ -34,6 +35,21 @@ type internal UnionForm =
         /// The tag of the case [[HardenPolicy.TransparentUnions]] declares transparent for this
         /// union — written BARE, its one field's value without a tag — or `None`.
         Transparent: string option
+    }
+
+/// A record reference resolved against the vocabulary (Phase 732): the declaration and the binding
+/// its arguments make, as [[UnionForm]] states a union reference's.
+type internal RecordForm =
+    {
+        /// The record's declared name.
+        Name: string
+        /// The type arguments the reference applies it to.
+        Args: IdlType list
+        /// The declaration, its fields as declared: a field naming a parameter still names it.
+        Decl: IdlRecord
+        /// Each parameter bound by name to its argument ([[TypeParams.bindRecord]]), or `None` when
+        /// the reference applies the record to the wrong number of arguments.
+        Binding: Map<string, IdlType> option
     }
 
 /// **The IDL's lowered wire form (Phase 513, DECISIONS.md D179)** — what a value of one declared
@@ -82,7 +98,7 @@ type internal WireForm =
     /// A `$type`-tagged object of a resolved union, or its transparent case written bare (`TUnion`).
     | Union of UnionForm
     /// An untagged object of a resolved record's fields (`TRecord`).
-    | Record of IdlRecord
+    | Record of RecordForm
     /// A JSON array of the item type (`TList`).
     | List of item: IdlType
     /// A JSON object whose authored keys map to the value type (`TMap`).
@@ -161,10 +177,15 @@ module internal WireForm =
         | TJson
         | THosted { Wire = None; Format = None } -> WireForm.Verbatim
         | THosted h -> WireForm.Hosted(h.Wire, h.Format)
-        | TRecord name ->
+        | TRecord(name, args) ->
             match IdlLookup.tryRecord idl name with
-            | Some r -> WireForm.Record r
-            | None -> WireForm.Undeclared(Undeclared.Record name)
+            | Some r ->
+                WireForm.Record
+                    { Name = name
+                      Args = args
+                      Decl = r
+                      Binding = TypeParams.bindRecord r args }
+            | None -> WireForm.Undeclared(Undeclared.Record(name, args))
         | TMap valueType -> WireForm.Map valueType
         | TKind -> WireForm.Kind
         | TOp -> WireForm.Op
@@ -281,7 +302,7 @@ module internal WireForm =
         | WireForm.Kind
         | WireForm.Op -> true
         | WireForm.Record r when not (Set.contains ("r:" + r.Name) seen) ->
-            requiredReachesNode idl (Set.add ("r:" + r.Name) seen) r.Fields
+            requiredReachesNode idl (Set.add ("r:" + r.Name) seen) r.Decl.Fields
         | WireForm.Union u when not (Set.contains ("u:" + u.Name) seen) ->
             let seen' = Set.add ("u:" + u.Name) seen
 
@@ -419,7 +440,7 @@ module internal WireForm =
     /// The inline record `t` names, when it names one.
     let inlineRecord (idl: Idl) (t: IdlType) : IdlRecord option =
         match ofType idl t with
-        | WireForm.Record r when r.Inline -> Some r
+        | WireForm.Record r when r.Decl.Inline -> Some r.Decl
         | _ -> None
 
     /// The presence-keyed union `t` names, with its rules, when it names one.

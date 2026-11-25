@@ -78,7 +78,7 @@ let rec valueKey (idl: Idl) (t: IdlType) (v: IdlValue) : string =
            |> List.map (fun (k, ev) -> Canonical.write Rendering.CrossHost (JStr k) + ":" + valueKey idl vt ev)
            |> String.concat ",")
         + "}"
-    | TRecord n, VRecord fs ->
+    | TRecord(n, _), VRecord fs ->
         match idl.Records |> List.tryFind (fun r -> r.Name = n) with
         | Some r -> "R" + n + "(" + fieldsKey idl Map.empty r.Fields fs + ")"
         | None -> sprintf "?record %s" n
@@ -195,7 +195,7 @@ let rec private toIdl (hosted: Map<string, obj -> JVal>) (idl: Idl) (t: IdlType)
     | TList inner -> VList [ for x in (o :?> Collections.IEnumerable) -> recur inner x ]
     | TMap vt ->
         VMap [ for kv in (o :?> Collections.IEnumerable) -> unbox<string> (prop kv "Key"), recur vt (prop kv "Value") ]
-    | TRecord n ->
+    | TRecord(n, _) ->
         let r = idl.Records |> List.find (fun r -> r.Name = n)
 
         if List.isEmpty r.Fields then
@@ -576,6 +576,7 @@ let compiledFixtures =
                   { ScoreDomainIdl.scoreIdl with
                       Records =
                           { Name = "Empty"
+                            Params = []
                             Fields = []
                             Annotations = Annotations.Empty
                             Inline = false }
@@ -790,9 +791,9 @@ let section7 =
                               Expect.equal
                                   (valueKey
                                       idl
-                                      (TRecord "Point")
+                                      (TRecord("Point", []))
                                       (fields |> List.find (fun (n, _) -> n = "origin") |> snd))
-                                  (valueKey idl (TRecord "Point") point)
+                                  (valueKey idl (TRecord("Point", [])) point)
                                   (sprintf "%s reads as the non-finite float" token)
                           | other -> failtestf "decoded %A" other
 
@@ -912,6 +913,7 @@ let private hardenIdl: Idl =
     { ReferenceIdl.refIdl with
         Records =
             { Name = "Target"
+              Params = []
               Fields = [ reqField "href" TStr ]
               Annotations = Annotations.Empty
               Inline = false }
@@ -920,7 +922,7 @@ let private hardenIdl: Idl =
             ReferenceIdl.refIdl.Kinds
             @ [ { Tag = "Anchor"
                   Category = "content"
-                  Fields = [ reqField "target" (TRecord "Target") ]
+                  Fields = [ reqField "target" (TRecord("Target", [])) ]
                   Annotations = Annotations.Empty }
                 { Tag = "Plain"
                   Category = "content"
@@ -1323,6 +1325,7 @@ module private Seam550 =
 
     let window: IdlRecord =
         { Name = "Window"
+          Params = []
           Fields = [ req "start" TInt; fld "label" TStr Optional ]
           Annotations = ann
           Inline = false }
@@ -1334,7 +1337,7 @@ module private Seam550 =
                 Fields =
                   [ req "placement" (TUnion("Placement", []))
                     req "deferred" (TUnion("Deferred", [ TInt ]))
-                    req "window" (TRecord "Window") ]
+                    req "window" (TRecord("Window", [])) ]
                 Annotations = ann }
               { Tag = "Seams"
                 Category = ""
@@ -1434,7 +1437,7 @@ module private Seam550 =
     let rootType (root: string) : IdlType =
         match root with
         | "Deferred" -> TUnion("Deferred", [ TInt ])
-        | "Window" -> TRecord "Window"
+        | "Window" -> TRecord("Window", [])
         | r -> TUnion(r, [])
 
     /// The generated module's reader and writer of `root`, as script source.

@@ -169,7 +169,7 @@ module internal FStarModel =
         | TJson -> Ok SJson
         | TNode -> Ok SNode
         | TEnum n -> Ok(SEnum n)
-        | TRecord n -> Ok(SRecord n)
+        | TRecord(n, _) -> Ok(SRecord n)
         | TList inner -> slotOf where inner |> Result.map SList
         | TMap vt -> slotOf where vt |> Result.map SMap
         | TVar v -> unmodellable (sprintf "an unresolved type parameter '%s" v) where
@@ -954,7 +954,7 @@ module internal FStarModel =
         // map declares no members of its own.
         let declare (t: IdlType) () : Result<unit, CodegenError> =
             match t with
-            | TRecord n ->
+            | TRecord(n, _) ->
                 match CodegenLookup.tryRecord idl n with
                 | None -> unmodellable ("an undeclared record '" + n + "'") ("record " + n)
                 // Phase 722 — an inline record's members sit on its holder's object, where
@@ -1205,11 +1205,13 @@ module internal FStarModel =
 
     /// [[modelOf]] behind the Phase 539 refusal: the model's decoder reads each member under its one
     /// name and has no presence condition, so a vocabulary declaring either (or an enum alias) is
-    /// refused by name rather than modelled as if it declared neither.
+    /// refused by name rather than modelled as if it declared neither. And behind Phase 732's: a
+    /// type-parameterised record is not modelled yet ([[Decl.parameterisedRecord]]).
     let model (idl: Idl) (kindTags: string list) : Result<Model, CodegenError> =
-        match Decl.canonicalFormDeclarations idl with
-        | what :: _ -> unmodellable (what + " (a Phase 539 canonical-form declaration)") "the vocabulary"
-        | [] -> modelOf idl kindTags
+        match Decl.canonicalFormDeclarations idl, Decl.parameterisedRecord idl with
+        | what :: _, _ -> unmodellable (what + " (a Phase 539 canonical-form declaration)") "the vocabulary"
+        | [], Some name -> unmodellable (Decl.parameterisedRecordConstruct name) "the vocabulary"
+        | [], None -> modelOf idl kindTags
 
     // -----------------------------------------------------------------------
     // 6. The expressibility partition — which of a vocabulary's kinds the target can

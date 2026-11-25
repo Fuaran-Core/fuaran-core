@@ -87,7 +87,7 @@ let private envelopeIdl: Idl =
               [ req "label" TStr
                 // the kind-spec leg
                 omit "weight" (TEnum "Weight") (VEnum "Normal")
-                req "trim" (TRecord "Trim")
+                req "trim" (TRecord("Trim", []))
                 req "source" (TUnion("Source", [])) ] } ]
       Unions =
         [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
@@ -107,11 +107,13 @@ let private envelopeIdl: Idl =
           Declare.enumOf "Exposure" [ "Auto"; "Hidden" ] ]
       Records =
         [ { Name = "Trim"
+            Params = []
             // the record leg
             Fields = [ omit "inset" TInt (VInt 0) ]
             Annotations = Annotations.Empty
             Inline = false }
           { Name = "Style"
+            Params = []
             Fields = [ req "name" TStr ]
             Annotations = Annotations.Empty
             Inline = false } ]
@@ -124,7 +126,7 @@ let private envelopeIdl: Idl =
       NodeFields =
         [ omit "state" (TEnum "Presence") (VEnum "Live")
           omit "accessibility" (TEnum "Exposure") (VEnum "Auto")
-          opt "style" (TRecord "Style")
+          opt "style" (TRecord("Style", []))
           hostOnly "motion" (TFn motionSlot)
           hostOnly "extraAttributes" (TFn attributesSlot) ]
       Ops = []

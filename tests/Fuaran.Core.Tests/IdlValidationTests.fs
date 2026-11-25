@@ -52,7 +52,7 @@ let private small: Idl =
                 f "tag" TStr Optional ]
           kind "Paired" [ f "p" (TUnion("Pair", [ TStr; TInt ])) Required ]
           kind "Marker" []
-          kind "Shaped" [ f "shape" (TRecord "Shape") Required; f "extra" TJson Optional ] ]
+          kind "Shaped" [ f "shape" (TRecord("Shape", [])) Required; f "extra" TJson Optional ] ]
       Unions =
         [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
             Name = "Pair"
@@ -63,6 +63,7 @@ let private small: Idl =
       Enums = [ Declare.enumWith "Level" [ "Low", "low"; "High", "high" ] ]
       Records =
         [ { Name = "Shape"
+            Params = []
             Fields = [ f "w" TInt Required; f "label" TStr Optional ]
             Annotations = Annotations.Empty
             Inline = false } ]
@@ -97,11 +98,38 @@ let private adversarial: (string * string * Idl) list =
               { WireShape.Default with
                   Discriminator = "ty\"pe" } }
       "a dangling enum name", "enum 'Nope'", small |> withKinds [ kind "Bad" [ f "x" (TEnum "Nope") Required ] ]
-      "a dangling record name", "record 'Nope'", small |> withKinds [ kind "Bad" [ f "x" (TRecord "Nope") Required ] ]
+      "a dangling record name",
+      "record 'Nope'",
+      small |> withKinds [ kind "Bad" [ f "x" (TRecord("Nope", [])) Required ] ]
       "a dangling union name", "union 'Nope'", small |> withKinds [ kind "Bad" [ f "x" (TUnion("Nope", [])) Required ] ]
       "a union applied to the wrong arity",
       "applies union 'Pair' to 1",
       small |> withKinds [ kind "Bad" [ f "x" (TUnion("Pair", [ TStr ])) Required ] ]
+      // Phase 732 — a record's type parameters, each fault in the sentence a union's gets.
+      "a record applied to the wrong arity",
+      "applies record 'Shape' to 1",
+      small
+      |> withKinds [ kind "Bad" [ f "x" (TRecord("Shape", [ TStr ])) Required ] ]
+      "a record field naming no parameter of its record",
+      "type variable 'T' is not a parameter of the record declaring it",
+      { small with
+          Records =
+              small.Records
+              @ [ { Name = "Loose"
+                    Params = []
+                    Fields = [ f "v" (TVar "T") Required ]
+                    Annotations = Annotations.Empty
+                    Inline = false } ] }
+      "a record's type parameter declared twice",
+      "record 'Twice': type parameter 'T' is declared more than once",
+      { small with
+          Records =
+              small.Records
+              @ [ { Name = "Twice"
+                    Params = [ "T"; "T" ]
+                    Fields = [ f "v" (TVar "T") Required ]
+                    Annotations = Annotations.Empty
+                    Inline = false } ] }
       "a duplicate kind tag", "kind 'Note' is declared more than once", small |> withKinds [ kind "Note" [] ]
       "a duplicate case tag",
       "case 'Of' is declared more than once",
@@ -119,6 +147,7 @@ let private adversarial: (string * string * Idl) list =
           Records =
               small.Records
               @ [ { Name = "Level"
+                    Params = []
                     Fields = []
                     Annotations = Annotations.Empty
                     Inline = false } ] }
@@ -192,7 +221,7 @@ let private adversarial: (string * string * Idl) list =
           Harden =
               { HardenPolicy.Undeclared with
                   TransparentUnions = [ "Wrap", "Bare" ] } }
-      |> withKinds [ kind "Bad" [ f "w" (TUnion("Wrap", [ TRecord "Shape" ])) Required ] ]
+      |> withKinds [ kind "Bad" [ f "w" (TUnion("Wrap", [ TRecord("Shape", []) ])) Required ] ]
       "an envelope field named kind under the nested shape",
       "field 'kind' is reserved",
       { small with
@@ -209,6 +238,7 @@ let private adversarial: (string * string * Idl) list =
           Records =
               small.Records
               @ [ { Name = "Ctor"
+                    Params = []
                     Fields = [ f "constructor" TStr Optional ]
                     Annotations = Annotations.Empty
                     Inline = false } ] }
@@ -378,6 +408,7 @@ let declareErrorsTests =
                       Records =
                           small.Records
                           @ [ { Name = "Empty"
+                                Params = []
                                 Fields = []
                                 Annotations = Annotations.Empty
                                 Inline = false } ] }
@@ -727,10 +758,11 @@ let samplerTotalityTests =
                   { small with
                       Records =
                           [ { Name = "Loop"
-                              Fields = [ f "next" (TRecord "Loop") Required ]
+                              Params = []
+                              Fields = [ f "next" (TRecord("Loop", [])) Required ]
                               Annotations = Annotations.Empty
                               Inline = false } ] }
-                  |> withKinds [ kind "L" [ f "l" (TRecord "Loop") Required ] ]
+                  |> withKinds [ kind "L" [ f "l" (TRecord("Loop", [])) Required ] ]
 
               for name, idl, tag in [ "empty enum", emptyEnum, "E"; "self-referential record", selfRecord, "L" ] do
                   match noThrow name (fun () -> Sample.trySampleNodes idl [ tag ] 3 4) with

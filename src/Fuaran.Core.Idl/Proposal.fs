@@ -257,7 +257,8 @@ module Proposal =
             components
             |> List.mapi (fun i c -> hostSurface (at @ [ PathSegment.Key "of"; PathSegment.Index i ]) c)
             |> List.concat
-        | TUnion(_, args) ->
+        | TUnion(_, args)
+        | TRecord(_, args) ->
             args
             |> List.mapi (fun i a -> hostSurface (at @ [ PathSegment.Key "args"; PathSegment.Index i ]) a)
             |> List.concat
@@ -266,7 +267,6 @@ module Proposal =
         | TBool
         | TFloat
         | TEnum _
-        | TRecord _
         | TNode
         | TKind
         | TJson

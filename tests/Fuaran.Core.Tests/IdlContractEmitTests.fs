@@ -255,7 +255,7 @@ let emitTests =
 
               Expect.equal
                   (list.Fields |> List.map (fun f -> f.Name, f.Type, f.Opt))
-                  [ "paging", TRecord "Paging", Required
+                  [ "paging", TRecord("Paging", []), Required
                     "limit", TInt, OmitDefault(VInt 20)
                     "status", TEnum "Status", Optional ]
                   "the members are the arguments as declared"
@@ -264,7 +264,7 @@ let emitTests =
 
               Expect.equal
                   (result.Fields |> List.map (fun f -> f.Name, f.Type, f.Opt))
-                  [ "result", TList(TRecord "Order"), Required ]
+                  [ "result", TList(TRecord("Order", [])), Required ]
                   "the result kind holds the answer")
 
           testCase "a contract the vocabulary does not declare, and a kind name already taken, are refused" (fun _ ->
@@ -275,6 +275,7 @@ let emitTests =
                       Records =
                           ContractsIdl.idl.Records
                           @ [ { Name = "GetResult"
+                                Params = []
                                 Fields = []
                                 Annotations = Annotations.Empty
                                 Inline = false } ] }

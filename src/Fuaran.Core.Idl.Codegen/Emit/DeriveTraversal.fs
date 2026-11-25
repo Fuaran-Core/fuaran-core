@@ -168,7 +168,7 @@ module internal Derive =
         | TNode -> Ok(p.Node e)
         | TList i -> positions p hs i x (d + 1) |> Result.map (p.List e x)
         | TMap i -> positions p hs i (p.MapItem e x) (d + 1) |> Result.map (fun b -> p.Map e x b d)
-        | TRecord n -> Ok(p.Named n e)
+        | TRecord(n, _) -> Ok(p.Named n e)
         | TUnion(n, args) when args |> List.exists (Decl.holdsIn hs) -> throughArgument n
         | TUnion(n, _) -> Ok(p.Named n e)
         | _ -> Ok(p.Other e)
@@ -221,7 +221,7 @@ module internal Derive =
         let isT (t: IdlType) =
             match t with
             | TEnum n
-            | TRecord n
+            | TRecord(n, _)
             | TUnion(n, _) -> n = typeName
             | _ -> false
 
@@ -269,7 +269,7 @@ module internal Derive =
         | TMap i ->
             fold p ctx u i (p.MapItem e x) s (d + 1)
             |> Result.map (fun b -> p.Map e x s b st)
-        | TRecord n ->
+        | TRecord(n, _) ->
             let fs =
                 Decl.tryRecord ctx n
                 |> Option.map _.Fields

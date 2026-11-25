@@ -33,7 +33,7 @@ module internal FSharpCodecOnly =
     let private rootType (idl: Idl) (name: string) : IdlType option =
         match CodegenLookup.tryUnion idl name, CodegenLookup.tryRecord idl name, CodegenLookup.tryEnum idl name with
         | Some u, _, _ -> Some(TUnion(u.Name, u.Params |> List.map TVar))
-        | _, Some r, _ -> Some(TRecord r.Name)
+        | _, Some r, _ -> Some(TRecord(r.Name, []))
         | _, _, Some e -> Some(TEnum e.Name)
         | _ -> None
 
@@ -86,7 +86,7 @@ module internal FSharpCodecOnly =
     /// The strict walker of a value of `t`.
     let rec private walker (t: IdlType) : string =
         match t with
-        | TRecord n -> "strict" + n
+        | TRecord(n, _) -> "strict" + n
         | TUnion(n, []) -> "strict" + n
         | TUnion(n, args) -> "(strict" + n + " " + (args |> List.map walker |> String.concat " ") + ")"
         | TVar v -> "strict" + v

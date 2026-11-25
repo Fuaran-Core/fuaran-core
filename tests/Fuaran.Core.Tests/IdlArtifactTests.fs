@@ -546,9 +546,24 @@ let private offDefaults: Idl =
                                 Synthesised = [ ("a", VStr "") ] } ] } ]
             Records =
                 [ { Name = "Grouped"
+                    Params = []
                     Fields = [ req "g" ]
                     Annotations = Annotations.Empty
-                    Inline = true } ] }
+                    Inline = true }
+                  // Phase 732 — a record that declares a type parameter, which the op applies.
+                  { Name = "Boxed"
+                    Params = [ "T" ]
+                    Fields = [ { req "v" with Type = TVar "T" } ]
+                    Annotations = Annotations.Empty
+                    Inline = false } ]
+            Ops =
+                idl.Ops
+                |> List.map (fun o ->
+                    { o with
+                        Fields =
+                            o.Fields
+                            @ [ { req "boxed" with
+                                    Type = TRecord("Boxed", [ TStr ]) } ] }) }
 
 /// The same vocabulary AT every default the omit table names.
 let private atDefaults: Idl =
@@ -574,7 +589,18 @@ let private atDefaults: Idl =
                     TagRule = UnionTagRule.CaseName
                     Discrimination = UnionDiscrimination.Tagged
                     Cases = u.Cases |> List.map (fun c -> { c with Hosted = None }) })
-        Records = offDefaults.Records |> List.map (fun r -> { r with Inline = false })
+        Records =
+            offDefaults.Records
+            |> List.map (fun r ->
+                { r with
+                    Inline = false
+                    Params = []
+                    Fields =
+                        r.Fields
+                        |> List.map (fun f ->
+                            match f.Type with
+                            | TVar _ -> { f with Type = TStr }
+                            | _ -> f) })
         Ops = []
         Wire = WireShape.Default }
 
@@ -584,6 +610,37 @@ let rec private memberNames (j: JVal) : string list =
     | JObj ms -> ms |> List.collect (fun (k, v) -> k :: memberNames v)
     | JArr xs -> xs |> List.collect memberNames
     | _ -> []
+
+/// The member names the artifact writes where an omit row's owner stands. A union always writes
+/// `params` and a union reference `args`, so the two record rows of those names (Phase 732) are read
+/// on a record's own object and on a record reference's; every other key is its row's alone and is
+/// read anywhere.
+let private namesOn (owner: string) (artifact: JVal) : Set<string> =
+    let rec objects (j: JVal) : (string * JVal) list list =
+        match j with
+        | JObj ms -> ms :: (ms |> List.collect (snd >> objects))
+        | JArr xs -> xs |> List.collect objects
+        | _ -> []
+
+    let shallow (os: (string * JVal) list list) = os |> List.collect (List.map fst)
+
+    match owner, artifact with
+    | "a record", JObj ms ->
+        ms
+        |> List.collect (function
+            | "records", JArr rs ->
+                rs
+                |> List.collect (function
+                    | JObj r -> List.map fst r
+                    | _ -> [])
+            | _ -> [])
+        |> Set.ofList
+    | "a record reference", _ ->
+        objects artifact
+        |> List.filter (List.contains ("$type", JStr "record"))
+        |> shallow
+        |> Set.ofList
+    | _ -> memberNames artifact |> Set.ofList
 
 let private schemaPath = "conformance/idl/idl.schema.json"
 
@@ -636,14 +693,19 @@ let codecTests =
     testList
         "Phase 527 — the artifact is a codec"
         [ testCase "every row of the omit table is omitted at its default and written away from it" (fun _ ->
-              let at = memberNames (Artifact.json atDefaults) |> Set.ofList
-              let off = memberNames (Artifact.json offDefaults) |> Set.ofList
+              let at = Artifact.json atDefaults
+              let off = Artifact.json offDefaults
 
               Expect.isNonEmpty Artifact.omitted "the table has rows"
 
               for owner, key in Artifact.omitted do
-                  Expect.isFalse (at.Contains key) (sprintf "'%s' on %s is omitted at its default" key owner)
-                  Expect.isTrue (off.Contains key) (sprintf "'%s' on %s is written away from its default" key owner)
+                  Expect.isFalse
+                      ((namesOn owner at).Contains key)
+                      (sprintf "'%s' on %s is omitted at its default" key owner)
+
+                  Expect.isTrue
+                      ((namesOn owner off).Contains key)
+                      (sprintf "'%s' on %s is written away from its default" key owner)
 
               for v in [ atDefaults; offDefaults ] do
                   Expect.equal

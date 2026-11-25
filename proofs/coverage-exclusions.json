@@ -1167,6 +1167,14 @@
     },
     {
       "members": [
+        "Idl.TypeParams.bindRecord"
+      ],
+      "class": "measured-elsewhere",
+      "reason": "A record reference's binding, by the one body `bind` answers a union reference's with; example-tested.",
+      "standIn": "tests/Fuaran.Core.Tests/IdlRecordParamsTests.fs"
+    },
+    {
+      "members": [
         "Idl.TransparentUnion.tag"
       ],
       "class": "measured-elsewhere",

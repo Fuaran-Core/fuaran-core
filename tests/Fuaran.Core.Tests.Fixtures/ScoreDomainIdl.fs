@@ -32,6 +32,7 @@ let private kind tag category fields : IdlKind =
 
 let private record name fields : IdlRecord =
     { Name = name
+      Params = []
       Fields = fields
       Annotations = Annotations.Empty
       Inline = false }
@@ -47,7 +48,12 @@ let private children = req "children" (TList TNode)
 let scoreIdl: Idl =
     { Kinds =
         [ kind "Score" "structure" [ opt "title" TStr; opt "composer" TStr; children ]
-          kind "Part" "structure" [ req "name" TStr; req "staves" (TList(TRecord "StaffDefinition")); children ]
+          kind
+              "Part"
+              "structure"
+              [ req "name" TStr
+                req "staves" (TList(TRecord("StaffDefinition", [])))
+                children ]
           kind "PartGroup" "structure" [ opt "name" TStr; req "bracket" (TEnum "BracketKind"); children ]
           kind
               "Measure"
@@ -62,18 +68,18 @@ let scoreIdl: Idl =
           kind
               "Note"
               "event"
-              [ req "pitch" (TRecord "Pitch")
-                req "duration" (TRecord "Duration")
+              [ req "pitch" (TRecord("Pitch", []))
+                req "duration" (TRecord("Duration", []))
                 omit "voice" TInt (VInt 1)
                 omit "tiedToNext" TBool (VBool false) ]
           kind
               "Chord"
               "event"
-              [ req "pitches" (TList(TRecord "Pitch"))
-                req "duration" (TRecord "Duration")
+              [ req "pitches" (TList(TRecord("Pitch", [])))
+                req "duration" (TRecord("Duration", []))
                 omit "voice" TInt (VInt 1)
                 omit "tiedToNext" TBool (VBool false) ]
-          kind "GraceNote" "event" [ req "pitch" (TRecord "Pitch"); req "grace" (TEnum "GraceKind") ]
+          kind "GraceNote" "event" [ req "pitch" (TRecord("Pitch", [])); req "grace" (TEnum "GraceKind") ]
           kind "Dynamic" "mark" [ req "level" (TEnum "DynamicLevel") ]
           kind "Fermata" "mark" []
           kind "HairpinStart" "spanner" [ req "hairpin" (TEnum "HairpinKind") ]
@@ -93,7 +99,7 @@ let scoreIdl: Idl =
               "Form"
               "structure"
               [ opt "name" TStr
-                req "sections" (TList(TRecord "FormSection"))
+                req "sections" (TList(TRecord("FormSection", [])))
                 req "arrangement" (TList TStr) ] ]
       // Finding (3): NO value union at all — the only discriminated union on
       // this vocabulary's wire is the node discriminator itself.
@@ -189,8 +195,8 @@ let scoreIdl: Idl =
               "StaffDefinition"
               [ req "number" TInt
                 req "clef" (TEnum "ClefKind")
-                req "initialKey" (TRecord "KeySignature")
-                req "initialTime" (TRecord "TimeSignature") ]
+                req "initialKey" (TRecord("KeySignature", []))
+                req "initialTime" (TRecord("TimeSignature", [])) ]
           // Finding (5): a record carrying a NODE LIST — record-over-tree recursion.
           record "FormSection" [ req "label" TStr; children ] ]
       Defaults = []

@@ -194,6 +194,7 @@ let private pipelineIdl =
                       req "args" (TList pipelineArg) ] ] ]
         []
         [ { Name = "CapabilityPipeline"
+            Params = []
             Fields = [ req "nodes" (TList(TUnion("PipelineNode", []))) ]
             Annotations = Annotations.Empty
             Inline = false } ]
@@ -271,6 +272,7 @@ let private queryIdl =
                 case "IllFormedSource" [ req "reason" TStr ] ] ]
         [ Declare.enumWith "SortDirection" [ "Ascending", "ascending"; "Descending", "descending" ] ]
         [ { Name = "SortKey"
+            Params = []
             Fields = [ req "column" TStr; req "direction" (TEnum "SortDirection") ]
             Annotations = Annotations.Empty
             Inline = false } ]

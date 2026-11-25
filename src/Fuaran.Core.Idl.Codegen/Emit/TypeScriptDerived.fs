@@ -153,7 +153,7 @@ module internal TypeScriptDerived =
             |> List.map tsInlineName
             |> Set.ofList
 
-        (ctx.Records |> List.map (fun r -> TRecord r.Name))
+        (ctx.Records |> List.map (fun r -> TRecord(r.Name, [])))
         @ (ctx.Unions |> List.map (fun u -> TUnion(u.Name, u.Params |> List.map TVar)))
         |> List.choose (Decl.inlineSlot idl)
         |> List.filter (fun slot -> read.Contains(tsInlineName slot))

@@ -34,7 +34,7 @@ module OmitWhenEmptyIdl =
           Annotations = Annotations.Empty
           Hosted = None }
 
-    let private param = TRecord "TransformParam"
+    let private param = TRecord("TransformParam", [])
 
     /// The declaring vocabulary: `Binding.Query.dependsOn`, `Binding.Transform.params`,
     /// `Binding.Expr.params` and `Panel.tags` are each an optional list declared non-empty.
@@ -61,6 +61,7 @@ module OmitWhenEmptyIdl =
           Enums = []
           Records =
             [ { Name = "TransformParam"
+                Params = []
                 Fields = [ field "name" TStr Required; field "value" TStr Required ]
                 Annotations = Annotations.Empty
                 Inline = false } ]
