@@ -18,7 +18,11 @@ While a slot is the standing DRAFT its entries are files of their own beside its
 that closes the slot (the release commit, with `CORE_APPROVE_DOCS=ledger-index`, or `open-slot`'s advance) prints
 them into the slot's file, a section per class, and removes them (DECISIONS.md D274).
 
-## 0.45.1 — DRAFT
+## 0.46.0 — DRAFT
+
+[`0.46.0.md`](0.46.0.md)
+
+## 0.45.1 — never released; its entries ship in `0.46.0`
 
 [`0.45.1.md`](0.45.1.md)
 
