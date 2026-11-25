@@ -154,8 +154,9 @@ let private declaredTypes (idl: Idl) : IdlType list =
         |> List.collect (fun m -> (m.Arguments |> List.map _.Type) @ Option.toList m.Result)
     )
 
-/// The fixture vocabularies of the suite's fixture library, none of which declares a
-/// parameterised record. A fixture added there is added here.
+/// The fixture vocabularies of the suite's fixture library that declare no parameterised record:
+/// all of them but [[ParameterisedRecordsIdl]], which is the one built to declare them. A fixture
+/// added there is added here.
 let private fixtures: (string * Idl) list =
     [ "mini", MiniIdl.miniIdl
       "document", SecondDomainIdl.docIdl

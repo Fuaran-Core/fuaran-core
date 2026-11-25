@@ -292,3 +292,35 @@ let interpreter =
                       (drawn |> List.map wraps |> List.distinct |> List.sort)
                       [ 1; 2 ]
                       "a drawn Wrap holds a Leaf, or one more Wrap above the floor, and never a third") ]
+
+// ---------------------------------------------------------------------------
+// The fixture vocabulary ([[ParameterisedRecordsIdl]]): a parameterised record in every position,
+// read and written by the interpreter.
+// ---------------------------------------------------------------------------
+
+[<Tests>]
+let fixture =
+    testList
+        "Phase 732 — the parameterised-records vocabulary, on the interpreter"
+        [ testCase "the vocabulary is well-formed, and each of its documents is written and read back" (fun _ ->
+              let idl = ParameterisedRecordsIdl.idl
+
+              Expect.isEmpty (Declare.errors idl) "well-formed"
+
+              for what, authored, bytes in ParameterisedRecordsIdl.documents do
+                  Expect.equal (Encode.encode idl authored) (Ok bytes) what
+                  roundTrips idl bytes
+                  Expect.isOk (Decode.decodeStrictDetailed idl bytes) (what + ": under the strict reading"))
+
+          testCase "every drawn document is written, and reads back to the same bytes" (fun _ ->
+              let idl = ParameterisedRecordsIdl.idl
+
+              match Sample.trySampleNodes idl ParameterisedRecordsIdl.kindTags 732 600 with
+              | Error fault -> failtestf "%s" fault.Describe
+              | Ok drawn ->
+                  for v in drawn do
+                      match Encode.encode idl v with
+                      | Ok text ->
+                          roundTrips idl text
+                          Expect.isOk (Decode.decodeStrictDetailed idl text) "under the strict reading"
+                      | Error e -> failtestf "a drawn value does not encode: %s (%A)" e v) ]
