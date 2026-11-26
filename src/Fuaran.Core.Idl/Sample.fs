@@ -257,7 +257,7 @@ module Sample =
             )
         // An unbound variable has no type to draw from; the encoder refuses it by name.
         | WireForm.Unbound v ->
-            refuse ("type variable '" + v + "'") "it is not bound by an enclosing union instantiation"
+            refuse ("type variable '" + v + "'") "it is not bound by an enclosing union or record instantiation"
         | WireForm.Enum e -> VEnum(pickAt r ("enum '" + e.Name + "'") e.WireCases)
         | WireForm.Undeclared(Undeclared.Enum name) ->
             refuse ("enum '" + name + "'") "the vocabulary does not declare it"

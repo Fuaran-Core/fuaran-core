@@ -993,7 +993,27 @@ let tests =
                     Expect.isEmpty
                         (within 20.0 "Declare.errors" (fun () ->
                             Declare.errors { idl with Kinds = [ idl.Kinds.Head ] }))
-                        "admitted") ] ]
+                        "admitted")
+
+                testCase "an instantiation is spelled one way, and a keyed map of strings is not a map" (fun _ ->
+                    let idl =
+                        vocabulary
+                            [ kind
+                                  "K"
+                                  [ f "m" (TRecord("Opt", [ TMap TInt ])) Optional
+                                    f "k" (TRecord("Opt", [ TKeyedMap(TStr, TInt) ])) Optional ] ]
+                            []
+                            [ record "Opt" [ "T" ] [ f "v" (TVar "T") (OmitDefault(VStr "")) ] ]
+
+                    let details = Declare.errors idl |> List.map _.Detail
+
+                    for spelled in [ "Opt<map<str, int>>"; "Opt<keyedMap<str, int>>" ] do
+                        Expect.equal
+                            (details
+                             |> List.filter (fun d -> d.Contains("at the instantiation " + spelled + " "))
+                             |> List.length)
+                            1
+                            (spelled + ": one fault names it")) ] ]
 
 // ---------------------------------------------------------------------------
 // A transparent case typed at a type parameter, instantiated through a generic HOLDER. The case is

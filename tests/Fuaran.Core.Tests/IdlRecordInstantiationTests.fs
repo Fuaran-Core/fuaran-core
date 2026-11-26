@@ -343,7 +343,26 @@ let interpreter =
                               match Encode.encode idl v with
                               | Ok text -> roundTrips idl text
                               | Error e -> failtestf "%s, seed %d: a drawn value does not encode: %s" what seed e
-                      | Error fault -> failtestf "%s, seed %d: %s" what seed fault.Describe) ]
+                      | Error fault -> failtestf "%s, seed %d: %s" what seed fault.Describe)
+
+          testCase "the sampler refuses a variable no record or union binds, saying so" (fun _ ->
+              // `X` is not `Box`'s parameter: the declaration check refuses it, and the sampler,
+              // handed it anyway, names it in a sentence that is true of a record.
+              let idl =
+                  vocabulary
+                      [ kind "K" [ f "b" (TRecord("Box", [ TInt ])) Required ] ]
+                      []
+                      [ record "Box" [ "T" ] [ f "item" (TVar "X") Required ] ]
+
+              Expect.isNonEmpty (Declare.errors idl) "the declaration check refuses it"
+
+              match Sample.trySampleNodes idl [ "K" ] 732 1 with
+              | Error fault ->
+                  Expect.equal
+                      (fault.At, fault.Reason)
+                      ("type variable 'X'", "it is not bound by an enclosing union or record instantiation")
+                      "the variable, and why"
+              | Ok drawn -> failtestf "sampled %A" drawn) ]
 
 // ---------------------------------------------------------------------------
 // The fixture vocabulary ([[ParameterisedRecordsIdl]]): a parameterised record in every position,

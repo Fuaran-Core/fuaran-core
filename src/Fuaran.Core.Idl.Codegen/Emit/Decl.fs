@@ -58,18 +58,12 @@ type internal InlineSlot =
     | Record of InlineRecord
     | Keyed of IdlUnion * KeyedCase list
 
-/// Phase 732 — a generic record instantiated at the arguments a vocabulary names, as
-/// [[Instantiation]] is a generic union: its instance name, the declaration, and the binding.
-type internal RecordInstantiation =
+/// A generic declaration instantiated at the arguments a vocabulary names: its instance name
+/// ([[Decl.instName]]), the declaration, and the parameter binding. `'Declaration` is an
+/// `IdlUnion` or (Phase 732) an `IdlRecord`: one shape for both.
+type internal Instantiation<'Declaration> =
     { Name: string
-      Record: IdlRecord
-      Subst: Map<string, IdlType> }
-
-/// A generic union instantiated at the arguments a vocabulary names: its instance name (the
-/// declaration's name plus its mangled arguments), the declaration, and the parameter binding.
-type internal Instantiation =
-    { Name: string
-      Union: IdlUnion
+      Declaration: 'Declaration
       Subst: Map<string, IdlType> }
 
 /// Phase 525 — what a kind selection reaches ON THE WIRE, monomorphised: the closed types (no
@@ -1267,7 +1261,9 @@ module internal Decl =
     /// names a union's and a union's a record's. A vocabulary whose
     /// instantiations are infinitely many, or more than an enumeration reads, is a typed refusal in
     /// the sentence that says which ([[writtenUnread]]); every other is walked to its end.
-    let private instantiated (idl: Idl) : Result<Instantiation list * RecordInstantiation list, CodegenError> =
+    let private instantiated
+        (idl: Idl)
+        : Result<Instantiation<IdlUnion> list * Instantiation<IdlRecord> list, CodegenError> =
         let generics =
             idl.Unions
             |> List.filter (fun u -> not (List.isEmpty u.Params))
@@ -1277,8 +1273,8 @@ module internal Decl =
         let wireFields (fields: IdlField list) =
             fields |> List.filter (fun f -> f.Opt <> HostOnly)
 
-        let mutable found: Map<string, Instantiation> = Map.empty
-        let mutable foundRecords: Map<string, RecordInstantiation> = Map.empty
+        let mutable found: Map<string, Instantiation<IdlUnion>> = Map.empty
+        let mutable foundRecords: Map<string, Instantiation<IdlRecord>> = Map.empty
         let mutable queue: IdlType list = []
 
         let rec discover (t: IdlType) =
@@ -1303,7 +1299,15 @@ module internal Decl =
                     | Some u when List.length u.Params <> List.length args -> ()
                     | Some u ->
                         let subst = TypeParams.bind u args |> Option.defaultValue Map.empty
-                        found <- Map.add key { Name = key; Union = u; Subst = subst } found
+
+                        found <-
+                            Map.add
+                                key
+                                { Name = key
+                                  Declaration = u
+                                  Subst = subst }
+                                found
+
                         queue <- t :: queue
             | TRecord(n, args) when not (List.isEmpty args) ->
                 args |> List.iter discover
@@ -1319,7 +1323,7 @@ module internal Decl =
                             Map.add
                                 key
                                 { Name = key
-                                  Record = r
+                                  Declaration = r
                                   Subst = subst }
                                 foundRecords
 
@@ -1370,10 +1374,10 @@ module internal Decl =
 
                 match head, Map.tryFind (instName head) found, Map.tryFind (instName head) foundRecords with
                 | TRecord _, _, Some i ->
-                    for f in wireFields i.Record.Fields do
+                    for f in wireFields i.Declaration.Fields do
                         discover (TypeParams.substitute i.Subst f.Type)
                 | TUnion _, Some i, _ ->
-                    for c in i.Union.Cases do
+                    for c in i.Declaration.Cases do
                         for f in wireFields c.Fields do
                             discover (TypeParams.substitute i.Subst f.Type)
                 | _ -> ()
@@ -1381,11 +1385,12 @@ module internal Decl =
             Ok(found |> Map.toList |> List.map snd, foundRecords |> Map.toList |> List.map snd)
 
     /// Every instantiation of a generic union the vocabulary names on the wire ([[instantiated]]).
-    let instantiations (idl: Idl) : Result<Instantiation list, CodegenError> = instantiated idl |> Result.map fst
+    let instantiations (idl: Idl) : Result<Instantiation<IdlUnion> list, CodegenError> =
+        instantiated idl |> Result.map fst
 
     /// Every instantiation of a generic record the vocabulary names on the wire ([[instantiated]]),
     /// an inline record's included: it has no object of its own, and its members are still walked.
-    let recordInstantiations (idl: Idl) : Result<RecordInstantiation list, CodegenError> =
+    let recordInstantiations (idl: Idl) : Result<Instantiation<IdlRecord> list, CodegenError> =
         instantiated idl |> Result.map snd
 
     // -----------------------------------------------------------------------

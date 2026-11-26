@@ -333,7 +333,18 @@ let tests =
                                         (reachedFrom place [] TInt [])
                                         (reachedFrom place [ "T" ] (TVar "T") [ TInt ]))
                                     (HostSurfaceOnly, sprintf "restated %s.v" (owned asUnion "Box"))
-                                    (where + ": the member is graded at the instantiation reached from there"))
+                                    (where + ": the member is graded at the instantiation reached from there")
+
+                            // The grade beside a document, where one holds the member: a node whose
+                            // envelope holds `Box`. (No document holds `Wrap`, which nothing reaches, and
+                            // an op is not a node document.)
+                            let envelope =
+                                places |> List.find (fun (where, _) -> where = "the node envelope") |> snd
+
+                            stillReads
+                                (reachedFrom envelope [] TInt [])
+                                (reachedFrom envelope [ "T" ] (TVar "T") [ TInt ])
+                                (VNodeEnv("n", [ "b", value asUnion [ "v", VInt 1 ] ], "K", [ "b", VInt 2 ])))
 
                     testCase (what + ": a declaration that holds itself, made generic, is host surface") (fun _ ->
                         let tree (pars: string list) (v: IdlType) (self: IdlType list) (at: IdlType list) =
@@ -373,7 +384,11 @@ let tests =
                             Expect.equal
                                 (rows (alone (TVar "T")) (alone (TList(TVar "T"))))
                                 [ BreakingWire, sprintf "changed %s.v" (owned asUnion "Box") ]
-                                "no reference shows what an old document held, so the move is not excused")
+                                "no reference shows what an old document held, so the move is not excused"
+
+                            // The grade is conservative, and says so beside a document: no document holds
+                            // `Box`, and every one the old vocabulary writes still reads.
+                            stillReads (alone (TVar "T")) (alone (TList(TVar "T"))) (node (VInt 1)))
 
                     testCase (what + ": a recursion that grows its argument is graded, and read as moved") (fun _ ->
                         // No member holds the parameter, so no document moves; the instantiations are
@@ -391,6 +406,9 @@ let tests =
                             [ BreakingWire, "changed kind K.b" ]
                             "the classifier answers, on the side of the break"
 
+                        // Conservative, beside a document: the old one still reads.
+                        stillReads (grow TInt) (grow TStr) (node (value asUnion [ "next", VList [] ]))
+
                         // And the instantiations the revision reaches cannot all be read either, so a
                         // member restated beside it is not excused: `Box`, made generic at the type it
                         // held, reads as moved, the grade that claims nothing of an old document.
@@ -402,7 +420,13 @@ let tests =
                         Expect.contains
                             (rows (beside (grow TInt) [] TInt []) (beside (grow TInt) [ "T" ] (TVar "T") [ TInt ]))
                             (BreakingWire, sprintf "changed %s.v" (owned asUnion "Box"))
-                            "the classifier answers, and on the side of the break") ]
+                            "the classifier answers, and on the side of the break"
+
+                        // Conservative here too: a document holding `Box` still reads.
+                        stillReads
+                            (beside (grow TInt) [] TInt [])
+                            (beside (grow TInt) [ "T" ] (TVar "T") [ TInt ])
+                            (VNode("m", "L", [ "c", value asUnion [ "v", VInt 1 ] ]))) ]
 
           testList
               "the snapshot"

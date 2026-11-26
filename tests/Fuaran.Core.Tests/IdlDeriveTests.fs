@@ -1802,9 +1802,9 @@ let declLaws =
                       idl.Unions |> List.exists (fun u -> u.Name = n && not u.Params.IsEmpty)
 
                   for i in insts do
-                      Expect.isNonEmpty i.Union.Params (sprintf "'%s' is of a generic union" i.Name)
+                      Expect.isNonEmpty i.Declaration.Params (sprintf "'%s' is of a generic union" i.Name)
 
-                      for c in i.Union.Cases do
+                      for c in i.Declaration.Cases do
                           for f in c.Fields do
                               if f.Opt <> HostOnly then
                                   for a in DeclLaws.applications (TypeParams.substitute i.Subst f.Type) do

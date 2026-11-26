@@ -427,7 +427,9 @@ module internal Instantiations =
         | TList inner -> applied "list" [ inner ]
         | TMap inner -> applied "map" [ TStr; inner ]
         | TSet inner -> applied "set" [ inner ]
-        | TKeyedMap(k, v) -> applied "map" [ k; v ]
+        // A string-keyed map is `map<str, v>` and a keyed map `keyedMap<k, v>`: two types, two
+        // spellings, whatever the key.
+        | TKeyedMap(k, v) -> applied "keyedMap" [ k; v ]
         | TTuple components -> applied "tuple" components
 
     /// A record's key in a vocabulary's reading ([[ofIdl]]).

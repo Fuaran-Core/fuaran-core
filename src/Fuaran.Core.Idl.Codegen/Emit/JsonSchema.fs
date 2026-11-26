@@ -349,7 +349,7 @@ module internal JsonSchema =
         // name (one instantiation read two ways) is a second declaration, not a renaming.
         let genericDefsR =
             Decl.instantiations idl
-            |> Result.map (List.map (fun i -> unionDefWith i.Subst i.Name i.Union))
+            |> Result.map (List.map (fun i -> unionDefWith i.Subst i.Name i.Declaration))
 
         /// One record definition, under a substitution for its type parameters.
         let recordDefWith (subst: Map<string, IdlType>) (name: string) (r: IdlRecord) =
@@ -364,8 +364,8 @@ module internal JsonSchema =
         let genericRecordDefsR =
             Decl.recordInstantiations idl
             |> Result.map (
-                List.filter (fun (i: RecordInstantiation) -> not i.Record.Inline)
-                >> List.map (fun i -> recordDefWith i.Subst i.Name i.Record)
+                List.filter (fun (i: Instantiation<IdlRecord>) -> not i.Declaration.Inline)
+                >> List.map (fun i -> recordDefWith i.Subst i.Name i.Declaration)
             )
 
         // A kind and an op are both an `IdlKind`, defined the same way.
