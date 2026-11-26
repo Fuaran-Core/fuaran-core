@@ -441,6 +441,11 @@ let tests =
 
                     Expect.isEmpty (Declare.errors over) "the declaration check admits it: nothing asks for them all"
 
+                    Expect.equal
+                        (within 30.0 "Artifact.parse" (fun () -> Artifact.parse (Artifact.render over)))
+                        (Ok(Artifact.canonicalise over))
+                        "and its artifact reads back, at once"
+
                     let answers =
                         within 60.0 "the backends" (fun () -> backends over @ schemas over)
                         |> List.map (fun (entry, answer) ->
@@ -689,6 +694,67 @@ let tests =
                         Expect.isEmpty
                             (within 20.0 "Declare.errors" (fun () -> Declare.errors growing))
                             "admitted beside growth"
+
+                        // And where the judged declaration grows itself, so it is judged in classes: a
+                        // literal twelve lists deep is decided only at a cut twelve deep, where the
+                        // growth beside it has thousands of classes; none of them is read for `H`.
+                        let deep = (VList [], [ 1..11 ]) ||> List.fold (fun v _ -> VList [ v ])
+                        let self (t: IdlType) = refer asUnion "H" [ t ]
+
+                        let classed =
+                            let idl = twoWay asUnion plain TStr
+
+                            let unions, records =
+                                declared
+                                    asUnion
+                                    "H"
+                                    [ "T" ]
+                                    [ f "l" (self (TList(TVar "T"))) Optional; f "v" (TVar "T") (OmitDefault deep) ]
+
+                            { idl with
+                                Kinds =
+                                    idl.Kinds
+                                    @ [ kind
+                                            "O"
+                                            [ f
+                                                  "h"
+                                                  (self ((TInt, [ 1..12 ]) ||> List.fold (fun t _ -> TList t)))
+                                                  Optional ] ]
+                                Unions = idl.Unions @ unions
+                                Records = idl.Records @ records }
+
+                        Expect.isEmpty
+                            (within 20.0 "Declare.errors" (fun () -> Declare.errors classed))
+                            "admitted, judged in classes beside growth it cannot reach"
+
+                        // Two judged declarations, one reaching the other: each member is refused once,
+                        // at its own declaration's instantiation, though one walk enters both.
+                        let pair =
+                            let ua, ra =
+                                declared
+                                    asUnion
+                                    "A"
+                                    [ "T" ]
+                                    [ f "v" (TVar "T") (OmitDefault(VStr ""))
+                                      f "b" (refer asUnion "B" [ TVar "T" ]) Optional ]
+
+                            let ub, rb =
+                                declared asUnion "B" [ "T" ] [ f "w" (TVar "T") (OmitDefault(VStr "")) ]
+
+                            vocabulary [ kind "K" [ f "a" (refer asUnion "A" [ TInt ]) Optional ] ] (ua @ ub) (ra @ rb)
+
+                        Expect.equal
+                            (within 20.0 "Declare.errors" (fun () -> Declare.errors pair)
+                             |> List.map (fun x -> x.Detail.Substring(0, x.Detail.IndexOf ':')))
+                            [ (if asUnion then
+                                   "union 'A' case 'Mk', field 'v'"
+                               else
+                                   "record 'A', field 'v'")
+                              (if asUnion then
+                                   "union 'B' case 'Mk', field 'w'"
+                               else
+                                   "record 'B', field 'w'") ]
+                            "one fault per member, each at its own declaration"
 
                         Expect.equal
                             (within 20.0 "Artifact.parse" (fun () -> Artifact.parse (Artifact.render branching)))

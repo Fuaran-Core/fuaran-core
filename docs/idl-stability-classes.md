@@ -213,10 +213,11 @@ EMITTER does rather than what a stored document does:
   A member whose written type moved in a generic declaration no reference reaches is graded as
   changed. So is a generic declaration's member whose written type moved, in a revision pair where
   either revision reaches infinitely many instantiations of its generic declarations (a recursion
-  that grows its type argument) or more than 4096: there is then no reach to read a restated member
-  at, so a member only restated beside such a declaration is `breaking-wire` too. And so is a type
-  that itself reaches infinitely many instantiations, or more than 4096, which cannot be compared to
-  its end. A contract method's argument and result types are compared as written.
+  that grows its type argument), more than 4096, or instantiations holding more than 65536 nodes
+  between them: there is then no reach to read a restated member at, so a member only restated
+  beside such a declaration is `breaking-wire` too. And so is a type that itself reaches
+  infinitely many instantiations, more than 4096, or more than 65536 nodes, which cannot be compared
+  to its end. A contract method's argument and result types are compared as written.
 
 The evolution differential in `tests/Fuaran.Core.Tests/IdlStabilityClassTests.fs` holds the rows to
 that definition: it decodes sampled old documents under each perturbed vocabulary — an optional or a
