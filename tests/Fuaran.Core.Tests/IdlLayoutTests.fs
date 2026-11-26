@@ -715,6 +715,53 @@ let backendTests =
                               (Some("an inline declaration the declaration check refuses (" + fault + ")"))
                               (sprintf "%s: %s answers the check's fault" label name)
 
+                  // A vocabulary whose wire reach is not walked (a declaration that reaches itself at a
+                  // larger argument, which these two backends state natively) is asked the same
+                  // question: the reach only ever said whether there was a layout to ask about.
+                  let growing =
+                      let idl = overlapping Optional
+
+                      let field (name: string) (t: IdlType) : IdlField =
+                          { Name = name
+                            Type = t
+                            Opt = Optional
+                            Aliases = []
+                            Keyed = false
+                            Presence = None
+                            Annotations = Annotations.Empty }
+
+                      { idl with
+                          Records =
+                              idl.Records
+                              @ [ { Name = "Grow"
+                                    Params = [ "T" ]
+                                    Fields = [ field "next" (TRecord("Grow", [ TList(TVar "T") ])) ]
+                                    Annotations = Annotations.Empty
+                                    Inline = false } ]
+                          Kinds =
+                              idl.Kinds
+                              |> List.mapi (fun i k ->
+                                  if i = 0 then
+                                      { k with
+                                          Fields = k.Fields @ [ field "grown" (TRecord("Grow", [ TInt ])) ] }
+                                  else
+                                      k) }
+
+                  let growingFault =
+                      match Declare.layoutErrors growing with
+                      | f :: _ -> f.Detail
+                      | [] -> failtest "the declaration check admits the growing vocabulary's layout"
+
+                  let growingTags = growing.Kinds |> List.map _.Tag
+
+                  for name, r in
+                      [ "fsharpModule", Gen.fsharpModule "M" growing growingTags
+                        "typescriptModule", Gen.typescriptModule growing growingTags ] do
+                      Expect.equal
+                          (construct r)
+                          (Some("an inline declaration the declaration check refuses (" + growingFault + ")"))
+                          (sprintf "a reach that was not walked: %s answers the check's fault" name)
+
                   // The codec-only module, over the vocabulary its request is declared against.
                   let codec (idl: Idl) =
                       Gen.fsharpCodecModule GenSupport.Empty LayoutIdl.codecRequest LayoutIdl.codecModuleName idl

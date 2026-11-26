@@ -289,7 +289,7 @@ let tests =
                         "no value holds the larger instantiation"
 
                     Expect.stringContains
-                        (match described (Gen.jsonSchema unheld) with
+                        (match within 20.0 "Gen.jsonSchema" (fun () -> described (Gen.jsonSchema unheld)) with
                          | Error why -> why
                          | Ok() -> "emitted")
                         (sentence "record" "G" "G<'T>" "G<list<'T>>")
@@ -384,7 +384,14 @@ let tests =
                           "contractArgumentSchemas", "emits" ]
                         "a backend that states a generic natively emits; one that names each instantiation refuses"
 
-                    // The default rule has every instantiation to judge, and says it did not.
+                    // A literal that fits with the parameter unbound is asked nothing more, so there
+                    // is nothing to enumerate and nothing to stop at.
+                    Expect.isEmpty
+                        (Declare.errors (chain 13 (f "v" (TList(TVar "T")) (OmitDefault(VList [])))))
+                        "an empty list at list<T> is admitted without reading an instantiation"
+
+                    // Any other literal has every instantiation to be judged at, and the rule says
+                    // it did not judge them.
                     let unjudged =
                         within 30.0 "the declaration check" (fun () ->
                             Declare.errors (chain 13 (f "v" (TVar "T") (OmitDefault(VStr "")))))
@@ -706,7 +713,35 @@ let tests =
                         | Ok() -> failtestf "%s: the fold was emitted" host
 
                     for host, answer in fold (through (fun t -> TKeyedMap(TInt, t))) do
-                        Expect.isOk answer (host + ": the growth is in a member the fold does not descend")) ]
+                        Expect.isOk answer (host + ": the growth is in a member the fold does not descend")
+
+                    // The larger argument is a union's instantiation. A fold does not look inside a
+                    // union, and the record is still read at one new instantiation after another.
+                    let wrapped =
+                        let idl = through TList
+
+                        { idl with
+                            Unions =
+                                idl.Unions
+                                @ [ union
+                                        "Opt"
+                                        [ "X" ]
+                                        [ case "None" []; case "Some" [ f "value" (TVar "X") Required ] ] ]
+                            Records =
+                                [ record
+                                      "R"
+                                      [ "T" ]
+                                      [ f "tree" (TUnion("Tree", [])) Optional
+                                        f "more" (TList(TRecord("R", [ TUnion("Opt", [ TVar "T" ]) ]))) Optional ] ] }
+
+                    for host, answer in within 20.0 "the fold" (fun () -> fold wrapped) do
+                        match answer with
+                        | Error why ->
+                            Expect.stringContains
+                                why
+                                ("a fold over 'Tree' through " + sentence "record" "R" "R<'T>" "R<Opt<'T>>")
+                                (host + ": refused, the argument growing inside a union's")
+                        | Ok() -> failtestf "%s: the fold was emitted" host) ]
 
           testList
               "the default rule"
@@ -826,13 +861,14 @@ let tests =
                         Expect.isGreaterThan growing 200 "and most of them reach infinitely many instantiations")
 
                 testCase "a class is judged at its first member only where the cut decides it" (fun _ ->
-                    // `[[]]` fits `list<list<int>>` and does not fit `list<int>`: two instantiations
-                    // that agree one level down. The one reached first is admitted, and the other is
-                    // still judged.
+                    // `[[]]` fits `list<list<int>>` and does not fit `list<map<int>>`: two
+                    // instantiations that agree one level down (a list of something). The one reached
+                    // first is admitted, the cut one level down does not decide that, and so the
+                    // other is still judged.
                     let idl =
                         vocabulary
                             [ kind "K" [ f "g" (TRecord("G", [ TList(TList TInt) ])) Optional ]
-                              kind "L" [ f "g" (TRecord("G", [ TList TInt ])) Optional ] ]
+                              kind "L" [ f "g" (TRecord("G", [ TList(TMap TInt) ])) Optional ] ]
                             []
                             [ record
                                   "G"
@@ -844,7 +880,7 @@ let tests =
                     | [ only ] ->
                         Expect.stringContains
                             only
-                            "at the instantiation G<list<int>> ("
+                            "at the instantiation G<list<map<str, int>>> ("
                             "the instantiation it does not fit"
                     | other -> failtestf "one fault expected: %A" other
 
