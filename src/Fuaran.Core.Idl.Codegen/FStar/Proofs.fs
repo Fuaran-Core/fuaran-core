@@ -798,7 +798,7 @@ module internal FStarProofs =
             line ""
 
             for name in c.Enums do
-                let tn = "e_" + snake name
+                let tn = slotName (SEnum name)
 
                 line (
                     sprintf

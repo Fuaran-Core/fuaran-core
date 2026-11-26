@@ -89,7 +89,7 @@ module internal FStarVectors =
             match CodegenLookup.tryEnum idl n with
             | Some e ->
                 match e.CaseOf spelling with
-                | Some case -> Ok(q + ctorName ("e_" + snake n) case)
+                | Some case -> Ok(q + ctorName (slotName (SEnum n)) case)
                 | None -> unmodellable (sprintf "the enum spelling %A" spelling) where
             | None -> unmodellable ("the undeclared enum " + n) where
         | SList inner, VList xs ->

@@ -591,7 +591,7 @@ module internal FStarVocabulary =
                 match CodegenLookup.tryEnum idl name with
                 | None -> ()
                 | Some e ->
-                    let tn = "e_" + snake name
+                    let tn = slotName (SEnum name)
                     let cases = List.zip e.Cases e.WireCases
                     line (sprintf "type %s =" tn)
 

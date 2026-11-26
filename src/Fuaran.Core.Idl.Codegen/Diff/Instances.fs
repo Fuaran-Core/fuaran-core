@@ -160,19 +160,30 @@ module internal DiffInstances =
               s.RecordParams |> Map.tryFind name |> Option.defaultValue [],
               fields |> List.map (fun f -> f.Wire.Shape) ]
 
+    /// A type shape as its head and the shapes it holds: an object's member values and an array's
+    /// items, the rest of it (its keys, a scalar) the head.
+    let private splitOf (v: JVal) : JVal * JVal list =
+        match v with
+        | JObj fs -> JObj(fs |> List.map (fun (k, _) -> k, JBool false)), fs |> List.map snd
+        | JArr xs -> JArr(xs |> List.map (fun _ -> JBool false)), xs
+        | _ -> v, []
+
     /// One revision's declarations, analysed.
     [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
     let private analysed (s: Snapshot) : Fuaran.Core.Idl.Instantiations.Analysis<JVal> =
         Fuaran.Core.Idl.Instantiations.analyse (
-            Fuaran.Core.Idl.Instantiations.reading (declarations s) shapeOf substitute false
+            Fuaran.Core.Idl.Instantiations.reading (declarations s) shapeOf substitute splitOf false
         )
 
     /// Whether the instantiations one revision reaches from `roots` cannot all be named: they are
-    /// infinitely many, or more than an enumeration reads.
+    /// infinitely many, more than an enumeration reads, or more than
+    /// `Instantiations.sizeLimit` nodes between them, since the walks below print each one they
+    /// enter (an [[Instance]]'s key).
     [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
     let private unread (analysis: Fuaran.Core.Idl.Instantiations.Analysis<JVal>) (roots: JVal list) : bool =
         match Fuaran.Core.Idl.Instantiations.closure analysis roots with
-        | Fuaran.Core.Idl.Instantiations.Closure.Finite _ -> false
+        | Fuaran.Core.Idl.Instantiations.Closure.Finite(_, printed) ->
+            printed > int64 Fuaran.Core.Idl.Instantiations.sizeLimit
         | Fuaran.Core.Idl.Instantiations.Closure.Infinite _
         | Fuaran.Core.Idl.Instantiations.Closure.Exceeds -> true
 

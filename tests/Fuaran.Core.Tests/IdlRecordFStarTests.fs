@@ -15,6 +15,7 @@ module Fuaran.Core.Tests.IdlRecordFStarTests
 open Expecto
 open Fuaran.Core.Idl
 open Fuaran.Core.Idl.Codegen.Types
+open Fuaran.Core.Idl.Emit
 open Fuaran.Core.Tests.IdlRecordParamsTests
 
 let private emitted (r: Result<string, CodegenError>) : string =
@@ -66,7 +67,7 @@ let model =
                     "  | C__r_labelled__str__Mk : label:(string) -> value:(string) -> r_labelled__str num flt"
                     "  | C__r_labelled__r_ranged__int__Mk : label:(string) -> value:(r_ranged__int num flt) -> r_labelled__r_ranged__int num flt"
                     "  | C__r_series__flt__Mk : points:(list (r_labelled__flt num flt)) -> r_series__flt num flt"
-                    "  | C__r_entry__str_e_direction__Mk : key:(string) -> value:(option (e_direction)) -> r_entry__str_e_direction num flt"
+                    "  | C__r_entry__str__e_direction__Mk : key:(string) -> value:(option (e_direction)) -> r_entry__str__e_direction num flt"
                     // A case of a parameterised union holding a record at the union's own argument,
                     // and a union declaring no parameter holding one at a closed argument.
                     "  | C__u_binding__flt__Bounded : range:(r_ranged__flt num flt) -> u_binding__flt num flt"
@@ -79,12 +80,221 @@ let model =
               for bare in [ "r_ranged "; "r_labelled "; "r_series "; "r_entry " ] do
                   Expect.isFalse (text.Contains("and " + bare)) (sprintf "no type `%s`" (bare.Trim())))
 
+          testCase "the model's type names are injective: one name exactly where one slot" (fun _ ->
+              // Declared names that the old spelling ran together with an instantiation's or with each
+              // other's: an underscore before a capital, a doubled, leading or trailing underscore,
+              // a capital after another, and names one prefix of another.
+              let names =
+                  [ "Ranged"
+                    "Ranged_Int"
+                    "Ranged__int"
+                    "Ranged_int"
+                    "RangedInt"
+                    "A"
+                    "AL"
+                    "AStr"
+                    "Box"
+                    "Box_"
+                    "_Box"
+                    "Foo"
+                    "FooEBar"
+                    "BarInt"
+                    "Foo_bar"
+                    "FooBar"
+                    "Pair" ]
+
+              let leaves =
+                  [ FStarModel.SStr
+                    FStarModel.SInt
+                    FStarModel.SFloat
+                    FStarModel.SList FStarModel.SStr
+                    FStarModel.SMap FStarModel.SInt ]
+                  @ [ for n in names -> FStarModel.SEnum n ]
+                  @ [ for n in names -> FStarModel.SRecord(n, []) ]
+
+              let tuples =
+                  [ for a in leaves.[0..2] @ [ FStarModel.SEnum "Foo"; FStarModel.SEnum "Box" ] do
+                        for b in leaves.[0..2] @ [ FStarModel.SEnum "BarInt"; FStarModel.SEnum "Foo_bar" ] do
+                            FStarModel.STuple [ a; b ] ]
+
+              let args = leaves @ tuples
+
+              let slots =
+                  leaves
+                  @ tuples
+                  @ [ for n in names do
+                          for a in args do
+                              FStarModel.SRecord(n, [ a ])
+                              FStarModel.SUnion(n, [ a ])
+                              FStarModel.SList(FStarModel.SRecord(n, [ a ]))
+
+                          for a in leaves do
+                              for b in leaves do
+                                  FStarModel.SRecord(n, [ a; b ])
+                                  FStarModel.SRecord(n, [ FStarModel.SRecord("Box", [ a ]); b ]) ]
+                  |> List.distinct
+
+              Expect.isGreaterThan slots.Length 5000 "the family is not vacuous"
+
+              let byName = slots |> List.groupBy FStarModel.slotName
+
+              for name, same in byName do
+                  Expect.equal same.Length 1 (sprintf "one slot named %s: %A" name same)
+
+              // Every name is an F* identifier that starts lower case.
+              for name, _ in byName do
+                  Expect.isTrue
+                      (System.Char.IsLower name[0]
+                       && name |> Seq.forall (fun c -> System.Char.IsLetterOrDigit c || c = '_'))
+                      (sprintf "%s is an F* type name" name)
+
+              // The pairs the old spelling named alike, each now two names.
+              for a, b in
+                  [ FStarModel.SRecord("Ranged", [ FStarModel.SInt ]), FStarModel.SRecord("Ranged_Int", [])
+                    FStarModel.SRecord("Ranged", [ FStarModel.SInt ]), FStarModel.SRecord("Ranged__int", [])
+                    FStarModel.SUnion("BoxU", [ FStarModel.SFloat ]), FStarModel.SUnion("BoxU__flt", [])
+                    FStarModel.SRecord("Pair", [ FStarModel.SRecord("A", []); FStarModel.SList FStarModel.SStr ]),
+                    FStarModel.SRecord("Pair", [ FStarModel.SRecord("AL", []); FStarModel.SStr ])
+                    FStarModel.SRecord("Foo_bar", []), FStarModel.SRecord("FooBar", []) ] do
+                  Expect.notEqual (FStarModel.slotName a) (FStarModel.slotName b) (sprintf "%A and %A" a b)
+
+              // The names a committed module states keep their spelling.
+              Expect.equal
+                  ([ FStarModel.SUnion("Slot", [ FStarModel.SStr ])
+                     FStarModel.SRecord("Labelled", [ FStarModel.SRecord("Ranged", [ FStarModel.SInt ]) ])
+                     FStarModel.SRecord("RangedFloat", []) ]
+                   |> List.map FStarModel.slotName)
+                  [ "u_slot__str"; "r_labelled__r_ranged__int"; "r_ranged_float" ]
+                  "a name with no underscore of its own, and an instantiation of one argument, are unchanged")
+
+          testCase "the model states one type per instantiation beside a declaration its old name met" (fun _ ->
+              let typesOf (text: string) =
+                  text.Split('\n')
+                  |> Array.choose (fun l ->
+                      if l.StartsWith "and r_" || l.StartsWith "and u_" then
+                          Some(l.Substring(4, l.IndexOf(' ', 4) - 4))
+                      else
+                          None)
+                  |> List.ofArray
+
+              for label, idl, expected in
+                  [ "Ranged<int> beside a record Ranged_Int",
+                    vocabulary
+                        [ kind
+                              "K"
+                              [ f "a" (TRecord("Ranged", [ TInt ])) Required
+                                f "b" (TRecord("Ranged_Int", [])) Required ] ]
+                        []
+                        [ record "Ranged" [ "T" ] [ f "low" (TVar "T") Required ]
+                          record "Ranged_Int" [] [ f "other" TStr Required ] ],
+                    [ "r_ranged__int"; "r_ranged_0_int" ]
+                    "BoxU<float> beside a union BoxU__flt",
+                    vocabulary
+                        [ kind
+                              "K"
+                              [ f "a" (TUnion("BoxU", [ TFloat ])) Required
+                                f "b" (TUnion("BoxU__flt", [])) Required ] ]
+                        [ union "BoxU" [ "T" ] [ case "Mk" [ f "v" (TVar "T") Required ] ]
+                          union "BoxU__flt" [] [ case "Mk" [ f "w" TStr Required ] ] ]
+                        [],
+                    [ "u_box_u__flt"; "u_box_u_0_0flt" ]
+                    "Pair<A, list<str>> beside Pair<AL, str>",
+                    vocabulary
+                        [ kind
+                              "K"
+                              [ f "a" (TRecord("Pair", [ TRecord("A", []); TList TStr ])) Required
+                                f "b" (TRecord("Pair", [ TRecord("AL", []); TStr ])) Required ] ]
+                        []
+                        [ record "Pair" [ "X"; "Y" ] [ f "x" (TVar "X") Required; f "y" (TVar "Y") Required ]
+                          record "A" [] [ f "n" TInt Required ]
+                          record "AL" [] [ f "s" TStr Required ] ],
+                    [ "r_pair__r_a__l_str"; "r_a"; "r_pair__r_a_l__str"; "r_a_l" ] ] do
+                  Expect.equal
+                      (typesOf (modelOf idl) |> List.sort)
+                      (List.sort expected)
+                      (label
+                       + ": one model type per instantiation and per declaration, each its own name")
+
+              // The reach the model reads keys a hosted slot by its format as well as its wire form, as
+              // the schema's names do: two instantiations that differ only there are two entries.
+              let hosted (format: HostedFormat) =
+                  THosted
+                      { FSharp = "string"
+                        Encode = "JStr"
+                        Decode = "Ok"
+                        Wire = Some TStr
+                        Format = Some format
+                        Refusal = HostedRefusal.Sentence }
+
+              let formats =
+                  vocabulary
+                      [ kind
+                            "K"
+                            [ f "a" (TRecord("Box", [ hosted HostedFormat.Date ])) Required
+                              f "b" (TRecord("Box", [ hosted HostedFormat.Uuid ])) Required ] ]
+                      []
+                      [ record "Box" [ "T" ] [ f "v" (TVar "T") Required ] ]
+
+              Expect.equal
+                  ((Decl.resolve formats Map.empty [ "K" ]).Wire.FromKinds
+                   |> List.filter (fun t ->
+                       match t with
+                       | TRecord("Box", _) -> true
+                       | _ -> false)
+                   |> List.length)
+                  2
+                  "a date slot and a uuid slot: two instantiations of Box"
+
+              // Two declared names that differ only in the case of their first letter meet in one
+              // word; the vocabulary is refused by name.
+              let cased =
+                  vocabulary
+                      [ kind
+                            "K"
+                            [ f "a" (TRecord("FooBar", [])) Required
+                              f "b" (TRecord("fooBar", [])) Required ] ]
+                      []
+                      [ record "FooBar" [] [ f "n" TInt Required ]
+                        record "fooBar" [] [ f "s" TStr Required ] ]
+
+              Expect.stringContains
+                  (refusalOf cased "K")
+                  "two types the model would give one name, 'r_foo_bar': FooBar and fooBar"
+                  "refused, naming both"
+
+              // A tuple keeps its older spelling, under which two tuples of enums meet; an
+              // instantiation at each is refused the same way.
+              let enumsOf (names: string list) : IdlEnum list =
+                  names
+                  |> List.map (fun n ->
+                      { Name = n
+                        Cases = [ "a" ]
+                        Wires = []
+                        CaseAnnotations = []
+                        Aliases = []
+                        Annotations = Annotations.Empty })
+
+              let tupled =
+                  { vocabulary
+                        [ kind
+                              "K"
+                              [ f "a" (TRecord("Box", [ TTuple [ TEnum "FooEBar"; TInt ] ])) Required
+                                f "b" (TRecord("Box", [ TTuple [ TEnum "Foo"; TEnum "BarInt" ] ])) Required ] ]
+                        []
+                        [ record "Box" [ "T" ] [ f "v" (TVar "T") Required ] ] with
+                      Enums = enumsOf [ "FooEBar"; "Foo"; "BarInt" ] }
+
+              Expect.stringContains
+                  (refusalOf tupled "K")
+                  "two types the model would give one name, 'r_box__tp2_e_foo_e_bar_int': Box<tuple<FooEBar, int>> and Box<tuple<Foo, BarInt>>"
+                  "refused, naming both")
+
           testCase "an inline parameterised record's members are its holder's, at the holder's argument" (fun _ ->
               let text = modelOf ParameterisedRecordsIdl.idl
 
               for line in
                   [ // `Grid.paging: Paging<string>`: the kind's own members, the cursor a string.
-                    "  | C__vkind__Grid : cursor:(option (string)) -> page_size:(num) -> series:(option (r_series__flt num flt)) -> sort:(option (r_entry__str_e_direction num flt)) -> title:(option (r_labelled__str num flt)) -> vkind num flt"
+                    "  | C__vkind__Grid : cursor:(option (string)) -> page_size:(num) -> series:(option (r_series__flt num flt)) -> sort:(option (r_entry__str__e_direction num flt)) -> title:(option (r_labelled__str num flt)) -> vkind num flt"
                     // `Binding<T>.Local.payload: LocalState<T>`: beside the case's tag, at each
                     // instantiation of the union.
                     "  | C__u_binding__flt__Local : initial:(flt) -> state_key:(string) -> u_binding__flt num flt"

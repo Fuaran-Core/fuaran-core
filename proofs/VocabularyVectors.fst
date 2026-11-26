@@ -7,7 +7,7 @@
    vocabulary: sha256:f79a9d5698e83ca274feef4986b1d8dd9ae8cc02ce3f25eb04a33a6e2465e611
    vocabulary: sha256:46bcb7bf3fca5c05b6e11d1c3ce328cfe55db565588574416e16be96a5a1d288
    vocabulary: sha256:c91497ea3c022bc9abfbf096b819ae1278612c4b9565a1ce81a27094e603aa1f
-   emission: sha256:32ca0c42f4517908e82df4831ca130e9d35147e4aa2afa904a98a6ad41a24550
+   emission: sha256:cefb0f769e8d83df7cd2c8ac777f82adbbe0048f0f866b1486cd204b97b26795
 *)
 (*
    VocabularyVectors — the interpreter's vectors over the generated models (Phase 303).
@@ -511,7 +511,7 @@ let p_de1 : jval int string =
   (JObj [("id", (JStr "p")); ("kind", (JObj [("$type", (JStr "Stepper")); ("binding", (JObj [("$type", (JStr "Bounded")); ("range", (JObj [("high", (JInt 3)); ("low", (JInt 1))]))])); ("range", (JObj [("high", (JInt 9)); ("low", (JInt 1))])); ("window", (JObj [("label", (JStr "w")); ("value", (JObj [("high", (JInt 4)); ("low", (JInt 2))]))]))]))])
 
 let p_dv2 : P.node int string =
-  (P.C__node__Node "g" (P.C__vkind__Grid (Some "c") (20) (Some (P.C__r_series__flt__Mk ([(P.C__r_labelled__flt__Mk ("p") ("0.5"))]))) (Some (P.C__r_entry__str_e_direction__Mk ("name") (Some P.C__e_direction__desc))) (Some (P.C__r_labelled__str__Mk ("t") ("v")))))
+  (P.C__node__Node "g" (P.C__vkind__Grid (Some "c") (20) (Some (P.C__r_series__flt__Mk ([(P.C__r_labelled__flt__Mk ("p") ("0.5"))]))) (Some (P.C__r_entry__str__e_direction__Mk ("name") (Some P.C__e_direction__desc))) (Some (P.C__r_labelled__str__Mk ("t") ("v")))))
 
 let p_de2 : jval int string =
   (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "Grid")); ("cursor", (JStr "c")); ("pageSize", (JInt 20)); ("series", (JObj [("points", (JArr [(JObj [("label", (JStr "p")); ("value", (JFloat "0.5"))])]))])); ("sort", (JObj [("key", (JStr "name")); ("value", (JStr "desc"))])); ("title", (JObj [("label", (JStr "t")); ("value", (JStr "v"))]))]))])
@@ -607,7 +607,7 @@ let pf_de1 : jval int string =
   (JObj [("kind", (JStr "Stepper")); ("id", (JStr "p")); ("range", (JObj [("low", (JInt 1)); ("high", (JInt 9))])); ("window", (JObj [("label", (JStr "w")); ("value", (JObj [("low", (JInt 2)); ("high", (JInt 4))]))])); ("binding", (JObj [("kind", (JStr "Bounded")); ("range", (JObj [("low", (JInt 1)); ("high", (JInt 3))]))]))])
 
 let pf_dv2 : PF.node int string =
-  (PF.C__node__Grid "g" (20) (Some "c") (Some (PF.C__r_labelled__str__Mk ("t") ("v"))) (Some (PF.C__r_series__flt__Mk ([(PF.C__r_labelled__flt__Mk ("p") ("0.5"))]))) (Some (PF.C__r_entry__str_e_direction__Mk ("name") (Some PF.C__e_direction__desc))))
+  (PF.C__node__Grid "g" (20) (Some "c") (Some (PF.C__r_labelled__str__Mk ("t") ("v"))) (Some (PF.C__r_series__flt__Mk ([(PF.C__r_labelled__flt__Mk ("p") ("0.5"))]))) (Some (PF.C__r_entry__str__e_direction__Mk ("name") (Some PF.C__e_direction__desc))))
 
 let pf_de2 : jval int string =
   (JObj [("kind", (JStr "Grid")); ("id", (JStr "g")); ("pageSize", (JInt 20)); ("cursor", (JStr "c")); ("title", (JObj [("label", (JStr "t")); ("value", (JStr "v"))])); ("series", (JObj [("points", (JArr [(JObj [("label", (JStr "p")); ("value", (JFloat "0.5"))])]))])); ("sort", (JObj [("key", (JStr "name")); ("value", (JStr "desc"))]))])

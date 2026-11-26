@@ -36,7 +36,7 @@ open Fuaran.Core
 /// many. So each parameter takes finitely many values.
 ///
 /// WHICH REFERENCES A WALK ENTERS is the walk's own ([[Reading]]), and the theorem is exact for
-/// whichever it states. Two are in use. A walk that names every instantiation WRITTEN enters a
+/// whichever it states. Two kinds are in use. A walk that names every instantiation WRITTEN enters a
 /// reference wherever it stands, a reference inside another's argument included (the JSON
 /// schema's `$defs`). A walk that follows what a VALUE holds enters a reference written as an
 /// argument only where the member holding that parameter is itself followed: `Phantom<Opt<int>>`,
@@ -85,6 +85,10 @@ module internal Instantiations =
             /// `true` where a reference written as an ARGUMENT is entered wherever it stands; `false`
             /// where it is entered only if a value of the outer declaration holds one.
             Arguments: bool
+            /// `t` as its HEAD (`t` with each type it holds replaced by one placeholder) and the types
+            /// it holds, in order: two types with one head and the same parts are one type. What
+            /// [[identity]] interns a type by.
+            Split: 'T -> 'T * 'T list
         }
 
     /// The witness that a closure is infinite: the declaration at its own parameters reaches itself
@@ -100,6 +104,61 @@ module internal Instantiations =
     [<Literal>]
     let limit = 4096
 
+    /// How many NODES the instantiations an entry prints may hold between them, each counted at
+    /// its full printed size (`Box<tuple<int, int>>` is four). A closure of few instantiations can
+    /// still be enormous to print: a chain of n declarations, each naming the next at
+    /// `tuple<T, T>`, has n instantiations and the last holds 2^n leaves. An entry that prints or
+    /// models every instantiation refuses past it, beside [[limit]]; a chain of twelve naming the
+    /// next at two arguments (4095 instantiations, 49152 nodes) is under both.
+    [<Literal>]
+    let sizeLimit = 65536
+
+    /// A sum of printed sizes, saturating: a size past the range is still more than every cap.
+    let private add (a: int64) (b: int64) : int64 =
+        if a > System.Int64.MaxValue - b then
+            System.Int64.MaxValue
+        else
+            a + b
+
+    /// Types as numbers: each type an analysis meets is interned once, by its head and the numbers
+    /// of the types it holds, and an object met again is answered from a table of objects. A type
+    /// written once and SHARED in memory (a substitution places one argument at each position that
+    /// names its parameter) is therefore read once however often it is held, so equality, hashing
+    /// and the printed size cost a constant per node of the shared graph, never per node of the
+    /// type printed out.
+    type private Interner<'T when 'T: equality and 'T: not struct>(split: 'T -> 'T * 'T list) =
+        let objects = System.Collections.Generic.Dictionary<'T, int>(HashIdentity.Reference)
+
+        let nodes =
+            System.Collections.Generic.Dictionary<'T * int list, int>(HashIdentity.Structural)
+
+        let sizes = ResizeArray<int64>()
+
+        member this.Id(t: 'T) : int =
+            match objects.TryGetValue t with
+            | true, id -> id
+            | false, _ ->
+                let head, parts = split t
+                let ids = parts |> List.map this.Id
+                let key = head, ids
+
+                let id =
+                    match nodes.TryGetValue key with
+                    | true, id -> id
+                    | false, _ ->
+                        let id = sizes.Count
+                        nodes[key] <- id
+                        sizes.Add((1L, ids) ||> List.fold (fun acc i -> add acc sizes[i]))
+                        id
+
+                objects[t] <- id
+                id
+
+        member _.Size(id: int) : int64 = sizes[id]
+
+        member this.SizeOf(args: 'T list) : int64 =
+            (1L, args) ||> List.fold (fun acc a -> add acc (this.Size(this.Id a)))
+
     type private Edge<'T> =
         {
             From: string * int
@@ -111,12 +170,13 @@ module internal Instantiations =
 
     /// One reading, analysed once: the argument positions a value reaches, the references each
     /// declaration enters, and the parameter graph.
-    type Analysis<'T> =
+    type Analysis<'T when 'T: equality and 'T: not struct> =
         private
             { Reading: Reading<'T>
               Held: Set<string * int>
               Entered: Map<string, (string * 'T list) list>
-              Edges: Map<string * int, Edge<'T> list> }
+              Edges: Map<string * int, Edge<'T> list>
+              Interner: Interner<'T> }
 
     let private applied (reading: Reading<'T>) (declaration: string) (args: 'T list) : Declaration<'T> option =
         reading.Declarations
@@ -162,6 +222,7 @@ module internal Instantiations =
         (declarations: (string * string list * 'T list) list)
         (shape: 'T -> Shape<'T>)
         (substitute: Map<string, 'T> -> 'T -> 'T)
+        (split: 'T -> 'T * 'T list)
         (arguments: bool)
         : Reading<'T> =
         { Declarations =
@@ -169,7 +230,8 @@ module internal Instantiations =
             ||> List.foldBack (fun (key, pars, members) acc -> acc.Add(key, { Params = pars; Members = members }))
           Shape = shape
           Substitute = substitute
-          Arguments = arguments }
+          Arguments = arguments
+          Split = split }
 
     /// The analysis of one reading.
     let analyse (reading: Reading<'T>) : Analysis<'T> =
@@ -231,11 +293,52 @@ module internal Instantiations =
         { Reading = reading
           Held = held
           Entered = entered
-          Edges = edges }
+          Edges = edges
+          Interner = Interner reading.Split }
 
     /// The references a walk enters in `t` ([[references]]).
     let entered (analysis: Analysis<'T>) (t: 'T) : (string * 'T list) list =
         references analysis.Reading analysis.Held t
+
+    /// The type `t` as a number: two types have one number exactly where they are one type
+    /// ([[Interner]]), at a cost per node of `t` as it is shared in memory.
+    let identity (analysis: Analysis<'T>) (t: 'T) : int = analysis.Interner.Id t
+
+    /// The printed size of the instantiation `declaration<args>`: its nodes, each type it holds
+    /// counted at its full printed size, read off the shared graph.
+    let size (analysis: Analysis<'T>) (_: string, args: 'T list) : int64 = analysis.Interner.SizeOf args
+
+    /// The printed size of these instantiations together ([[size]]), saturating.
+    let printedSize (analysis: Analysis<'T>) (instantiations: (string * 'T list) list) : int64 =
+        (0L, instantiations) ||> List.fold (fun acc i -> add acc (size analysis i))
+
+    /// The declarations whose instantiations can reach one of `declaration` through the members a
+    /// walk follows, `declaration` itself included: the only ones a walk for its instantiations
+    /// needs to enter, since an instantiation is reached only from a root or from an instantiation
+    /// of a declaration that enters its declaration.
+    let reaching (analysis: Analysis<'T>) (declaration: string) : Set<string> =
+        let into =
+            [ for KeyValue(name, found) in analysis.Entered do
+                  for inner, _ in found do
+                      inner, name ]
+            |> List.groupBy fst
+            |> List.map (fun (inner, pairs) -> inner, pairs |> List.map snd)
+            |> Map.ofList
+
+        let rec close (acc: Set<string>) (frontier: string list) =
+            match frontier with
+            | [] -> acc
+            | d :: rest ->
+                let fresh =
+                    into
+                    |> Map.tryFind d
+                    |> Option.defaultValue []
+                    |> List.filter (fun e -> not (acc.Contains e))
+                    |> List.distinct
+
+                close (Set.union acc (Set.ofList fresh)) (fresh @ rest)
+
+        close (Set.singleton declaration) [ declaration ]
 
     /// The binding an instantiation makes: each parameter of its declaration to the argument at its
     /// position. None where the reference applies another number of arguments, or names nothing.
@@ -304,8 +407,9 @@ module internal Instantiations =
     /// are: a reached declaration with a parameter on a cycle that holds an expanding edge (the
     /// first one found, taking the declarations in first-reach order), and what following that
     /// cycle once reaches it at. Every expanding edge of a reached declaration is tried as the
-    /// cycle's first edge, so no such cycle is missed.
-    let growth (analysis: Analysis<'T>) (roots: 'T list) : Growth<'T> option =
+    /// cycle's first edge, so no such cycle is missed. Only the declarations `keep` answers are
+    /// asked; a cycle through one of [[reaching]]'s declarations passes only through others.
+    let growth (analysis: Analysis<'T>) (keep: string -> bool) (roots: 'T list) : Growth<'T> option =
         let cycle (declaration: string) : Edge<'T> list option =
             let own =
                 analysis.Reading.Declarations[declaration].Params
@@ -327,6 +431,7 @@ module internal Instantiations =
                 |> Option.filter (List.exists _.Expanding))
 
         declarationsReached analysis roots
+        |> List.filter keep
         |> List.tryPick (fun declaration ->
             cycle declaration
             |> Option.map (fun edges ->
@@ -350,32 +455,42 @@ module internal Instantiations =
     /// The instantiations a set of roots reaches.
     [<RequireQualifiedAccess>]
     type Closure<'T> =
-        /// Every one, each once, in breadth-first order of first reach.
-        | Finite of (string * 'T list) list
+        /// Every one, each once, in breadth-first order of first reach, and the printed size of
+        /// the GENERIC ones together ([[size]]).
+        | Finite of instantiations: (string * 'T list) list * size: int64
         /// Infinitely many ([[growth]]).
         | Infinite of Growth<'T>
         /// Finitely many, and more than [[limit]].
         | Exceeds
 
-    /// Every instantiation the roots reach: a worklist and a visited set, with no bound on depth.
-    let closure (analysis: Analysis<'T>) (roots: 'T list) : Closure<'T> when 'T: equality =
-        match growth analysis roots with
+    /// Every instantiation the roots reach of the declarations `keep` answers: a worklist and a
+    /// visited set, with no bound on depth. An instantiation is keyed by its declaration and the
+    /// [[identity]] of each argument, so a step costs what the declarations' own types cost
+    /// however large the arguments it substitutes have grown.
+    let closureWithin (analysis: Analysis<'T>) (keep: string -> bool) (roots: 'T list) : Closure<'T> =
+        match growth analysis keep roots with
         | Some g -> Closure.Infinite g
         | None ->
             let seen =
-                System.Collections.Generic.HashSet<string * 'T list>(HashIdentity.Structural)
+                System.Collections.Generic.HashSet<string * int list>(HashIdentity.Structural)
 
             let order = ResizeArray<string * 'T list>()
             let queue = System.Collections.Generic.Queue<string * 'T list>()
             // Counted: the instantiations of GENERIC declarations. A declaration applied to no
             // argument is one entry however it is reached.
             let mutable generic = 0
+            let mutable printed = 0L
 
             let offer (found: (string * 'T list) list) =
-                for instantiation in found do
-                    if generic <= limit && seen.Add instantiation then
-                        if not (List.isEmpty (snd instantiation)) then
+                for (declaration, args) as instantiation in found do
+                    if
+                        generic <= limit
+                        && keep declaration
+                        && seen.Add((declaration, args |> List.map (identity analysis)))
+                    then
+                        if not (List.isEmpty args) then
                             generic <- generic + 1
+                            printed <- add printed (size analysis instantiation)
 
                         order.Add instantiation
                         queue.Enqueue instantiation
@@ -388,7 +503,11 @@ module internal Instantiations =
             if generic > limit then
                 Closure.Exceeds
             else
-                Closure.Finite(List.ofSeq order)
+                Closure.Finite(List.ofSeq order, printed)
+
+    /// Every instantiation the roots reach ([[closureWithin]], every declaration kept).
+    let closure (analysis: Analysis<'T>) (roots: 'T list) : Closure<'T> =
+        closureWithin analysis (fun _ -> true) roots
 
     // -----------------------------------------------------------------------
     // The reading of a vocabulary's own declarations.
@@ -528,6 +647,46 @@ module internal Instantiations =
         | TTimeOfDay
         | TDuration -> Shape.Holds []
 
+    /// An [[IdlType]] as its head and the types it holds ([[Reading.Split]]): a declaration's
+    /// arguments, a collection's items, a tuple's components, a hosted slot's declared wire form.
+    /// A host function's signature is held by nothing a substitution reaches, so it is all head.
+    /// Every case is named.
+    let split (t: IdlType) : IdlType * IdlType list =
+        let hole = TVar ""
+        let holes (parts: IdlType list) = parts |> List.map (fun _ -> hole)
+
+        match t with
+        | TRecord(n, args) -> TRecord(n, holes args), args
+        | TUnion(n, args) -> TUnion(n, holes args), args
+        | TList inner -> TList hole, [ inner ]
+        | TMap inner -> TMap hole, [ inner ]
+        | TSet inner -> TSet hole, [ inner ]
+        | TTuple components -> TTuple(holes components), components
+        | TKeyedMap(k, v) -> TKeyedMap(hole, hole), [ k; v ]
+        | THosted h ->
+            THosted
+                { h with
+                    Wire = h.Wire |> Option.map (fun _ -> hole) },
+            Option.toList h.Wire
+        | TStr
+        | TInt
+        | TBool
+        | TFloat
+        | TEnum _
+        | TVar _
+        | TNode
+        | TClosure
+        | TFn _
+        | TOpaque
+        | TJson
+        | TKind
+        | TOp
+        | TInt64
+        | TDecimal
+        | TBytes
+        | TTimeOfDay
+        | TDuration -> t, []
+
     /// A vocabulary's records and unions as one walk reads them. Where two declarations share a
     /// name the first is read, as [[IdlLookup]] answers it.
     let ofIdl (walk: Walk) (idl: Idl) : Reading<IdlType> =
@@ -540,6 +699,7 @@ module internal Instantiations =
                   recordKey r.Name, r.Params, types r.Fields ]
             (shape walk)
             TypeParams.substitute
+            split
             walk.Arguments
 
     /// A declaration's key as a reference names it: its family and its name.
@@ -570,23 +730,42 @@ module internal Instantiations =
     let exceeds: string =
         sprintf "more than %d instantiations of the vocabulary's generic declarations" limit
 
-    /// Why a walk over `idl` from `roots` cannot name every instantiation it reaches, in the one
-    /// sentence each cause has ([[describe]], [[exceeds]]); `None` where it can.
-    let unread (walk: Walk) (idl: Idl) (roots: IdlType list) : string option =
-        match closure (analyse (ofIdl walk idl)) roots with
-        | Closure.Finite _ -> None
-        | Closure.Infinite g -> Some(describe g)
-        | Closure.Exceeds -> Some exceeds
+    /// A declaration's key as a sentence names it: `record 'Opt'`, `union 'Pick'`.
+    let spelledKey (declaration: string) : string =
+        let family, name = named declaration
+        sprintf "%s '%s'" family name
 
-    /// [[describe]] of the growth a walk over `idl` from `roots` meets; `None` where the
-    /// instantiations it reaches are finitely many, however many.
-    let growing (walk: Walk) (idl: Idl) (roots: IdlType list) : string option =
-        growth (analyse (ofIdl walk idl)) roots |> Option.map describe
+    /// What a walk for the instantiations of ONE declaration says when it stopped at [[limit]]: it
+    /// counts that declaration's and those of the declarations that reach it ([[reaching]]).
+    let exceedsReaching (declaration: string) : string =
+        sprintf
+            "more than %d instantiations of %s and the generic declarations that reach it"
+            limit
+            (spelledKey declaration)
+
+    /// What a walk for the instantiations of ONE declaration says when they hold more than
+    /// [[sizeLimit]] nodes between them.
+    let oversizedAt (declaration: string) : string =
+        sprintf "more than %d nodes across the instantiations of %s" sizeLimit (spelledKey declaration)
+
+    /// What an entry that prints every instantiation says of a vocabulary whose instantiations
+    /// hold more than [[sizeLimit]] nodes between them.
+    let oversized: string =
+        sprintf "more than %d nodes across the instantiations of the vocabulary's generic declarations" sizeLimit
 
     /// Every instantiation a walk over `idl` reaches from `roots`, each as the reference it is,
-    /// or why they cannot all be named ([[unread]]).
+    /// or why an entry that prints each one cannot: they are infinitely many ([[describe]]), more
+    /// than [[limit]] ([[exceeds]]), or more than [[sizeLimit]] nodes to print ([[oversized]]).
     let reached (walk: Walk) (idl: Idl) (roots: IdlType list) : Result<IdlType list, string> =
         match closure (analyse (ofIdl walk idl)) roots with
-        | Closure.Finite all -> Ok(all |> List.map applies)
+        | Closure.Finite(_, printed) when printed > int64 sizeLimit -> Error oversized
+        | Closure.Finite(all, _) -> Ok(all |> List.map applies)
         | Closure.Infinite g -> Error(describe g)
         | Closure.Exceeds -> Error exceeds
+
+    /// Why an entry that prints every instantiation a walk over `idl` reaches from `roots` cannot
+    /// ([[reached]]); `None` where it can.
+    let unread (walk: Walk) (idl: Idl) (roots: IdlType list) : string option =
+        match reached walk idl roots with
+        | Ok _ -> None
+        | Error why -> Some why

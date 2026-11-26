@@ -617,13 +617,17 @@ module internal Decl =
 
     /// One wire type's identity: two closed types with one key are one entry of the reach. A
     /// hosted slot is its declared wire form, or a verbatim JSON value when it declares none; a
-    /// signature and a closure are one sentinel.
+    /// signature and a closure are one sentinel. A hosted slot that declares a FORMAT is its wire
+    /// form under that format (Phase 732): the format is a contract on the wire, which the JSON
+    /// schema's names ([[instName]]) state, so two instantiations that differ only there are two
+    /// entries, as they are two definitions.
     let rec private wireKey (t: IdlType) : string =
         match t with
         | THosted h ->
-            match h.Wire with
-            | Some w -> wireKey w
-            | None -> "json"
+            match h.Wire, h.Format with
+            | Some w, Some format -> "hosted_" + HostedFormat.name format + "(" + wireKey w + ")"
+            | Some w, None -> wireKey w
+            | None, _ -> "json"
         | TJson -> "json"
         | TFn _
         | TClosure -> "closure"
@@ -650,14 +654,9 @@ module internal Decl =
         | TSet inner -> "set_" + wireKey inner
         | TKeyedMap(k, v) -> "keyedMap(" + wireKey k + "," + wireKey v + ")"
 
-    /// Why a walk of what a value on the wire holds cannot name every instantiation it reaches from
-    /// `roots`, or `None` where it can (`Instantiations.unread`).
-    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
-    let wireUnread (idl: Idl) (roots: IdlType list) : string option =
-        Instantiations.unread Instantiations.wire idl roots
-
     /// Every instantiation a value on the wire holds from `roots`, each once, or why they cannot
-    /// all be named (`Instantiations.reached`). The enumeration the wire reach's own walk is held to.
+    /// all be named (`Instantiations.reached`): what the wire reach asks before it walks, and the
+    /// enumeration its own walk is held to.
     [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
     let wireInstantiations (idl: Idl) (roots: IdlType list) : Result<IdlType list, string> =
         Instantiations.reached Instantiations.wire idl roots
@@ -736,18 +735,20 @@ module internal Decl =
                 visit (TypeParams.substitute subst f.Type)
 
         // The walk ends only where the instantiations are finitely many, so that is asked first,
-        // of the declarations; a depth reached says nothing of it either way.
+        // of the declarations; a depth reached says nothing of it either way. And it prints each
+        // one it places (its key), so it is not walked where they are too many or too large to
+        // print: an entry that reads the reach then reads why ([[WireReach.Unread]]).
         let roots =
             onWire idl.NodeFields @ (kinds |> List.collect (fun k -> onWire k.Fields))
             |> List.map _.Type
 
-        match wireUnread idl roots with
-        | Some why ->
+        match wireInstantiations idl roots with
+        | Error why ->
             { FromEnvelope = [ TNode ]
               FromKinds = []
               Enums = []
               Unread = Some why }
-        | None ->
+        | Ok _ ->
             visit TNode
             let all = List.ofSeq order
 
@@ -1141,11 +1142,15 @@ module internal Decl =
                     Type = TypeParams.substitute subst f.Type })
         | _ -> r.Fields
 
-    /// [[Instantiations.describe]] of the growth a fold meets from `t`: the records it would read
-    /// at one new instantiation after another without end. `None` where it reads finitely many.
+    /// Why a fold from `t` cannot read every record instantiation on its paths: they are infinitely
+    /// many, the records it would read at one new instantiation after another without end
+    /// ([[Instantiations.describe]]), or more, or larger, than an enumeration reads (Phase 732: a
+    /// fold names each instantiation it enters), each with whether it is a cap rather than growth.
+    /// `None` where it reads them all.
     [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
-    let private foldGrowth (idl: Idl) (t: IdlType) : string option =
-        Instantiations.growing Instantiations.folded idl [ t ]
+    let private foldUnread (idl: Idl) (t: IdlType) : (string * bool) option =
+        Instantiations.unread Instantiations.folded idl [ t ]
+        |> Option.map (fun why -> why, (why = Instantiations.exceeds || why = Instantiations.oversized))
 
     /// Whether a value of type `t` holds a value of the union `u`'s own instantiation — the
     /// positions a fold over `u` descends — refusing a recursion the fold cannot follow (at other
@@ -1184,8 +1189,13 @@ module internal Decl =
                 |> Option.defaultValue (Ok false)
             | _ -> Ok false
 
-        match foldGrowth d.Idl t with
-        | Some growth ->
+        match foldUnread d.Idl t with
+        | Some(why, true) ->
+            refuse
+                (sprintf "a fold over '%s' through %s" u.Name why)
+                "the fold reads a record at each instantiation on its path, so they must be few enough to read"
+                "recurse at a fixed argument, or do not request the fold"
+        | Some(growth, false) ->
             refuse
                 (sprintf "a fold over '%s' through %s" u.Name growth)
                 "the fold reads a record at each instantiation on its path, and this one names a new instantiation at every step"
