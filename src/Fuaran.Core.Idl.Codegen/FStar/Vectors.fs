@@ -102,7 +102,7 @@ module internal FStarVectors =
             |> List.map (fun (k, ev) -> pairTerm (strLit where k) (valueTerm idl m q where inner ev))
             |> sequenceR
             |> Result.map (fun ts -> "[" + String.concat "; " ts + "]")
-        | SRecord n, VRecord fs ->
+        | SRecord(n, _), VRecord fs ->
             match
                 m.Records.TryFind(slotName s)
                 |> Option.bind (fun ctors -> ctorFor m (slotName s) ctors "Mk" (authoredPick fs))
@@ -262,7 +262,7 @@ module internal FStarVectors =
             |> sequenceR
             |> Result.map (fun ts -> "(JArr [" + String.concat "; " ts + "])")
         | SMap inner, JObj fs -> objectOf (fun _ -> Some inner) fs
-        | SRecord n, JObj fs ->
+        | SRecord(n, _), JObj fs ->
             match
                 m.Records.TryFind(slotName s)
                 |> Option.bind (fun ctors -> ctorFor m (slotName s) ctors "Mk" (wirePick fs))

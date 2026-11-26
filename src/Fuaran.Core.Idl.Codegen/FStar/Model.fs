@@ -16,7 +16,7 @@ module internal FStarModel =
     // 1. The monomorphic slot — an IDL type with every type variable resolved.
     // -----------------------------------------------------------------------
 
-    /// A wire slot the model can express, with generic unions already instantiated.
+    /// A wire slot the model can express, with generic unions and records already instantiated.
     /// Everything the target refuses is absent by construction: there is no `SClosure`,
     /// so a closure cannot reach the emitter and be dropped there.
     type Slot =
@@ -44,8 +44,9 @@ module internal FStarModel =
         | SSentinel of sentinel: string
         /// `TEnum` — a closed set of wire strings.
         | SEnum of enumName: string
-        /// `TRecord` — a named object with no discriminator.
-        | SRecord of recordName: string
+        /// `TRecord`, instantiated: the record's name and its resolved type arguments (Phase 732). A
+        /// named object with no discriminator; one model type per instantiation, as a union's is.
+        | SRecord of recordName: string * args: Slot list
         /// `TUnion`, instantiated: the union's name and its resolved type arguments.
         | SUnion of unionName: string * args: Slot list
         /// `TList` — a JSON array.
@@ -169,20 +170,19 @@ module internal FStarModel =
         | TJson -> Ok SJson
         | TNode -> Ok SNode
         | TEnum n -> Ok(SEnum n)
-        | TRecord(n, _) -> Ok(SRecord n)
+        | TRecord(n, args) ->
+            args
+            |> List.map (slotOf where)
+            |> sequenceR
+            |> Result.map (fun ss -> SRecord(n, ss))
         | TList inner -> slotOf where inner |> Result.map SList
         | TMap vt -> slotOf where vt |> Result.map SMap
         | TVar v -> unmodellable (sprintf "an unresolved type parameter '%s" v) where
         | TUnion(n, args) ->
-            let rec go acc rest =
-                match rest with
-                | [] -> Ok(List.rev acc)
-                | a :: t ->
-                    match slotOf where a with
-                    | Error e -> Error e
-                    | Ok s -> go (s :: acc) t
-
-            go [] args |> Result.map (fun ss -> SUnion(n, ss))
+            args
+            |> List.map (slotOf where)
+            |> sequenceR
+            |> Result.map (fun ss -> SUnion(n, ss))
         | THosted h when h.FSharp = "" -> unmodellable "a host codec with no declared host type" where
         | THosted h ->
             match hostedWireRefusal "the F* proof model" h with
@@ -262,8 +262,10 @@ module internal FStarModel =
         | SSentinel "<opaque>" -> "opaque"
         | SSentinel _ -> "closure"
         | SEnum n -> "e_" + snake n
-        | SRecord n -> "r_" + snake n
+        // An instantiation is named for its arguments: `r_ranged__flt`, `u_binding__int`.
+        | SRecord(n, []) -> "r_" + snake n
         | SUnion(n, []) -> "u_" + snake n
+        | SRecord(n, args) -> "r_" + snake n + "__" + (args |> List.map slotName |> String.concat "_")
         | SUnion(n, args) -> "u_" + snake n + "__" + (args |> List.map slotName |> String.concat "_")
         | SList inner -> "l_" + slotName inner
         | SMap inner -> "m_" + slotName inner
@@ -419,6 +421,7 @@ module internal FStarModel =
                     out.Add s
             | SList inner
             | SMap inner -> visit inner
+            | SRecord(_, args)
             | SUnion(_, args) -> List.iter visit args
             | _ -> ()
 
@@ -546,10 +549,14 @@ module internal FStarModel =
                     unmodellable
                         (sprintf "a declared JSON default holding a number the opaque numeric model cannot spell: %A" v)
                         where
-            | Literal.Record(r, _, authored) ->
-                variantFor idl Map.empty (where + " (default)") r.Fields authored
-                |> Result.bind (fun (picks, ms) ->
-                    ctorLit idl where (ctorName (slotName (SRecord r.Name)) ("Mk" + variantSuffix picks)) ms authored)
+            | Literal.Record(r, args, authored) ->
+                let subst = TypeParams.bindRecord r args |> Option.defaultValue Map.empty
+
+                slotOf where t
+                |> Result.bind (fun s ->
+                    variantFor idl subst (where + " (default)") r.Fields authored
+                    |> Result.bind (fun (picks, ms) ->
+                        ctorLit idl where (ctorName (slotName s) ("Mk" + variantSuffix picks)) ms authored))
             | Literal.Union(u, args, c, authored) ->
                 let subst = TypeParams.bind u args |> Option.defaultValue Map.empty
 
@@ -822,8 +829,9 @@ module internal FStarModel =
     type Model =
         {
             Order: Slot list
-            /// Record slot name to its constructors, (label, members): `Mk` alone, or one per choice
-            /// of case when the record holds a presence-keyed union (Phase 722).
+            /// Record slot name (one per instantiation, Phase 732) to its constructors, (label,
+            /// members): `Mk` alone, or one per choice of case when the record holds a presence-keyed
+            /// union (Phase 722).
             Records: Map<string, (string * Member list) list>
             /// Union slot name to its constructors, (label, members), in declaration order. The label
             /// is the case's WIRE tag (the case name under the default tag rule; Phase 550), suffixed
@@ -954,17 +962,25 @@ module internal FStarModel =
         // map declares no members of its own.
         let declare (t: IdlType) () : Result<unit, CodegenError> =
             match t with
-            | TRecord(n, _) ->
+            | TRecord(n, args) ->
                 match CodegenLookup.tryRecord idl n with
                 | None -> unmodellable ("an undeclared record '" + n + "'") ("record " + n)
                 // Phase 722 — an inline record's members sit on its holder's object, where
                 // [[fieldMembers]] lays them out: it declares nothing of its own.
                 | Some r when r.Inline -> Ok()
+                // Phase 732 — one declaration per instantiation, its members at the reference's
+                // arguments, exactly as a union's cases are.
+                // [[model]] has already refused a reference no binding can be made for, in every
+                // backend's sentence; the arm below keeps this function total over an unchecked value.
                 | Some r ->
-                    fieldVariants idl Map.empty ("record " + n) r.Fields
-                    |> Result.map (fun found ->
-                        let key = slotName (SRecord n)
-                        recordMap[key] <- constructors key "Mk" found)
+                    match TypeParams.bindRecord r args, slotOf ("record " + n) t with
+                    | None, _ -> unmodellable ("a record arity mismatch on '" + n + "'") ("record " + n)
+                    | _, Error e -> Error e
+                    | Some subst, Ok s ->
+                        fieldVariants idl subst ("record " + n) r.Fields
+                        |> Result.map (fun found ->
+                            let key = slotName s
+                            recordMap[key] <- constructors key "Mk" found)
             | TUnion(n, args) ->
                 match CodegenLookup.tryUnion idl n with
                 | None -> unmodellable ("an undeclared union '" + n + "'") ("union " + n)
@@ -1065,9 +1081,17 @@ module internal FStarModel =
                 (Ok [])
             |> Result.map (fun ks -> caseMap["vkind"] <- List.rev ks)
 
+        // Phase 732 — a declaration whose recursion grows its type argument has no finite set of
+        // instances, so no model: the reach stopped following it and names it.
+        let finite () =
+            match reach.Grows with
+            | None -> Ok()
+            | Some grows ->
+                unmodellable (sprintf "the generic %s, whose recursion grows its type argument" grows) "the vocabulary"
+
         let translated =
             sequence (
-                [ layout; envelope ]
+                [ finite; layout; envelope ]
                 @ (reach.FromEnvelope |> List.map declare)
                 @ [ kinds ]
                 @ (reach.FromKinds |> List.map declare)
@@ -1173,6 +1197,7 @@ module internal FStarModel =
                     | THosted h -> h.Wire.IsSome
                     | TList inner
                     | TMap inner -> declaredWire inner
+                    | TRecord(_, args)
                     | TUnion(_, args) -> args |> List.exists declaredWire
                     | _ -> false
 
@@ -1205,13 +1230,14 @@ module internal FStarModel =
 
     /// [[modelOf]] behind the Phase 539 refusal: the model's decoder reads each member under its one
     /// name and has no presence condition, so a vocabulary declaring either (or an enum alias) is
-    /// refused by name rather than modelled as if it declared neither. And behind Phase 732's: a
-    /// type-parameterised record is not modelled yet ([[Decl.parameterisedRecord]]).
+    /// refused by name rather than modelled as if it declared neither. And behind the one question
+    /// every backend asks of a record reference (Phase 732, [[Decl.recordsAppliedIdl]]): a reference
+    /// no binding can be made for has no instantiation to model, and is refused in the other
+    /// backends' sentence.
     let model (idl: Idl) (kindTags: string list) : Result<Model, CodegenError> =
-        match Decl.canonicalFormDeclarations idl, Decl.parameterisedRecord idl with
-        | what :: _, _ -> unmodellable (what + " (a Phase 539 canonical-form declaration)") "the vocabulary"
-        | [], Some name -> unmodellable (Decl.parameterisedRecordConstruct name) "the vocabulary"
-        | [], None -> modelOf idl kindTags
+        match Decl.canonicalFormDeclarations idl with
+        | what :: _ -> unmodellable (what + " (a Phase 539 canonical-form declaration)") "the vocabulary"
+        | [] -> Decl.recordsAppliedIdl idl |> Result.bind (fun () -> modelOf idl kindTags)
 
     // -----------------------------------------------------------------------
     // 6. The expressibility partition — which of a vocabulary's kinds the target can

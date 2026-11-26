@@ -81,6 +81,11 @@ type internal Instantiation =
 /// host's decoder checks, and nothing when it declares none. Two types that are one wire type
 /// (a hosted slot and its declared wire, a `TFn` and a `TClosure`) are one entry.
 ///
+/// Phase 732 — a record is an entry per INSTANTIATION, as a union is: `Ranged<float>` and
+/// `Ranged<int>` are two, each reaching its fields at its own arguments. A declaration whose
+/// recursion grows its type argument has no finite set of instances; the walk stops following it at
+/// a fixed depth of nested instantiations and names it in [[Grows]], so the reach is always finite.
+///
 /// This is the reach the F* model is printed from. The host reach above ([[Decl.Records]] and
 /// its siblings) answers a different question — which declarations the host SOURCE must state,
 /// including those named only by a signature or a host-only field — and is a set in declaration
@@ -93,6 +98,11 @@ type internal WireReach =
         FromKinds: IdlType list
         /// The enums met, in first-reach order.
         Enums: string list
+        /// The first generic declaration the walk stopped following, as `union '<name>'` or
+        /// `record '<name>'`: its instantiations were still new [[Decl.instantiationDepth]] deep on
+        /// one path, which is a recursion that grows its type argument. `None` for every other
+        /// vocabulary, whose reach is then complete.
+        Grows: string option
     }
 
 /// Phase 525 — an IDL-declared default VALUE as a typed literal: the value at the type it is
@@ -631,7 +641,7 @@ module internal Decl =
         | TOp -> "op"
         | TVar v -> "var_" + v
         | TEnum n -> "enum_" + n
-        | TRecord(n, _) -> "record_" + n
+        | TRecord(n, args) -> "record_" + n + "(" + (args |> List.map wireKey |> String.concat ",") + ")"
         | TList inner -> "list_" + wireKey inner
         | TMap vt -> "map_" + wireKey vt
         | TUnion(n, args) -> "union_" + n + "(" + (args |> List.map wireKey |> String.concat ",") + ")"
@@ -644,15 +654,23 @@ module internal Decl =
         | TSet inner -> "set_" + wireKey inner
         | TKeyedMap(k, v) -> "keyedMap(" + wireKey k + "," + wireKey v + ")"
 
+    /// How many instantiations of generic declarations one path may nest before a walk stops and
+    /// names the declaration as one whose recursion grows its type argument: the wire reach's bound
+    /// ([[WireReach.Grows]]) and the fold's ([[foldSelfIn]]).
+    [<Literal>]
+    let instantiationDepth = 64
+
     let private wireReach (idl: Idl) (kinds: IdlKind list) : WireReach =
         let order = ResizeArray<IdlType>()
         let seen = System.Collections.Generic.HashSet<string>()
         let enums = ResizeArray<string>()
         let mutable envelopeReach = 0
+        let mutable grows: string option = None
 
-        let rec visit (t: IdlType) =
+        // `depth` counts the instantiations of generic declarations entered on the current path.
+        let rec visit (depth: int) (t: IdlType) =
             match t with
-            | THosted h -> h.Wire |> Option.iter visit
+            | THosted h -> h.Wire |> Option.iter (visit depth)
             | TEnum n ->
                 if not (enums.Contains n) then
                     enums.Add n
@@ -660,18 +678,18 @@ module internal Decl =
             | TMap inner
             | TSet inner ->
                 if seen.Add(wireKey t) then
-                    visit inner
+                    visit depth inner
                     order.Add t
             // Phase 639 — a tuple and a keyed map after what they hold; a text-borne scalar once, so
             // the F* model declares its canonical-spelling predicate where a member first reaches it.
             | TTuple args ->
                 if seen.Add(wireKey t) then
-                    args |> List.iter visit
+                    args |> List.iter (visit depth)
                     order.Add t
             | TKeyedMap(k, v) ->
                 if seen.Add(wireKey t) then
-                    visit k
-                    visit v
+                    visit depth k
+                    visit depth v
                     order.Add t
             | TInt64
             | TDecimal
@@ -685,40 +703,57 @@ module internal Decl =
                     // Placed BEFORE its members are walked, so a kind that holds a node does not
                     // re-enter; the kinds come after everything the envelope reaches.
                     order.Add TNode
-                    visitFields idl.NodeFields
+                    visitFields depth Map.empty idl.NodeFields
                     envelopeReach <- order.Count
 
                     for k in kinds do
-                        visitFields k.Fields
-            | TRecord(n, _) ->
-                if seen.Add(wireKey t) then
-                    order.Add t
-                    CodegenLookup.tryRecord idl n |> Option.iter (fun r -> visitFields r.Fields)
+                        visitFields depth Map.empty k.Fields
+            | TRecord(n, args) ->
+                instance depth t "record" n args (fun () ->
+                    CodegenLookup.tryRecord idl n
+                    |> Option.bind (fun r ->
+                        TypeParams.bindRecord r args |> Option.map (fun subst -> subst, [ r.Fields ])))
             | TUnion(n, args) ->
-                if seen.Add(wireKey t) then
-                    order.Add t
-
-                    match CodegenLookup.tryUnion idl n with
-                    | Some u ->
-                        match TypeParams.bind u args with
-                        | Some subst ->
-                            for c in u.Cases do
-                                for f in onWire c.Fields do
-                                    visit (TypeParams.substitute subst f.Type)
-                        | None -> ()
-                    | None -> ()
+                instance depth t "union" n args (fun () ->
+                    CodegenLookup.tryUnion idl n
+                    |> Option.bind (fun u ->
+                        TypeParams.bind u args
+                        |> Option.map (fun subst -> subst, u.Cases |> List.map _.Fields)))
             | _ -> ()
 
-        and visitFields (fields: IdlField list) =
-            for f in onWire fields do
-                visit f.Type
+        // One instance of a declaration: placed when first met, before what its fields reach at its
+        // own arguments. A reference no binding can be made for reaches nothing.
+        and instance
+            (depth: int)
+            (t: IdlType)
+            (what: string)
+            (name: string)
+            (args: IdlType list)
+            (members: unit -> (Map<string, IdlType> * IdlField list list) option)
+            =
+            let inner = if List.isEmpty args then depth else depth + 1
 
-        visit TNode
+            if inner > instantiationDepth then
+                if grows.IsNone then
+                    grows <- Some(sprintf "%s '%s'" what name)
+            elif seen.Add(wireKey t) then
+                order.Add t
+
+                match members () with
+                | Some(subst, fieldLists) -> fieldLists |> List.iter (visitFields inner subst)
+                | None -> ()
+
+        and visitFields (depth: int) (subst: Map<string, IdlType>) (fields: IdlField list) =
+            for f in onWire fields do
+                visit depth (TypeParams.substitute subst f.Type)
+
+        visit 0 TNode
         let all = List.ofSeq order
 
         { FromEnvelope = List.truncate envelopeReach all
           FromKinds = List.skip envelopeReach all
-          Enums = List.ofSeq enums }
+          Enums = List.ofSeq enums
+          Grows = grows }
 
     // -----------------------------------------------------------------------
     // Phase 539 — the canonical-form declarations (DECISIONS.md D190), named for a backend that
@@ -1024,11 +1059,6 @@ module internal Decl =
                     Type = TypeParams.substitute subst f.Type })
         | _ -> r.Fields
 
-    /// How many record instantiations deep [[foldSelfIn]] follows one path before it refuses the
-    /// record as one whose recursion grows its type argument.
-    [<Literal>]
-    let private foldDepth = 64
-
     /// Whether a value of type `t` holds a value of the union `u`'s own instantiation — the
     /// positions a fold over `u` descends — refusing a recursion the fold cannot follow (at other
     /// type arguments, or through another union). `seen` is the records already entered, each by
@@ -1052,7 +1082,7 @@ module internal Decl =
                 "recurse through a list, an option, a map or a record, or do not request the fold"
         | TList i
         | TMap i -> foldSelfIn d u seen i
-        | TRecord(n, _) when seen.Count >= foldDepth ->
+        | TRecord(n, _) when seen.Count >= instantiationDepth ->
             refuse
                 (sprintf "a fold over '%s' through the record '%s', whose recursion grows its type argument" u.Name n)
                 "the fold reads a record at each instantiation on its path, and this record names a new one at every step"
@@ -1350,7 +1380,7 @@ module internal Decl =
         (allFieldLists idl |> List.collect (List.map _.Type)) @ methodTypes
         |> List.tryPick walk
 
-    /// Phase 732 — what the F# and TypeScript entries ask of a vocabulary before they emit a record:
+    /// Phase 732 — what every backend's entries ask of a vocabulary before they emit a record:
     /// that every reference applies as many arguments as its record declares parameters. A backend is
     /// handed an `Idl` value, not a declaration that was checked, and a reference no binding can be
     /// made for has no generic type or function to apply; it is refused by the record's name, in the
@@ -1369,23 +1399,6 @@ module internal Decl =
     /// [[recordsAppliedIdl]] over a resolution, answering the resolution itself.
     let recordsApplied (d: Decl) : Result<Decl, CodegenError> =
         recordsAppliedIdl d.Idl |> Result.map (fun () -> d)
-
-    /// Phase 732 — the first record of the vocabulary that declares a type parameter, else the first
-    /// a reference applies to a type argument. The declaration, the artifact, the declaration check,
-    /// the interpreter, the JSON schema, the F# entries and the TypeScript entries carry both; the F*
-    /// model does not model one yet, so it asks this of the WHOLE vocabulary (its contracts' types
-    /// included) and refuses by the record's name ([[parameterisedRecordConstruct]]). A backend drops
-    /// the question when it emits the record, and this goes with the last.
-    let parameterisedRecord (idl: Idl) : string option =
-        idl.Records
-        |> List.tryFind (fun r -> not (List.isEmpty r.Params))
-        |> Option.map _.Name
-        |> Option.orElseWith (fun () ->
-            firstRecordReference (fun n args -> if List.isEmpty args then None else Some n) idl)
-
-    /// The construct a backend names when [[parameterisedRecord]] answers a record.
-    let parameterisedRecordConstruct (name: string) : string =
-        sprintf "a type-parameterised record ('%s')" name
 
     /// A presence-keyed union's roster — see [[WireForm.keyedRoster]].
     [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]

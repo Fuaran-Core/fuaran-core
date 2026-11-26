@@ -6,8 +6,8 @@ module Fuaran.Core.Tests.IdlRecordParamsTests
 //
 // This file holds the DECLARATION: what `Declare.errors` admits and refuses, each refusal in the
 // sentence the same fault of a union gets; what the artifact writes and reads; that a vocabulary
-// declaring no parameterised record writes neither new member; and which backend entries emit a
-// parameterised record and which refuse it yet, by the record's name.
+// declaring no parameterised record writes neither new member; and that every backend entry emits a
+// parameterised record, and refuses by the record's name a reference no binding can be made for.
 // ---------------------------------------------------------------------------
 
 open Expecto
@@ -180,12 +180,12 @@ let private fixtures: (string * Idl) list =
       "wider defaults", WiderDefaultsIdl.idl
       "classify base", IdlClassify.Fixtures.baseIdl ]
 
-/// One description per backend entry that emits a declaration or prints a value, over `idl`, in two
-/// lists: the F# and TypeScript entries, which emit a parameterised record (held to the interpreter
-/// in `IdlRecordFSharpTests`, `IdlRecordTypeScriptTests` and `IdlThreeHostTests`), and the F* entries,
-/// which do not yet. The JSON-schema entries emit one, and are held to the interpreter in
-/// `IdlSchemaValidatorTests`.
-let private backends (idl: Idl) : (string * Result<unit, string>) list * (string * Result<unit, string>) list =
+/// One description per backend entry that emits a declaration or prints a value, over `idl`: the F#
+/// and TypeScript entries (held to the interpreter in `IdlRecordFSharpTests`,
+/// `IdlRecordTypeScriptTests` and `IdlThreeHostTests`) and the F* entries (whose model is held to it
+/// by the decode vectors, `IdlRecordFStarTests`). The JSON-schema entries are held to the interpreter
+/// in `IdlSchemaValidatorTests`.
+let private backends (idl: Idl) : (string * Result<unit, string>) list =
     let tags = idl.Kinds |> List.map _.Tag
 
     let describe (r: Result<'a, CodegenError>) =
@@ -216,8 +216,8 @@ let private backends (idl: Idl) : (string * Result<unit, string>) list * (string
       "typescriptModuleDerived", describe (Gen.typescriptModuleDerived [] idl tags)
       "typescriptDeclarations", describe (Gen.typescriptDeclarations idl tags)
       "typescriptDeclarationsDerived", describe (Gen.typescriptDeclarationsDerived [] idl tags)
-      "typescriptValue", describe (Gen.typescriptValue idl TStr (VStr "x")) ],
-    [ "FStarTarget.vocabularyModule", describe (FStarTarget.vocabularyModule "Boxed" idl tags)
+      "typescriptValue", describe (Gen.typescriptValue idl TStr (VStr "x"))
+      "FStarTarget.vocabularyModule", describe (FStarTarget.vocabularyModule "Boxed" idl tags)
       "FStarTarget.proofsModule", describe (FStarTarget.proofsModule "Boxed" "BoxedProofs" idl tags) ]
 
 [<Tests>]
@@ -516,41 +516,34 @@ let tests =
                   | Ok schema -> failtestf "a schema naming an instantiation that does not exist: %s" schema)
 
           testCase
-              "the F# and TypeScript entries emit a parameterised record; the F* entries refuse it by name"
+              "every backend entry emits a parameterised record, and refuses a reference no binding can be made for"
               (fun _ ->
-                  // A declared parameter, and separately an applied argument no declaration backs: a
-                  // backend is handed an `Idl` value, not a declaration that was checked.
+                  // An applied argument no declaration backs: a backend is handed an `Idl` value, not a
+                  // declaration that was checked.
                   let applied =
                       { boxed with
                           Kinds = [ kind "Holder" [ f "shape" (TRecord("Shape", [ TStr ])) Required ] ]
                           Unions = []
                           Records = [ record "Shape" [] [ f "w" TInt Required ] ] }
 
-                  let emitting, refusing = backends boxed
-                  Expect.equal (List.length emitting) 10 "the five F# entries and the five TypeScript ones"
-                  Expect.equal (List.length refusing) 2 "the two F* entries"
+                  let emitting = backends boxed
+
+                  Expect.equal
+                      (List.length emitting)
+                      12
+                      "the five F# entries, the five TypeScript ones and the two F* ones"
 
                   for entry, answer in emitting do
                       Expect.equal answer (Ok()) (sprintf "%s emits the parameterised records" entry)
 
-                  // A reference no binding can be made for has no generic type to name: every F# and
-                  // TypeScript entry refuses it by the record's name, in the sentence the JSON schema
-                  // refuses it in.
-                  for entry, answer in fst (backends applied) do
+                  // A reference no binding can be made for has no generic type, function or model
+                  // instance to name: every entry refuses it by the record's name, in the sentence the
+                  // JSON schema refuses it in.
+                  for entry, answer in backends applied do
                       match answer with
                       | Ok() -> failtestf "%s: emitted for a reference no binding can be made for" entry
                       | Error description ->
                           Expect.stringContains
                               description
                               "a reference applying record 'Shape' to 1 type argument(s) where it declares 0"
-                              (sprintf "%s names the reference" entry)
-
-                  for what, idl, named in [ "declared", boxed, "Box"; "applied", applied, "Shape" ] do
-                      for entry, answer in snd (backends idl) do
-                          match answer with
-                          | Ok() -> failtestf "%s (%s): emitted for a parameterised record" entry what
-                          | Error description ->
-                              Expect.stringContains
-                                  description
-                                  (sprintf "a type-parameterised record ('%s')" named)
-                                  (sprintf "%s (%s) names the record" entry what)) ]
+                              (sprintf "%s names the reference" entry)) ]

@@ -1,0 +1,154 @@
+module Fuaran.Core.Tests.IdlRecordFStarTests
+
+// ---------------------------------------------------------------------------
+// Phase 732 — the F* proof model over a parameterised record.
+//
+// The model is monomorphic: a record at two instantiations is two model types, each named for its
+// arguments as a union's instance is, and an inline one has no type at all — its members are its
+// holder's, at the holder's argument. The generated round trip over the two certified vocabularies
+// is checked by the proof leg (`proofs/ParameterisedVocabularyProofs.fst`,
+// `proofs/ParameterisedFlatVocabularyProofs.fst`, held to the generator by the `Proofs.Vocabulary`
+// family); this file holds what the model STATES for each position of the fixture, the refusals the
+// target keeps, and the decode vectors that tie the model's reading to the interpreter's.
+// ---------------------------------------------------------------------------
+
+open Expecto
+open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Codegen.Types
+open Fuaran.Core.Tests.IdlRecordParamsTests
+
+let private emitted (r: Result<string, CodegenError>) : string =
+    match r with
+    | Ok src -> src.Replace("\r\n", "\n")
+    | Error e -> failtestf "the generator refused: %s" (CodegenError.describe e)
+
+let private tagsOf (idl: Idl) : string list = idl.Kinds |> List.map _.Tag
+
+let private modelOf (idl: Idl) : string =
+    emitted (FStarTarget.vocabularyModule "M" idl (tagsOf idl))
+
+/// The refusal the target gives the kind `tag` of `idl`.
+let private refusalOf (idl: Idl) (tag: string) : string =
+    match (FStarTarget.partition idl |> List.find (fun v -> v.Tag = tag)).Refusal with
+    | Some why -> why
+    | None -> failtestf "the F* target models %s" tag
+
+/// The members of a `Grow<T>` that holds `Grow<T list>`, `self` naming the declaration applied to an
+/// argument: every instantiation names a new one.
+let private growing (self: IdlType -> IdlType) : IdlField list =
+    [ f "here" (TVar "T") Required; f "next" (self (TList(TVar "T"))) Optional ]
+
+[<Tests>]
+let model =
+    testList
+        "Phase 732 — the F* model over a parameterised record"
+        [ testCase "every kind of the fixture is modelled, in each of its vocabularies" (fun _ ->
+              for name, idl in
+                  [ "default", ParameterisedRecordsIdl.idl
+                    "flat", ParameterisedRecordsIdl.flat
+                    "derived", ParameterisedRecordsIdl.derived ] do
+                  for v in FStarTarget.partition idl do
+                      Expect.isNone v.Refusal (sprintf "%s: %s is modelled" name v.Tag))
+
+          testCase "a record is one model type per instantiation, named for its arguments" (fun _ ->
+              let text = modelOf ParameterisedRecordsIdl.idl
+
+              // Two instantiations of one record, an argument that is itself an applied record, a
+              // record passing its parameter on, two parameters (one an enum reached only there).
+              for line in
+                  [ "  | C__r_ranged__flt__Mk : high:(flt) -> low:(flt) -> steps:(option (list (flt))) -> r_ranged__flt num flt"
+                    "  | C__r_ranged__int__Mk : high:(num) -> low:(num) -> steps:(option (list (num))) -> r_ranged__int num flt"
+                    "  | C__r_labelled__flt__Mk : label:(string) -> value:(flt) -> r_labelled__flt num flt"
+                    "  | C__r_labelled__str__Mk : label:(string) -> value:(string) -> r_labelled__str num flt"
+                    "  | C__r_labelled__r_ranged__int__Mk : label:(string) -> value:(r_ranged__int num flt) -> r_labelled__r_ranged__int num flt"
+                    "  | C__r_series__flt__Mk : points:(list (r_labelled__flt num flt)) -> r_series__flt num flt"
+                    "  | C__r_entry__str_e_direction__Mk : key:(string) -> value:(option (e_direction)) -> r_entry__str_e_direction num flt"
+                    // A case of a parameterised union holding a record at the union's own argument,
+                    // and a union declaring no parameter holding one at a closed argument.
+                    "  | C__u_binding__flt__Bounded : range:(r_ranged__flt num flt) -> u_binding__flt num flt"
+                    "  | C__u_binding__int__Bounded : range:(r_ranged__int num flt) -> u_binding__int num flt"
+                    "  | C__u_shape__Span : extent:(r_ranged__flt num flt) -> u_shape num flt" ] do
+                  Expect.stringContains text (line + "\n") line
+
+              // No type is declared for the generic declaration itself: nothing is named for a bare
+              // record that is only ever applied.
+              for bare in [ "r_ranged "; "r_labelled "; "r_series "; "r_entry " ] do
+                  Expect.isFalse (text.Contains("and " + bare)) (sprintf "no type `%s`" (bare.Trim())))
+
+          testCase "an inline parameterised record's members are its holder's, at the holder's argument" (fun _ ->
+              let text = modelOf ParameterisedRecordsIdl.idl
+
+              for line in
+                  [ // `Grid.paging: Paging<string>`: the kind's own members, the cursor a string.
+                    "  | C__vkind__Grid : cursor:(option (string)) -> page_size:(num) -> series:(option (r_series__flt num flt)) -> sort:(option (r_entry__str_e_direction num flt)) -> title:(option (r_labelled__str num flt)) -> vkind num flt"
+                    // `Binding<T>.Local.payload: LocalState<T>`: beside the case's tag, at each
+                    // instantiation of the union.
+                    "  | C__u_binding__flt__Local : initial:(flt) -> state_key:(string) -> u_binding__flt num flt"
+                    "  | C__u_binding__int__Local : initial:(num) -> state_key:(string) -> u_binding__int num flt" ] do
+                  Expect.stringContains text (line + "\n") line
+
+              for inlined in [ "r_paging"; "r_local_state" ] do
+                  Expect.isFalse (text.Contains inlined) (sprintf "an inline record declares no type (%s)" inlined))
+
+          testCase "a declared default that is a generic record's literal is the instance's constructor" (fun _ ->
+              // `Outline.trail: Tagged<string>`, omitted at `{ tag = ""; items = [] }`.
+              let text = modelOf ParameterisedRecordsIdl.derived
+
+              Expect.stringContains
+                  text
+                  "(if f0 = (C__r_tagged__str__Mk ([]) None (\"\")) then"
+                  "the encoder compares against the instance's own value"
+
+              Expect.stringContains
+                  text
+                  "(match get_prop \"trail\" el with | Error _ -> Ok (C__r_tagged__str__Mk ([]) None (\"\"))"
+                  "and the decoder restores it")
+
+          testCase "a union that holds itself at a record's argument is one recursive family" (fun _ ->
+              // `Tree.Branch.kids: Kid<Tree> list`, `spare: Tagged<Tree>`: the record's instance at
+              // the union is a type of the union's own mutual group.
+              let text = modelOf ParameterisedRecordsIdl.derived
+
+              for line in
+                  [ "  | C__u_tree__Branch : kids:(list (r_kid__u_tree num flt)) -> spare:(option (r_tagged__u_tree num flt)) -> u_tree num flt"
+                    "  | C__r_kid__u_tree__Mk : child:(u_tree num flt) -> name:(string) -> r_kid__u_tree num flt" ] do
+                  Expect.stringContains text (line + "\n") line)
+
+          testCase "a declaration whose recursion grows its type argument is refused by name" (fun _ ->
+              // No finite set of instances, so no model. The reach stops at a fixed depth and names
+              // the declaration; a kind that does not reach it is modelled as it always was.
+              let record' =
+                  vocabulary
+                      [ kind "K" [ f "grown" (TRecord("Grow", [ TStr ])) Required ]
+                        kind "Plain" [ f "label" TStr Required ] ]
+                      []
+                      [ record "Grow" [ "T" ] (growing (fun t -> TRecord("Grow", [ t ]))) ]
+
+              Expect.isEmpty (Declare.errors record') "the declaration check admits it"
+
+              Expect.stringContains
+                  (refusalOf record' "K")
+                  "the generic record 'Grow', whose recursion grows its type argument"
+                  "by the record's name"
+
+              Expect.isNone
+                  (FStarTarget.partition record' |> List.find (fun v -> v.Tag = "Plain")).Refusal
+                  "a kind that does not reach it is modelled"
+
+              // The union's same recursion: one walk bounds both.
+              let union' =
+                  vocabulary
+                      [ kind "K" [ f "grown" (TUnion("Grow", [ TStr ])) Required ] ]
+                      [ union "Grow" [ "T" ] [ case "More" (growing (fun t -> TUnion("Grow", [ t ]))) ] ]
+                      []
+
+              Expect.isEmpty (Declare.errors union') "the declaration check admits it"
+
+              Expect.stringContains
+                  (refusalOf union' "K")
+                  "the generic union 'Grow', whose recursion grows its type argument"
+                  "by the union's name"
+
+              // Every backend resolves the vocabulary through the same reach: none hangs on it.
+              Expect.isOk (Gen.fsharpModule "Probe" record' [ "K" ]) "the F# codec emits the growing record"
+              Expect.isOk (Gen.typescriptModule record' [ "K" ]) "and the TypeScript codec") ]

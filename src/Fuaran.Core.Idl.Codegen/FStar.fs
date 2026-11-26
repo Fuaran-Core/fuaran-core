@@ -32,6 +32,9 @@ open Fuaran.Core.Idl.Codegen.Types
 // over an unknown application. Instantiating it once per reached argument keeps every
 // definition and every lemma FIRST-ORDER, which is what makes the emitted proof script a
 // mechanical shape rather than a research problem.
+// A parameterised RECORD is instantiated the same way (Phase 732): `Ranged<float>` and `Ranged<int>`
+// are two model types, each named for its arguments, and an inline one has no type at all, its
+// members being its holder's at the holder's argument.
 //
 // THE REFUSAL IS TYPED, like every other refusal in this package: an IDL construct with no
 // wire-level meaning in the model (a host codec whose wire is not JSON, an op or a bare kind
