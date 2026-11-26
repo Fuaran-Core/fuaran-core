@@ -561,24 +561,24 @@
       "kind": "generated",
       "opens": [ "WireDecode" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
-      "budgetSeconds": 60,
-      "measuredSeconds": 27,
-      "fastestSeconds": 27,
+      "budgetSeconds": 50,
+      "measuredSeconds": 25,
+      "fastestSeconds": 18,
       "fastestPhase": "fuaran-core#732",
       "phase": "fuaran-core#732",
-      "note": "Phase 732 - the GENERATED model of the PARAMETERISED-RECORD vocabulary (`tests/Fuaran.Core.Tests.Fixtures/ParameterisedRecordsIdl.fs`, `derived`): a record that declares type parameters is ONE MODEL TYPE PER INSTANTIATION, named for its arguments (`r_ranged__flt`, `r_ranged__int`, `r_labelled__r_ranged__int`, `r_entry__str_e_direction`), as a type-parameterised union already is, and an INLINE one declares no type: its members are its holder's, at the holder's argument. The vocabulary holds one in every position a record reference can stand (a plain field, a list's item, a union case's payload, an inline member of a kind, an inline payload of a parameterised case, a record applied to a record, two parameters), a union that holds itself at a record's argument, a declared default that is a generic record's literal, and a generic record holding a node. All five of its kinds are modelled. Carries the `--ext context_pruning` option inside the generated file, like every generated model."
+      "note": "Phase 732 - the GENERATED model of the PARAMETERISED-RECORD vocabulary (`tests/Fuaran.Core.Tests.Fixtures/ParameterisedRecordsIdl.fs`, `derived`): a record that declares type parameters is ONE MODEL TYPE PER INSTANTIATION, named for its arguments (`r_ranged__flt`, `r_ranged__int`, `r_labelled__r_ranged__int`, `r_entry__str_e_direction`), as a type-parameterised union already is, and an INLINE one declares no type: its members are its holder's, at the holder's argument. The vocabulary holds one in every position a record reference can stand (a plain field, a list's item, a union case's payload, an inline member of a kind, an inline payload of a parameterised case, a record applied to a record, two parameters), a union that holds itself at a record's argument, a declared default that is a generic record's literal, and a generic record holding a node. All five of its kinds are modelled. Carries the `--ext context_pruning` option inside the generated file, like every generated model. SEEDED from the phase's `check.ps1 -Runs 3` leg: 25s, 19s, 18s."
     },
     {
       "module": "ParameterisedVocabularyProofs",
       "kind": "generated",
       "opens": [ "WireDecode", "ParameterisedVocabulary" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
-      "budgetSeconds": 50,
-      "measuredSeconds": 25,
-      "fastestSeconds": 25,
+      "budgetSeconds": 70,
+      "measuredSeconds": 32,
+      "fastestSeconds": 23,
       "fastestPhase": "fuaran-core#732",
       "phase": "fuaran-core#732",
-      "note": "Phase 732 - the generated ROUND TRIP over `ParameterisedVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type, each instantiation of each parameterised record included) and `dec_node_total`, by the walk and the lemma shapes of `VocabularyProofs`: an instantiation is a record of the model like any other, so the generator emits no lemma shape for it that the certification set did not already check."
+      "note": "Phase 732 - the generated ROUND TRIP over `ParameterisedVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type, each instantiation of each parameterised record included) and `dec_node_total`, by the walk and the lemma shapes of `VocabularyProofs`: an instantiation is a record of the model like any other, so the generator emits no lemma shape for it that the certification set did not already check. SEEDED from the phase's `check.ps1 -Runs 3` leg: 32s, 25s, 23s."
     },
     {
       "module": "ParameterisedFlatVocabulary",
@@ -587,22 +587,22 @@
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 50,
       "measuredSeconds": 23,
-      "fastestSeconds": 23,
+      "fastestSeconds": 18,
       "fastestPhase": "fuaran-core#732",
       "phase": "fuaran-core#732",
-      "note": "Phase 732 - the GENERATED model of the PARAMETERISED-RECORD vocabulary under the FLAT wire configuration (`tests/Fuaran.Core.Tests.Fixtures/ParameterisedRecordsIdl.fs`, `derivedFlat`): the declarations of `ParameterisedVocabulary` with a `kind` discriminator, the kind merged into the node envelope and members in declared order, so an inline parameterised record's members sit on the node's own object beside the envelope's. One model type per instantiation, as `ParameterisedVocabulary` states. All five of its kinds are modelled. Carries the `--ext context_pruning` option inside the generated file, like every generated model."
+      "note": "Phase 732 - the GENERATED model of the PARAMETERISED-RECORD vocabulary under the FLAT wire configuration (`tests/Fuaran.Core.Tests.Fixtures/ParameterisedRecordsIdl.fs`, `derivedFlat`): the declarations of `ParameterisedVocabulary` with a `kind` discriminator, the kind merged into the node envelope and members in declared order, so an inline parameterised record's members sit on the node's own object beside the envelope's. One model type per instantiation, as `ParameterisedVocabulary` states. All five of its kinds are modelled. Carries the `--ext context_pruning` option inside the generated file, like every generated model. SEEDED from the phase's `check.ps1 -Runs 3` leg: 23s, 21s, 18s."
     },
     {
       "module": "ParameterisedFlatVocabularyProofs",
       "kind": "generated",
       "opens": [ "WireDecode", "ParameterisedFlatVocabulary" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
-      "budgetSeconds": 70,
-      "measuredSeconds": 35,
-      "fastestSeconds": 35,
+      "budgetSeconds": 80,
+      "measuredSeconds": 38,
+      "fastestSeconds": 27,
       "fastestPhase": "fuaran-core#732",
       "phase": "fuaran-core#732",
-      "note": "Phase 732 - the generated ROUND TRIP over `ParameterisedFlatVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type) and `dec_node_total`, by the walk and the lemma shapes of `DocVocabularyProofs`, the certified vocabulary on the same wire configuration."
+      "note": "Phase 732 - the generated ROUND TRIP over `ParameterisedFlatVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type) and `dec_node_total`, by the walk and the lemma shapes of `DocVocabularyProofs`, the certified vocabulary on the same wire configuration. SEEDED from the phase's `check.ps1 -Runs 3` leg: 38s, 27s, 32s."
     },
     {
       "module": "Relation",

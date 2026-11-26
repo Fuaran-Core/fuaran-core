@@ -108,6 +108,42 @@ let model =
                   "(match get_prop \"trail\" el with | Error _ -> Ok (C__r_tagged__str__Mk ([]) None (\"\"))"
                   "and the decoder restores it")
 
+          testCase
+              "an omit-at-default member at a type parameter is read at each instantiation's argument, as a union case's is"
+              (fun _ ->
+                  // The model is monomorphic, so the member's type is closed by the time its default is
+                  // asked for: admitted where the literal is a value of the argument, refused in the
+                  // admissibility rule's own words where it is not. (The F# and TypeScript backends
+                  // refuse the member at every instantiation: their record is generic.)
+                  let members = [ f "v" (TVar "T") (OmitDefault(VStr "")); f "w" TStr Required ]
+
+                  let asRecord (arg: IdlType) =
+                      vocabulary
+                          [ kind "K" [ f "o" (TRecord("Opt", [ arg ])) Required ] ]
+                          []
+                          [ record "Opt" [ "T" ] members ]
+
+                  let asUnion (arg: IdlType) =
+                      vocabulary
+                          [ kind "K" [ f "o" (TUnion("Opt", [ arg ])) Required ] ]
+                          [ union "Opt" [ "T" ] [ case "Some" members ] ]
+                          []
+
+                  for what, declare in [ "record", asRecord; "union", asUnion ] do
+                      Expect.isNone
+                          (FStarTarget.partition (declare TStr) |> List.find (fun v -> v.Tag = "K")).Refusal
+                          (sprintf "%s: modelled at a string, where the default is a value" what)
+
+                      Expect.stringContains
+                          (refusalOf (declare TInt) "K")
+                          "no default literal for an IDL value of type TInt"
+                          (sprintf "%s: refused at an integer, where it is not" what)
+
+                  Expect.stringContains
+                      (modelOf (asRecord TStr))
+                      "  | C__r_opt__str__Mk : v:(string) -> w:(string) -> r_opt__str num flt\n"
+                      "the instance holds the member at the argument")
+
           testCase "a union that holds itself at a record's argument is one recursive family" (fun _ ->
               // `Tree.Branch.kids: Kid<Tree> list`, `spare: Tagged<Tree>`: the record's instance at
               // the union is a type of the union's own mutual group.
