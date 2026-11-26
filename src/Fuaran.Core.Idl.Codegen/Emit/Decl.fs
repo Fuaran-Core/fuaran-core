@@ -1018,41 +1018,122 @@ module internal Decl =
     let private refuse (construct: string) (principle: string) (alternative: string) : Result<'a, CodegenError> =
         Error(CodegenError.UnsupportedConstruct(construct, principle, alternative))
 
-    /// The instance name of a type — for a non-generic declaration its own name, and for an
-    /// instantiated generic union or record (Phase 732) the name plus its mangled arguments
-    /// (`Binding_float`, `Binding_list_SelectOption`). Total over `IdlType`, so a printer can name an instance for
-    /// any slot it meets: the instantiation walk below names by this same function, so the set
-    /// of instances EMITTED and the set REFERENCED are computed one way.
+    // -----------------------------------------------------------------------
+    // The instance name of a type: what a definition stated once per instantiation is filed under
+    // (the JSON schema's `$defs`).
+    //
+    // A name is WORDS joined by `_`, in prefix order: a declaration and then its arguments, a
+    // collection and then what it holds (`Binding_float`, `Binding_list_SelectOption`,
+    // `Pair_Ranged_int_str`). A word is one of the fixed words below or a declared name, and three
+    // spellings keep the list readable back:
+    //
+    //   * a declared name's own `_` is written `_0`, so a `_` that a `0` does not follow is always a
+    //     separator (no word starts with a digit);
+    //   * a declared name spelled as a fixed word is written after `_1` (a record named `list` is
+    //     `_1list`), so a fixed word is never a declaration;
+    //   * a type parameter is written after `_2`.
+    //
+    // Every word then says how many words follow it: a fixed word by itself (`tuple3` holds three),
+    // a declared name by its declaration. So, in a vocabulary whose references each apply a
+    // declaration to as many arguments as it declares, two types with one name are one type: the
+    // name is INJECTIVE. An instantiation's name holds a separator and a declared name's holds
+    // none, so no instantiation is named as a declaration is, nor as `Node`, `NodeKind` or `TreeOp`.
+    // And the name is a function of the type alone: it does not move when a neighbour is declared.
+    //
+    // The type named is the type ON THE WIRE. A hosted slot is named by what it states there (its
+    // declared wire form and format, never its host type or codec), and a function by the one
+    // sentinel it is: two types that differ only there state one definition, under one name.
+    // -----------------------------------------------------------------------
+
+    /// The fixed word of a hosted slot that declares a wire form and this format.
+    let private hostedWord (format: HostedFormat) : string =
+        match format with
+        | HostedFormat.Date -> "hostedDate"
+        | HostedFormat.DateTime -> "hostedDateTime"
+        | HostedFormat.Uuid -> "hostedUuid"
+
+    /// The fixed word of a tuple of `arity` components.
+    let private tupleWord (arity: int) : string = sprintf "tuple%d" arity
+
+    /// Whether `n` is spelled as a fixed word of an instance name: one of the words [[instName]]
+    /// writes for a type that is not a declaration. `IdlDeriveTests` holds the two to each other.
+    let isNameWord (n: string) : bool =
+        let fixedWords =
+            [ "str"
+              "int"
+              "bool"
+              "float"
+              "json"
+              "opaque"
+              "closure"
+              "Node"
+              "NodeKind"
+              "TreeOp"
+              "int64"
+              "decimal"
+              "bytes"
+              "timeOfDay"
+              "duration"
+              "list"
+              "map"
+              "set"
+              "keyedMap"
+              "hosted"
+              "hostedAs" ]
+            @ (HostedFormat.all |> List.map hostedWord)
+
+        List.contains n fixedWords
+        || (n.StartsWith "tuple"
+            && n.Length > 5
+            && n.Substring 5 |> Seq.forall (fun c -> c >= '0' && c <= '9'))
+
+    /// A declared name as an instance name spells it: the name itself, unless it holds a `_` or is
+    /// spelled as a fixed word. What every definition filed under a declaration's own name (an
+    /// enum, a record, a union, a kind, an op) is filed under, so that no instantiation's name is
+    /// one of them.
+    let declaredName (n: string) : string =
+        (if isNameWord n then "_1" else "") + n.Replace("_", "_0")
+
+    /// The instance name of a type (the comment above): for a declaration that takes no argument
+    /// its own name ([[declaredName]]), and for an instantiated generic union or record the name
+    /// and then its arguments' (`Binding_float`, `Binding_list_SelectOption`). Total over
+    /// `IdlType`, so a printer can name an instance for any slot it meets: the instantiation walk
+    /// below names by this same function, so the set of instances EMITTED and the set REFERENCED
+    /// are computed one way.
     let rec instName (t: IdlType) : string =
+        let words (head: string) (parts: IdlType list) : string =
+            head :: (parts |> List.map instName) |> String.concat "_"
+
         match t with
         | TStr -> "str"
         | TInt -> "int"
         | TBool -> "bool"
         | TFloat -> "float"
         | TJson -> "json"
-        | THosted _ -> "hosted"
+        | THosted { Wire = None } -> "hosted"
+        | THosted { Wire = Some wire; Format = None } -> words "hostedAs" [ wire ]
+        | THosted { Wire = Some wire
+                    Format = Some format } -> words (hostedWord format) [ wire ]
         | TOpaque -> "opaque"
         | TClosure
         | TFn _ -> "closure"
         | TNode -> "Node"
         | TKind -> "NodeKind"
         | TOp -> "TreeOp"
-        | TEnum n
-        | TRecord(n, [])
-        | TUnion(n, []) -> n
-        | TVar v -> v
-        | TList inner -> "list_" + instName inner
-        | TMap vt -> "map_" + instName vt
+        | TEnum n -> declaredName n
+        | TVar v -> "_2" + v.Replace("_", "_0")
+        | TList inner -> words "list" [ inner ]
+        | TMap vt -> words "map" [ vt ]
         | TRecord(n, args)
-        | TUnion(n, args) -> n + "_" + (args |> List.map instName |> String.concat "_")
+        | TUnion(n, args) -> words (declaredName n) args
         | TInt64 -> "int64"
         | TDecimal -> "decimal"
         | TBytes -> "bytes"
         | TTimeOfDay -> "timeOfDay"
         | TDuration -> "duration"
-        | TTuple args -> "tuple_" + (args |> List.map instName |> String.concat "_")
-        | TSet inner -> "set_" + instName inner
-        | TKeyedMap(k, v) -> "keyedMap_" + instName k + "_" + instName v
+        | TTuple args -> words (tupleWord args.Length) args
+        | TSet inner -> words "set" [ inner ]
+        | TKeyedMap(k, v) -> words "keyedMap" [ k; v ]
 
     /// Phase 732 — a record's fields at the instantiation a reference applies: a member naming one
     /// of the record's parameters is here at its argument. The declared fields where the reference
@@ -1179,9 +1260,11 @@ module internal Decl =
         Instantiations.unread Instantiations.written idl roots
 
     /// Every instantiation of a generic union and of a generic record (Phase 732) the vocabulary
-    /// names on the wire, each keyed and ordered by instance name. ONE worklist over the wire fields
-    /// of every declaration (an instantiation's own fields substituted before being walked), because
-    /// a record's instantiation names a union's and a union's a record's. A vocabulary whose
+    /// names on the wire, each keyed and ordered by instance name ([[instName]], which is injective
+    /// over what a type states on the wire, so one key is one definition). ONE worklist over the
+    /// wire fields of every declaration (an instantiation's own fields substituted before being
+    /// walked), a hosted slot's declared wire form included, because a record's instantiation
+    /// names a union's and a union's a record's. A vocabulary whose
     /// instantiations are infinitely many, or more than an enumeration reads, is a typed refusal in
     /// the sentence that says which ([[writtenUnread]]); every other is walked to its end.
     let private instantiated (idl: Idl) : Result<Instantiation list * RecordInstantiation list, CodegenError> =
@@ -1207,6 +1290,9 @@ module internal Decl =
             | TKeyedMap(k, v) ->
                 discover k
                 discover v
+            // A hosted slot's declared wire form is stated by the schema as that type, so an
+            // instantiation named only there is named too.
+            | THosted { Wire = Some wire } -> discover wire
             | TUnion(n, args) when not (List.isEmpty args) ->
                 args |> List.iter discover
                 let key = instName t

@@ -323,6 +323,45 @@ let tests =
                         (Decl.wireInstantiations (through "Phantom") root)
                         "and is not where that position holds nothing")
 
+                testCase "the walk of every reference written reads a hosted slot's declared wire form" (fun _ ->
+                    // The JSON schema states a hosted slot as its declared wire form, so an
+                    // instantiation written only there is one it names. `G<int>` is written nowhere
+                    // else, and `G` grows: there is no end to what the schema would have to name.
+                    let slot (wire: IdlType) =
+                        THosted
+                            { FSharp = "Held"
+                              Encode = "encodeHeld"
+                              Decode = "decodeHeld"
+                              Wire = Some wire
+                              Format = None
+                              Refusal = HostedRefusal.Sentence }
+
+                    let held (members: IdlField list) =
+                        vocabulary
+                            [ kind "K" [ f "h" (slot (TRecord("G", [ TInt ]))) Optional ] ]
+                            []
+                            [ record "G" [ "T" ] members ]
+
+                    let grows =
+                        held
+                            [ f "next" (TRecord("G", [ TList(TVar "T") ])) Optional
+                              f "v" (TVar "T") Optional ]
+
+                    Expect.isEmpty (Declare.errors grows) "the declaration check admits it"
+
+                    Expect.stringContains
+                        (match within 20.0 "Gen.jsonSchema" (fun () -> described (Gen.jsonSchema grows)) with
+                         | Error why -> why
+                         | Ok() -> "emitted")
+                        (sentence "record" "G" "G<'T>" "G<list<'T>>")
+                        "the growth is met through the wire form, and said"
+
+                    // The same holder over a declaration that does not grow is emitted, and names it.
+                    match Gen.jsonSchema (held [ f "v" (TVar "T") Optional ]) with
+                    | Ok text ->
+                        Expect.stringContains text "\"G_int\":" "the instantiation in the wire form is defined"
+                    | Error e -> failtestf "refused: %s" (CodegenError.describe e))
+
                 testCase "an enumeration stops at its count, and says the count" (fun _ ->
                     // FINITE, and enormous: each of twelve declarations names the next at two
                     // arguments, so the last is reached at 2^12 instantiations.

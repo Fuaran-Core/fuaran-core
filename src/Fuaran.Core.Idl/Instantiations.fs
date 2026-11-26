@@ -456,16 +456,13 @@ module internal Instantiations =
           Arguments = false
           Follows = fun _ -> true }
 
-    /// Every instantiation WRITTEN in a wire member, a reference inside an argument included; a
-    /// hosted slot's wire form is not read. The walk that names one definition per instantiation.
+    /// Every instantiation WRITTEN in a wire member, a reference inside an argument and one inside
+    /// a hosted slot's declared wire form included. The walk that names one definition per
+    /// instantiation.
     let written: Walk =
         { Members = List.filter (fun f -> f.Opt <> HostOnly)
           Arguments = true
-          Follows =
-            fun t ->
-                match t with
-                | THosted _ -> false
-                | _ -> true }
+          Follows = fun _ -> true }
 
     /// What a fold descends: a list, a map and a record, through every member of the record. A
     /// union is where a fold stops or is refused, so it is not looked inside.

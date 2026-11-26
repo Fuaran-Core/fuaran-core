@@ -504,3 +504,500 @@ let parameterisedRecords =
                   Expect.notEqual wrong original (what + ": the document was changed")
                   Expect.isError (Decode.decode idl wrong) (what + ": the interpreter refuses")
                   Expect.isFalse (evaluate schema wrong) (what + ": the schema refuses")) ]
+
+// ---------------------------------------------------------------------------
+// Phase 732 — the NAME a definition stated once per instantiation is filed under
+// (`Decl.instName`). Three properties are held here, over a family built to break each:
+//
+//   1. it is injective over what a type states on the wire: two instantiations share a name
+//      exactly where they state one definition (they differ only in a hosted slot's host type or
+//      codec, or in a function's signature);
+//   2. no instantiation is named as a declaration is, nor as another entry of the schema;
+//   3. it is a function of the type alone (true by construction: the function takes nothing else).
+//
+// The family holds declared names that read as something else (`a_b` beside `a` and `b`, a record
+// named `list`, `tuple2` or `Box_int`), tuples that differ only in where they nest, and hosted
+// slots that differ only in their format or their wire form. Every instantiation of it is then
+// held in ONE vocabulary, whose schema must parse, close, and admit what the interpreter writes.
+// ---------------------------------------------------------------------------
+
+module private InstanceNames =
+    open Fuaran.Core.Idl.Emit
+
+    let field (name: string) (t: IdlType) (opt: Optionality) : IdlField =
+        { Name = name
+          Type = t
+          Opt = opt
+          Aliases = []
+          Keyed = false
+          Presence = None
+          Annotations = Annotations.Empty }
+
+    let record (name: string) (pars: string list) (fields: IdlField list) : IdlRecord =
+        { Name = name
+          Params = pars
+          Fields = fields
+          Annotations = Annotations.Empty
+          Inline = false }
+
+    let hosted (host: string) (wire: IdlType option) (format: HostedFormat option) : IdlType =
+        THosted
+            { FSharp = host
+              Encode = "enc" + host
+              Decode = "dec" + host
+              Wire = wire
+              Format = format
+              Refusal = HostedRefusal.Sentence }
+
+    let box (t: IdlType) : IdlType = TRecord("Box", [ t ])
+    let pair (a: IdlType) (b: IdlType) : IdlType = TRecord("Pair", [ a; b ])
+    let opt (t: IdlType) : IdlType = TUnion("Opt", [ t ])
+
+    /// Plain records whose names read as a separator, an escape, a fixed word or an instantiation.
+    let plainNames: string list =
+        [ "a"
+          "b"
+          "c"
+          "a_b"
+          "b_c"
+          "a_"
+          "_b"
+          "a__b"
+          "a_0b"
+          "a0b"
+          "list"
+          "int"
+          "hosted"
+          "hostedAs"
+          "tuple2"
+          "closure"
+          "Node"
+          "_1list"
+          "_2T"
+          "Box_int"
+          "Box_a_b"
+          "Box_list_int"
+          "Pair_a_b"
+          "Pair_int_str"
+          "Opt_int" ]
+
+    let enumNames: string list = [ "tone"; "to_ne"; "str" ]
+
+    /// What a type states on the wire: a hosted slot is its wire form and format, and a function
+    /// is the one sentinel. Written apart from `Decl.instName`, which is held to it.
+    let rec wire (t: IdlType) : IdlType =
+        match t with
+        | THosted h -> hosted "" (h.Wire |> Option.map wire) h.Format
+        | TFn _ -> TClosure
+        | TList i -> TList(wire i)
+        | TMap i -> TMap(wire i)
+        | TSet i -> TSet(wire i)
+        | TTuple cs -> TTuple(List.map wire cs)
+        | TKeyedMap(k, v) -> TKeyedMap(wire k, wire v)
+        | TRecord(n, args) -> TRecord(n, List.map wire args)
+        | TUnion(n, args) -> TUnion(n, List.map wire args)
+        | other -> other
+
+    /// The arguments an instantiation is built at: every scalar, every declared name, hosted slots
+    /// that differ in one part each, and tuples and collections that differ in their nesting.
+    let leaves: IdlType list =
+        [ TStr
+          TInt
+          TBool
+          TFloat
+          TJson
+          TInt64
+          TDecimal
+          TBytes
+          TTimeOfDay
+          TDuration ]
+        @ (plainNames |> List.map (fun n -> TRecord(n, [])))
+        @ (enumNames |> List.map TEnum)
+        @ [ hosted "A" None None
+            hosted "B" None None
+            hosted "A" (Some TStr) None
+            hosted "B" (Some TStr) None
+            hosted "A" (Some TStr) (Some HostedFormat.Date)
+            hosted "A" (Some TStr) (Some HostedFormat.DateTime)
+            hosted "A" (Some TStr) (Some HostedFormat.Uuid)
+            hosted "A" (Some TInt) None
+            hosted "A" (Some(box TInt)) None
+            hosted "A" (Some(TList TStr)) None ]
+        @ [ TTuple [ TInt; TStr ]
+            TTuple [ TInt; TStr; TBool ]
+            TTuple [ TTuple [ TInt; TStr ]; TBool ]
+            TTuple [ TInt; TTuple [ TStr; TBool ] ]
+            TTuple [ TInt; TTuple [ TStr; TBool ]; TFloat ]
+            TTuple [ TInt; TTuple [ TStr; TBool; TFloat ] ]
+            TList TInt
+            TList(TList TInt)
+            TMap TInt
+            TMap(TList TInt)
+            TSet TInt
+            TKeyedMap(TInt, TStr)
+            TKeyedMap(TInt64, TList TInt) ]
+
+    /// A second level: a generic declaration applied to a leaf, as an argument.
+    let nested: IdlType list =
+        [ box TInt
+          box (TRecord("int", []))
+          box (TRecord("a", []))
+          box (TList TInt)
+          opt TInt
+          pair TInt TStr
+          pair (TRecord("a", [])) (TRecord("b", []))
+          TList(box TInt) ]
+
+    /// Every instantiation of the family: each generic declaration at every argument, and the
+    /// two-parameter one at every pair of a selection that holds each ambiguity.
+    let instantiations: IdlType list =
+        let arguments = leaves @ nested
+
+        let paired =
+            [ TInt; TStr; TList TInt ]
+            @ ([ "a"
+                 "b"
+                 "c"
+                 "a_b"
+                 "b_c"
+                 "a_"
+                 "_b"
+                 "list"
+                 "int"
+                 "Box_int"
+                 "Pair_a_b" ]
+               |> List.map (fun n -> TRecord(n, [])))
+            @ [ box TInt
+                pair TInt TStr
+                TTuple [ TInt; TStr ]
+                hosted "A" (Some TStr) (Some HostedFormat.Date) ]
+
+        (arguments |> List.collect (fun a -> [ box a; opt a ]))
+        @ [ for x in paired do
+                for y in paired do
+                    pair x y ]
+        |> List.distinct
+
+    let private kindOf (members: (string * IdlType) list) : IdlKind =
+        { Tag = "K"
+          Category = "probe"
+          Fields = members |> List.map (fun (n, t) -> field n t Optional)
+          Annotations = Annotations.Empty }
+
+    let private generics: IdlRecord list =
+        [ record "Box" [ "T" ] [ field "item" (TVar "T") Required ]
+          record "Pair" [ "A"; "B" ] [ field "x" (TVar "A") Required; field "y" (TVar "B") Required ] ]
+
+    /// A vocabulary of the three generic holders over `records` and `enums`, one kind of `members`.
+    let over (records: IdlRecord list) (enums: IdlEnum list) (members: (string * IdlType) list) : Idl =
+        { Kinds = [ kindOf members ]
+          Unions =
+            [ { Name = "Opt"
+                Params = [ "T" ]
+                Cases =
+                  [ { Tag = "Held"
+                      Fields = [ field "v" (TVar "T") Required ]
+                      Annotations = Annotations.Empty
+                      Hosted = None }
+                    { Tag = "Empty"
+                      Fields = []
+                      Annotations = Annotations.Empty
+                      Hosted = None } ]
+                Annotations = Annotations.Empty
+                TagRule = UnionTagRule.CaseName
+                Discrimination = UnionDiscrimination.Tagged } ]
+          Enums = enums
+          Records = generics @ records
+          Defaults = []
+          NodeFields = []
+          Ops = []
+          Wire = WireShape.Default
+          Harden = HardenPolicy.Undeclared
+          Contracts = [] }
+
+    /// The family in one vocabulary: each instantiation an optional member of the one kind.
+    let vocabulary: Idl =
+        over
+            (plainNames |> List.map (fun n -> record n [] [ field "n" TInt Required ]))
+            (enumNames |> List.map (fun n -> Declare.enumOf n [ "p"; "q" ]))
+            (instantiations |> List.mapi (fun i t -> sprintf "m%d" i, t))
+
+    let name (t: IdlType) : string = Decl.instName t
+
+    /// The declaration check's faults, as the sentences a failed expectation should show.
+    let faults (idl: Idl) : string list =
+        Declare.errors idl |> List.truncate 3 |> List.map _.Detail
+
+    /// [[evaluate]] with a `format` asserted: the validator reads it as an annotation otherwise,
+    /// and two hosted formats are then one schema.
+    let admits (schema: JsonSchema) (wire: string) : bool =
+        use doc = JsonDocument.Parse wire
+
+        let options =
+            EvaluationOptions(OutputFormat = OutputFormat.Flag, RequireFormatValidation = true)
+
+        (schema.Evaluate(doc.RootElement, options)).IsValid
+
+    let isWord (n: string) : bool = Decl.isNameWord n
+
+[<Tests>]
+let instanceNames =
+    let names (ts: IdlType list) =
+        ts |> List.map InstanceNames.name |> List.distinct
+
+    let r (n: string) = TRecord(n, [])
+    let formatted = InstanceNames.hosted "A" (Some TStr)
+
+    let doc (m: string) (value: string) =
+        sprintf """{"id":"n","kind":{"$type":"K","%s":%s}}""" m value
+
+    testList
+        "Phase 732 — a definition's name is injective, and never a declaration's"
+        [ testCase "two instantiations share a name exactly where they state one definition" (fun _ ->
+              let family =
+                  InstanceNames.instantiations @ InstanceNames.leaves @ InstanceNames.nested
+
+              Expect.isGreaterThan (List.length InstanceNames.instantiations) 300 "the family is not a handful"
+
+              let byName = family |> List.groupBy InstanceNames.name
+              let byWire = family |> List.groupBy InstanceNames.wire
+
+              for name, group in byName do
+                  Expect.equal
+                      (group |> List.map InstanceNames.wire |> List.distinct |> List.length)
+                      1
+                      (sprintf "'%s' names one type on the wire" name)
+
+              for _, group in byWire do
+                  Expect.equal
+                      (names group)
+                      [ InstanceNames.name (List.head group) ]
+                      "one type on the wire has one name"
+
+              // The merge is met: the family holds types that differ only off the wire.
+              Expect.isLessThan
+                  (List.length byWire)
+                  (List.length (List.distinct family))
+                  "some of the family differ only in the host"
+
+              Expect.equal
+                  (InstanceNames.name (InstanceNames.box (InstanceNames.hosted "A" (Some TStr) None)))
+                  (InstanceNames.name (InstanceNames.box (InstanceNames.hosted "B" (Some TStr) None)))
+                  "a hosted slot is named by its wire form, whatever its host type")
+
+          testCase "each pair of types the old spelling named alike has two names" (fun _ ->
+              for what, one, other, expected in
+                  [ "two hosted formats",
+                    InstanceNames.box (formatted (Some HostedFormat.Date)),
+                    InstanceNames.box (formatted (Some HostedFormat.Uuid)),
+                    ("Box_hostedDate_str", "Box_hostedUuid_str")
+                    "a hosted slot with and without a wire form",
+                    InstanceNames.box (InstanceNames.hosted "A" None None),
+                    InstanceNames.box (formatted None),
+                    ("Box_hosted", "Box_hostedAs_str")
+                    "a tuple's arity",
+                    InstanceNames.box (TTuple [ TInt; TTuple [ TStr; TBool ]; TFloat ]),
+                    InstanceNames.box (TTuple [ TInt; TTuple [ TStr; TBool; TFloat ] ]),
+                    ("Box_tuple3_int_tuple2_str_bool_float", "Box_tuple2_int_tuple3_str_bool_float")
+                    "a `_` in a declared name",
+                    InstanceNames.pair (r "a_b") (r "c"),
+                    InstanceNames.pair (r "a") (r "b_c"),
+                    ("Pair_a_0b_c", "Pair_a_b_0c")
+                    "an instantiation beside a declaration of its old name",
+                    InstanceNames.box TInt,
+                    r "Box_int",
+                    ("Box_int", "Box_0int")
+                    "a declaration named as a fixed word",
+                    InstanceNames.pair (TList(r "list")) TInt,
+                    InstanceNames.pair (r "list") (TList TInt),
+                    ("Pair_list__1list_int", "Pair__1list_list_int")
+                    "a leading and a trailing `_`",
+                    InstanceNames.pair (r "a_") (r "b"),
+                    InstanceNames.pair (r "a") (r "_b"),
+                    ("Pair_a_0_b", "Pair_a__0b") ] do
+                  Expect.equal (InstanceNames.name one, InstanceNames.name other) expected what
+
+              // A type parameter is never a declaration either.
+              Expect.equal (InstanceNames.name (InstanceNames.box (TVar "T"))) "Box__2T" "a parameter"
+              Expect.equal (InstanceNames.name (InstanceNames.box (TEnum "T"))) "Box_T" "an enum of its name")
+
+          testCase "a name that holds no `_` and is no fixed word is the declaration's own, as it always was" (fun _ ->
+              for n in [ "Binding"; "SelectOption"; "K"; "a0b"; "Tuple2"; "tuple"; "tupleX"; "Hosted" ] do
+                  Expect.isFalse (InstanceNames.isWord n) (n + " is no fixed word")
+                  Expect.equal (InstanceNames.name (r n)) n n
+                  Expect.equal (InstanceNames.name (TEnum n)) n (n + ", an enum")
+
+              // Every word the name of a type that is not a declaration opens with is a fixed word.
+              for t in InstanceNames.leaves @ [ TNode; TKind; TOp; TOpaque; TClosure; TTuple [] ] do
+                  match t with
+                  | TRecord _
+                  | TEnum _ -> ()
+                  | _ ->
+                      let word = (InstanceNames.name t).Split('_')[0]
+                      Expect.isTrue (InstanceNames.isWord word) (sprintf "'%s' is a fixed word" word))
+
+          testCase "no instantiation is named as a declaration or as another entry of the schema is" (fun _ ->
+              let declared =
+                  (InstanceNames.plainNames |> List.map r)
+                  @ (InstanceNames.enumNames |> List.map TEnum)
+                  @ [ r "K"; TNode; TKind; TOp ]
+                  |> List.map InstanceNames.name
+
+              Expect.equal (List.distinct declared) declared "the declarations' own names are distinct"
+
+              let instantiated = names InstanceNames.instantiations
+
+              Expect.isEmpty
+                  (Set.intersect (Set.ofList declared) (Set.ofList instantiated) |> Set.toList)
+                  "no instantiation's name is a declaration's"
+
+              for n in declared @ instantiated do
+                  Expect.isTrue
+                      (n
+                       |> Seq.forall (fun c ->
+                           (c >= 'a' && c <= 'z')
+                           || (c >= 'A' && c <= 'Z')
+                           || (c >= '0' && c <= '9')
+                           || c = '_'))
+                      (sprintf "'%s' needs no escape in a `$ref`" n))
+
+          testCase "the family in one vocabulary: the schema parses, closes, and has one entry a name" (fun _ ->
+              let idl = InstanceNames.vocabulary
+              Expect.equal (InstanceNames.faults idl) [] "the vocabulary is well-formed"
+
+              let text = schemaOf idl
+              // `Json.parse` refuses a member name repeated in one object.
+              let defs = parsed text |> defsOf |> Map.keys |> Set.ofSeq
+              assertClosed "the family" text
+
+              for t in InstanceNames.instantiations do
+                  Expect.isTrue (defs.Contains(InstanceNames.name t)) (InstanceNames.name t + " is defined")
+
+              for n in InstanceNames.plainNames do
+                  Expect.isTrue (defs.Contains(InstanceNames.name (r n))) (sprintf "the record '%s' is defined" n)
+
+              let schema = build text
+
+              let written =
+                  match Sample.trySampleNodes idl [ "K" ] 732 12 with
+                  | Error fault -> failtestf "the sampler faulted: %s" fault.Describe
+                  | Ok nodes ->
+                      nodes
+                      |> List.map (fun v ->
+                          match Encode.encode idl v with
+                          | Ok bytes -> bytes
+                          | Error e -> failtestf "the interpreter refused its own sample: %s" e)
+
+              Expect.isGreaterThan (written |> List.distinct |> List.length) 6 "documents were drawn"
+
+              for d in written do
+                  Expect.isTrue
+                      (InstanceNames.admits schema d)
+                      (sprintf "the schema admits %s" (d.Substring(0, min 120 d.Length))))
+
+          testCase
+              "each such pair in one vocabulary: a document is admitted at its own member and refused at the other"
+              (fun _ ->
+                  let plain (n: string) =
+                      InstanceNames.record n [] [ InstanceNames.field "other" TStr Required ]
+
+                  for what, idl, one, other in
+                      [ "two hosted formats",
+                        InstanceNames.over
+                            []
+                            []
+                            [ "p", InstanceNames.box (formatted (Some HostedFormat.Date))
+                              "q", InstanceNames.box (formatted (Some HostedFormat.Uuid)) ],
+                        """{"item":"2024-01-02"}""",
+                        """{"item":"123e4567-e89b-12d3-a456-426614174000"}"""
+                        "a tuple's arity",
+                        InstanceNames.over
+                            []
+                            []
+                            [ "p", InstanceNames.box (TTuple [ TInt; TTuple [ TStr; TBool ]; TFloat ])
+                              "q", InstanceNames.box (TTuple [ TInt; TTuple [ TStr; TBool; TFloat ] ]) ],
+                        """{"item":[1,["a",true],0.5]}""",
+                        """{"item":[1,["a",true,0.5]]}"""
+                        "a `_` in a declared name",
+                        InstanceNames.over
+                            []
+                            [ Declare.enumOf "a_b" [ "ab" ]
+                              Declare.enumOf "c" [ "c" ]
+                              Declare.enumOf "a" [ "a" ]
+                              Declare.enumOf "b_c" [ "bc" ] ]
+                            [ "p", InstanceNames.pair (TEnum "a_b") (TEnum "c")
+                              "q", InstanceNames.pair (TEnum "a") (TEnum "b_c") ],
+                        """{"x":"ab","y":"c"}""",
+                        """{"x":"a","y":"bc"}"""
+                        "an instantiation beside a declaration of its old name",
+                        InstanceNames.over
+                            [ plain "Box_float" ]
+                            []
+                            [ "p", InstanceNames.box TFloat; "q", r "Box_float" ],
+                        """{"item":1.5}""",
+                        """{"other":"o"}"""
+                        "an instantiation beside one over a declaration of its argument's old name",
+                        InstanceNames.over
+                            [ plain "Box_int" ]
+                            []
+                            [ "p", InstanceNames.pair (InstanceNames.box TInt) TInt
+                              "q", InstanceNames.pair (r "Box_int") TInt ],
+                        """{"x":{"item":1},"y":2}""",
+                        """{"x":{"other":"o"},"y":2}""" ] do
+                      Expect.equal (InstanceNames.faults idl) [] (what + ": well-formed")
+                      let text = schemaOf idl
+                      assertClosed what text
+                      let schema = build text
+
+                      for m, own, foreign in [ "p", one, other; "q", other, one ] do
+                          Expect.equal
+                              (Decode.decode idl (doc m own) |> Result.bind (Encode.encode idl))
+                              (Ok(doc m own))
+                              (sprintf "%s: the interpreter reads and re-writes `%s` at %s" what own m)
+
+                          Expect.isTrue
+                              (InstanceNames.admits schema (doc m own))
+                              (sprintf "%s: `%s` is admitted at %s" what own m)
+
+                          Expect.isError
+                              (Decode.decode idl (doc m foreign))
+                              (sprintf "%s: the interpreter refuses `%s` at %s" what foreign m)
+
+                          Expect.isFalse
+                              (InstanceNames.admits schema (doc m foreign))
+                              (sprintf "%s: `%s` is refused at %s" what foreign m))
+
+          testCase "an instantiation named only in a hosted slot's wire form has its definition" (fun _ ->
+              let slot (wire: IdlType) =
+                  InstanceNames.hosted "A" (Some wire) None
+
+              let idl =
+                  InstanceNames.over
+                      []
+                      []
+                      [ "h", slot (InstanceNames.box TInt)
+                        "g", InstanceNames.box (slot (InstanceNames.box TStr)) ]
+
+              Expect.equal (InstanceNames.faults idl) [] "well-formed"
+              let text = schemaOf idl
+              assertClosed "a hosted wire form" text
+              let defs = parsed text |> defsOf |> Map.keys |> Set.ofSeq
+
+              Expect.equal
+                  (Set.intersect defs (set [ "Box_int"; "Box_str"; "Box_hostedAs_Box_str" ]))
+                  (set [ "Box_int"; "Box_str"; "Box_hostedAs_Box_str" ])
+                  "the instantiation in each wire form, and the holder named by it"
+
+              let schema = build text
+
+              for m, good, bad in
+                  [ "h", """{"item":1}""", """{"item":"x"}"""
+                    "g", """{"item":{"item":"x"}}""", """{"item":{"item":1}}""" ] do
+                  Expect.equal
+                      (Decode.decode idl (doc m good) |> Result.bind (Encode.encode idl))
+                      (Ok(doc m good))
+                      "the interpreter reads the wire form"
+
+                  Expect.isTrue (InstanceNames.admits schema (doc m good)) (good + " is admitted")
+                  Expect.isError (Decode.decode idl (doc m bad)) "the interpreter refuses another type"
+                  Expect.isFalse (InstanceNames.admits schema (doc m bad)) (bad + " is refused")) ]

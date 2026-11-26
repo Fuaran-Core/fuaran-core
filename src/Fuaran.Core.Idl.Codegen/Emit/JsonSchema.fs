@@ -26,11 +26,16 @@ module internal JsonSchema =
 
     /// The `$defs` NAME of a type: its instance name in the resolution ([[Decl.instName]]) —
     /// for a non-generic declaration its own name, for an instantiated generic union or record
-    /// the name plus its mangled arguments (`Binding_float`). The instantiation walk names by this same
+    /// the name and then its arguments' (`Binding_float`). The instantiation walk names by this same
     /// function, so the set of names EMITTED and the set REFERENCED are computed one way, and a
     /// dangling `$ref` (an ERROR to a strict validator, never a permissive skip) cannot arise
     /// from the two disagreeing.
     let defName (t: IdlType) : string = Decl.instName t
+
+    /// The `$defs` NAME of a definition filed under a declared name that is not a type's (a kind's
+    /// tag, an op's): the name as an instance name spells it ([[Decl.declaredName]]), so that no
+    /// instantiation's name is one of them. It is the name itself wherever the name holds no `_`.
+    let declDefName (name: string) : string = Decl.declaredName name
 
     // -----------------------------------------------------------------------
     // Phase 704 — a declaration's `doc` annotation (Phase 255) is the JSON-Schema `description`: a
@@ -173,10 +178,12 @@ module internal JsonSchema =
                   JArr
                       [ JObj [ "type", JStr "number" ]
                         JObj [ "enum", JArr [ JStr "NaN"; JStr "Infinity"; JStr "-Infinity" ] ] ] ]
-        | TEnum n -> JObj [ "$ref", JStr("#/$defs/" + n) ]
+        | TEnum _
         // fuaran#1068 — an instantiated generic union names ITS OWN definition. A
         // non-generic one is `defName`'s identity case, so this line is unchanged
         // for every union that has no parameters. Phase 732 — a record likewise.
+        // Phase 732 — and an enum is named through `defName` too: every definition is filed
+        // under the one spelling, so an instantiation's name is never a declaration's.
         | TUnion _
         | TRecord _ -> JObj [ "$ref", JStr("#/$defs/" + defName t) ]
         // Reached only for a parameter no instantiation bound — a declaration read
@@ -290,7 +297,7 @@ module internal JsonSchema =
 
         let enumDef (e: IdlEnum) =
             // The `enum` array is a WIRE contract — wire strings, not host case names.
-            e.Name,
+            defName (TEnum e.Name),
             definitionDoc e.Annotations (JObj [ "type", JStr "string"; "enum", JArr(e.WireCases |> List.map JStr) ])
 
         /// A declaration's fields under a substitution for its type parameters (empty for a
@@ -325,7 +332,8 @@ module internal JsonSchema =
             // A generic union's doc is every instantiation's: each is the union at one argument.
             name, definitionDoc u.Annotations (JObj [ "oneOf", JArr(bare @ tagged) ])
 
-        let unionDef (u: IdlUnion) = unionDefWith Map.empty u.Name u
+        let unionDef (u: IdlUnion) =
+            unionDefWith Map.empty (defName (TUnion(u.Name, []))) u
 
         // ── fuaran#1068: the instantiations of every GENERIC union ─────────────
         //
@@ -347,7 +355,8 @@ module internal JsonSchema =
         let recordDefWith (subst: Map<string, IdlType>) (name: string) (r: IdlRecord) =
             name, definitionDoc r.Annotations (recordSchema idl (fieldsAt subst r.Fields))
 
-        let recordDef (r: IdlRecord) = recordDefWith Map.empty r.Name r
+        let recordDef (r: IdlRecord) =
+            recordDefWith Map.empty (defName (TRecord(r.Name, []))) r
 
         // Phase 732 — a generic record is emitted as a generic union is: once per instantiation
         // the vocabulary names, under the instance name `schemaOf` references, and never under
@@ -361,7 +370,7 @@ module internal JsonSchema =
 
         // A kind and an op are both an `IdlKind`, defined the same way.
         let kindDef (k: IdlKind) =
-            k.Tag, definitionDoc k.Annotations (objectSchema idl idl.Wire.Discriminator k.Tag k.Fields)
+            declDefName k.Tag, definitionDoc k.Annotations (objectSchema idl idl.Wire.Discriminator k.Tag k.Fields)
 
         // Phase 511 — the node envelope from its layout: one object carrying `id`, the kind under
         // its key when the kind is nested, and the declared envelope members (fuaran#690: optional by
@@ -402,7 +411,12 @@ module internal JsonSchema =
         // schema, which has always carried a `NodeKind` definition.
         let nodeKindDef =
             "NodeKind",
-            JObj [ "oneOf", JArr(decl.Kinds |> List.map (fun k -> JObj [ "$ref", JStr("#/$defs/" + k.Tag) ])) ]
+            JObj
+                [ "oneOf",
+                  JArr(
+                      decl.Kinds
+                      |> List.map (fun k -> JObj [ "$ref", JStr("#/$defs/" + declDefName k.Tag) ])
+                  ) ]
 
         /// The op alternation. Absent when the domain declares no ops, so an
         /// op-free IDL's schema is exactly what it was.
@@ -412,7 +426,12 @@ module internal JsonSchema =
             else
                 (idl.Ops |> List.map kindDef)
                 @ [ "TreeOp",
-                    JObj [ "oneOf", JArr(idl.Ops |> List.map (fun o -> JObj [ "$ref", JStr("#/$defs/" + o.Tag) ])) ] ]
+                    JObj
+                        [ "oneOf",
+                          JArr(
+                              idl.Ops
+                              |> List.map (fun o -> JObj [ "$ref", JStr("#/$defs/" + declDefName o.Tag) ])
+                          ) ] ]
 
         // The wire has TWO roots once ops are declared (`WIRE_FORMAT.md` §3.4) —
         // a payload is a Node or a TreeOp. They are distinguishable on structure
