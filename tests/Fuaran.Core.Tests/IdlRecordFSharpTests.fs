@@ -70,44 +70,74 @@ let private handler: IdlType =
 
 /// Every position a type can hold another in, beside the list and the map the predicates always
 /// descended: what it is, the type holding `inner` there, and whether the declaration check admits
-/// a hosted slot or a function there (a set's element and a keyed map's key must be orderable).
+/// a hosted slot or a function there (a set's element and a keyed map's key must be orderable). A
+/// generic record's and a generic union's argument are positions too ([[carriers]]).
 let private holdings (inner: IdlType) : (string * IdlType * bool) list =
     [ "a tuple's component", TTuple [ inner; TInt ], true
       "a keyed map's value", TKeyedMap(TInt, inner), true
       "a set's element", TSet inner, false
-      "a keyed map's key", TKeyedMap(inner, TInt), false ]
+      "a keyed map's key", TKeyedMap(inner, TInt), false
+      "a generic record's argument", TRecord("Lab", [ inner ]), true
+      "a generic union's argument", TUnion("Pick", [ inner ]), true ]
+
+/// `vocabulary kinds` with the two generic declarations [[holdings]] applies, each holding its
+/// parameter in a member.
+let private carriers (kinds: IdlKind list) : Idl =
+    { vocabulary kinds with
+        Records =
+            [ { Name = "Lab"
+                Params = [ "T" ]
+                Fields = [ f "label" TStr Required; f "value" (TVar "T") Required ]
+                Annotations = Annotations.Empty
+                Inline = false } ]
+        Unions =
+            [ { Name = "Pick"
+                Params = [ "T" ]
+                Cases =
+                  [ { Tag = "One"
+                      Fields = [ f "v" (TVar "T") Required ]
+                      Annotations = Annotations.Empty
+                      Hosted = None } ]
+                Annotations = Annotations.Empty
+                TagRule = UnionTagRule.CaseName
+                Discrimination = UnionDiscrimination.Tagged } ] }
 
 [<Tests>]
 let predicateTests =
     testList
         "Phase 732 — the vocabulary-wide predicates descend every type"
-        [ testCase "a hosted slot held in a tuple, a set or a keyed map has its helpers emitted" (fun _ ->
-              for where, t, admitted in holdings hosted do
-                  let idl = vocabulary [ kind "K" [ f "held" t Required ] ]
+        [ testCase
+              "a hosted slot held in a tuple, a set, a keyed map or a generic's argument has its helpers emitted"
+              (fun _ ->
+                  for where, t, admitted in holdings hosted do
+                      let idl = carriers [ kind "K" [ f "held" t Required ] ]
 
-                  Expect.equal
-                      (List.isEmpty (Declare.errors idl))
-                      admitted
-                      (sprintf "%s: whether the declaration check admits it" where)
+                      Expect.equal
+                          (List.isEmpty (Declare.errors idl))
+                          admitted
+                          (sprintf "%s: whether the declaration check admits it" where)
 
-                  let src = emitted (Gen.fsharpModule "Probe" idl [ "K" ])
+                      let src = emitted (Gen.fsharpModule "Probe" idl [ "K" ])
 
-                  Expect.stringContains src "dHosted " (sprintf "%s: the decoder reads the slot through dHosted" where)
+                      Expect.stringContains
+                          src
+                          "dHosted "
+                          (sprintf "%s: the decoder reads the slot through dHosted" where)
 
-                  Expect.stringContains src "let private dHosted " (sprintf "%s: and the module defines it" where)
+                      Expect.stringContains src "let private dHosted " (sprintf "%s: and the module defines it" where)
 
-                  Expect.stringContains
-                      src
-                      "let private dFormat "
-                      (sprintf "%s: and the format check the slot declares" where))
+                      Expect.stringContains
+                          src
+                          "let private dFormat "
+                          (sprintf "%s: and the format check the slot declares" where))
 
           testCase
-              "a function over the message held in a tuple, a set or a keyed map makes its holder generic"
+              "a function over the message held in a tuple, a set, a keyed map or a generic's argument makes its holder generic"
               (fun _ ->
                   for where, t, admitted in holdings handler do
                       // `Plain` holds a node (a keyed map's value may be one), so it is generic when `K` is.
                       let idl =
-                          vocabulary
+                          carriers
                               [ kind "K" [ f "held" t Required ]
                                 kind "Plain" [ f "children" (TKeyedMap(TInt, TNode)) Required ] ]
 

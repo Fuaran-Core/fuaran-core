@@ -222,18 +222,15 @@ let backends (idl: Idl) : (string * Result<unit, string>) list =
         |> List.map (fun n -> n, "Boxed.Host." + n)
         |> Map.ofList
 
+    let codecOnly: CodecOnly =
+        { Roots = idl.Records |> List.filter (fun r -> not r.Inline) |> List.map _.Name
+          HostTypes = hostTypes }
+
     [ "fsharpTypes", describe (Gen.fsharpTypes idl)
       "fsharpModule", describe (Gen.fsharpModule "Boxed.Generated" idl tags)
       "fsharpModuleDerived", describe (Gen.fsharpModuleDerived GenSupport.Empty [] "Boxed.Generated" idl tags)
-      "fsharpCodecModule",
-      describe (
-          Gen.fsharpCodecModule
-              GenSupport.Empty
-              { Roots = idl.Records |> List.filter (fun r -> not r.Inline) |> List.map _.Name
-                HostTypes = hostTypes }
-              "Boxed.Codec"
-              idl
-      )
+      "fsharpCodecModule", describe (Gen.fsharpCodecModule GenSupport.Empty codecOnly "Boxed.Codec" idl)
+      "fsharpCodecModuleWith", describe (Gen.fsharpCodecModuleWith GenSupport.Empty codecOnly [] "Boxed.Codec" idl)
       "fsharpValue", describe (Gen.fsharpValue idl TStr (VStr "x"))
       "typescriptModule", describe (Gen.typescriptModule idl tags)
       "typescriptModuleDerived", describe (Gen.typescriptModuleDerived [] idl tags)
@@ -527,10 +524,7 @@ let tests =
           testCase "every backend entry and both schema entries emit a parameterised record" (fun _ ->
               let emitting = backends boxed
 
-              Expect.equal
-                  (List.length emitting)
-                  12
-                  "the five F# entries, the five TypeScript ones and the two F* ones"
+              Expect.equal (List.length emitting) 13 "the six F# entries, the five TypeScript ones and the two F* ones"
 
               for entry, answer in emitting @ schemas boxed do
                   Expect.equal answer (Ok()) (sprintf "%s emits the parameterised records" entry))
@@ -587,7 +581,7 @@ let tests =
                       asked (what + ", " + way) sentence idl
 
               // And at a contract method's argument, which no kind reaches.
-              for what, held in [ "union", TUnion("Maybe", []); "record", TRecord("Box", []) ] do
+              for what, name, held in [ "union", "Maybe", TUnion("Maybe", []); "record", "Box", TRecord("Box", []) ] do
                   let idl =
                       { boxed with
                           Contracts =
@@ -603,9 +597,52 @@ let tests =
                                                     |> List.truncate 1
                                                     |> List.map (fun x -> { x with Type = held }) }) } ] }
 
-                  asked (what + " at a method's argument") (sprintf "a reference applying %s '" what) idl
+                  asked
+                      (what + " at a method's argument")
+                      (sprintf "a reference applying %s '%s' to 0 type argument(s) where it declares 1" what name)
+                      idl
 
               Expect.equal (List.ofSeq atFault) [] "every entry refuses every misapplied reference, by name")
+
+          testCase
+              "the value entries print a parameterised record's value at its instantiation, and refuse one misapplied in the type handed them"
+              (fun _ ->
+                  // `backends` asks the value entries of a string, so that they answer for the
+                  // vocabulary's own references; here they are asked of a record.
+                  let held = TRecord("Box", [ TInt ])
+                  let value = VRecord [ "value", VInt 7 ]
+
+                  match Gen.fsharpValue boxed held value, Gen.typescriptValue boxed held value with
+                  | Ok fs, Ok ts ->
+                      Expect.stringContains fs "Value = 7" "F#: the member at the argument"
+                      Expect.stringContains ts "value: 7" "TypeScript: the member at the argument"
+                  | other -> failtestf "a value of Box<int>: %A" other
+
+                  // The member is read at the argument: a string there is not a value of Box<int>.
+                  for what, answer in
+                      [ "F#", Gen.fsharpValue boxed held (VRecord [ "value", VStr "x" ])
+                        "TypeScript", Gen.typescriptValue boxed held (VRecord [ "value", VStr "x" ]) ] do
+                      match answer with
+                      | Error e ->
+                          Expect.stringContains
+                              (CodegenError.describe e)
+                              "a value that does not match IDL type TInt"
+                              (what + ": refused at the argument")
+                      | Ok src -> failtestf "%s printed %s" what src
+
+                  for args in [ []; [ TInt; TStr ] ] do
+                      let misapplied = TRecord("Box", args)
+
+                      for what, answer in
+                          [ "F#", Gen.fsharpValue boxed misapplied value
+                            "TypeScript", Gen.typescriptValue boxed misapplied value ] do
+                          match answer with
+                          | Error e ->
+                              Expect.stringContains
+                                  (CodegenError.describe e)
+                                  (sprintf "record 'Box' applied to %d type arguments" args.Length)
+                                  (what + ": the handed type is refused, naming the record and the count")
+                          | Ok src -> failtestf "%s printed %s at %A" what src misapplied)
 
           testCase
               "a declaration whose recursion grows its type argument: every entry answers, and each as pinned"
@@ -657,6 +694,7 @@ let tests =
                             "fsharpModule", "emits"
                             "fsharpModuleDerived", "emits"
                             "fsharpCodecModule", "emits"
+                            "fsharpCodecModuleWith", "emits"
                             "fsharpValue", "emits"
                             "typescriptModule", "emits"
                             "typescriptModuleDerived", "emits"

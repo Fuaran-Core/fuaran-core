@@ -387,6 +387,24 @@ let tests =
                     | Ok all -> Expect.equal all.Length 2047 "a chain of eleven is read to its end"
                     | Error why -> failtestf "a chain of eleven: %s" why
 
+                    // The count is of GENERIC instantiations: 2^12 - 1 of them is under it, and two
+                    // declarations applied to no argument beside them are not counted.
+                    let twelve = chain 12 plain
+
+                    let besidePlain =
+                        { twelve with
+                            Records =
+                                twelve.Records
+                                @ [ record "P1" [] [ f "w" TInt Required ]
+                                    record "P2" [] [ f "w" TInt Required ] ] }
+
+                    match
+                        within 30.0 "the wire reach" (fun () ->
+                            Decl.wireInstantiations besidePlain (root @ [ TRecord("P1", []); TRecord("P2", []) ]))
+                    with
+                    | Ok all -> Expect.equal all.Length 4097 "4095 generic instantiations and two plain declarations"
+                    | Error why -> failtestf "a chain of twelve beside two plain declarations: %s" why
+
                     let over = chain 13 plain
 
                     Expect.equal
@@ -411,6 +429,7 @@ let tests =
                           "fsharpModule", "emits"
                           "fsharpModuleDerived", "emits"
                           "fsharpCodecModule", "emits"
+                          "fsharpCodecModuleWith", "emits"
                           "fsharpValue", "emits"
                           "typescriptModule", "emits"
                           "typescriptModuleDerived", "emits"
@@ -527,6 +546,7 @@ let tests =
                               "fsharpModule", "emits"
                               "fsharpModuleDerived", "emits"
                               "fsharpCodecModule", "emits"
+                              "fsharpCodecModuleWith", "emits"
                               "fsharpValue", "emits"
                               "typescriptModule", "emits"
                               "typescriptModuleDerived", "emits"
@@ -780,7 +800,53 @@ let tests =
                                 why
                                 ("a fold over 'Tree' through " + sentence "record" "R" "R<'T>" "R<Opt<'T>>")
                                 (host + ": refused, the argument growing inside a union's")
-                        | Ok() -> failtestf "%s: the fold was emitted" host) ]
+                        | Ok() -> failtestf "%s: the fold was emitted" host)
+
+                testCase
+                    "a fold is refused for a recursion through another union met only as a record's argument"
+                    (fun _ ->
+                        // `Tree` holds itself in a list, and holds `Other`, whose case holds `Lab<Tree>`.
+                        // The fold does not look inside `Other`, so every `Tree` behind it would go
+                        // unvisited: the recursion through `Other` is found through `Lab`'s argument.
+                        let idl (via: IdlType) =
+                            vocabulary
+                                [ kind "K" [ f "tree" (TUnion("Tree", [])) Required ] ]
+                                [ union
+                                      "Tree"
+                                      []
+                                      [ case "TLeaf" [ f "n" TInt Required ]
+                                        case
+                                            "TBranch"
+                                            [ f "o" (TUnion("Other", [])) Optional
+                                              f "kids" (TList(TUnion("Tree", []))) Required ] ]
+                                  union "Other" [] [ case "Stop" []; case "Go" [ f "via" via Required ] ] ]
+                                [ record "Lab" [ "T" ] [ f "label" TStr Required; f "value" (TVar "T") Required ] ]
+
+                        let fold (idl: Idl) =
+                            [ "F#",
+                              described (
+                                  Gen.fsharpModuleDerived
+                                      GenSupport.Empty
+                                      [ Derivation.Fold "Tree" ]
+                                      "Probe"
+                                      idl
+                                      [ "K" ]
+                              )
+                              "TypeScript",
+                              described (Gen.typescriptModuleDerived [ Derivation.Fold "Tree" ] idl [ "K" ]) ]
+
+                        for host, answer in fold (idl (TRecord("Lab", [ TUnion("Tree", []) ]))) do
+                            match answer with
+                            | Error why ->
+                                Expect.stringContains
+                                    why
+                                    "a fold over 'Tree', which recurses through the union 'Other'"
+                                    (host + ": refused, naming the union")
+                            | Ok() -> failtestf "%s: the fold was emitted" host
+
+                        // The control: `Lab` applied to what reaches no `Tree`.
+                        for host, answer in fold (idl (TRecord("Lab", [ TInt ]))) do
+                            Expect.isOk answer (host + ": Other reaches no Tree, and the fold is emitted")) ]
 
           testList
               "the default rule"
