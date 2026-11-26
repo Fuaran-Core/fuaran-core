@@ -346,8 +346,17 @@ let private encFloat (f: float) : JVal =
                     // Phase 656 — a TUPLE default is tested by pattern-match for the same reason: a
                     // component's literal is a legal pattern ([[LiteralTraversal]] prints its items as
                     // a union literal's members), and a component that reaches a closure has no `=`.
+                    //
+                    // Phase 732 — a default of a record APPLIED TO ARGUMENTS is tested by
+                    // pattern-match too. `=` asks equality of the record's type, which holds only
+                    // where every argument has it: inside a generic encoder the argument is the
+                    // holder's own parameter (`Outer<'T>` holding `Tagged<'T>`: FS0043, a missing
+                    // `when 'T: equality`), and a closed argument that reaches a closure has none
+                    // either. The record literal is a legal pattern ([[fsDefaultLit]]), and a
+                    // match asks nothing of the argument.
                     | TUnion _
-                    | TTuple _ -> sprintf "(match %s with | %s -> None | _ -> %s)" src dexpr present
+                    | TTuple _
+                    | TRecord(_, _ :: _) -> sprintf "(match %s with | %s -> None | _ -> %s)" src dexpr present
                     // fuaran#1080 — a LIST default is tested with `List.isEmpty`, never with
                     // `= []`, and for the same reason the union arm above exists: an element
                     // type that reaches a closure carries no equality, so `SrcSetEntry`

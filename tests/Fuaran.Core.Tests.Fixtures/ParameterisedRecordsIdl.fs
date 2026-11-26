@@ -421,3 +421,122 @@ let flatRefused: (string * string) list =
       """{"kind":"Outline","id":"o","tree":{"kind":"Branch","kids":[{"name":"l","child":"x"}]}}"""
       "a generic record at a declared default, a member of the authored value at another argument's type",
       """{"kind":"Outline","id":"o","tree":{"kind":"Leaf","n":7},"trail":{"tag":"t","items":[1]}}""" ]
+
+// ---------------------------------------------------------------------------
+// A declared default that is a generic record's literal, where the member's type applies the record
+// to an argument the encoder cannot ask equality of. `Tagged<T>` is the record; its literal is the
+// default of
+//
+//   * a member of a generic record ............ `Outer<T>.inner: Tagged<T>`
+//   * a member of a generic union's case ...... `Pick<T>.Held.inner: Tagged<T>`
+//   * a member of an inline generic record .... `Laid<T>.inner: Tagged<T>`, laid on a kind
+//                                               (`Defaults.laid: Laid<string>`) and on a generic case
+//                                               (`Pick<T>.Carried.payload: Laid<T>`)
+//   * a member at a closed argument that carries no equality in F#
+//                                               `Defaults.format: Tagged<Format>`, `Format` holding a
+//                                               function
+//
+// In the first three the argument is the holder's own parameter, so the generated encoder is generic
+// in it. `Twin<T>` is declared after `Tagged<T>` with members of the same names and other types, so
+// the literal must be read at the member's type and not at the last record that declares the names.
+// `ParameterisedRecordsDefaultsGenerated.fs` is the F# emitted for the vocabulary, committed and
+// compiled by the suite.
+// ---------------------------------------------------------------------------
+
+let private tagged (t: IdlType) : IdlType = TRecord("Tagged", [ t ])
+
+let private atDefault: Optionality =
+    OmitDefault(VRecord [ "tag", VStr ""; "items", VList [] ])
+
+/// The vocabulary of the header: one kind reaching every holder.
+let defaulted: Idl =
+    { Kinds =
+        [ kind
+              "Defaults"
+              [ field "outer" (TRecord("Outer", [ TFloat ])) Required
+                field "choice" (TUnion("Pick", [ TInt ])) Optional
+                field "laid" (TRecord("Laid", [ TStr ])) Required
+                field "format" (tagged (TUnion("Format", []))) atDefault
+                field "twin" (TRecord("Twin", [ TStr ])) Optional ] ]
+      Unions =
+        [ union
+              "Pick"
+              [ "T" ]
+              [ case "Held" [ field "inner" (tagged (TVar "T")) atDefault; field "x" TInt Required ]
+                case "Carried" [ field "payload" (TRecord("Laid", [ TVar "T" ])) Required ]
+                case "Bare" [] ]
+          union
+              "Format"
+              []
+              [ case "Plain" []
+                case
+                    "Custom"
+                    [ field
+                          "render"
+                          (TFn
+                              { FSharp = "obj -> string"
+                                TypeScript = "(x: unknown) => string"
+                                Placeholder = "(fun (_: obj) -> \"\")" })
+                          Required ] ] ]
+      Enums = []
+      Records =
+        [ record
+              "Tagged"
+              [ "T" ]
+              false
+              [ field "tag" TStr (OmitDefault(VStr ""))
+                field "items" (TList(TVar "T")) (OmitDefault(VList [])) ]
+          record
+              "Twin"
+              [ "T" ]
+              false
+              [ field "tag" TInt Required
+                field "items" (TList TInt) Required
+                field "extra" (TVar "T") Required ]
+          record "Outer" [ "T" ] false [ field "inner" (tagged (TVar "T")) atDefault; field "x" TInt Required ]
+          record "Laid" [ "T" ] true [ field "inner" (tagged (TVar "T")) atDefault; field "y" TInt Required ] ]
+      Defaults = []
+      NodeFields = []
+      Ops = []
+      Wire = WireShape.Default
+      Harden = HardenPolicy.Undeclared
+      Contracts = [] }
+
+/// Documents of [[defaulted]] in canonical form, each with what it shows: every literal at its
+/// default (so every member left out), and each literal away from it in every holder.
+let defaultedDocuments: (string * string) list =
+    [ "every default left out, the case holding the member",
+      """{"id":"a","kind":{"$type":"Defaults","choice":{"$type":"Held","x":2},"outer":{"x":1},"y":3}}"""
+      "every default left out, the case laying the inline record out",
+      """{"id":"b","kind":{"$type":"Defaults","choice":{"$type":"Carried","y":4},"outer":{"x":1},"y":3}}"""
+      "each literal away from its default: in the record, the case, the inline record on the kind, and at the closed argument",
+      """{"id":"c","kind":{"$type":"Defaults","choice":{"$type":"Held","inner":{"items":[7]},"x":2},"format":{"items":[{"$type":"Plain"}]},"inner":{"tag":"k"},"outer":{"inner":{"items":[1.5],"tag":"t"},"x":1},"twin":{"extra":"e","items":[1],"tag":5},"y":3}}"""
+      "the literal away from its default in the inline record laid on a case",
+      """{"id":"d","kind":{"$type":"Defaults","choice":{"$type":"Carried","inner":{"items":[9]},"y":4},"outer":{"x":1},"y":3}}""" ]
+
+/// Documents that WRITE a default the encoder leaves out, each with the canonical bytes it re-writes
+/// to: the test that a value is at its default, asked in every holder.
+let defaultedWritten: (string * string) list =
+    [ """{"id":"a","kind":{"$type":"Defaults","choice":{"$type":"Held","inner":{"items":[],"tag":""},"x":2},"format":{"items":[],"tag":""},"inner":{"items":[],"tag":""},"outer":{"inner":{"items":[],"tag":""},"x":1},"y":3}}""",
+      """{"id":"a","kind":{"$type":"Defaults","choice":{"$type":"Held","x":2},"outer":{"x":1},"y":3}}"""
+      """{"id":"b","kind":{"$type":"Defaults","choice":{"$type":"Carried","inner":{},"y":4},"outer":{"inner":{},"x":1},"y":3}}""",
+      """{"id":"b","kind":{"$type":"Defaults","choice":{"$type":"Carried","y":4},"outer":{"x":1},"y":3}}""" ]
+
+/// The module name the committed file of [[defaulted]] declares.
+[<Literal>]
+let defaultedModuleName = "Fuaran.Core.Tests.ParameterisedRecordsDefaultsGenerated"
+
+/// The committed generated file of [[defaulted]], repository-relative.
+[<Literal>]
+let defaultedGeneratedFile =
+    "tests/Fuaran.Core.Tests/ParameterisedRecordsDefaultsGenerated.fs"
+
+/// The module text the generator emits for [[defaulted]], with the collecting decoders and the
+/// default records requested.
+let generateDefaulted () : Result<string, CodegenError> =
+    Gen.fsharpModuleDerived
+        GenSupport.Empty
+        [ Derivation.SpecDecoders; Derivation.DefaultRecords ]
+        defaultedModuleName
+        defaulted
+        (defaulted.Kinds |> List.map _.Tag)

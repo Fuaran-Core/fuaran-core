@@ -454,8 +454,8 @@ let printerAndRefusalTests =
 
               Expect.stringContains
                   src
-                  "(if s.Trail = { Tag = \"\"; Items = []; Note = None } then None else Some(\"trail\", (encTagged JStr) s.Trail))"
-                  "the encoder omits the member at the literal"
+                  "(match s.Trail with | { Tag = \"\"; Items = []; Note = None } -> None | _ -> Some(\"trail\", (encTagged JStr) s.Trail))"
+                  "the encoder omits the member at the literal, tested by a match"
 
               Expect.stringContains
                   src
@@ -478,7 +478,7 @@ let printerAndRefusalTests =
 
               Expect.stringContains
                   (emitted (Gen.fsharpModule "Probe" atParameter [ "K" ]))
-                  "(if s.Pin = { Label = \"a\"; Value = 3 } then None else Some(\"pin\", (encPinned JInt) s.Pin))"
+                  "(match s.Pin with | { Label = \"a\"; Value = 3 } -> None | _ -> Some(\"pin\", (encPinned JInt) s.Pin))"
                   "the member at the parameter is an integer literal")
 
           testCase "an omit-at-default member at a type parameter is refused, for a union and a record alike" (fun _ ->
@@ -633,3 +633,101 @@ let printerAndRefusalTests =
                   let generic = emitted (Gen.fsharpModule "Probe" (idl [ "T" ]) [ "K" ])
                   Expect.stringContains generic "type Plain<'T> =" "the generic record is declared"
                   Expect.isFalse (generic.Contains "CustomEquality") "and takes no custom equality") ]
+
+// ---------------------------------------------------------------------------
+// A generic record's literal as a declared default, where the member's type applies the record to
+// its holder's parameter ([[ParameterisedRecordsIdl.defaulted]]). The encoder of such a holder is
+// generic, so the test "is this value the default" cannot be `=` (F# asks `'T: equality` of it, and
+// the module does not compile); it is a match on the literal, which asks nothing of the argument.
+// The committed module is compiled by this project, which is the assertion that it compiles.
+// ---------------------------------------------------------------------------
+
+module Dflt = Fuaran.Core.Tests.ParameterisedRecordsDefaultsGenerated
+
+[<Tests>]
+let defaultedTests =
+    testList
+        "Phase 732 — a generic record's literal as the default of a member typed at its holder's parameter"
+        [ testCase
+              "the committed ParameterisedRecordsDefaultsGenerated.fs is what the generator emits (byte for byte)"
+              (fun _ ->
+                  driftGuard
+                      Approval.Regenerated.ParameterisedRecordsDefaults
+                      ParameterisedRecordsIdl.defaultedGeneratedFile
+                      (ParameterisedRecordsIdl.generateDefaulted ()))
+
+          testCase
+              "each holder's test of the default is a match on the literal, and none asks equality of a record"
+              (fun _ ->
+                  let text = emitted (ParameterisedRecordsIdl.generateDefaulted ())
+
+                  // The declaration that opens with `head`, to the line before the next one.
+                  let declarationOf (head: string) =
+                      match
+                          text.Split('\n')
+                          |> Array.skipWhile (fun l -> not (l.Contains head))
+                          |> List.ofArray
+                      with
+                      | [] -> failtestf "the module declares no '%s'" head
+                      | first :: rest ->
+                          first
+                          :: (rest
+                              |> List.takeWhile (fun l -> not (l.StartsWith "and " || l.StartsWith "let ")))
+                          |> String.concat "\n"
+
+                  let test (src: string) =
+                      sprintf "(match %s with | { Tag = \"\"; Items = [] } -> None | _ -> Some(" src
+
+                  for what, head, src in
+                      [ "a generic record", "encOuter<'T>", "s.Inner"
+                        "a generic union's case", "| Pick.Held (inner, x) ->", "inner"
+                        "an inline generic record", "encMembersLaid<'T>", "s.Inner"
+                        "a closed argument that carries no equality", "Canonical.typed \"Defaults\"", "s.Format" ] do
+                      Expect.stringContains (declarationOf head) (test src) what
+
+                  Expect.isFalse
+                      (text.Contains "= { Tag = \"\"; Items = [] } then")
+                      "no encoder compares a record's literal with `=`")
+
+          testCase
+              "the vocabulary is well-formed, and the interpreter and the compiled module re-write each document alike"
+              (fun _ ->
+                  let idl = ParameterisedRecordsIdl.defaulted
+                  Expect.isEmpty (Declare.errors idl) "well-formed"
+
+                  Expect.equal
+                      (List.length ParameterisedRecordsIdl.defaultedDocuments)
+                      4
+                      "every default left out under two cases, and each literal away from it"
+
+                  for what, doc in ParameterisedRecordsIdl.defaultedDocuments do
+                      Expect.equal
+                          (Decode.decode idl doc |> Result.bind (Encode.encode idl))
+                          (Ok doc)
+                          (what + ": the interpreter")
+
+                      match Dflt.decodeNode doc with
+                      | Ok node -> Expect.equal (Dflt.encodeNode node) doc (what + ": the compiled module")
+                      | Error e ->
+                          failtestf "%s: the compiled decoder refused: %s" what (Fuaran.Core.DecodeError.render e)
+
+                      match Dflt.decodeNodeAll doc with
+                      | Ok node -> Expect.equal (Dflt.encodeNode node) doc (what + ": the collecting decoder")
+                      | Error es -> failtestf "%s: the collecting decoder refused: %A" what es)
+
+          testCase "a default written on the wire is left out by both hosts, in every holder" (fun _ ->
+              let idl = ParameterisedRecordsIdl.defaulted
+
+              Expect.equal (List.length ParameterisedRecordsIdl.defaultedWritten) 2 "both documents"
+
+              for doc, canonical in ParameterisedRecordsIdl.defaultedWritten do
+                  Expect.notEqual doc canonical "the document writes a default"
+
+                  Expect.equal
+                      (Decode.decode idl doc |> Result.bind (Encode.encode idl))
+                      (Ok canonical)
+                      "the interpreter leaves each default out"
+
+                  match Dflt.decodeNode doc with
+                  | Ok node -> Expect.equal (Dflt.encodeNode node) canonical "the compiled module leaves each out"
+                  | Error e -> failtestf "the compiled decoder refused %s: %s" doc (Fuaran.Core.DecodeError.render e)) ]

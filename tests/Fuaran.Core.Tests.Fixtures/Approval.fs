@@ -306,6 +306,11 @@ module Regenerated =
     [<Literal>]
     let ParameterisedRecordsCodec = "ParameterisedRecordsCodecGenerated"
 
+    /// Phase 732 — the module over a generic record's literal as a declared default
+    /// (`IdlRecordFSharpTests`).
+    [<Literal>]
+    let ParameterisedRecordsDefaults = "ParameterisedRecordsDefaultsGenerated"
+
     [<Literal>]
     let Mini = "MiniGenerated"
 
