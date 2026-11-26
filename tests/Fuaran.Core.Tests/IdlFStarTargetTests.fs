@@ -1442,19 +1442,46 @@ let idlFStarTargetTests =
                   "and enc_dflt_bool (#num #flt: eqtype) (d: bool) (v: bool) : Tot (option (jval num flt)) (decreases v) =\n  if v = d then None else Some (JBool v)\n"
                   "and its wrapper still encodes the value itself"
 
-              // The certification set reaches NONE of the four family-slot wrappers, which is why
-              // Core's own proof leg stayed green over a defect every such consumer met. Pinned so
-              // that the day a certification vocabulary does reach one, the committed model carries
-              // the Phase 256 shape under the prover, and this line is the one to revisit.
+              // Until Phase 732 the certification set reached NONE of the four family-slot wrappers,
+              // which is why Core's own proof leg stayed green over a defect every such consumer met.
+              // The two parameterised-record vocabularies reach the LIST wrapper (`Tagged<T>.items`,
+              // omitted at the empty list, at a string and at a union), so the committed models carry
+              // the Phase 256 shape under the prover. No certification vocabulary reaches the map,
+              // record or union wrapper in a suffixed constructor: those three are held by the
+              // assertions above alone.
               for g in generated do
                   match FStarTarget.vocabularyModule g.Module g.Idl (selection g.Idl) with
                   | Error e -> failtestf "%s: the target refused it: %s" g.Module (CodegenError.describe e)
                   | Ok text ->
-                      Expect.isFalse
-                          (Regex.IsMatch(text, @"(?m)^and enc_dflt_(l|m|r|u)_"))
-                          (sprintf
-                              "%s reaches no defaulted list, map, record or union member in a suffixed constructor"
-                              g.Module)
+                      let wrappers =
+                          [ for m in
+                                Regex.Matches(
+                                    lf text,
+                                    @"(?m)^and (enc_dflt_(?:l|m|r|u)_[a-z0-9_]+) \(#num #flt: eqtype\) (.*) =\n(.*)$"
+                                ) -> m.Groups[1].Value, m.Groups[2].Value, m.Groups[3].Value ]
+
+                      if g.Module.StartsWith("Parameterised", System.StringComparison.Ordinal) then
+                          Expect.equal
+                              (wrappers |> List.map (fun (name, _, _) -> name) |> List.sort)
+                              [ "enc_dflt_l_str"; "enc_dflt_l_u_tree" ]
+                              (sprintf "%s reaches the defaulted list wrapper, at both arguments" g.Module)
+
+                          for name, head, body in wrappers do
+                              Expect.stringContains
+                                  head
+                                  "(e: jval num flt)"
+                                  (sprintf "%s: `%s` takes the encoding as an argument" g.Module name)
+
+                              Expect.equal
+                                  body
+                                  "  if v = d then None else Some e"
+                                  (sprintf "%s: `%s` only chooses between the encoding and absence" g.Module name)
+                      else
+                          Expect.isEmpty
+                              wrappers
+                              (sprintf
+                                  "%s reaches no defaulted list, map, record or union member in a suffixed constructor"
+                                  g.Module)
 
           testCase
               "a suffixed constructor's leaf members are DECODED through named, opaque readers, and the round trip cites one value lemma per reader"

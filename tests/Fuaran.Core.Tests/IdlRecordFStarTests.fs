@@ -43,11 +43,15 @@ let model =
     testList
         "Phase 732 — the F* model over a parameterised record"
         [ testCase "every kind of the fixture is modelled, in each of its vocabularies" (fun _ ->
-              for name, idl in
-                  [ "default", ParameterisedRecordsIdl.idl
-                    "flat", ParameterisedRecordsIdl.flat
-                    "derived", ParameterisedRecordsIdl.derived ] do
-                  for v in FStarTarget.partition idl do
+              for name, idl, kinds in
+                  [ "default", ParameterisedRecordsIdl.idl, 3
+                    "flat", ParameterisedRecordsIdl.flat, 3
+                    "derived", ParameterisedRecordsIdl.derived, 5
+                    "derived, flat", ParameterisedRecordsIdl.derivedFlat, 5 ] do
+                  let verdicts = FStarTarget.partition idl
+                  Expect.equal (List.length verdicts) kinds (sprintf "%s: its kinds" name)
+
+                  for v in verdicts do
                       Expect.isNone v.Refusal (sprintf "%s: %s is modelled" name v.Tag))
 
           testCase "a record is one model type per instantiation, named for its arguments" (fun _ ->
@@ -149,6 +153,140 @@ let model =
                   "the generic union 'Grow', whose recursion grows its type argument"
                   "by the union's name"
 
-              // Every backend resolves the vocabulary through the same reach: none hangs on it.
-              Expect.isOk (Gen.fsharpModule "Probe" record' [ "K" ]) "the F# codec emits the growing record"
-              Expect.isOk (Gen.typescriptModule record' [ "K" ]) "and the TypeScript codec") ]
+              // Every backend resolves a vocabulary through the same reach, and the reach is finite:
+              // the two codecs emit the growing declaration (each host recurses polymorphically).
+              for what, idl in [ "record", record'; "union", union' ] do
+                  Expect.isOk (Gen.fsharpModule "Probe" idl [ "K" ]) (sprintf "the F# codec emits the growing %s" what)
+                  Expect.isOk (Gen.typescriptModule idl [ "K" ]) (sprintf "and the TypeScript codec (%s)" what)) ]
+
+// ---------------------------------------------------------------------------
+// The decode vectors. The generated round trip speaks only of what the model's encoder writes; what
+// holds the model's READING of a parameterised record to the interpreter's is the committed facts
+// module (`proofs/VocabularyVectors.fst`, held to this text by `IdlThreeHostTests` and checked by the
+// proof leg), where the normaliser evaluates each model's `dec_node` on documents the interpreter
+// wrote and on documents it refuses.
+// ---------------------------------------------------------------------------
+
+/// One certified model's vectors: the vocabulary, the model's abbreviation, the constructor a node
+/// of a kind is (the default envelope nests the kind, the flat one merges it), the documents read
+/// and the documents refused.
+let private certified: (string * Idl * string * (string -> string) * string list * (string * string) list) list =
+    [ "default",
+      ParameterisedRecordsIdl.derived,
+      "P",
+      (fun tag -> "(P.C__vkind__" + tag + " "),
+      ParameterisedRecordsIdl.modelDocuments,
+      ParameterisedRecordsIdl.refused
+      "flat",
+      ParameterisedRecordsIdl.derivedFlat,
+      "PF",
+      (fun tag -> "(PF.C__node__" + tag + " "),
+      ParameterisedRecordsIdl.flatModelDocuments (),
+      ParameterisedRecordsIdl.flatRefused ]
+
+[<Tests>]
+let vectors =
+    testList
+        "Phase 732 — the F* decode vectors over a parameterised record"
+        [ testCase "each document the interpreter wrote is read at the interpreter's value" (fun _ ->
+              let facts = emitted (CertificationVectors.vectorsText ())
+
+              let definition (name: string) : string =
+                  let head = sprintf "let %s : " name
+
+                  match facts.IndexOf(head, System.StringComparison.Ordinal) with
+                  | -1 -> failtestf "the vectors module defines no %s" name
+                  | at -> facts.Substring(at, facts.IndexOf("\n\n", at, System.StringComparison.Ordinal) - at)
+
+              Expect.equal
+                  (List.length ParameterisedRecordsIdl.modelDocuments)
+                  6
+                  "one document per kind of the fixture, and the derived corpus"
+
+              // Under the flat configuration the same six, as the interpreter writes them there:
+              // the first three are the bytes the fixture pins.
+              Expect.equal
+                  (ParameterisedRecordsIdl.flatModelDocuments () |> List.truncate 3)
+                  ParameterisedRecordsIdl.flatBytes
+                  "the fixture's pinned flat bytes"
+
+              Expect.equal (List.length (ParameterisedRecordsIdl.flatModelDocuments ())) 6 "and six in all"
+
+              for name, idl, prefix, nodeOf, documents, _ in certified do
+                  let lower = prefix.ToLowerInvariant()
+
+                  // The kind is read off the interpreter's own value, never off the generated text.
+                  let tags =
+                      documents
+                      |> List.mapi (fun i doc ->
+                          match Decode.decodeDetailed idl doc with
+                          | Ok(VNode(_, tag, _))
+                          | Ok(VNodeEnv(_, _, tag, _)) -> tag
+                          | other -> failtestf "%s: the interpreter does not read document %d: %A" name i other)
+
+                  Expect.equal (set tags) (set (tagsOf idl)) (sprintf "%s: every kind is read by some document" name)
+
+                  tags
+                  |> List.iteri (fun i tag ->
+                      Expect.stringContains
+                          (definition (sprintf "%s_dv%d" lower i))
+                          (nodeOf tag)
+                          (sprintf "%s: document %d is a value of its kind's constructor" name i)
+
+                      Expect.stringContains
+                          facts
+                          (sprintf "  assert_norm (%s.dec_node %s_de%d == Ok %s_dv%d)" prefix lower i lower i)
+                          (sprintf "%s: and the decoder is evaluated on document %d" name i))
+
+              // The documents are not vacuous for the phase: between them the values read hold a
+              // record at every instantiation the two models declare.
+              let read (prefix: string) (count: int) =
+                  [ 0 .. count - 1 ]
+                  |> List.map (fun i -> definition (sprintf "%s_dv%d" prefix i))
+                  |> String.concat "\n"
+
+              let declared (idl: Idl) =
+                  (modelOf idl).Split('\n')
+                  |> Array.choose (fun l ->
+                      let l = l.Trim()
+
+                      if l.StartsWith("| C__r_", System.StringComparison.Ordinal) then
+                          Some(l.Substring(2, l.IndexOf(' ', 2) - 2))
+                      else
+                          None)
+                  |> List.ofArray
+
+              for prefix, lower, idl, count in
+                  [ "P", "p", ParameterisedRecordsIdl.derived, 6
+                    "PF", "pf", ParameterisedRecordsIdl.derivedFlat, 6 ] do
+                  let values = read lower count
+                  let instances = declared idl
+                  Expect.isNonEmpty instances "the model declares record instantiations"
+
+                  for ctor in instances do
+                      Expect.stringContains
+                          values
+                          ("(" + prefix + "." + ctor + " ")
+                          (ctor + " is read by some document"))
+
+          testCase "each document the interpreter refuses is refused by the model" (fun _ ->
+              let facts = emitted (CertificationVectors.vectorsText ())
+
+              Expect.equal
+                  (List.length ParameterisedRecordsIdl.refused)
+                  13
+                  "the default configuration's refused documents"
+
+              Expect.equal (List.length ParameterisedRecordsIdl.flatRefused) 8 "the flat configuration's"
+
+              for name, idl, prefix, _, _, refused in certified do
+                  refused
+                  |> List.iteri (fun i (what, doc) ->
+                      Expect.isError
+                          (Decode.decodeDetailed idl doc)
+                          (sprintf "%s: the interpreter refuses %s" name what)
+
+                      Expect.stringContains
+                          facts
+                          (sprintf "  assert_norm (Error? (%s.dec_node %s_dr%d))" prefix (prefix.ToLowerInvariant()) i)
+                          (sprintf "%s: the decoder is evaluated on the document (%s)" name what))) ]

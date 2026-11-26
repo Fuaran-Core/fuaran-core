@@ -5,7 +5,9 @@
    vocabulary: sha256:bac3a017bb023ec8dbc71cf0b971e374bf14a4c42911dca757d839d54296b931
    vocabulary: sha256:bb16a7799ad1395b528bdc2713c76f93b0761fcfb9d8e3e43ce5b2d42896194c
    vocabulary: sha256:f79a9d5698e83ca274feef4986b1d8dd9ae8cc02ce3f25eb04a33a6e2465e611
-   emission: sha256:c5fd0d20e9309e3ba190b738bc81c87a892b05a35d87a3e79bb3589fbee9b73a
+   vocabulary: sha256:46bcb7bf3fca5c05b6e11d1c3ce328cfe55db565588574416e16be96a5a1d288
+   vocabulary: sha256:c91497ea3c022bc9abfbf096b819ae1278612c4b9565a1ce81a27094e603aa1f
+   emission: sha256:32ca0c42f4517908e82df4831ca130e9d35147e4aa2afa904a98a6ad41a24550
 *)
 (*
    VocabularyVectors — the interpreter's vectors over the generated models (Phase 303).
@@ -40,6 +42,8 @@ module S = ScoreVocabulary
 module R = Vocabulary
 module L = LayoutVocabulary
 module H = LayoutHoldersVocabulary
+module P = ParameterisedVocabulary
+module PF = ParameterisedFlatVocabulary
 
 let d_v0 : D.node int string =
   (D.C__node__Document "a\"b" (Some "back\\slash") (D.C__e_locale__EnUS) (D.C__e_numbering__DecimalNumbering) ([(D.C__node__Table "node-1" None ([(D.C__node__Row "a\"b" (true) ([]))]))]))
@@ -493,3 +497,175 @@ let h_decode_agree : unit =
   assert_norm (Error? (H.dec_node h_dr2));
   assert_norm (Error? (H.dec_node h_dr3));
   assert_norm (Error? (H.dec_node h_dr4))
+
+let p_dv0 : P.node int string =
+  (P.C__node__Node "s" (P.C__vkind__Slider ((P.C__u_binding__flt__Local ("2.5") ("k"))) (Some [(P.C__r_labelled__flt__Mk ("a") ("1.5"))]) ((P.C__r_ranged__flt__Mk ("9.5") ("0.5") (Some ["1.5"; "2.5"]))) (Some (P.C__u_shape__Span ((P.C__r_ranged__flt__Mk ("1.5") ("0.5") None))))))
+
+let p_de0 : jval int string =
+  (JObj [("id", (JStr "s")); ("kind", (JObj [("$type", (JStr "Slider")); ("binding", (JObj [("$type", (JStr "Local")); ("initial", (JFloat "2.5")); ("stateKey", (JStr "k"))])); ("marks", (JArr [(JObj [("label", (JStr "a")); ("value", (JFloat "1.5"))])])); ("range", (JObj [("high", (JFloat "9.5")); ("low", (JFloat "0.5")); ("steps", (JArr [(JFloat "1.5"); (JFloat "2.5")]))])); ("shape", (JObj [("$type", (JStr "Span")); ("extent", (JObj [("high", (JFloat "1.5")); ("low", (JFloat "0.5"))]))]))]))])
+
+let p_dv1 : P.node int string =
+  (P.C__node__Node "p" (P.C__vkind__Stepper (Some (P.C__u_binding__int__Bounded ((P.C__r_ranged__int__Mk (3) (1) None)))) ((P.C__r_ranged__int__Mk (9) (1) None)) (Some (P.C__r_labelled__r_ranged__int__Mk ("w") ((P.C__r_ranged__int__Mk (4) (2) None))))))
+
+let p_de1 : jval int string =
+  (JObj [("id", (JStr "p")); ("kind", (JObj [("$type", (JStr "Stepper")); ("binding", (JObj [("$type", (JStr "Bounded")); ("range", (JObj [("high", (JInt 3)); ("low", (JInt 1))]))])); ("range", (JObj [("high", (JInt 9)); ("low", (JInt 1))])); ("window", (JObj [("label", (JStr "w")); ("value", (JObj [("high", (JInt 4)); ("low", (JInt 2))]))]))]))])
+
+let p_dv2 : P.node int string =
+  (P.C__node__Node "g" (P.C__vkind__Grid (Some "c") (20) (Some (P.C__r_series__flt__Mk ([(P.C__r_labelled__flt__Mk ("p") ("0.5"))]))) (Some (P.C__r_entry__str_e_direction__Mk ("name") (Some P.C__e_direction__desc))) (Some (P.C__r_labelled__str__Mk ("t") ("v")))))
+
+let p_de2 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "Grid")); ("cursor", (JStr "c")); ("pageSize", (JInt 20)); ("series", (JObj [("points", (JArr [(JObj [("label", (JStr "p")); ("value", (JFloat "0.5"))])]))])); ("sort", (JObj [("key", (JStr "name")); ("value", (JStr "desc"))])); ("title", (JObj [("label", (JStr "t")); ("value", (JStr "v"))]))]))])
+
+let p_dv3 : P.node int string =
+  (P.C__node__Node "o1" (P.C__vkind__Outline ((P.C__r_tagged__str__Mk (["a"; "b"]) None ("t"))) ((P.C__u_tree__Branch ([(P.C__r_kid__u_tree__Mk ((P.C__u_tree__Leaf (1))) ("l")); (P.C__r_kid__u_tree__Mk ((P.C__u_tree__Branch ([(P.C__r_kid__u_tree__Mk ((P.C__u_tree__Leaf (2))) ("n"))]) None)) ("m"))]) (Some (P.C__r_tagged__u_tree__Mk ([(P.C__u_tree__Leaf (3))]) (Some "x") ("")))))))
+
+let p_de3 : jval int string =
+  (JObj [("id", (JStr "o1")); ("kind", (JObj [("$type", (JStr "Outline")); ("trail", (JObj [("items", (JArr [(JStr "a"); (JStr "b")])); ("tag", (JStr "t"))])); ("tree", (JObj [("$type", (JStr "Branch")); ("kids", (JArr [(JObj [("child", (JObj [("$type", (JStr "Leaf")); ("n", (JInt 1))])); ("name", (JStr "l"))]); (JObj [("child", (JObj [("$type", (JStr "Branch")); ("kids", (JArr [(JObj [("child", (JObj [("$type", (JStr "Leaf")); ("n", (JInt 2))])); ("name", (JStr "n"))])]))])); ("name", (JStr "m"))])])); ("spare", (JObj [("items", (JArr [(JObj [("$type", (JStr "Leaf")); ("n", (JInt 3))])])); ("note", (JStr "x"))]))]))]))])
+
+let p_dv4 : P.node int string =
+  (P.C__node__Node "o2" (P.C__vkind__Outline ((P.C__r_tagged__str__Mk ([]) None (""))) ((P.C__u_tree__Leaf (7)))))
+
+let p_de4 : jval int string =
+  (JObj [("id", (JStr "o2")); ("kind", (JObj [("$type", (JStr "Outline")); ("tree", (JObj [("$type", (JStr "Leaf")); ("n", (JInt 7))]))]))])
+
+let p_dv5 : P.node int string =
+  (P.C__node__Node "f1" (P.C__vkind__Frame (()) ((P.C__r_panel__str__Mk ((P.C__node__Node "b" (P.C__vkind__Outline ((P.C__r_tagged__str__Mk ([]) None (""))) ((P.C__u_tree__Leaf (9)))))) ("m"))) ([(P.C__node__Node "r" (P.C__vkind__Outline ((P.C__r_tagged__str__Mk ([]) None (""))) ((P.C__u_tree__Leaf (8)))))])))
+
+let p_de5 : jval int string =
+  (JObj [("id", (JStr "f1")); ("kind", (JObj [("$type", (JStr "Frame")); ("onOpen", (JStr "<closure>")); ("panel", (JObj [("body", (JObj [("id", (JStr "b")); ("kind", (JObj [("$type", (JStr "Outline")); ("tree", (JObj [("$type", (JStr "Leaf")); ("n", (JInt 9))]))]))])); ("meta", (JStr "m"))])); ("rest", (JArr [(JObj [("id", (JStr "r")); ("kind", (JObj [("$type", (JStr "Outline")); ("tree", (JObj [("$type", (JStr "Leaf")); ("n", (JInt 8))]))]))])]))]))])
+
+let p_dr0 : jval int string =
+  (JObj [("id", (JStr "p")); ("kind", (JObj [("$type", (JStr "Stepper")); ("range", (JObj [("high", (JStr "9")); ("low", (JStr "1"))]))]))])
+
+let p_dr1 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "Grid")); ("pageSize", (JInt 20)); ("title", (JObj [("label", (JStr "t")); ("value", (JObj [("high", (JInt 4)); ("low", (JInt 2))]))]))]))])
+
+let p_dr2 : jval int string =
+  (JObj [("id", (JStr "p")); ("kind", (JObj [("$type", (JStr "Stepper")); ("range", (JObj [("high", (JInt 9)); ("low", (JInt 1))])); ("window", (JObj [("label", (JStr "w")); ("value", (JStr "v"))]))]))])
+
+let p_dr3 : jval int string =
+  (JObj [("id", (JStr "p")); ("kind", (JObj [("$type", (JStr "Stepper")); ("range", (JObj [("low", (JInt 1))]))]))])
+
+let p_dr4 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "Grid")); ("cursor", (JStr "c"))]))])
+
+let p_dr5 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "Grid")); ("cursor", (JInt 5)); ("pageSize", (JInt 20))]))])
+
+let p_dr6 : jval int string =
+  (JObj [("id", (JStr "p")); ("kind", (JObj [("$type", (JStr "Stepper")); ("binding", (JObj [("$type", (JStr "Local")); ("initial", (JInt 2))])); ("range", (JObj [("high", (JInt 9)); ("low", (JInt 1))]))]))])
+
+let p_dr7 : jval int string =
+  (JObj [("id", (JStr "p")); ("kind", (JObj [("$type", (JStr "Stepper")); ("binding", (JObj [("$type", (JStr "Local")); ("initial", (JStr "x")); ("stateKey", (JStr "k"))])); ("range", (JObj [("high", (JInt 9)); ("low", (JInt 1))]))]))])
+
+let p_dr8 : jval int string =
+  (JObj [("id", (JStr "p")); ("kind", (JObj [("$type", (JStr "Stepper")); ("binding", (JObj [("$type", (JStr "Bounded")); ("range", (JObj [("high", (JInt 3))]))])); ("range", (JObj [("high", (JInt 9)); ("low", (JInt 1))]))]))])
+
+let p_dr9 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "Grid")); ("pageSize", (JInt 20)); ("sort", (JObj [("key", (JStr "name")); ("value", (JStr "sideways"))]))]))])
+
+let p_dr10 : jval int string =
+  (JObj [("id", (JStr "g")); ("kind", (JObj [("$type", (JStr "Grid")); ("pageSize", (JInt 20)); ("sort", (JObj [("value", (JStr "desc"))]))]))])
+
+let p_dr11 : jval int string =
+  (JObj [("id", (JStr "o")); ("kind", (JObj [("$type", (JStr "Outline")); ("tree", (JObj [("$type", (JStr "Branch")); ("kids", (JArr [(JObj [("child", (JStr "x")); ("name", (JStr "l"))])]))]))]))])
+
+let p_dr12 : jval int string =
+  (JObj [("id", (JStr "o")); ("kind", (JObj [("$type", (JStr "Outline")); ("trail", (JObj [("items", (JArr [(JInt 1)])); ("tag", (JStr "t"))])); ("tree", (JObj [("$type", (JStr "Leaf")); ("n", (JInt 7))]))]))])
+
+let p_decode_agree : unit =
+  assert_norm (P.dec_node p_de0 == Ok p_dv0);
+  assert_norm (P.dec_node p_de1 == Ok p_dv1);
+  assert_norm (P.dec_node p_de2 == Ok p_dv2);
+  assert_norm (P.dec_node p_de3 == Ok p_dv3);
+  assert_norm (P.dec_node p_de4 == Ok p_dv4);
+  assert_norm (P.dec_node p_de5 == Ok p_dv5);
+  assert_norm (Error? (P.dec_node p_dr0));
+  assert_norm (Error? (P.dec_node p_dr1));
+  assert_norm (Error? (P.dec_node p_dr2));
+  assert_norm (Error? (P.dec_node p_dr3));
+  assert_norm (Error? (P.dec_node p_dr4));
+  assert_norm (Error? (P.dec_node p_dr5));
+  assert_norm (Error? (P.dec_node p_dr6));
+  assert_norm (Error? (P.dec_node p_dr7));
+  assert_norm (Error? (P.dec_node p_dr8));
+  assert_norm (Error? (P.dec_node p_dr9));
+  assert_norm (Error? (P.dec_node p_dr10));
+  assert_norm (Error? (P.dec_node p_dr11));
+  assert_norm (Error? (P.dec_node p_dr12))
+
+let pf_dv0 : PF.node int string =
+  (PF.C__node__Slider "s" ((PF.C__r_ranged__flt__Mk ("0.5") ("9.5") (Some ["1.5"; "2.5"]))) (Some [(PF.C__r_labelled__flt__Mk ("a") ("1.5"))]) ((PF.C__u_binding__flt__Local ("2.5") ("k"))) (Some (PF.C__u_shape__Span ((PF.C__r_ranged__flt__Mk ("0.5") ("1.5") None)))))
+
+let pf_de0 : jval int string =
+  (JObj [("kind", (JStr "Slider")); ("id", (JStr "s")); ("range", (JObj [("low", (JFloat "0.5")); ("high", (JFloat "9.5")); ("steps", (JArr [(JFloat "1.5"); (JFloat "2.5")]))])); ("marks", (JArr [(JObj [("label", (JStr "a")); ("value", (JFloat "1.5"))])])); ("binding", (JObj [("kind", (JStr "Local")); ("initial", (JFloat "2.5")); ("stateKey", (JStr "k"))])); ("shape", (JObj [("kind", (JStr "Span")); ("extent", (JObj [("low", (JFloat "0.5")); ("high", (JFloat "1.5"))]))]))])
+
+let pf_dv1 : PF.node int string =
+  (PF.C__node__Stepper "p" ((PF.C__r_ranged__int__Mk (1) (9) None)) (Some (PF.C__r_labelled__r_ranged__int__Mk ("w") ((PF.C__r_ranged__int__Mk (2) (4) None)))) (Some (PF.C__u_binding__int__Bounded ((PF.C__r_ranged__int__Mk (1) (3) None)))))
+
+let pf_de1 : jval int string =
+  (JObj [("kind", (JStr "Stepper")); ("id", (JStr "p")); ("range", (JObj [("low", (JInt 1)); ("high", (JInt 9))])); ("window", (JObj [("label", (JStr "w")); ("value", (JObj [("low", (JInt 2)); ("high", (JInt 4))]))])); ("binding", (JObj [("kind", (JStr "Bounded")); ("range", (JObj [("low", (JInt 1)); ("high", (JInt 3))]))]))])
+
+let pf_dv2 : PF.node int string =
+  (PF.C__node__Grid "g" (20) (Some "c") (Some (PF.C__r_labelled__str__Mk ("t") ("v"))) (Some (PF.C__r_series__flt__Mk ([(PF.C__r_labelled__flt__Mk ("p") ("0.5"))]))) (Some (PF.C__r_entry__str_e_direction__Mk ("name") (Some PF.C__e_direction__desc))))
+
+let pf_de2 : jval int string =
+  (JObj [("kind", (JStr "Grid")); ("id", (JStr "g")); ("pageSize", (JInt 20)); ("cursor", (JStr "c")); ("title", (JObj [("label", (JStr "t")); ("value", (JStr "v"))])); ("series", (JObj [("points", (JArr [(JObj [("label", (JStr "p")); ("value", (JFloat "0.5"))])]))])); ("sort", (JObj [("key", (JStr "name")); ("value", (JStr "desc"))]))])
+
+let pf_dv3 : PF.node int string =
+  (PF.C__node__Outline "o1" ((PF.C__u_tree__Branch ([(PF.C__r_kid__u_tree__Mk ("l") ((PF.C__u_tree__Leaf (1)))); (PF.C__r_kid__u_tree__Mk ("m") ((PF.C__u_tree__Branch ([(PF.C__r_kid__u_tree__Mk ("n") ((PF.C__u_tree__Leaf (2))))]) None)))]) (Some (PF.C__r_tagged__u_tree__Mk ("") ([(PF.C__u_tree__Leaf (3))]) (Some "x"))))) ((PF.C__r_tagged__str__Mk ("t") (["a"; "b"]) None)))
+
+let pf_de3 : jval int string =
+  (JObj [("kind", (JStr "Outline")); ("id", (JStr "o1")); ("tree", (JObj [("kind", (JStr "Branch")); ("kids", (JArr [(JObj [("name", (JStr "l")); ("child", (JObj [("kind", (JStr "Leaf")); ("n", (JInt 1))]))]); (JObj [("name", (JStr "m")); ("child", (JObj [("kind", (JStr "Branch")); ("kids", (JArr [(JObj [("name", (JStr "n")); ("child", (JObj [("kind", (JStr "Leaf")); ("n", (JInt 2))]))])]))]))])])); ("spare", (JObj [("items", (JArr [(JObj [("kind", (JStr "Leaf")); ("n", (JInt 3))])])); ("note", (JStr "x"))]))])); ("trail", (JObj [("tag", (JStr "t")); ("items", (JArr [(JStr "a"); (JStr "b")]))]))])
+
+let pf_dv4 : PF.node int string =
+  (PF.C__node__Outline "o2" ((PF.C__u_tree__Leaf (7))) ((PF.C__r_tagged__str__Mk ("") ([]) None)))
+
+let pf_de4 : jval int string =
+  (JObj [("kind", (JStr "Outline")); ("id", (JStr "o2")); ("tree", (JObj [("kind", (JStr "Leaf")); ("n", (JInt 7))]))])
+
+let pf_dv5 : PF.node int string =
+  (PF.C__node__Frame "f1" ((PF.C__r_panel__str__Mk ((PF.C__node__Outline "b" ((PF.C__u_tree__Leaf (9))) ((PF.C__r_tagged__str__Mk ("") ([]) None)))) ("m"))) ([(PF.C__node__Outline "r" ((PF.C__u_tree__Leaf (8))) ((PF.C__r_tagged__str__Mk ("") ([]) None)))]) (()))
+
+let pf_de5 : jval int string =
+  (JObj [("kind", (JStr "Frame")); ("id", (JStr "f1")); ("panel", (JObj [("body", (JObj [("kind", (JStr "Outline")); ("id", (JStr "b")); ("tree", (JObj [("kind", (JStr "Leaf")); ("n", (JInt 9))]))])); ("meta", (JStr "m"))])); ("rest", (JArr [(JObj [("kind", (JStr "Outline")); ("id", (JStr "r")); ("tree", (JObj [("kind", (JStr "Leaf")); ("n", (JInt 8))]))])])); ("onOpen", (JStr "<closure>"))])
+
+let pf_dr0 : jval int string =
+  (JObj [("kind", (JStr "Stepper")); ("id", (JStr "p")); ("range", (JObj [("low", (JStr "1")); ("high", (JStr "9"))]))])
+
+let pf_dr1 : jval int string =
+  (JObj [("kind", (JStr "Stepper")); ("id", (JStr "p")); ("range", (JObj [("low", (JInt 1))]))])
+
+let pf_dr2 : jval int string =
+  (JObj [("kind", (JStr "Grid")); ("id", (JStr "g")); ("cursor", (JStr "c"))])
+
+let pf_dr3 : jval int string =
+  (JObj [("kind", (JStr "Grid")); ("id", (JStr "g")); ("pageSize", (JInt 20)); ("cursor", (JInt 5))])
+
+let pf_dr4 : jval int string =
+  (JObj [("kind", (JStr "Stepper")); ("id", (JStr "p")); ("range", (JObj [("low", (JInt 1)); ("high", (JInt 9))])); ("binding", (JObj [("kind", (JStr "Local")); ("initial", (JInt 2))]))])
+
+let pf_dr5 : jval int string =
+  (JObj [("kind", (JStr "Grid")); ("id", (JStr "g")); ("pageSize", (JInt 20)); ("title", (JObj [("label", (JStr "t")); ("value", (JObj [("low", (JInt 2)); ("high", (JInt 4))]))]))])
+
+let pf_dr6 : jval int string =
+  (JObj [("kind", (JStr "Outline")); ("id", (JStr "o")); ("tree", (JObj [("kind", (JStr "Branch")); ("kids", (JArr [(JObj [("name", (JStr "l")); ("child", (JStr "x"))])]))]))])
+
+let pf_dr7 : jval int string =
+  (JObj [("kind", (JStr "Outline")); ("id", (JStr "o")); ("tree", (JObj [("kind", (JStr "Leaf")); ("n", (JInt 7))])); ("trail", (JObj [("tag", (JStr "t")); ("items", (JArr [(JInt 1)]))]))])
+
+let pf_decode_agree : unit =
+  assert_norm (PF.dec_node pf_de0 == Ok pf_dv0);
+  assert_norm (PF.dec_node pf_de1 == Ok pf_dv1);
+  assert_norm (PF.dec_node pf_de2 == Ok pf_dv2);
+  assert_norm (PF.dec_node pf_de3 == Ok pf_dv3);
+  assert_norm (PF.dec_node pf_de4 == Ok pf_dv4);
+  assert_norm (PF.dec_node pf_de5 == Ok pf_dv5);
+  assert_norm (Error? (PF.dec_node pf_dr0));
+  assert_norm (Error? (PF.dec_node pf_dr1));
+  assert_norm (Error? (PF.dec_node pf_dr2));
+  assert_norm (Error? (PF.dec_node pf_dr3));
+  assert_norm (Error? (PF.dec_node pf_dr4));
+  assert_norm (Error? (PF.dec_node pf_dr5));
+  assert_norm (Error? (PF.dec_node pf_dr6));
+  assert_norm (Error? (PF.dec_node pf_dr7))

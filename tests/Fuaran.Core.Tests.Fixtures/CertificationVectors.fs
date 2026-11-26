@@ -329,7 +329,9 @@ let holdersDecodeWires () : string list =
     |> fst
 
 /// The decode vectors of the certification set: the layout vocabulary's corpus and the documents
-/// it refuses, and the holders vocabulary's drawn documents and the documents it refuses.
+/// it refuses, the holders vocabulary's drawn documents and the documents it refuses, and (Phase
+/// 732) the parameterised-record vocabulary's documents and the documents it refuses, in both of its
+/// wire configurations.
 let decodeVectors () : DecodeVectors list =
     [ { Read =
           { Model = "LayoutVocabulary"
@@ -342,7 +344,21 @@ let decodeVectors () : DecodeVectors list =
             Prefix = "H"
             Idl = LayoutIdl.holders
             Wires = holdersDecodeWires () }
-        Refused = LayoutIdl.holdersRefused } ]
+        Refused = LayoutIdl.holdersRefused }
+      { Read =
+          { Model = "ParameterisedVocabulary"
+            Prefix = "P"
+            Idl = ParameterisedRecordsIdl.derived
+            Wires =
+              ParameterisedRecordsIdl.modelDocuments
+              |> List.map (interpreterWrote ParameterisedRecordsIdl.derived) }
+        Refused = ParameterisedRecordsIdl.refused |> List.map snd }
+      { Read =
+          { Model = "ParameterisedFlatVocabulary"
+            Prefix = "PF"
+            Idl = ParameterisedRecordsIdl.derivedFlat
+            Wires = ParameterisedRecordsIdl.flatModelDocuments () }
+        Refused = ParameterisedRecordsIdl.flatRefused |> List.map snd } ]
 
 /// The facts module the generator writes for the certification set.
 let vectorsText () : Result<string, CodegenError> =

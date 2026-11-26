@@ -278,9 +278,10 @@ let tests =
                       (File.ReadAllText(Snapshots.repoFile "proofs/VocabularyVectors.fst"))
 
               Expect.equal p.Target "F* vectors" "the vectors target"
-              // The three models of the encode facts, and the two inline-declaration models the decode
-              // facts are over (Phase 722).
-              Expect.equal (List.length p.Vocabularies) 5 "one vocabulary line per model it holds facts over"
+              // The three models of the encode facts, and the models the decode facts are over: the
+              // two inline-declaration models (Phase 722) and the two parameterised-record models
+              // (Phase 732).
+              Expect.equal (List.length p.Vocabularies) 7 "one vocabulary line per model it holds facts over"
 
           testCase "the scaffold's provenance header is the same grammar, keyed by its source wire"
           <| fun _ ->

@@ -489,8 +489,19 @@ module internal FStarVocabulary =
                     "       case SYNTHESISES is written at its declared value and carried as `unit`; the"
                     "       decoder refuses it absent or at another value, comparing the `jval` as it stands"
                     "       (the model has no render step, so the literal is the canonical form)." ]
-          "     - Generic unions are MONOMORPHISED at the arguments this vocabulary reaches, which"
-          "       is what keeps every definition and every emitted lemma first-order."
+          // Phase 732 — a parameterised record is stated where the vocabulary declares one, so a
+          // vocabulary that declares none keeps its bytes.
+          if idl.Records |> List.exists (fun r -> not (List.isEmpty r.Params)) then
+              yield!
+                  [ "     - Generic unions and RECORDS are MONOMORPHISED at the arguments this vocabulary"
+                    "       reaches, which is what keeps every definition and every emitted lemma"
+                    "       first-order. A record at two instantiations is two types, each named for its"
+                    "       arguments; an INLINE one declares no type, its members being its holder's at"
+                    "       the holder's argument." ]
+          else
+              yield!
+                  [ "     - Generic unions are MONOMORPHISED at the arguments this vocabulary reaches, which"
+                    "       is what keeps every definition and every emitted lemma first-order." ]
           ""
           sprintf
               "   VOCABULARY. Discriminator %s, %s envelope, %s key order."

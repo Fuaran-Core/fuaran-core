@@ -127,7 +127,42 @@ let generated: Generated list =
               @ remedyLines
             Proves =
               [ "F* BACKEND over every HOLDER of a presence-keyed union: one constructor of the holder"
-                "per choice of case whatever the holder is, and the round trip a theorem about each." ] } } ]
+                "per choice of case whatever the holder is, and the round trip a theorem about each." ] } }
+      // Phase 732 — the parameterised records: without these two entries no committed proof would
+      // meet a record instantiated at an argument, and the generator emits a proof script for each
+      // instantiation. The first is the fixture's widest vocabulary on the default wire shape; the
+      // second is the same vocabulary under the flat node envelope, where an inline record's members
+      // share the node's own object with the envelope's.
+      { Module = "ParameterisedVocabulary"
+        Idl = ParameterisedRecordsIdl.derived
+        Provenance =
+          { Origin =
+              [ "the PARAMETERISED-RECORD vocabulary — `tests/Fuaran.Core.Tests.Fixtures/ParameterisedRecordsIdl.fs`"
+                "(`derived`), authored to hold a record that declares type parameters in every position a"
+                "record reference can stand: a plain field, a list's item, a union case's payload, an"
+                "inline member of a kind, an inline payload of a parameterised case, two instantiations"
+                "of one record, a record applied to a record, two parameters, a union that holds itself"
+                "at a record's argument, and a declared default that is a generic record's literal"
+                "(fuaran-core Phase 732)." ]
+              @ remedyLines
+            Proves =
+              [ "F* BACKEND over PARAMETERISED RECORDS: a record is one model type per instantiation,"
+                "an inline one is its holder's members at the holder's argument, and the round trip is"
+                "a theorem about each instantiation. That the reading is the interpreter's is held by"
+                "the decode vectors, not by a theorem." ] } }
+      { Module = "ParameterisedFlatVocabulary"
+        Idl = ParameterisedRecordsIdl.derivedFlat
+        Provenance =
+          { Origin =
+              [ "the PARAMETERISED-RECORD vocabulary under the FLAT wire configuration —"
+                "`tests/Fuaran.Core.Tests.Fixtures/ParameterisedRecordsIdl.fs` (`derivedFlat`): the"
+                "declarations of `ParameterisedVocabulary` with a `kind` discriminator, the kind merged"
+                "into the node envelope and members in declared order, so an inline parameterised"
+                "record's members sit on the node's own object (fuaran-core Phase 732)." ]
+              @ remedyLines
+            Proves =
+              [ "F* BACKEND over PARAMETERISED RECORDS on the declared non-default wire shape: one"
+                "model type per instantiation, and the round trip a theorem about each." ] } } ]
 
 let modelPath (g: Generated) =
     Path.Combine(repoRoot, "proofs", g.Module + ".fst")

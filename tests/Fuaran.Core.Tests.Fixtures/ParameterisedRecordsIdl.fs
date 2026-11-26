@@ -347,3 +347,77 @@ let codecGeneratedFile =
 /// The codec-only module text the generator emits for [[codecRequest]].
 let generateCodec () : Result<string, CodegenError> =
     Gen.fsharpCodecModule GenSupport.Empty codecRequest codecModuleName derived
+
+// ---------------------------------------------------------------------------
+// The F* proof model over a parameterised record. Two generated models are committed and checked by
+// the proof leg, one per wire configuration: `proofs/ParameterisedVocabulary.fst` over [[derived]]
+// (every position of the header, and what `derived` adds: a union that holds itself at a record's
+// argument, a declared default that is a generic record's literal, a generic record holding a node)
+// and `proofs/ParameterisedFlatVocabulary.fst` over [[derivedFlat]], the same declarations where an
+// inline record's members share the node's own object with the envelope's. The decode vectors below
+// hold each model's READING to the interpreter's: documents the interpreter wrote, and documents it
+// refuses.
+// ---------------------------------------------------------------------------
+
+/// [[derived]] under the second wire configuration ([[flat]]'s).
+let derivedFlat: Idl = { derived with Wire = flat.Wire }
+
+/// The documents the model of [[derived]] reads: one per kind of [[idl]], then [[derivedCorpus]].
+let modelDocuments: string list =
+    (documents |> List.map (fun (_, _, bytes) -> bytes)) @ derivedCorpus
+
+/// [[modelDocuments]] as the interpreter writes each under [[derivedFlat]]: the documents that
+/// model reads. The first three are [[flatBytes]].
+let flatModelDocuments () : string list =
+    modelDocuments
+    |> List.map (fun doc ->
+        match Decode.decode derived doc |> Result.bind (Encode.encode derivedFlat) with
+        | Ok bytes -> bytes
+        | Error m -> failwithf "the interpreter did not rewrite %s under the flat configuration: %s" doc m)
+
+/// Documents the interpreter REFUSES under [[derived]], each with what it shows. No document holds
+/// a number that is not an integer, so each is carried into the model verbatim.
+let refused: (string * string) list =
+    [ "a member of `Ranged<int>` holding what `Ranged<string>` would",
+      """{"id":"p","kind":{"$type":"Stepper","range":{"high":"9","low":"1"}}}"""
+      "`Labelled<string>` holding the value of `Labelled<Ranged<int>>`",
+      """{"id":"g","kind":{"$type":"Grid","pageSize":20,"title":{"label":"t","value":{"high":4,"low":2}}}}"""
+      "`Labelled<Ranged<int>>` holding the value of `Labelled<string>`",
+      """{"id":"p","kind":{"$type":"Stepper","range":{"high":9,"low":1},"window":{"label":"w","value":"v"}}}"""
+      "a required member of an instantiation missing", """{"id":"p","kind":{"$type":"Stepper","range":{"low":1}}}"""
+      "a required member of an inline record missing from the kind's own object",
+      """{"id":"g","kind":{"$type":"Grid","cursor":"c"}}"""
+      "an inline record's member holding what another instantiation would",
+      """{"id":"g","kind":{"$type":"Grid","cursor":5,"pageSize":20}}"""
+      "a required member of an inline payload missing beside the case's tag",
+      """{"id":"p","kind":{"$type":"Stepper","binding":{"$type":"Local","initial":2},"range":{"high":9,"low":1}}}"""
+      "an inline payload's member holding what the union's other instantiation would",
+      """{"id":"p","kind":{"$type":"Stepper","binding":{"$type":"Local","initial":"x","stateKey":"k"},"range":{"high":9,"low":1}}}"""
+      "a record held by a parameterised case, a required member missing",
+      """{"id":"p","kind":{"$type":"Stepper","binding":{"$type":"Bounded","range":{"high":3}},"range":{"high":9,"low":1}}}"""
+      "two parameters: the second argument's enum at a spelling it does not declare",
+      """{"id":"g","kind":{"$type":"Grid","pageSize":20,"sort":{"key":"name","value":"sideways"}}}"""
+      "two parameters: the member at the first argument missing",
+      """{"id":"g","kind":{"$type":"Grid","pageSize":20,"sort":{"value":"desc"}}}"""
+      "a record applied to a union, its member holding no value of that union",
+      """{"id":"o","kind":{"$type":"Outline","tree":{"$type":"Branch","kids":[{"child":"x","name":"l"}]}}}"""
+      "a generic record at a declared default, a member of the authored value at another argument's type",
+      """{"id":"o","kind":{"$type":"Outline","trail":{"items":[1],"tag":"t"},"tree":{"$type":"Leaf","n":7}}}""" ]
+
+/// Documents the interpreter REFUSES under [[derivedFlat]], each with what it shows.
+let flatRefused: (string * string) list =
+    [ "a member of `Ranged<int>` holding what `Ranged<string>` would",
+      """{"kind":"Stepper","id":"p","range":{"low":"1","high":"9"}}"""
+      "a required member of an instantiation missing", """{"kind":"Stepper","id":"p","range":{"low":1}}"""
+      "a required member of an inline record missing from the node's own object",
+      """{"kind":"Grid","id":"g","cursor":"c"}"""
+      "an inline record's member holding what another instantiation would",
+      """{"kind":"Grid","id":"g","pageSize":20,"cursor":5}"""
+      "a required member of an inline payload missing beside the case's tag",
+      """{"kind":"Stepper","id":"p","range":{"low":1,"high":9},"binding":{"kind":"Local","initial":2}}"""
+      "`Labelled<string>` holding the value of `Labelled<Ranged<int>>`",
+      """{"kind":"Grid","id":"g","pageSize":20,"title":{"label":"t","value":{"low":2,"high":4}}}"""
+      "a record applied to a union, its member holding no value of that union",
+      """{"kind":"Outline","id":"o","tree":{"kind":"Branch","kids":[{"name":"l","child":"x"}]}}"""
+      "a generic record at a declared default, a member of the authored value at another argument's type",
+      """{"kind":"Outline","id":"o","tree":{"kind":"Leaf","n":7},"trail":{"tag":"t","items":[1]}}""" ]

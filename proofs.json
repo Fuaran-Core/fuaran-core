@@ -3133,6 +3133,81 @@
       }
     },
     {
+      "id": "parameterised-vocabulary-generated-model",
+      "level": "proved",
+      "statement": "The GENERATED model of PARAMETERISED RECORDS — `proofs/ParameterisedVocabulary.fst`: the parameterised-record vocabulary (`tests/Fuaran.Core.Tests.Fixtures/ParameterisedRecordsIdl.fs`, `derived`), emitted by `FStarTarget.vocabularyModuleFrom`. A record that declares type parameters is one model type per instantiation the vocabulary reaches, named for its arguments (`r_ranged__flt` and `r_ranged__int` for `Ranged<T>` at a float and at an integer; `r_labelled__r_ranged__int` where the argument is itself an applied record; `r_entry__str_e_direction` for two parameters), each with its members at those arguments, as a type-parameterised union's instance is stated. An INLINE parameterised record declares no type: its members are stated on its holder at the holder's argument, on a kind (`Grid` carries `cursor` and `pageSize`) and beside a parameterised case's tag (`Local` of `Binding<T>` carries `initial` at each instantiation of the union). The vocabulary holds such a record as a plain field, a list's item, a union case's payload, a member of a record that passes its own parameter on, the argument of another record, and at a union that holds itself through the record's argument (`Kid<Tree>` inside `Tree`), which puts that instance in the union's own recursive family; a declared default that is a generic record's literal is the instance's constructor. Every decoder is `Tot` on an arbitrary `jval`, by the `get_prop` termination argument the `vocabulary-generated-model` row states. All five kinds are modelled. Proved with no assume and no admit under --report_assumes error, and held to a fresh generation by the Proofs.Vocabulary family.",
+      "boundary": "A model of the WIRE, on the default wire shape, and MONOMORPHIC: there is no model type for the generic record itself and no theorem quantified over a type argument. An instantiation the vocabulary does not reach is not stated, and a vocabulary that reaches another has another model. That the model's reading is the interpreter's is NOT a theorem: the decode vectors of the `parameterised-vocabulary-decode-vectors` row evaluate `dec_node` on documents the interpreter wrote and on documents it refuses, and nothing else ties the two. A record or a union whose recursion grows its type argument has no finite set of instances and is refused by name; so is a reference applying a number of arguments its record does not declare. The model's numeric carriers are opaque, so a float member is a `flt` whose layout the model does not state. CHECKED but not EXTRACTED, for the reason `check.ps1`'s `$proofOnly` note gives; the claim is within the model.",
+      "phase": "fuaran-core#732",
+      "evidence": {
+        "theorem": "dec_node",
+        "model": "proofs/ParameterisedVocabulary.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.vocabularyModuleFrom"
+        ]
+      }
+    },
+    {
+      "id": "parameterised-vocabulary-round-trip",
+      "level": "proved",
+      "statement": "The ROUND TRIP over `ParameterisedVocabulary`, GENERATED and COMMITTED: `rt_node` in `proofs/ParameterisedVocabularyProofs.fst` proves `dec_node (enc_node x) == Ok x` for every value of every modelled type — so for every instantiation of every parameterised record the vocabulary reaches, and for each holder of an inline one, the object the encoder writes is read back as the same value with the same members. By the mutual induction and the lemma shapes of the `vocabulary-round-trip` row: an instantiation is a record of the model like any other, and the generator emits for it what it emits for a record that declares no parameter, so no lemma shape is particular to an instantiation. The generator writes a fuel option around each lemma that unfolds an encoder or a decoder (`#push-options \"--fuel N --ifuel 4\"`, N from 8 to 10 here) and `--ext context_pruning` for the module; fuel only lets the solver unfold further, and no option raises the leg's rlimit, drops its quake or admits a query.",
+      "boundary": "Over the instantiations this vocabulary reaches only: a theorem about each, none about the generic record at an arbitrary argument. It speaks of what the encoder writes, and says nothing of a document no encoder writes, which the `parameterised-vocabulary-decode-vectors` row evaluates on concrete documents. A round trip in the model: it says nothing of any host's codec. NOT claimed: the `wf` characterisation, for the reason the `doc-vocabulary-round-trip` row gives.",
+      "phase": "fuaran-core#732",
+      "evidence": {
+        "theorem": "rt_node",
+        "model": "proofs/ParameterisedVocabularyProofs.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.proofsModuleFrom"
+        ]
+      }
+    },
+    {
+      "id": "parameterised-flat-vocabulary-generated-model",
+      "level": "proved",
+      "statement": "The GENERATED model of PARAMETERISED RECORDS on the declared non-default wire shape — `proofs/ParameterisedFlatVocabulary.fst`: the parameterised-record vocabulary under its flat configuration (`tests/Fuaran.Core.Tests.Fixtures/ParameterisedRecordsIdl.fs`, `derivedFlat`: the declarations of the `parameterised-vocabulary-generated-model` row with a `kind` discriminator, the kind merged into the node envelope, members in declared order), emitted by `FStarTarget.vocabularyModuleFrom`. One model type per instantiation, as that row states. Here a node is one object, so an inline parameterised record's members (`pageSize` and `cursor` of `Grid`) are members of the node's own constructor, beside its id. All five kinds are modelled. Proved with no assume and no admit under --report_assumes error, and held to a fresh generation by the Proofs.Vocabulary family.",
+      "boundary": "The boundary of the `parameterised-vocabulary-generated-model` row, on this wire shape. The row exists because the generator emits another encoder and decoder for the flat envelope, and a generator must not emit a script no prover has checked. CHECKED but not EXTRACTED, for the reason `check.ps1`'s `$proofOnly` note gives; the claim is within the model.",
+      "phase": "fuaran-core#732",
+      "evidence": {
+        "theorem": "dec_node",
+        "model": "proofs/ParameterisedFlatVocabulary.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.vocabularyModuleFrom"
+        ]
+      }
+    },
+    {
+      "id": "parameterised-flat-vocabulary-round-trip",
+      "level": "proved",
+      "statement": "The ROUND TRIP over `ParameterisedFlatVocabulary`, GENERATED and COMMITTED: `rt_node` in `proofs/ParameterisedFlatVocabularyProofs.fst` proves `dec_node (enc_node x) == Ok x` for every value of every modelled type — every instantiation of every parameterised record the vocabulary reaches, and each node holding an inline one's members on its own object. By the mutual induction and the lemma shapes of the `doc-vocabulary-round-trip` row, the certified round trip on the same wire shape, under the generated fuel option the `parameterised-vocabulary-round-trip` row describes, N from 8 to 12 here.",
+      "boundary": "Over the instantiations this vocabulary reaches only, and of what the encoder writes: it says nothing of a document no encoder writes, which the `parameterised-vocabulary-decode-vectors` row evaluates on concrete documents. A round trip in the model: it says nothing of any host's codec. NOT claimed: the `wf` characterisation, for the reason the `doc-vocabulary-round-trip` row gives.",
+      "phase": "fuaran-core#732",
+      "evidence": {
+        "theorem": "rt_node",
+        "model": "proofs/ParameterisedFlatVocabularyProofs.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.proofsModuleFrom"
+        ]
+      }
+    },
+    {
+      "id": "parameterised-vocabulary-decode-vectors",
+      "level": "proved",
+      "statement": "The parameterised-record models READ what the reference interpreter reads, and refuse what it refuses, on the documents given: `p_decode_agree` and `pf_decode_agree` in `proofs/VocabularyVectors.fst`, emitted by `FStarTarget.vectorsModuleWith` from the fixtures library, are sequences of normaliser facts over `ParameterisedVocabulary.dec_node` and `ParameterisedFlatVocabulary.dec_node`, of the two forms the `layout-vocabulary-decode-vectors` row states. On the default wire shape: six documents as the interpreter writes them, covering every kind and between them holding a value of every record instantiation the model declares, and thirteen refused documents (a member of one instantiation holding what another instantiation of the same record would, at a plain field and inside a record applied to a record; a required member of an instantiation missing; on a kind and beside a parameterised case's tag, a required member of an inline record missing and one holding another instantiation's type; a required member missing from a record a parameterised case holds; with two parameters, an undeclared enum spelling at the second argument and a missing member at the first; a record applied to a union holding no value of that union; an authored value at a declared default holding another argument's type). On the flat wire shape: the same six documents as the interpreter writes them there, covering every kind and every instantiation that model declares, and eight refused documents of the same sorts. The facts are discharged by the NORMALISER, not by Z3. Measured: a refused document asserted `Ok?`, and a read document asserted at another document's value, each fail the module, in each of the two models. Proved with no assume and no admit under --report_assumes error, and held to a fresh generation by `IdlThreeHostTests`.",
+      "boundary": "A fact is about its document, in the model. NOT a theorem that the model's decoder is the interpreter's on every document: beyond these documents nothing here ties the two. A refused document is carried verbatim, and a fact states THAT the model refuses it, not the refusal's code or path, which the hosts' conformance vectors carry. No refused document holds a number that is not an integer, so no refusal at a float member is evaluated. The float LAYOUT is outside the facts, as the `vocabulary-vectors-agree` row says: a float is carried as its canonical layout, a string, on both sides.",
+      "phase": "fuaran-core#732",
+      "evidence": {
+        "theorem": "p_decode_agree",
+        "model": "proofs/VocabularyVectors.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.vectorsModuleWith"
+        ]
+      }
+    },
+    {
       "id": "evolution-classify-sound",
       "level": "proved",
       "statement": "WIRE_FORMAT section 15.4's classifier is SOUND, and the three theorems beside it stand on that. `proofs/WireVersioning.fst` models `Versioning.classify` / `bump` / `negotiate` clause for clause and proves `classify_sound`: `classify` answers `Additive` ONLY when every tag of the before-vocabulary survives into the after-vocabulary. The function computes a LIST — a difference — where the table talks about a SUBSET, and the two are the same statement only through an induction, which is the module's whole substance; `classify_additive_is_sub` packages the quantified form. `rename_is_breaking` is the row section 15.4 calls out by name, because a rename LOOKS additive from the new vocabulary's side: a tag present before and absent after forces `Breaking` whatever else the change added, and nothing about the addition enters the proof. `breaking_bump_is_foreign` and `additive_bump_is_behind` carry the verdict through to the consequence a reader acts on — a breaking verdict mints a new major and the old consumer is `Foreign` and refuses; an additive verdict keeps the major and that consumer is `Behind` and tolerates. Section 15.4's FIELD rows are proved beside them, at the composition that decides them: `classify_field_add` models `Diff.classifyFieldAdd` clause for clause, `evolution_of` models `Diff.evolution`'s partition of each row's subject by severity, and `optional_field_addition_bumps_the_minor` carries the result through `bump` and `negotiate` — an added optional field introduces a subject, the verdict is a NON-EMPTY `Additive`, the minor moves and an old consumer is `Behind`. `required_field_addition_is_foreign_not_behind` states the required row: a required field added retires its subject, moves the major and leaves an old consumer `Foreign` — a minor would rest on the premise that every old document still decodes, which `field_additive_monotone` refutes — and `host_only_field_addition_moves_no_profile` states the one that genuinely moves nothing, which is what makes the other two a measurement rather than a constant. `tag_delta_is_blind_to_field_additions` keeps the other half: the kind-tag delta alone cannot decide any of them. Proved with no assume and no admit under --report_assumes error.",

@@ -14,7 +14,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## Summary
 
-440 rows: 260 offered, 1 a host's own proof, 179 uncovered (proved 107, tested 31, assumed 39, policy 2).
+445 rows: 260 offered, 1 a host's own proof, 184 uncovered (proved 112, tested 31, assumed 39, policy 2).
 
 ## Offers, by model
 
@@ -89,6 +89,14 @@ Grouped by model. Each group is a candidate vector family or oracle function.
 
 - `OpStreamLoad` (3): `op-stream-load-totality`, `op-stream-load-faults-locate`, `op-stream-load-round-trip`
 
+- `ParameterisedFlatVocabulary` (1): `parameterised-flat-vocabulary-generated-model`
+
+- `ParameterisedFlatVocabularyProofs` (1): `parameterised-flat-vocabulary-round-trip`
+
+- `ParameterisedVocabulary` (1): `parameterised-vocabulary-generated-model`
+
+- `ParameterisedVocabularyProofs` (1): `parameterised-vocabulary-round-trip`
+
 - `Preservation` (20): `apply-preserves-parent-first`, `apply-total`, `reject-identity`, `apply-preserves-wf`, `keyed-apply-preserves-wf`, `canapply-preserves`, `invert-round-trip`, `invert-batch-round-trip`, `invert-all-round-trip`, `contained-clause-for-clause`, `not-a-container-exact`, `contained-preserves`, `contained-premises`, `graft-containment`, `canapply-contained-agrees`, `container-sequence-gap`, `contained-preserves-script`, `canapply-all-with-agrees`, `sequence-surface-total-instance`, `container-sequence-gap-closed`
 
 - `PropagationOps` (5): `propagation-changed-for-op-complete`, `propagation-kind-kept`, `propagation-dirty-from-op-complete`, `propagation-dirty-from-op-least`, `propagation-evalfrom-agrees-for-op`
@@ -115,7 +123,7 @@ Grouped by model. Each group is a candidate vector family or oracle function.
 
 - `VocabularyProofs` (1): `vocabulary-round-trip`
 
-- `VocabularyVectors` (2): `layout-vocabulary-decode-vectors`, `vocabulary-vectors-agree`
+- `VocabularyVectors` (3): `layout-vocabulary-decode-vectors`, `parameterised-vocabulary-decode-vectors`, `vocabulary-vectors-agree`
 
 - `WireVersioning` (6): `evolution-classify-sound`, `evolution-additive-monotone`, `evolution-preserve-exact`, `evolution-unknown-transport-only`, `evolution-bump-refuses-at-the-edge`, `evolution-field-additive-monotone`
 
