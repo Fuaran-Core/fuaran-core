@@ -46,10 +46,13 @@
   indistinguishable from a tagged case`. Inside a generic union holder this loaded at `0.45.0`, and the encoder wrote
   documents the decoder refused. A consumer applies the holder at an argument that is no object, or tags the case.
   Where the instantiations are infinitely many each rule judges them in classes and names the first it refuses at;
-  where they are more than 4096 it says so, once, at the first member it holds (`…: the omit-at-default value was not
-  checked at every instantiation, because the vocabulary reaches more than 4096 instantiations of the vocabulary's
-  generic declarations`, `the transparent case` likewise). A declaration no document can hold a value of, and one
-  held only where the literal fits and no case meets an object, load as before. SIXTH, sentences a consumer may have
+  each rule walks for each declaration it judges on its own, entering only it and the declarations that can reach it,
+  and past a cap says so, once, at that declaration's first member it holds, naming it: `…: the omit-at-default
+  value was not checked at every instantiation, because the vocabulary reaches more than 4096 instantiations of
+  record '<D>' and the generic declarations that reach it`, or, a refusal printing the instantiation it refuses at, `…
+  more than 65536 nodes across the instantiations of record '<D>'` (`the transparent case` likewise). A declaration no
+  document can hold a value of, and one held only where the literal fits and no case meets an object, load as before,
+  whatever the rest of the vocabulary reaches. SIXTH, sentences a consumer may have
   matched. A type variable where no parameter is declared is refused as `type variable '<T>' names a type parameter,
   and a kind declares none` (an op, the node envelope, a contract's method), where it said `is not a parameter of the
   union declaring it`; a type variable in a record's field that is not the record's parameter is refused as `is not
@@ -65,9 +68,13 @@
   F\* target, for the kinds that reach it, and the JSON schema refuse it as `the generic union '<U>', which has no
   finite set of instantiations: <U><'T> reaches <U><list<'T>>`; a fold through it is refused as `a fold over
   '<root>' through ` and that sentence; and the declaration check admits it, asking only the FIFTH's rules. A
-  vocabulary whose instantiations are finitely many and more than 4096 is refused by the F\* target and the JSON
-  schema as `more than 4096 instantiations of the vocabulary's generic declarations`, and emitted by the F# and
-  TypeScript entries. EIGHTH, the JSON schema's definition names (`$defs` keys and the `$ref`s to them) are injective
+  vocabulary whose instantiations are finitely many and more than 4096, or that hold more than 65536 nodes between
+  them each counted at its printed size, is refused by the F\* target, the JSON schema and a fold as `more than 4096
+  instantiations of the vocabulary's generic declarations` or `more than 65536 nodes across the instantiations of the
+  vocabulary's generic declarations`, and emitted by the F# and TypeScript entries; a vocabulary whose instantiations
+  print that large (a chain of declarations each naming the next at two arguments or at a tuple of its parameter) was
+  emitted by `0.45.0`'s schema and is refused now. Every analysis over instantiations interns their types, so it
+  answers at once however large an instantiation prints. EIGHTH, the JSON schema's definition names (`$defs` keys and the `$ref`s to them) are injective
   over the type on the wire, so four spellings move. A tuple inside an argument writes its arity (`Box_tuple_int_str`
   is `Box_tuple2_int_str`); a hosted slot that declares a wire form inside an argument writes it and its format
   (`Box_hosted` is `Box_hostedAs_str`, `Box_hostedDate_str`, `Box_hostedDateTime_str` or `Box_hostedUuid_str`; with
@@ -86,5 +93,18 @@
   moves for a vocabulary where a reference's argument reaches a node through a declaration of the same name
   (`Box<Box<node>>`, or `Alt<node>` inside `Alt<int>`), a generic union's included: the sampler's depth floor now
   reads such an argument, and a draw that ended in `it has no finite value — every draw at the depth floor recurses`
-  draws. Every other stream, artifact, schema-checked document and generated module of a vocabulary that declares no
-  parameterised record and misapplies no reference is byte-identical.
+  draws. TENTH, the F\* model's type names are injective over the declarations' names: a declared name writes each `_` of
+  its own as `_0` (a record `Ranged_Int` is `r_ranged_0_int`, where it shared `Ranged<int>`'s `r_ranged__int`), and an
+  instantiation joins its arguments' names with `__` (`r_entry__str_e_direction` is `r_entry__str__e_direction`); a
+  name with no `_` of its own and an instantiation of one argument are unchanged (`u_slot__str`). A vocabulary in which
+  two declared types still meet in one name (declared names that differ only in the case of their first letter, or
+  two tuples of enums) is refused by the F\* target by name. A consumer that holds a generated model regenerates it.
+  ELEVENTH, `TypeParams.substitute` substituting inside a tuple, a set and a keyed map (the FIRST) is a defect fix that
+  moves emitted output of a vocabulary declaring no parameterised record: one that applies a generic union at one of
+  those holding its parameter. `U1<T> { x: U2<tuple<T, T>> }` and on, held at `U1<str>`, stated the schema's ``
+  `U2_tuple_T_T`, `U3_tuple_T_T` and on, each component the unconstrained `{}`, and was refused by the F\* target as
+  `an unresolved type parameter 'T`; it now states `U2_tuple2_str_str`, `U3_tuple2_tuple2_str_str_tuple2_str_str` and on,
+  each component typed, and is modelled. Its F# and TypeScript modules do not move. Every other stream, artifact,
+  schema-checked document and generated module is byte-identical: that of a vocabulary which declares no
+  parameterised record, misapplies no reference, applies no generic union at a tuple, a set or a keyed map of its
+  parameter nor at two or more arguments, declares no name holding `_`, and is under both caps of the SEVENTH.

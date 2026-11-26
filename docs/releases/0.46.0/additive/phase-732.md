@@ -14,7 +14,8 @@
   applied record's literal by a match, so a generic holder's module compiles. The TypeScript backend emits one
   function per record on the same terms and a generic type in the declaration file, and intersects an inline record
   applied to arguments into its holder as its members, so a holder that reaches itself through one type-checks. The
-  F\* target states one model type per instantiation (`r_ranged__flt`), with the round trip proved for a vocabulary
+  F\* target states one model type per instantiation, under a name injective over the declarations' names
+  (`r_ranged__flt`; the breaking entry's TENTH), with the round trip proved for a vocabulary
   that holds a parameterised record at a parameterised union case, in both wire shapes (the `parameterised-` rows of
   `proofs.json`). The stability classifier reads a record's parameters and grades them as a union's
   (`RecordParamsChanged`), and `Proposal.applyDelta` reads a record reference's arguments in a delta's field and
