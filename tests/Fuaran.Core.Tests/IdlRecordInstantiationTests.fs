@@ -158,6 +158,32 @@ let rec private wraps (v: IdlValue) : int =
     | VList items -> items |> List.map wraps |> List.fold max 0
     | _ -> 0
 
+/// `Hold<T>`, a record, and `Held<T>`, a union, each holding its parameter in a required member;
+/// `Alt<T>`, a union with no nullary case, one of whose cases holds `Alt<node>`.
+let private heldRecords = [ record "Hold" [ "T" ] [ f "item" (TVar "T") Required ] ]
+
+let private heldUnions =
+    [ union "Held" [ "T" ] [ case "C" [ f "item" (TVar "T") Required ] ]
+      union
+          "Alt"
+          [ "T" ]
+          [ case "A" [ f "x" (TVar "T") Required ]
+            case "B" [ f "y" (TUnion("Alt", [ TNode ])) Required ] ] ]
+
+/// A node nested in those, a declaration applied to an instantiation of itself in each; and
+/// `Alt<int>`, whose case reaches a node through the argument of a reference to `Alt` itself.
+let private nests: (string * IdlType) list =
+    let hold t = TRecord("Hold", [ t ])
+    let held t = TUnion("Held", [ t ])
+
+    [ "Hold<Hold<node>>", hold (hold TNode)
+      "Held<Held<node>>", held (held TNode)
+      "Hold<Hold<Hold<node>>>", hold (hold (hold TNode))
+      "Hold<Held<Hold<node>>>", hold (held (hold TNode))
+      "Held<Hold<Held<node>>>", held (hold (held TNode))
+      "Hold<list<Hold<node>>>", hold (TList(hold TNode))
+      "Alt<int>", TUnion("Alt", [ TInt ]) ]
+
 [<Tests>]
 let interpreter =
     testList
@@ -291,7 +317,33 @@ let interpreter =
                   Expect.equal
                       (drawn |> List.map wraps |> List.distinct |> List.sort)
                       [ 1; 2 ]
-                      "a drawn Wrap holds a Leaf, or one more Wrap above the floor, and never a third") ]
+                      "a drawn Wrap holds a Leaf, or one more Wrap above the floor, and never a third")
+
+          testCase "the depth floor reads an argument that names the declaration it is the argument of" (fun _ ->
+              // `Box<Box<node>>` reaches a node through the inner `Box`'s argument. Read with the
+              // outer `Box` already entered, the inner one passes for a declaration cycle and reaches
+              // nothing: the floor then took the member for a leaf, and the draw ended in "it has no
+              // finite value" (seeds 10 and 56 of these, at the record; 18 at the union).
+              let floors =
+                  [ for what, nest in nests do
+                        "only kind, optional: " + what,
+                        vocabulary [ kind "K" [ f "t" nest Optional ] ] heldUnions heldRecords
+
+                        "required, beside a leaf: " + what,
+                        vocabulary [ kind "K" [ f "t" nest Required ]; kind "L" [] ] heldUnions heldRecords ]
+
+              for what, idl in floors do
+                  Expect.isEmpty (Declare.errors idl) (what + ": well-formed")
+                  let tags = idl.Kinds |> List.map _.Tag
+
+                  for seed in 1..400 do
+                      match Sample.trySampleNodes idl tags seed 20 with
+                      | Ok drawn ->
+                          for v in drawn do
+                              match Encode.encode idl v with
+                              | Ok text -> roundTrips idl text
+                              | Error e -> failtestf "%s, seed %d: a drawn value does not encode: %s" what seed e
+                      | Error fault -> failtestf "%s, seed %d: %s" what seed fault.Describe) ]
 
 // ---------------------------------------------------------------------------
 // The fixture vocabulary ([[ParameterisedRecordsIdl]]): a parameterised record in every position,

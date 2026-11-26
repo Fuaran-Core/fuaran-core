@@ -303,20 +303,26 @@ module internal WireForm =
     /// case the floor never draws — and it is kept: an answer that moves here moves which draws the
     /// sampler takes, and so every seeded stream over a vocabulary with that shape. A record reads its
     /// arguments and its declared fields the same way (Phase 732), wider where an argument reaches a
-    /// node only behind an optional member. `seen` breaks declaration cycles.
+    /// node only behind an optional member.
+    ///
+    /// `seen` breaks declaration cycles, so it guards a declaration's FIELDS and nothing else. An
+    /// argument is a smaller type than the reference it is written in, so it is read under the `seen`
+    /// the reference was reached with, whether or not the declaration was entered already:
+    /// `Box<Box<node>>` reaches a node through the inner `Box`, and a case holding `Alt<node>` inside
+    /// `Alt` reaches one through that argument. Neither is a cycle.
     let rec reachesNodeAtFloor (idl: Idl) (seen: Set<string>) (t: IdlType) : bool =
+        let byArgs (args: IdlType list) =
+            args |> List.exists (reachesNodeAtFloor idl seen)
+
         match ofType idl t with
         | WireForm.Node
         | WireForm.Kind
         | WireForm.Op -> true
-        | WireForm.Record r when not (Set.contains ("r:" + r.Name) seen) ->
-            let seen' = Set.add ("r:" + r.Name) seen
-
-            r.Args |> List.exists (reachesNodeAtFloor idl seen')
-            || requiredReachesNode idl seen' r.Decl.Fields
-        | WireForm.Union u when not (Set.contains ("u:" + u.Name) seen) ->
-            let seen' = Set.add ("u:" + u.Name) seen
-
+        | WireForm.Record r ->
+            byArgs r.Args
+            || (not (Set.contains ("r:" + r.Name) seen)
+                && requiredReachesNode idl (Set.add ("r:" + r.Name) seen) r.Decl.Fields)
+        | WireForm.Union u ->
             // The floor prefers a nullary case when the union has one, and a nullary case has no
             // fields — so only a union WITHOUT one can still reach a node through a case.
             let candidates =
@@ -324,15 +330,14 @@ module internal WireForm =
                 | [] -> u.Decl.Cases
                 | nullary -> nullary
 
-            u.Args |> List.exists (reachesNodeAtFloor idl seen')
-            || candidates |> List.exists (fun c -> requiredReachesNode idl seen' c.Fields)
-        | WireForm.Undeclared(Undeclared.Union(name, args)) when not (Set.contains ("u:" + name) seen) ->
-            args |> List.exists (reachesNodeAtFloor idl (Set.add ("u:" + name) seen))
-        | WireForm.Undeclared(Undeclared.Record(name, args)) when not (Set.contains ("r:" + name) seen) ->
-            args |> List.exists (reachesNodeAtFloor idl (Set.add ("r:" + name) seen))
+            byArgs u.Args
+            || (not (Set.contains ("u:" + u.Name) seen)
+                && candidates
+                   |> List.exists (fun c -> requiredReachesNode idl (Set.add ("u:" + u.Name) seen) c.Fields))
+        | WireForm.Undeclared(Undeclared.Union(_, args) | Undeclared.Record(_, args)) -> byArgs args
         // Phase 639 — a tuple draws every component, so it reaches what any of them reaches; a set and
         // a keyed map are drawn empty at the floor, as a list and a map are.
-        | WireForm.Tuple components -> components |> List.exists (reachesNodeAtFloor idl seen)
+        | WireForm.Tuple components -> byArgs components
         | _ -> false
 
     /// Whether a REQUIRED one of `fields` reaches a node at the depth floor — the fields an owner
