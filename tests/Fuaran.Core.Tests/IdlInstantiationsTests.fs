@@ -928,3 +928,232 @@ let tests =
                         (within 20.0 "Declare.errors" (fun () ->
                             Declare.errors { idl with Kinds = [ idl.Kinds.Head ] }))
                         "admitted") ] ]
+
+// ---------------------------------------------------------------------------
+// A transparent case typed at a type parameter, instantiated through a generic HOLDER. The case is
+// written bare, so its field may not encode to an object; a reference that applies the union to
+// its holder's own parameter (`Hold<T> { u: T1<T> }`) is judged at every instantiation of the
+// holder a document can hold a value of, and refused at the holder's member.
+// ---------------------------------------------------------------------------
+
+/// `vocabulary` with `T1<T>`, whose case `Bare` is transparent and holds `held`.
+let private transparent (held: IdlType) (kinds: IdlKind list) (unions: IdlUnion list) (records: IdlRecord list) : Idl =
+    { vocabulary
+          kinds
+          (union "T1" [ "T" ] [ case "Bare" [ f "v" held Required ]; case "Tagged" [ f "n" TInt Required ] ]
+           :: unions)
+          records with
+        Harden =
+            { HardenPolicy.Undeclared with
+                TransparentUnions = [ "T1", "Bare" ] } }
+
+let private t1 (t: IdlType) : IdlType = TUnion("T1", [ t ])
+
+[<Tests>]
+let transparentTests =
+    testList
+        "Phase 732 — a transparent case instantiated to an object through a generic holder"
+        [ testCase "the refusal names the holder, the member and the instantiation" (fun _ ->
+              let box = record "Box" [ "W" ] [ f "item" (TVar "W") Required ]
+
+              let through (holders: IdlUnion list * IdlRecord list) (at: IdlType) =
+                  transparent (TVar "T") [ kind "K" [ f "g" at Optional ] ] (fst holders) (box :: snd holders)
+
+              let faults (idl: Idl) =
+                  Declare.errors idl |> List.map (fun e -> e.At, e.Detail)
+
+              let ending =
+                  ", instantiates union 'T1' so that its transparent case's field 'v' can encode to an object — a bare object is indistinguishable from a tagged case"
+
+              Expect.equal
+                  (faults (
+                      through
+                          ([], [ record "Hold" [ "T" ] [ f "u" (t1 (TVar "T")) Required ] ])
+                          (TRecord("Hold", [ TRecord("Box", [ TInt ]) ]))
+                  ))
+                  [ [ PathSegment.Key "records"
+                      PathSegment.Index 1
+                      PathSegment.Key "fields"
+                      PathSegment.Index 0
+                      PathSegment.Key "type" ],
+                    "record 'Hold', field 'u': at the instantiation Hold<Box<int>>" + ending ]
+                  "a generic record as the holder"
+
+              Expect.equal
+                  (faults (
+                      through
+                          ([ union "HoldU" [ "T" ] [ case "C" [ f "u" (t1 (TVar "T")) Required ] ] ], [])
+                          (TUnion("HoldU", [ TMap TInt ]))
+                  ))
+                  [ [ PathSegment.Key "unions"
+                      PathSegment.Index 1
+                      PathSegment.Key "cases"
+                      PathSegment.Index 0
+                      PathSegment.Key "fields"
+                      PathSegment.Index 0
+                      PathSegment.Key "type" ],
+                    "union 'HoldU' case 'C', field 'u': at the instantiation HoldU<map<str, int>>"
+                    + ending ]
+                  "a generic union as the holder, at a map"
+
+              // The same holders where the argument is no object: admitted.
+              Expect.isEmpty
+                  (faults (
+                      through
+                          ([], [ record "Hold" [ "T" ] [ f "u" (t1 (TVar "T")) Required ] ])
+                          (TRecord("Hold", [ TList(TRecord("Box", [ TInt ])) ]))
+                  ))
+                  "a list of objects is an array")
+
+          // Exact over this family: admitted exactly where every document the encoder writes reads
+          // back to its bytes. It holds each way a holder passes its parameter to the union (bare,
+          // in a list, through a second holder, as the argument of a record that holds it and of
+          // one that does not), holders whose instantiations are infinitely many, and a union whose
+          // transparent field is a list of its parameter (never an object).
+          testCase "is exact over a family of holders, finitely and infinitely instantiated" (fun _ ->
+              let mutable admitted = 0
+              let mutable refused = 0
+              let mutable growing = 0
+
+              let args: (IdlType * IdlValue) list =
+                  [ TInt, VInt 1
+                    TStr, VStr "s"
+                    TList TInt, VList [ VInt 1 ]
+                    TList(TRecord("Box", [ TInt ])), VList [ VRecord [ "item", VInt 1 ] ]
+                    TRecord("Box", [ TInt ]), VRecord [ "item", VInt 1 ]
+                    TRecord("Box", [ TList TInt ]), VRecord [ "item", VList [ VInt 1 ] ]
+                    TMap TInt, VMap [ "k", VInt 1 ]
+                    TRecord("Plain", []), VRecord [ "n", VInt 1 ] ]
+
+              for bare in [ true; false ] do
+                  // The transparent field: the parameter itself, or a list of it.
+                  let held = if bare then TVar "T" else TList(TVar "T")
+                  let inBare (v: IdlValue) = if bare then v else VList [ v ]
+
+                  let values (v: IdlValue) : IdlValue list =
+                      [ VUnion("Bare", [ "v", inBare v ]); VUnion("Tagged", [ "n", VInt 1 ]) ]
+
+                  for arg, argValue in args do
+                      for holder in
+                          [ "direct"
+                            "record"
+                            "union"
+                            "list"
+                            "nested"
+                            "passed"
+                            "phantom"
+                            "grows by a list"
+                            "grows into a record" ] do
+                          let hold (members: IdlField list) = record "Hold" [ "T" ] members
+                          let self (t: IdlType) = TRecord("Hold", [ t ])
+                          let u = f "u" (t1 (TVar "T")) Optional
+
+                          let unions, records, at, documents =
+                              match holder with
+                              | "direct" -> [], [], t1 arg, values argValue
+                              | "record" ->
+                                  [],
+                                  [ hold [ u ] ],
+                                  self arg,
+                                  values argValue |> List.map (fun v -> VRecord [ "u", v ])
+                              | "union" ->
+                                  [ union "HoldU" [ "T" ] [ case "C" [ u ] ] ],
+                                  [],
+                                  TUnion("HoldU", [ arg ]),
+                                  values argValue |> List.map (fun v -> VUnion("C", [ "u", v ]))
+                              | "list" ->
+                                  [],
+                                  [ hold [ f "u" (TList(t1 (TVar "T"))) Optional ] ],
+                                  self arg,
+                                  [ VRecord [ "u", VList(values argValue) ] ]
+                              | "nested" ->
+                                  [],
+                                  [ hold [ u ]; record "Outer" [ "S" ] [ f "h" (self (TVar "S")) Optional ] ],
+                                  TRecord("Outer", [ arg ]),
+                                  values argValue |> List.map (fun v -> VRecord [ "h", VRecord [ "u", v ] ])
+                              | "passed" ->
+                                  [],
+                                  [ hold [ f "u" (TRecord("Pair", [ t1 (TVar "T"); TInt ])) Optional ]
+                                    record "Pair" [ "A"; "B" ] [ f "x" (TVar "A") Required; f "y" (TVar "B") Required ] ],
+                                  self arg,
+                                  values argValue
+                                  |> List.map (fun v -> VRecord [ "u", VRecord [ "x", v; "y", VInt 2 ] ])
+                              | "phantom" ->
+                                  // No value of `T1<arg>` is ever held: `Phantom` holds nothing at
+                                  // its parameter.
+                                  [],
+                                  [ hold [ f "u" (TRecord("Phantom", [ t1 (TVar "T") ])) Optional ]
+                                    record "Phantom" [ "P" ] [ f "n" TInt Optional ] ],
+                                  self arg,
+                                  [ VRecord []; VRecord [ "u", VRecord [ "n", VInt 1 ] ] ]
+                              | "grows by a list" ->
+                                  // `Hold<arg>`, `Hold<list<arg>>`, …: only the first can be an object.
+                                  [],
+                                  [ hold [ u; f "next" (self (TList(TVar "T"))) Optional ] ],
+                                  self arg,
+                                  [ for v in values argValue do
+                                        yield VRecord [ "u", v ]
+
+                                        for deeper in values (VList [ argValue ]) do
+                                            yield VRecord [ "u", v; "next", VRecord [ "u", deeper ] ] ]
+                              | _ ->
+                                  // `Hold<arg>`, `Hold<Box<arg>>`, …: every one after the first is.
+                                  [],
+                                  [ hold [ u; f "next" (self (TRecord("Box", [ TVar "T" ]))) Optional ] ],
+                                  self arg,
+                                  [ for v in values argValue do
+                                        yield VRecord [ "u", v ]
+
+                                        for deeper in values (VRecord [ "item", argValue ]) do
+                                            yield VRecord [ "u", v; "next", VRecord [ "u", deeper ] ] ]
+
+                          let idl =
+                              transparent
+                                  held
+                                  [ kind "K" [ f "g" at Optional ] ]
+                                  unions
+                                  (records
+                                   @ [ record "Box" [ "W" ] [ f "item" (TVar "W") Required ]
+                                       record "Plain" [] [ f "n" TInt Required ] ])
+
+                          let label = sprintf "T1<T> { Bare: %A }, held %s at %A" held holder arg
+
+                          let written =
+                              documents
+                              |> List.choose (fun document ->
+                                  match Encode.encode idl (node document) with
+                                  | Ok bytes -> Some bytes
+                                  | Error _ -> None)
+
+                          Expect.equal
+                              (List.length written)
+                              (List.length documents)
+                              (label + ": the encoder writes every value")
+
+                          let every =
+                              written
+                              |> List.forall (fun bytes ->
+                                  (Decode.decode idl bytes |> Result.bind (Encode.encode idl)) = Ok bytes)
+
+                          let faults = within 20.0 (label + ": Declare.errors") (fun () -> Declare.errors idl)
+
+                          if holder.StartsWith "grows" then
+                              growing <- growing + 1
+
+                          if List.isEmpty faults then
+                              admitted <- admitted + 1
+                              Expect.isTrue every (label + ": admitted, so every value reads back")
+                          else
+                              refused <- refused + 1
+                              Expect.isFalse every (label + ": refused, so some value does not read back")
+
+                              for fault in faults do
+                                  Expect.stringContains
+                                      fault.Detail
+                                      "instantiates union 'T1' so that its transparent case's field 'v' can encode to an object"
+                                      (label + ": refused by this rule and no other")
+
+              // No side is vacuous.
+              Expect.isGreaterThan admitted 80 "declarations are admitted"
+              Expect.isGreaterThan refused 25 "declarations are refused"
+              Expect.equal growing 32 "and thirty-two of them reach infinitely many instantiations") ]
