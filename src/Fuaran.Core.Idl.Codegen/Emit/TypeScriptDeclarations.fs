@@ -320,9 +320,15 @@ module internal TypeScriptDeclarations =
         // Phase 722 — a member holding an inline declaration states no key of its own: the holder's
         // type is its own members INTERSECTED with the declaration's (`& Paging`, `& GridRows`), and
         // an optional presence-keyed union admits the object carrying no case's key beside its cases.
-        // Phase 732 — an inline record applied to arguments is intersected at that instantiation
-        // (`& Paging<string>`; `& LocalState<T>` where the holder passes its own parameter down).
-        let inlineType (f: IdlField) (slot: InlineSlot) : Result<string, CodegenError> =
+        // Phase 732 — an inline record applied to arguments is intersected as its own MEMBERS at
+        // that instantiation (`& { pageSize: number; cursor?: string }` for `Paging<string>`), never
+        // as the reference `& Paging<string>`. The two are one type (the second is the alias applied,
+        // the first what it is an alias of), and only the first can stand where the argument is the
+        // type being declared: `type Tree = … | ({ $type: "TInl" } & Inl<Tree>)` is TS2456, a
+        // circular alias, because an alias's arguments are read at once, while an object type's
+        // members are read when they are asked for. An inline record holds none itself (the
+        // declaration check refuses one laid inside another), so the recursion below ends at once.
+        let rec inlineType (f: IdlField) (slot: InlineSlot) : Result<string, CodegenError> =
             match slot, f.Opt with
             | InlineSlot.Keyed(u, keyed), Optional ->
                 Ok(
@@ -335,9 +341,10 @@ module internal TypeScriptDeclarations =
                     + " })"
                 )
             | InlineSlot.Keyed(u, _), _ -> Ok u.Name
+            | InlineSlot.Record r, _ when not (List.isEmpty r.Args) -> objectType [] (Decl.recordFieldsAt r.Decl r.Args)
             | InlineSlot.Record r, _ -> tsType (TRecord(r.Decl.Name, r.Args))
 
-        let objectType (extra: string list) (fields: IdlField list) : Result<string, CodegenError> =
+        and objectType (extra: string list) (fields: IdlField list) : Result<string, CodegenError> =
             let held =
                 fields
                 |> List.choose (fun f -> tsInlineOf idl f |> Option.map (inlineType f))

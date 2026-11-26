@@ -29,7 +29,7 @@ let private typeLines (declarations: string) : string list =
 
 // ---------------------------------------------------------------------------
 // The declarations: a generic TypeScript type for a generic record, applied at each reference; an
-// inline one intersected into its holder at the holder's argument.
+// inline one's members intersected into its holder at the holder's argument.
 // ---------------------------------------------------------------------------
 
 /// A consumer of the vocabulary's declarations that uses a generic record at two instantiations,
@@ -103,13 +103,14 @@ let declarationTests =
                     // A record passing its parameter on, and two parameters.
                     "export type Series<T> = { points: Array<Labelled<T>> };"
                     "export type Entry<K, V> = { key: K; value?: V };"
-                    // An inline record is a type too: its holder intersects it at the holder's argument.
+                    // An inline record is a type too, and its holder states its members at the
+                    // holder's argument: an object type, never the reference (`& LocalState<T>`).
                     "export type Paging<T> = { pageSize: number; cursor?: T };"
-                    "export type Binding<T> = { $type: \"Static\"; value: T } | ({ $type: \"Local\" } & LocalState<T>) | { $type: \"Bounded\"; range: Ranged<T> };"
+                    "export type Binding<T> = { $type: \"Static\"; value: T } | ({ $type: \"Local\" } & { initial: T; stateKey: string }) | { $type: \"Bounded\"; range: Ranged<T> };"
                     "export type Shape = { $type: \"Span\"; extent: Ranged<number> } | { $type: \"Point\" };"
                     // Two instantiations of one record, and a record applied to a record.
                     "export type StepperSpec = { $type: \"Stepper\"; range: Ranged<number>; window?: Labelled<Ranged<number>>; binding?: Binding<number> };"
-                    "export type GridSpec = { $type: \"Grid\"; title?: Labelled<string>; series?: Series<number>; sort?: Entry<string, Direction> } & Paging<string>;" ] do
+                    "export type GridSpec = { $type: \"Grid\"; title?: Labelled<string>; series?: Series<number>; sort?: Entry<string, Direction> } & { pageSize: number; cursor?: string };" ] do
                   Expect.contains lines line "declared")
 
           // The compiler leg (Phase 348): it runs where `FUARAN_CORE_TSC` names a TypeScript compiler,
@@ -182,6 +183,199 @@ let declarationTests =
                   with
                   | None -> skiptest "node not on PATH"
                   | Some(code, out) -> Expect.equal code 0 (sprintf "tsc accepts the consumer: %s" out)) ]
+
+// ---------------------------------------------------------------------------
+// An inline generic record applied to the type that HOLDS it. The declaration of the holder states
+// the record's members at the argument (an object type), where the reference `Inl<Tree>` would make
+// `Tree` an alias that reads itself while it is being declared (TS2456). Each shape is compiled,
+// and the consumer holds the two spellings to be one type: the holder's value is the record's at
+// that argument, and the record's members beside the tag are the holder's.
+// ---------------------------------------------------------------------------
+
+module private HeldByItself =
+    let field (name: string) (t: IdlType) (opt: Optionality) : IdlField =
+        { Name = name
+          Type = t
+          Opt = opt
+          Aliases = []
+          Keyed = false
+          Presence = None
+          Annotations = Annotations.Empty }
+
+    let record (name: string) (pars: string list) (isInline: bool) (fields: IdlField list) : IdlRecord =
+        { Name = name
+          Params = pars
+          Fields = fields
+          Annotations = Annotations.Empty
+          Inline = isInline }
+
+    let case (tag: string) (fields: IdlField list) : IdlUnionCase =
+        { Tag = tag
+          Fields = fields
+          Annotations = Annotations.Empty
+          Hosted = None }
+
+    let union (name: string) (pars: string list) (cases: IdlUnionCase list) : IdlUnion =
+        { Name = name
+          Params = pars
+          Cases = cases
+          Annotations = Annotations.Empty
+          TagRule = UnionTagRule.CaseName
+          Discrimination = UnionDiscrimination.Tagged }
+
+    let vocabulary (members: IdlField list) (unions: IdlUnion list) (records: IdlRecord list) : Idl =
+        { Kinds =
+            [ { Tag = "K"
+                Category = "probe"
+                Fields = members
+                Annotations = Annotations.Empty } ]
+          Unions = unions
+          Enums = []
+          Records = records
+          Defaults = []
+          NodeFields = []
+          Ops = []
+          Wire = WireShape.Default
+          Harden = HardenPolicy.Undeclared
+          Contracts = [] }
+
+    /// `Inl<T>`, inline: its members are its holder's own.
+    let inl: IdlRecord =
+        record
+            "Inl"
+            [ "T" ]
+            true
+            [ field "held" (TVar "T") Required
+              field "heldMany" (TList(TVar "T")) Optional ]
+
+    let tree: IdlType = TUnion("Tree", [])
+
+    /// A union whose case lays `Inl<Tree>` out beside its tag.
+    let unionOfItself: Idl =
+        vocabulary
+            [ field "tree" tree Required ]
+            [ union
+                  "Tree"
+                  []
+                  [ case "TLeaf" [ field "n" TInt Required ]
+                    case "TInl" [ field "payload" (TRecord("Inl", [ tree ])) Required ] ] ]
+            [ inl ]
+
+    /// The same through a generic union, at its own instantiation.
+    let genericUnionOfItself: Idl =
+        vocabulary
+            [ field "tree" (TUnion("GTree", [ TInt ])) Required ]
+            [ union
+                  "GTree"
+                  [ "T" ]
+                  [ case "GLeaf" [ field "v" (TVar "T") Required ]
+                    case "GInl" [ field "payload" (TRecord("Inl", [ TUnion("GTree", [ TVar "T" ]) ])) Required ] ] ]
+            [ inl ]
+
+    /// A kind laying `Inl<Node>` on itself, where the kind is merged into the node envelope.
+    let kindOfNode: Idl =
+        { vocabulary [ field "i" (TRecord("Inl", [ TNode ])) Required; field "n" TInt Optional ] [] [ inl ] with
+            Wire =
+                { Discriminator = "kind"
+                  NodeEnvelope = NodeEnvelopeShape.FlatKind
+                  KeyOrder = KeyOrder.Declared } }
+
+    /// A record laying an inline generic record of itself out.
+    let recordOfItself: Idl =
+        vocabulary
+            [ field "r" (TRecord("Holder", [])) Optional ]
+            []
+            [ record "Rest" [ "T" ] true [ field "rest" (TList(TVar "T")) Required ]
+              record
+                  "Holder"
+                  []
+                  false
+                  [ field "payload" (TRecord("Rest", [ TRecord("Holder", []) ])) Required
+                    field "x" TInt Required ] ]
+
+    /// Each shape with the declaration it must make and a consumer that uses it.
+    let shapes: (string * Idl * string * string list) list =
+        [ "a union's case",
+          unionOfItself,
+          "export type Tree = { $type: \"TLeaf\"; n: number } | ({ $type: \"TInl\" } & { held: Tree; heldMany?: Array<Tree> });",
+          [ "import { type Tree, type Inl } from './generated.mjs';"
+            "const leaf: Tree = { $type: 'TLeaf', n: 1 };"
+            "const inner: Tree = { $type: 'TInl', held: leaf, heldMany: [leaf] };"
+            "const members: Inl<Tree> = inner.$type === 'TInl' ? inner : { held: leaf };"
+            "const again: Tree = { $type: 'TInl', ...members };"
+            "console.log(again);"
+            "// @ts-expect-error"
+            "const bad: Tree = { $type: 'TInl', held: 3 };"
+            "console.log(bad);" ]
+          "a generic union's case",
+          genericUnionOfItself,
+          "export type GTree<T> = { $type: \"GLeaf\"; v: T } | ({ $type: \"GInl\" } & { held: GTree<T>; heldMany?: Array<GTree<T>> });",
+          [ "import { type GTree, type Inl } from './generated.mjs';"
+            "const leaf: GTree<number> = { $type: 'GLeaf', v: 1 };"
+            "const inner: GTree<number> = { $type: 'GInl', held: leaf };"
+            "const members: Inl<GTree<number>> = inner.$type === 'GInl' ? inner : { held: leaf };"
+            "const again: GTree<number> = { $type: 'GInl', ...members };"
+            "console.log(again);"
+            "// @ts-expect-error"
+            "const bad: GTree<number> = { $type: 'GInl', held: { $type: 'GLeaf', v: 'x' } };"
+            "console.log(bad);" ]
+          "a kind merged into the node",
+          kindOfNode,
+          "export type KSpec = { kind: \"K\"; n?: number } & { held: Node; heldMany?: Array<Node> };",
+          [ "import { type Node, type KSpec, type Inl } from './generated.mjs';"
+            "declare const child: Node;"
+            "const spec: KSpec = { kind: 'K', held: child };"
+            "const members: Inl<Node> = spec;"
+            "const node: Node = { id: 'n', kind: 'K', ...members };"
+            "console.log(node.held.id);"
+            "// @ts-expect-error"
+            "const bad: KSpec = { kind: 'K', held: 3 };"
+            "console.log(bad);" ]
+          "a record",
+          recordOfItself,
+          "export type Holder = { x: number } & { rest: Array<Holder> };",
+          [ "import { type Holder, type Rest } from './generated.mjs';"
+            "const end: Holder = { x: 1, rest: [] };"
+            "const members: Rest<Holder> = end;"
+            "const outer: Holder = { x: 2, ...members, rest: [end] };"
+            "console.log(outer.rest[0]?.x);"
+            "// @ts-expect-error"
+            "const bad: Holder = { x: 2, rest: [3] };"
+            "console.log(bad);" ] ]
+
+[<Tests>]
+let heldByItselfTests =
+    testList
+        "Phase 732 — the TypeScript declarations where an inline generic record is applied to its holder"
+        [ testCase "the holder states the record's members at the argument, and the record keeps its own type" (fun _ ->
+              for what, idl, declared, _ in HeldByItself.shapes do
+                  Expect.isEmpty (Declare.errors idl) (what + ": well-formed")
+                  let lines = typeLines (emitted (Gen.typescriptDeclarations idl (tagsOf idl)))
+                  Expect.contains lines declared (what + ": the holder")
+
+                  Expect.isTrue
+                      (lines
+                       |> List.exists (fun l ->
+                           l.StartsWith "export type Inl<T> = " || l.StartsWith "export type Rest<T> = "))
+                      (what + ": the inline record is still a type of its own"))
+
+          testCase
+              "with a TypeScript compiler, each such declaration file compiles, and its two spellings are one type"
+              (fun _ ->
+                  match IdlDeriveTests.tscJs () with
+                  | None -> skiptest "FUARAN_CORE_TSC names no TypeScript compiler — the type-check leg cannot run"
+                  | Some tsc ->
+                      for what, idl, _, consumer in HeldByItself.shapes do
+                          match
+                              IdlDeriveTests.tscCheck
+                                  tsc
+                                  [ "generated.mjs", emitted (Gen.typescriptModule idl (tagsOf idl))
+                                    "generated.d.mts", emitted (Gen.typescriptDeclarations idl (tagsOf idl))
+                                    "consumer.mts", String.concat "\n" consumer ]
+                          with
+                          | None -> skiptest "node not on PATH"
+                          | Some(code, out) ->
+                              Expect.equal code 0 (sprintf "%s: tsc accepts the consumer: %s" what out)) ]
 
 // ---------------------------------------------------------------------------
 // The derived members ([[ParameterisedRecordsIdl.derived]]): each is run under node over the
