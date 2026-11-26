@@ -6,8 +6,10 @@ module Fuaran.Core.Tests.IdlRecordParamsTests
 //
 // This file holds the DECLARATION: what `Declare.errors` admits and refuses, each refusal in the
 // sentence the same fault of a union gets; what the artifact writes and reads; that a vocabulary
-// declaring no parameterised record writes neither new member; and that every backend entry emits a
-// parameterised record, and refuses by the record's name a reference no binding can be made for.
+// declaring no parameterised record writes neither new member; that every backend entry emits a
+// parameterised record and refuses by name a reference no binding can be made for, a union's as a
+// record's; what each entry answers over a recursion that grows its type argument; and that an
+// omit-at-default member at a type parameter is admitted exactly where every value reads back.
 // ---------------------------------------------------------------------------
 
 open Expecto
@@ -522,60 +524,16 @@ let tests =
               Expect.isNonEmpty references "the reference vocabulary names a record"
               Expect.equal (references |> List.distinct |> List.sort) [ "$type"; "name" ] "tag and name alone")
 
-          testCase
-              "the schema emits a parameterised record, and refuses a reference no binding can be made for"
-              (fun _ ->
-                  Expect.isOk (Gen.jsonSchema boxed) "every instantiation is stated"
-                  Expect.isOk (Gen.contractArgumentSchemas boxed) "and a method's arguments read the same definitions"
+          testCase "every backend entry and both schema entries emit a parameterised record" (fun _ ->
+              let emitting = backends boxed
 
-                  // Arguments applied to a record that declares none: the declaration check refuses the
-                  // vocabulary, and a backend handed it unchecked names the reference.
-                  let applied =
-                      { boxed with
-                          Kinds = [ kind "Holder" [ f "shape" (TRecord("Shape", [ TStr ])) Required ] ]
-                          Unions = []
-                          Records = [ record "Shape" [] [ f "w" TInt Required ] ] }
+              Expect.equal
+                  (List.length emitting)
+                  12
+                  "the five F# entries, the five TypeScript ones and the two F* ones"
 
-                  match Gen.jsonSchema applied with
-                  | Error e ->
-                      Expect.stringContains
-                          (CodegenError.describe e)
-                          "a reference applying record 'Shape' to 1 type argument(s) where it declares 0"
-                          "by the record's name"
-                  | Ok schema -> failtestf "a schema naming an instantiation that does not exist: %s" schema)
-
-          testCase
-              "every backend entry emits a parameterised record, and refuses a reference no binding can be made for"
-              (fun _ ->
-                  // An applied argument no declaration backs: a backend is handed an `Idl` value, not a
-                  // declaration that was checked.
-                  let applied =
-                      { boxed with
-                          Kinds = [ kind "Holder" [ f "shape" (TRecord("Shape", [ TStr ])) Required ] ]
-                          Unions = []
-                          Records = [ record "Shape" [] [ f "w" TInt Required ] ] }
-
-                  let emitting = backends boxed
-
-                  Expect.equal
-                      (List.length emitting)
-                      12
-                      "the five F# entries, the five TypeScript ones and the two F* ones"
-
-                  for entry, answer in emitting do
-                      Expect.equal answer (Ok()) (sprintf "%s emits the parameterised records" entry)
-
-                  // A reference no binding can be made for has no generic type, function or model
-                  // instance to name: every entry refuses it by the record's name, in the sentence the
-                  // JSON schema refuses it in.
-                  for entry, answer in backends applied do
-                      match answer with
-                      | Ok() -> failtestf "%s: emitted for a reference no binding can be made for" entry
-                      | Error description ->
-                          Expect.stringContains
-                              description
-                              "a reference applying record 'Shape' to 1 type argument(s) where it declares 0"
-                              (sprintf "%s names the reference" entry))
+              for entry, answer in emitting @ schemas boxed do
+                  Expect.equal answer (Ok()) (sprintf "%s emits the parameterised records" entry))
 
           testCase "a misapplied reference is refused by every entry in one sentence, a union's as a record's" (fun _ ->
               // Each way a reference can apply another number of arguments than its declaration

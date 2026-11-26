@@ -199,6 +199,20 @@ EMITTER does rather than what a stored document does:
   re-encodes to different bytes — the argument the moved-identity-default row already rests on.
 - **Int to float is `additive`** (Phase 252, below), and is the same test passed: old documents
   decode and re-encode byte-identically under the widened vocabulary.
+- **A type parameter and a type argument are graded at the instantiation** (Phase 732), for a union
+  and a record alike. The wire carries no type argument, so a type that is only WRITTEN differently
+  moves no document: a parameter no member names added or removed, a parameter renamed, a
+  declaration made generic and applied at the type it held, an argument changed where no member holds
+  the parameter. Each is `host-surface-only` (`FieldTypeRestated`, and `UnionParamsChanged` /
+  `RecordParamsChanged` for the list itself). What decides is the type each member is at the
+  arguments a reference applies, over every instantiation the two revisions reach from a kind, an
+  op, the node envelope, a declaration that declares no parameter, or a contract method. So an
+  argument changed where a member holds the parameter is a type change of that member
+  (`breaking-wire`, or `additive` for an `int` widened to `float`), and two parameters exchanged
+  under references written as before are `breaking-wire` at the member, though no reference moved.
+  A member whose written type moved in a generic declaration no reference reaches, and a type
+  compared through a recursion that grows its type argument, are graded as changed. A contract
+  method's argument and result types are compared as written.
 
 The evolution differential in `tests/Fuaran.Core.Tests/IdlStabilityClassTests.fs` holds the rows to
 that definition: it decodes sampled old documents under each perturbed vocabulary — an optional or a
