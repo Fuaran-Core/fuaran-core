@@ -261,6 +261,13 @@
       "versionStamped": true
     },
     {
+      "path": "conformance/laws/canonical-form-laws.json",
+      "render": "laws",
+      "heldBy": "ExportersTests",
+      "copies": [ "Fuaran/Fuaran-UI/wire-format-fixtures:laws/canonical-form-laws.json" ],
+      "versionStamped": true
+    },
+    {
       "path": "conformance/laws/propagation-laws.json",
       "render": "laws",
       "heldBy": "ExportersTests",

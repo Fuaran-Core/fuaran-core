@@ -127,7 +127,7 @@ let private fixture (dropRow: string option) : Fixture =
     let corpus = initRepo (Path.Combine(root, "corpus"))
 
     for name, text in lawsAtReleased.Value do
-        if name <> CanonicalFormVectorExport.fileName then
+        if Set.contains ("laws/" + name) (Exporters.declared registry.Value lawsRow.Value) then
             write (Path.Combine(corpus, "laws", name)) text
 
     write (Path.Combine(corpus, "laws", "manifest.json")) (manifestText dropRow)
@@ -260,7 +260,7 @@ let private expectSlotAt (f: Fixture) (outcome: OpenSlot.Outcome) (version: stri
     Expect.equal (changedIn f.Corpus) [] "and left the corpus clean"
 
     Expect.isFalse
-        (File.Exists(Path.Combine(f.Corpus, "laws", CanonicalFormVectorExport.fileName)))
+        (File.Exists(Path.Combine(f.Corpus, "laws", LawVectorExport.Gates.fileName)))
         "an emitted file the corpus does not declare never lands there"
 
     for rel in declared do
@@ -597,9 +597,9 @@ let tests =
           <| fun _ ->
               refuses
                   None
-                  (fun f -> write (Path.Combine(f.Corpus, "laws", CanonicalFormVectorExport.fileName)) "{}\n")
+                  (fun f -> write (Path.Combine(f.Corpus, "laws", LawVectorExport.Gates.fileName)) "{}\n")
                   (fun f -> f.Request(opening, OpenSlot.Additive))
-                  "uncommitted changes outside the declared set (laws/canonical-form-laws.json)"
+                  "uncommitted changes outside the declared set (laws/capability-gate-laws.json)"
 
           testCase "go-red: the corpus checkout is behind the pin"
           <| fun _ ->

@@ -42,8 +42,9 @@ conformance/
 Core is the reference for every law family it ships, so it emits every law set a host certifies a
 reimplementation against. Since Phase 650 that is **six** families under `laws/`, all written by
 the tool's `render laws` (`LawVectorExport.emitted` in `tests/Fuaran.Core.Tests.Fixtures/`); the shared
-corpus carries the first four, and `canonicalFormLaws` (Phase 539, the IDL's canonical-form declarations)
-and `capabilityGateLaws` are read from this repository's own `conformance/`:
+corpus carries the first four and `canonicalFormLaws` (Phase 539, the IDL's canonical-form declarations;
+its copy, manifest row and producer record landed in the corpus with Phase 554), and `capabilityGateLaws`
+is read from this repository's own `conformance/`:
 
 | Family | File | Shape |
 |---|---|---|
