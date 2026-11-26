@@ -13,10 +13,10 @@ module internal DiffSnapshot =
 
     let private field (name: string) (v: JVal) : JVal option = Decoder.tryMember name v
 
-    let private str (name: string) (v: JVal) : string option =
+    let str (name: string) (v: JVal) : string option =
         Decoder.optField name Decoder.str v |> Result.defaultValue None
 
-    let private arr (name: string) (v: JVal) : JVal list =
+    let arr (name: string) (v: JVal) : JVal list =
         Decoder.fieldOr name [] Decoder.items v |> Result.defaultValue []
 
     /// The type object with its `hostSurface` key removed — the wire-observable
@@ -67,12 +67,13 @@ module internal DiffSnapshot =
         | "closure"
         | "opaque" -> tag
         | "enum" -> "enum " + named ()
-        | "record" -> "record " + named ()
         | "var" -> "'" + named ()
-        | "union" ->
+        // Phase 732 — a record reference applies arguments as a union reference does, and is labelled so.
+        | "union"
+        | "record" ->
             match arr "args" v with
-            | [] -> "union " + named ()
-            | args -> sprintf "union %s<%s>" (named ()) (args |> List.map typeLabel |> String.concat ", ")
+            | [] -> tag + " " + named ()
+            | args -> sprintf "%s %s<%s>" tag (named ()) (args |> List.map typeLabel |> String.concat ", ")
         | "list" ->
             match field "of" v with
             | Some inner -> sprintf "list<%s>" (typeLabel inner)
@@ -165,6 +166,14 @@ module internal DiffSnapshot =
     // ---- contracts (Phase 644, DECISIONS.md D260.16) ----
 
     let private text (v: JVal) : string = Canonical.write Rendering.CrossHost v
+
+    /// A union's or a record's declared type-parameter names in order: `[]` when the declaration
+    /// writes no `params` member, which a record declaring none does not (Phase 732).
+    let private readParams (decl: JVal) : string list =
+        arr "params" decl
+        |> List.choose (function
+            | JStr s -> Some s
+            | _ -> None)
 
     let private wireOf (ty: JVal) : WireType =
         { Tag = str "$type" ty |> Option.defaultValue "?"
@@ -324,14 +333,7 @@ module internal DiffSnapshot =
                     |> byName (str "name") (fun u ->
                         let cases = arr "cases" u
 
-                        { Params =
-                            match field "params" u with
-                            | Some(JArr ps) ->
-                                ps
-                                |> List.choose (function
-                                    | JStr s -> Some s
-                                    | _ -> None)
-                            | _ -> []
+                        { Params = readParams u
                           Cases =
                             cases
                             |> byName (str "tag") (fun c ->
@@ -445,7 +447,11 @@ module internal DiffSnapshot =
                                + "."
                                + (str "case" e |> Option.defaultValue ""))
                            |> String.concat ",")
-                  Contracts = arr "contracts" artifact |> byName (str "name") readContract }
+                  Contracts = arr "contracts" artifact |> byName (str "name") readContract
+                  RecordParams =
+                    arr "records" artifact
+                    |> byName (str "name") readParams
+                    |> Map.filter (fun _ ps -> not ps.IsEmpty) }
         | _ -> Error "idl.json: expected a JSON object at the root"
 
     /// Phase 293 — a snapshot with the support document beside the artifact joined in;

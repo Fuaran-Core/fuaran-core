@@ -73,6 +73,7 @@
     <Compile Include="SupportArtifact.fs" />
     <!-- Phase 524 - the stability classifier, one concern per file behind the `Diff` facade. -->
     <Compile Include="Diff/Snapshot.fs" />
+    <Compile Include="Diff/Instances.fs" />
     <Compile Include="Diff/Rules.fs" />
     <Compile Include="Diff/Changes.fs" />
     <Compile Include="Diff/Verdict.fs" />

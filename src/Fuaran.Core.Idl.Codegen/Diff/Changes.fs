@@ -10,8 +10,15 @@ module internal DiffChanges =
 
     /// The addition and removal of a field are a `FieldOptionalityChanged` seen
     /// from too far away only when the name matches; everything else pairs by
-    /// name too, so field diffing is one shared walk.
-    let private diffFields (owner: Owner) (before: FieldSnap list) (after: FieldSnap list) : Change list =
+    /// name too, so field diffing is one shared walk. Phase 732 — whether a field's TYPE moved is
+    /// `judge`'s to say (`DiffInstances`): a type written differently that is the same type at
+    /// every instantiation the vocabulary reaches is `FieldTypeRestated`, not a wire move.
+    let private diffFields
+        (judge: Owner -> FieldSnap -> FieldSnap -> DiffInstances.TypeMove)
+        (owner: Owner)
+        (before: FieldSnap list)
+        (after: FieldSnap list)
+        : Change list =
         let b = before |> List.map (fun f -> f.Name, f) |> Map.ofList
         let a = after |> List.map (fun f -> f.Name, f) |> Map.ofList
 
@@ -19,10 +26,16 @@ module internal DiffChanges =
               match Map.tryFind f.Name b with
               | None -> yield FieldAdded(owner, f)
               | Some old ->
-                  if old.Wire <> f.Wire then
-                      yield FieldTypeChanged(owner, f.Name, old, f)
-                  elif old.Host <> f.Host then
-                      yield FieldHostSurfaceChanged(owner, f.Name, old.Host, f.Host)
+                  match judge owner old f with
+                  | DiffInstances.TypeMove.Moved -> yield FieldTypeChanged(owner, f.Name, old, f)
+                  | DiffInstances.TypeMove.Restated ->
+                      yield FieldTypeRestated(owner, f.Name, old, f)
+
+                      if old.Host <> f.Host then
+                          yield FieldHostSurfaceChanged(owner, f.Name, old.Host, f.Host)
+                  | DiffInstances.TypeMove.Unmoved ->
+                      if old.Host <> f.Host then
+                          yield FieldHostSurfaceChanged(owner, f.Name, old.Host, f.Host)
 
                   if old.Presence <> f.Presence then
                       yield FieldOptionalityChanged(owner, f.Name, old, f)
@@ -193,6 +206,8 @@ module internal DiffChanges =
     /// reported beside its add and remove, never instead of them; annotation and category
     /// moves are reported only for members both revisions carry.
     let changes (before: Snapshot) (after: Snapshot) : Change list =
+        let diffFields = diffFields (DiffInstances.judge before after)
+
         let unordered =
             [ if before.Version <> after.Version then
                   ArtifactVersionChanged(before.Version, after.Version)
@@ -304,7 +319,14 @@ module internal DiffChanges =
                   diffNamed
                       RecordAdded
                       RecordRemoved
-                      (fun name b a -> diffFields (ORecord name) b a)
+                      (fun name b a ->
+                          let declared (s: Snapshot) =
+                              s.RecordParams |> Map.tryFind name |> Option.defaultValue []
+
+                          [ if declared before <> declared after then
+                                RecordParamsChanged(name, declared before, declared after)
+
+                            yield! diffFields (ORecord name) b a ])
                       before.Records
                       after.Records
 

@@ -157,7 +157,7 @@ let private declaredTypes (idl: Idl) : IdlType list =
 /// The fixture vocabularies of the suite's fixture library that declare no parameterised record:
 /// all of them but [[ParameterisedRecordsIdl]], which is the one built to declare them. A fixture
 /// added there is added here.
-let private fixtures: (string * Idl) list =
+let fixtures: (string * Idl) list =
     [ "mini", MiniIdl.miniIdl
       "document", SecondDomainIdl.docIdl
       "score", ScoreDomainIdl.scoreIdl

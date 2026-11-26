@@ -285,6 +285,8 @@ module internal DiffVerdict =
             | UnionRemoved _
             | UnionCaseRemoved _
             | UnionParamsChanged _
+            | RecordParamsChanged _
+            | FieldTypeRestated _
             | UnionTransparencyChanged _
             | UnionTagRuleChanged _
             | UnionCaseHostedChanged _

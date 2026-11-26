@@ -344,4 +344,9 @@ type Snapshot =
         /// Phase 644 — the contracts by name; empty when the revision declares none or predates the
         /// member.
         Contracts: Map<string, ContractSnap>
+        /// Phase 732 — a record's declared type-parameter names in order, for the records that
+        /// declare any. A map beside [[Records]], for the reason [[KindCategory]] is one beside
+        /// [[Kinds]]; a record declaring none is absent from it, which is also how a revision
+        /// predating the member reads.
+        RecordParams: Map<string, string list>
     }

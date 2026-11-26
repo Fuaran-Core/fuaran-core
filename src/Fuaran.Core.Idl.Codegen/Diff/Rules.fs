@@ -356,6 +356,38 @@ module internal DiffRules =
 
     // Phase 644 — the contract rows share a family, a consequence and two citations. No F# is
     // generated for a contract, so no change to one moves a generated shape.
+    /// Phase 732 — a union's and a record's type-parameter list moving is ONE rule, in one
+    /// sentence. The list itself is never on the wire; what a member that names a parameter
+    /// holds, and what a reference applies, are graded on the field's own row
+    /// (`FieldTypeChanged` / `FieldTypeRestated`).
+    let private paramsRule
+        (case: string)
+        (rank: string)
+        (what: string)
+        (cite: string)
+        (n: string)
+        (b: string list)
+        (a: string list)
+        : Rule =
+        rule
+            case
+            rank
+            NoFamily
+            n
+            (HostSurfaceOnly,
+             sprintf
+                 "`%s` type parameters %A → %A — generic arity is a host-declaration property; the wire carries no type arguments."
+                 n
+                 b
+                 a,
+             cite)
+            (always reference)
+            (sprintf "%s %s type parameters changed" what n)
+            [ row
+                  (sprintf "a %s's type parameters moved" what)
+                  "`host-surface-only` — the wire carries no type arguments"
+                  "`type-name-reference` (the wrong arity)" ]
+
     let private contractCite =
         "DECISIONS.md D260.16 (a change that can refuse a caller the contract admitted, or change what an admitted caller receives, is breaking); docs/idl-contracts.md"
 
@@ -602,27 +634,11 @@ module internal DiffRules =
                 (sprintf "union case removed: %s.%s" u c)
                 [ row "a union case removed" "`breaking-wire`" "`exhaustive-match`" ]
 
-        | UnionParamsChanged(n, b, a) ->
-            rule
-                "UnionParamsChanged"
-                "34"
-                NoFamily
-                (n)
-                (HostSurfaceOnly,
-                 sprintf
-                     "`%s` type parameters %A → %A — generic arity is a host-declaration property; the wire carries no type arguments."
-                     n
-                     b
-                     a,
-                 "Idl.IdlUnion.Params")
-                (always reference)
-                (sprintf "union %s type parameters changed" n)
-                // The document used to say `breaking-wire` here (Phase 293 corrected it to what the
-                // classifier has always decided): the wire carries no type arguments.
-                [ row
-                      "a union's type parameters moved"
-                      "`host-surface-only` — the wire carries no type arguments"
-                      "`type-name-reference` (the wrong arity)" ]
+        // The document used to say `breaking-wire` here (Phase 293 corrected it to what the
+        // classifier has always decided): the wire carries no type arguments.
+        | UnionParamsChanged(n, b, a) -> paramsRule "UnionParamsChanged" "34" "union" "Idl.IdlUnion.Params" n b a
+
+        | RecordParamsChanged(n, b, a) -> paramsRule "RecordParamsChanged" "52" "record" "Idl.IdlRecord.Params" n b a
 
         | UnionTransparencyChanged(n, b, a) ->
             rule
@@ -899,6 +915,27 @@ module internal DiffRules =
                       "a field's type moved across an **erased** slot (`hosted` / `json` / `opaque`), at any depth — a list element, a map value, a union argument"
                       "`undecided`"
                       "`generated-shape-unreadable`" ]
+
+        | FieldTypeRestated(o, n, b, a) ->
+            rule
+                "FieldTypeRestated"
+                "75"
+                NoFamily
+                (o.Key + "/" + n)
+                (HostSurfaceOnly,
+                 sprintf
+                     "field `%s` on %s is written differently: %s → %s. The wire carries no type arguments, and at every instantiation the vocabulary reaches each member the type names is the type it was, so every old document reads to the same value and writes the same bytes. The generated declaration's type moved."
+                     n
+                     o.Describe
+                     b.Label
+                     a.Label,
+                 "docs/idl-stability-classes.md (a class is what an old document does, Phase 304); Idl.TypeParams (an instantiation's members)")
+                (always construction)
+                (sprintf "field type restated: %s.%s : %s -> %s" o.Describe n b.Label a.Label)
+                [ row
+                      "a field's type **written differently and the same at every instantiation reached** — a reference applying other type arguments, or a generic declaration's member naming a type parameter where it named a type"
+                      "`host-surface-only`"
+                      "`full-literal-construction`" ]
 
         | FieldOptionalityChanged(o, n, b, a) ->
             rule
@@ -1753,9 +1790,11 @@ module internal DiffRules =
           EnumCaseAliasesChanged("", "", [], [])
           RecordAdded ""
           RecordRemoved ""
+          RecordParamsChanged("", [], [])
           FieldAdded(owner, field)
           FieldRemoved(owner, "", field)
           FieldTypeChanged(owner, "", field, field)
+          FieldTypeRestated(owner, "", field, field)
           FieldOptionalityChanged(owner, "", field, field)
           FieldHostSurfaceChanged(owner, "", host, host)
           FieldAnnotationsChanged(owner, "", "", "")

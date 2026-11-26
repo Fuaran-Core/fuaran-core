@@ -207,6 +207,14 @@ type Change =
     /// A fact the host reads and no caller is admitted or refused by moved: a description or the
     /// audit kind. `subject` names the contract, method or argument.
     | ContractHostFactChanged of subject: string * fact: string * before: string * after: string
+    /// The record's type-parameter list moved (Phase 732): graded as [[UnionParamsChanged]] is,
+    /// by the one rule.
+    | RecordParamsChanged of name: string * before: string list * after: string list
+    /// The field's type is WRITTEN differently and is the same type at every instantiation the
+    /// vocabulary reaches (Phase 732): a reference applying other type arguments, or a member
+    /// of a generic declaration naming a type parameter where it named a type. No old document
+    /// moves; the generated declaration does.
+    | FieldTypeRestated of Owner * name: string * before: FieldSnap * after: FieldSnap
 
 /// A change's wire verdict — what an OLD document, or an old emitter, meets under the
 /// new vocabulary. Independent of the F# consequence reported beside it.

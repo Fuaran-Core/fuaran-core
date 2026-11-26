@@ -86,6 +86,7 @@ point.
 | an enum case's alias list | `additive` when no alias is withdrawn, `breaking-wire` otherwise | none | `EnumCaseAliasesChanged` |
 | a record added | `additive` | `no-generated-shape-change` | `RecordAdded` |
 | a record removed | `breaking-wire` | `type-name-reference` | `RecordRemoved` |
+| a record's type parameters moved | `host-surface-only` — the wire carries no type arguments | `type-name-reference` (the wrong arity) | `RecordParamsChanged` |
 | a **required** field added — every old document lacks it and is refused | `breaking-wire` | `full-literal-construction` | `FieldAdded` |
 | an **optional** field added | `additive` | `full-literal-construction` | `FieldAdded` |
 | a **host-only** field added | `host-surface-only` | `full-literal-construction` | `FieldAdded` |
@@ -93,6 +94,7 @@ point.
 | a field's type moved | `breaking-wire` | `full-literal-construction` | `FieldTypeChanged` |
 | a field's type **widened from `int` to `float`** (anywhere in it — a list element, a map value, a union argument) | `additive` | `full-literal-construction` | `FieldTypeChanged` |
 | a field's type moved across an **erased** slot (`hosted` / `json` / `opaque`), at any depth — a list element, a map value, a union argument | `undecided` | `generated-shape-unreadable` | `FieldTypeChanged` |
+| a field's type **written differently and the same at every instantiation reached** — a reference applying other type arguments, or a generic declaration's member naming a type parameter where it named a type | `host-surface-only` | `full-literal-construction` | `FieldTypeRestated` |
 | a field's optionality moved **into or out of** `optional` | `breaking-wire` when it became required (old documents that omitted it are refused); `additive` when `required` became `optional` (every old document carries it and re-encodes identically; the consumer that relied on presence meets absence only from a new emitter — host lag); `breaking-wire` between `optional` and `omitDefault` (absence changes meaning, or a default-valued member stops re-encoding) | `full-literal-construction` | `FieldOptionalityChanged` |
 | a field's optionality moved **between** `required` and `omitDefault`, or its identity default moved | `breaking-wire` — becoming required refuses the old documents that omitted it; becoming omit-at-default, or moving the default, re-encodes every old document sitting on the default without the member (omit-at-default is wire-visible) | `full-literal-construction` on a kind field with no authoring default — `mk<Kind>` takes a parameter for every required field, so the parameter leaves or arrives — else `no-generated-shape-change` | `FieldOptionalityChanged` |
 | a field crossed the **host-only** boundary | `breaking-wire` | `full-literal-construction` when it crossed `optional` too, else `no-generated-shape-change` | `FieldOptionalityChanged` |

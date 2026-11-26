@@ -24,7 +24,7 @@ module Mini = Fuaran.Core.Tests.MiniIdl
 /// A complete, admissible proposal document with one field addition. Every test
 /// that wants a DEFECT starts from this and removes exactly one thing, so the
 /// defect it asserts is the only difference from a clean document.
-let private completeJson (extraDeltaJson: string) (fixtureWire: string) =
+let completeJson (extraDeltaJson: string) (fixtureWire: string) =
     sprintf
         """
 {
