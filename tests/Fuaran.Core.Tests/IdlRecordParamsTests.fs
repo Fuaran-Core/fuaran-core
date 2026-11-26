@@ -92,6 +92,27 @@ let boxed: Idl =
 
 let private details (idl: Idl) : string list = Declare.errors idl |> List.map _.Detail
 
+/// `Opt<T>` as a union of one case `Mk` or as a record, at `args`.
+let private direct (asUnion: bool) (arg: IdlType) : IdlType =
+    if asUnion then
+        TUnion("Opt", [ arg ])
+    else
+        TRecord("Opt", [ arg ])
+
+/// `Opt<T>` declaring one member `v: declared = literal` (omitted at the literal), `Outer<U>` passing
+/// its own parameter down to it, and a kind `K` holding one optional member per type of `held`.
+let private defaulted (asUnion: bool) (declared: IdlType) (literal: IdlValue) (held: IdlType list) : Idl =
+    let members = [ f "v" declared (OmitDefault literal) ]
+
+    vocabulary
+        [ kind "K" (held |> List.mapi (fun i t -> f (sprintf "m%d" i) t Optional)) ]
+        (if asUnion then
+             [ union "Opt" [ "T" ] [ case "Mk" members ] ]
+         else
+             [])
+        ((if asUnion then [] else [ record "Opt" [ "T" ] members ])
+         @ [ record "Outer" [ "U" ] [ f "inner" (direct asUnion (TVar "U")) Required ] ])
+
 /// The one fault of `idl`, as its path and its sentence.
 let private theFault (idl: Idl) : PathSegment list * string =
     match Declare.errors idl with
@@ -723,4 +744,211 @@ let tests =
                   Expect.isEmpty (Declare.errors idl) (what + ": well-formed")
 
                   for entry, answer in backends idl @ schemas idl do
-                      Expect.equal answer (Ok()) (sprintf "%s: %s emits the chain" what entry)) ]
+                      Expect.equal answer (Ok()) (sprintf "%s: %s emits the chain" what entry))
+
+          testCase
+              "an omit-at-default member at a type parameter is refused at the declaration, naming the instantiation its literal does not fit"
+              (fun _ ->
+                  for asUnion in [ false; true ] do
+                      let idl =
+                          defaulted asUnion (TVar "T") (VStr "") [ direct asUnion TInt; direct asUnion TStr ]
+
+                      let owner, path =
+                          if asUnion then
+                              "union 'Opt' case 'Mk', field 'v'",
+                              [ PathSegment.Key "unions"
+                                PathSegment.Index 0
+                                PathSegment.Key "cases"
+                                PathSegment.Index 0 ]
+                          else
+                              "record 'Opt', field 'v'", [ PathSegment.Key "records"; PathSegment.Index 0 ]
+
+                      let at, detail = theFault idl
+
+                      Expect.equal
+                          at
+                          (path
+                           @ [ PathSegment.Key "fields"
+                               PathSegment.Index 0
+                               PathSegment.Key "optionality"
+                               PathSegment.Key "default" ])
+                          "at the declaration's literal"
+
+                      Expect.stringStarts
+                          detail
+                          (owner
+                           + ": the omit-at-default value does not fit the field's type at the instantiation Opt<int> (")
+                          "the declaration, the member and the instantiation; `Opt<str>` is not named"
+
+                      // Reached through a generic holder's own parameter, and at a contract method's
+                      // argument which no kind reaches: the same fault.
+                      let through =
+                          defaulted asUnion (TVar "T") (VStr "") [ TRecord("Outer", [ TList TBool ]) ]
+
+                      Expect.stringContains
+                          (theFault through |> snd)
+                          "at the instantiation Opt<list<bool>> ("
+                          "the argument the holder passes down"
+
+                      let atMethod =
+                          { defaulted asUnion (TVar "T") (VStr "") [] with
+                              Contracts =
+                                  [ { ContractsIdl.orders with
+                                        Methods =
+                                            ContractsIdl.orders.Methods
+                                            |> List.truncate 1
+                                            |> List.map (fun m ->
+                                                { m with
+                                                    Result = Some(direct asUnion TInt)
+                                                    Arguments = [] }) } ] }
+
+                      Expect.isTrue
+                          (details atMethod
+                           |> List.exists (fun d -> d.Contains "at the instantiation Opt<int> ("))
+                          "a contract method's result is an instantiation reached"
+
+                      // No instantiation reached: nothing for the literal to fail to fit.
+                      Expect.isEmpty
+                          (Declare.errors (defaulted asUnion (TVar "T") (VStr "") []))
+                          "an unreached declaration"
+
+                      Expect.isEmpty
+                          (Declare.errors (defaulted asUnion (TVar "T") (VStr "") [ direct asUnion TStr ]))
+                          "and one reached only where the literal fits"
+
+                      // An argument that is itself an unbound variable is the variable's own fault, and
+                      // no instantiation: the literal is not also held against it.
+                      match details (defaulted asUnion (TVar "T") (VStr "") [ direct asUnion (TVar "T") ]) with
+                      | [ only ] ->
+                          Expect.stringContains
+                              only
+                              "type variable 'T' names a type parameter, and a kind declares none"
+                              "the one fault"
+                      | other -> failtestf "one fault expected: %A" other
+
+                      // A declaration that holds itself at its own parameter is entered once, so the
+                      // fault is stated once; one whose recursion grows its argument is followed to the
+                      // bound on nested instantiations, each instantiation on the way checked.
+                      let recursive (name: string) (next: IdlType) (at: IdlType) : Idl =
+                          let self (arg: IdlType) =
+                              if asUnion then
+                                  TUnion(name, [ arg ])
+                              else
+                                  TRecord(name, [ arg ])
+
+                          let members =
+                              [ f "v" (TVar "T") (OmitDefault(VStr ""))
+                                f "next" (TList(self next)) Optional ]
+
+                          vocabulary
+                              [ kind "K" [ f "m" (self at) Optional ] ]
+                              (if asUnion then
+                                   [ union name [ "T" ] [ case "Mk" members ] ]
+                               else
+                                   [])
+                              (if asUnion then [] else [ record name [ "T" ] members ])
+
+                      Expect.stringContains
+                          (theFault (recursive "Tree" (TVar "T") TInt) |> snd)
+                          "at the instantiation Tree<int> ("
+                          "a recursive declaration, once"
+
+                      let grown = details (recursive "Grow" (TList(TVar "T")) TStr)
+
+                      Expect.stringContains
+                          (List.head grown)
+                          "at the instantiation Grow<list<str>> ("
+                          "the literal fits `Grow<str>`, and not the instantiation it holds"
+
+                      Expect.equal
+                          (List.length grown, List.length (List.distinct grown))
+                          (63, 63)
+                          "one fault for each of the sixty-four instantiations followed but the first")
+
+          // The rule is exact over this family: a declaration is admitted exactly where every value
+          // the encoder writes at each instantiation reads back to the bytes it had.
+          testCase
+              "an omit-at-default member at a type parameter is admitted exactly where every value reads back"
+              (fun _ ->
+                  let sample (t: IdlType) : IdlValue =
+                      match t with
+                      | TStr -> VStr "a"
+                      | TInt -> VInt 3
+                      | TBool -> VBool true
+                      | TFloat -> VFloat 2.5
+                      | _ -> VList [ VStr "a" ]
+
+                  let mutable admitted = 0
+                  let mutable refused = 0
+
+                  for asUnion in [ false; true ] do
+                      for listed in [ false; true ] do
+                          for literal in
+                              [ VStr ""
+                                VStr "x"
+                                VInt 0
+                                VBool false
+                                VFloat 1.5
+                                VList []
+                                VList [ VInt 1 ] ] do
+                              for arg in [ TStr; TInt; TBool; TFloat; TList TStr ] do
+                                  for viaHolder in [ false; true ] do
+                                      let declared = if listed then TList(TVar "T") else TVar "T"
+
+                                      let held =
+                                          if viaHolder then
+                                              TRecord("Outer", [ arg ])
+                                          else
+                                              direct asUnion arg
+
+                                      let idl = defaulted asUnion declared literal [ held ]
+
+                                      let opt (members: (string * IdlValue) list) =
+                                          if asUnion then VUnion("Mk", members) else VRecord members
+
+                                      let document (members: (string * IdlValue) list) =
+                                          let inner = opt members
+
+                                          VNode(
+                                              "n",
+                                              "K",
+                                              [ "m0", (if viaHolder then VRecord [ "inner", inner ] else inner) ]
+                                          )
+
+                                      let ordinary = if listed then VList [ sample arg ] else sample arg
+
+                                      // What the encoder writes of the three candidates: the member left
+                                      // out, the member authored at the literal, and an ordinary value.
+                                      let written =
+                                          [ []; [ "v", literal ]; [ "v", ordinary ] ]
+                                          |> List.choose (fun members ->
+                                              match Encode.encode idl (document members) with
+                                              | Ok bytes -> Some bytes
+                                              | Error _ -> None)
+
+                                      let every =
+                                          written
+                                          |> List.forall (fun bytes ->
+                                              (Decode.decode idl bytes |> Result.bind (Encode.encode idl)) = Ok bytes)
+
+                                      let label =
+                                          sprintf
+                                              "%s, member %A = %A, at %A%s"
+                                              (if asUnion then "union" else "record")
+                                              declared
+                                              literal
+                                              arg
+                                              (if viaHolder then " through a holder" else "")
+
+                                      Expect.isNonEmpty written (label + ": the encoder writes some value")
+
+                                      if List.isEmpty (Declare.errors idl) then
+                                          admitted <- admitted + 1
+                                          Expect.isTrue every (label + ": admitted, so every value reads back")
+                                      else
+                                          refused <- refused + 1
+                                          Expect.isFalse every (label + ": refused, so some value does not read back")
+
+                  // Neither side is vacuous.
+                  Expect.isGreaterThan admitted 20 "declarations are admitted"
+                  Expect.isGreaterThan refused 100 "and declarations are refused") ]

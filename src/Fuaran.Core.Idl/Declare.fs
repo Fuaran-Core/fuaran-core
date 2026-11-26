@@ -124,6 +124,48 @@ module Declare =
 
     let private envelopeField (j: int) = [ key "nodeFields"; item j ]
 
+    /// How many instantiations of generic declarations one path is followed through before a
+    /// recursion that grows its type argument is left (Phase 732): the bound the generators' wire
+    /// reach uses.
+    [<Literal>]
+    let private growthBound = 64
+
+    /// A type as a fault spells an instantiation: the artifact's tags, a declaration by its name
+    /// and its arguments (`Opt<int>`, `Pair<str, list<bool>>`). Every case is named.
+    let rec private spell (t: IdlType) : string =
+        let applied (name: string) (args: IdlType list) =
+            match args with
+            | [] -> name
+            | _ -> sprintf "%s<%s>" name (args |> List.map spell |> String.concat ", ")
+
+        match t with
+        | TStr -> "str"
+        | TInt -> "int"
+        | TBool -> "bool"
+        | TFloat -> "float"
+        | TInt64 -> "int64"
+        | TDecimal -> "decimal"
+        | TBytes -> "bytes"
+        | TTimeOfDay -> "timeOfDay"
+        | TDuration -> "duration"
+        | TNode -> "node"
+        | TKind -> "kind"
+        | TOp -> "op"
+        | TJson -> "json"
+        | TClosure -> "closure"
+        | TOpaque -> "opaque"
+        | TFn _ -> "fn"
+        | THosted _ -> "hosted"
+        | TEnum n -> n
+        | TVar v -> "'" + v
+        | TRecord(n, args)
+        | TUnion(n, args) -> applied n args
+        | TList inner -> applied "list" [ inner ]
+        | TMap inner -> applied "map" [ TStr; inner ]
+        | TSet inner -> applied "set" [ inner ]
+        | TKeyedMap(k, v) -> applied "map" [ k; v ]
+        | TTuple components -> applied "tuple" components
+
     /// Well-formedness of every enum's case↔wire mapping — the backstop for a
     /// record built by literal rather than through [[enumOf]] / [[enumWith]].
     /// Empty list ⇒ well-formed. Checks the arity the pair-taking constructor
@@ -738,8 +780,9 @@ module Declare =
     ///   field, are values the GUARDED encoder writes at the slot's type (Phase 520: checked
     ///   through the encoder's own guarded renderer, so "fits" means "encodes to wire its decoder
     ///   reads" — a map default carrying one key twice is refused HERE, at its path, not at the
-    ///   first `encode`); a slot whose type mentions a type variable is checked where it is
-    ///   instantiated, by the encoder;
+    ///   first `encode`); an `OmitDefault` whose slot's type mentions a type variable is checked
+    ///   at every instantiation of its declaration the vocabulary reaches, and refused at the
+    ///   declaration naming the instantiation (Phase 732);
     /// - **slots** — a `HostOnly` field is a `TFn`; a declared transparent case carries
     ///   exactly one field, and that field cannot encode to an object, at its declaration
     ///   or at any instantiation of its union;
@@ -1180,6 +1223,146 @@ module Declare =
                       k.Fields
               yield! keyedErrors (what = "kind") label (fun j -> owner @ [ key "fields"; item j ]) k.Fields ]
 
+        /// Phase 732 — an omit-at-default member whose type names a type parameter has no one type
+        /// to be checked at where it is declared: its literal is a value of `T` at `Opt<string>` and
+        /// is none at `Opt<int>`, where a document that leaves the member out read to a value no
+        /// encoder writes. So it is checked at EVERY instantiation of its declaration the vocabulary
+        /// reaches, and refused at the declaration, naming the member and the instantiation.
+        ///
+        /// The instantiations are those reached from each owner that declares no parameter (a kind,
+        /// an op, the node envelope, a union or a record declaring none, a contract method), through
+        /// the members of each generic declaration at the arguments applied; a recursion that grows
+        /// its type argument is followed [[growthBound]] instantiations deep on one path. A
+        /// vocabulary that holds no such member is not walked at all.
+        let instantiatedDefaultErrors () : VocabularyFault list =
+            let atParameter (fields: IdlField list) (place: int -> PathSegment list * string) =
+                [ for j, f in List.indexed fields do
+                      match f.Opt with
+                      | OmitDefault d when mentionsVar f.Type ->
+                          let path, owner = place j
+
+                          yield
+                              path @ [ key "optionality"; key "default" ],
+                              sprintf "%s, field '%s'" owner f.Name,
+                              f.Type,
+                              d
+                      | _ -> () ]
+
+            // Each generic declaration holding such a member, by family and name.
+            let held: Map<string * string, (PathSegment list * string * IdlType * IdlValue) list> =
+                [ for i, r in List.indexed idl.Records do
+                      ("record", r.Name), atParameter r.Fields (fun j -> recordField i j, sprintf "record '%s'" r.Name)
+
+                  for i, u in List.indexed idl.Unions do
+                      ("union", u.Name),
+                      [ for c, case in List.indexed u.Cases do
+                            yield!
+                                atParameter case.Fields (fun j ->
+                                    caseField i c j, sprintf "union '%s' case '%s'" u.Name case.Tag) ] ]
+                |> List.filter (fun (_, members) -> not (List.isEmpty members))
+                |> Map.ofList
+
+            if Map.isEmpty held then
+                []
+            else
+                let entered = System.Collections.Generic.HashSet<IdlType>(HashIdentity.Structural)
+
+                let reached = ResizeArray<(string * string) * IdlType * Map<string, IdlType>>()
+
+                let rec visit (depth: int) (t: IdlType) : unit =
+                    // One instantiation: entered once, its members visited at its own arguments.
+                    let instance
+                        (family: string)
+                        (name: string)
+                        (args: IdlType list)
+                        (members: unit -> (Map<string, IdlType> * IdlField list) option)
+                        =
+                        args |> List.iter (visit depth)
+
+                        if
+                            not (List.isEmpty args)
+                            && not (List.exists mentionsVar args)
+                            && depth < growthBound
+                            && entered.Add t
+                        then
+                            match members () with
+                            | Some(binding, fields) ->
+                                reached.Add((family, name), t, binding)
+
+                                for f in fields do
+                                    visit (depth + 1) (TypeParams.substitute binding f.Type)
+                            | None -> ()
+
+                    match t with
+                    | TList inner
+                    | TMap inner
+                    | TSet inner -> visit depth inner
+                    | TTuple components -> components |> List.iter (visit depth)
+                    | TKeyedMap(k, v) ->
+                        visit depth k
+                        visit depth v
+                    | THosted h -> h.Wire |> Option.iter (visit depth)
+                    | TRecord(n, args) ->
+                        instance "record" n args (fun () ->
+                            IdlLookup.tryRecord idl n
+                            |> Option.bind (fun r -> TypeParams.bindRecord r args |> Option.map (fun b -> b, r.Fields)))
+                    | TUnion(n, args) ->
+                        instance "union" n args (fun () ->
+                            IdlLookup.tryUnion idl n
+                            |> Option.bind (fun u ->
+                                TypeParams.bind u args
+                                |> Option.map (fun b -> b, u.Cases |> List.collect _.Fields)))
+                    | TStr
+                    | TInt
+                    | TBool
+                    | TFloat
+                    | TEnum _
+                    | TVar _
+                    | TNode
+                    | TKind
+                    | TOp
+                    | TClosure
+                    | TOpaque
+                    | TFn _
+                    | TJson
+                    | TInt64
+                    | TDecimal
+                    | TBytes
+                    | TTimeOfDay
+                    | TDuration -> ()
+
+                let roots =
+                    [ for k in idl.Kinds @ idl.Ops do
+                          yield! k.Fields
+                      yield! idl.NodeFields
+                      for u in idl.Unions do
+                          if List.isEmpty u.Params then
+                              yield! u.Cases |> List.collect _.Fields
+                      for r in idl.Records do
+                          if List.isEmpty r.Params then
+                              yield! r.Fields ]
+                    |> List.map _.Type
+
+                let methodTypes =
+                    idl.Contracts
+                    |> List.collect _.Methods
+                    |> List.collect (fun m -> (m.Arguments |> List.map _.Type) @ Option.toList m.Result)
+
+                roots @ methodTypes |> List.iter (visit 0)
+
+                [ for declaration, instantiation, binding in reached do
+                      for path, at, declared, literal in held |> Map.tryFind declaration |> Option.defaultValue [] do
+                          match Encode.renderValue idl (TypeParams.substitute binding declared) literal with
+                          | Ok _ -> ()
+                          | Error m ->
+                              fault
+                                  path
+                                  (sprintf
+                                      "%s: the omit-at-default value does not fit the field's type at the instantiation %s (%s)"
+                                      at
+                                      (spell instantiation)
+                                      m) ]
+
         [ yield! wireShapeErrors idl
           yield! enumWireErrors idl
           yield! hostedWireErrors idl
@@ -1344,6 +1527,7 @@ module Declare =
 
           yield! fieldErrors "the node envelope" envelopeField (Binder.DeclaresNone "the node envelope") idl.NodeFields
           yield! keyedErrors false "the node envelope" envelopeField idl.NodeFields
+          yield! instantiatedDefaultErrors ()
 
           // The envelope's reserved names (Phase 292 amendment): `id` beside the node's own
           // id in every shape — the flat shape's rule is [[wireShapeErrors]]' — and `kind`

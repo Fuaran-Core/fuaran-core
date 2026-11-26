@@ -114,7 +114,9 @@ let model =
                   // The model is monomorphic, so the member's type is closed by the time its default is
                   // asked for: admitted where the literal is a value of the argument, refused in the
                   // admissibility rule's own words where it is not. (The F# and TypeScript backends
-                  // refuse the member at every instantiation: their record is generic.)
+                  // refuse the member at every instantiation: their record is generic.) The declaration
+                  // check refuses the second vocabulary itself, at the declaration; the model's refusal
+                  // is what a caller handing it an unchecked value meets.
                   let members = [ f "v" (TVar "T") (OmitDefault(VStr "")); f "w" TStr Required ]
 
                   let asRecord (arg: IdlType) =
@@ -130,6 +132,12 @@ let model =
                           []
 
                   for what, declare in [ "record", asRecord; "union", asUnion ] do
+                      Expect.isEmpty (Declare.errors (declare TStr)) (what + ": well-formed at a string")
+
+                      Expect.isNonEmpty
+                          (Declare.errors (declare TInt))
+                          (what + ": refused at its declaration at an integer")
+
                       Expect.isNone
                           (FStarTarget.partition (declare TStr) |> List.find (fun v -> v.Tag = "K")).Refusal
                           (sprintf "%s: modelled at a string, where the default is a value" what)
