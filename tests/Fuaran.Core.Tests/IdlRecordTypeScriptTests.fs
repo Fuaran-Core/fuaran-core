@@ -359,13 +359,16 @@ let heldByItselfTests =
                            l.StartsWith "export type Inl<T> = " || l.StartsWith "export type Rest<T> = "))
                       (what + ": the inline record is still a type of its own"))
 
-          testCase
-              "with a TypeScript compiler, each such declaration file compiles, and its two spellings are one type"
-              (fun _ ->
-                  match IdlDeriveTests.tscJs () with
-                  | None -> skiptest "FUARAN_CORE_TSC names no TypeScript compiler — the type-check leg cannot run"
-                  | Some tsc ->
-                      for what, idl, _, consumer in HeldByItself.shapes do
+          // One case a shape, so that each shape's file is compiled whatever another's answer is.
+          for what, idl, _, consumer in HeldByItself.shapes do
+              testCase
+                  (sprintf
+                      "with a TypeScript compiler, %s: the declaration file compiles, and its two spellings are one type"
+                      what)
+                  (fun _ ->
+                      match IdlDeriveTests.tscJs () with
+                      | None -> skiptest "FUARAN_CORE_TSC names no TypeScript compiler — the type-check leg cannot run"
+                      | Some tsc ->
                           match
                               IdlDeriveTests.tscCheck
                                   tsc
@@ -374,8 +377,7 @@ let heldByItselfTests =
                                     "consumer.mts", String.concat "\n" consumer ]
                           with
                           | None -> skiptest "node not on PATH"
-                          | Some(code, out) ->
-                              Expect.equal code 0 (sprintf "%s: tsc accepts the consumer: %s" what out)) ]
+                          | Some(code, out) -> Expect.equal code 0 (sprintf "tsc accepts the consumer: %s" out)) ]
 
 // ---------------------------------------------------------------------------
 // The derived members ([[ParameterisedRecordsIdl.derived]]): each is run under node over the
