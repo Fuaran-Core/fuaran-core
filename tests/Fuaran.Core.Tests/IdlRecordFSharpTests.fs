@@ -719,6 +719,24 @@ let defaultedTests =
                       (text.Contains "= { Tag = \"\"; Items = [] } then")
                       "no encoder compares a record's literal with `=`")
 
+          testCase "a record that declares no parameter keeps its `=` test, so its module does not move" (fun _ ->
+              let plain =
+                  { vocabulary
+                        [ kind
+                              "K"
+                              [ f "p" (TRecord("Plain", [])) (OmitDefault(VRecord [ "tag", VStr ""; "n", VInt 0 ]))
+                                f "x" TInt Required ] ] with
+                      Records =
+                          [ { Name = "Plain"
+                              Params = []
+                              Fields = [ f "tag" TStr Required; f "n" TInt Required ]
+                              Annotations = Annotations.Empty
+                              Inline = false } ] }
+
+              let text = emitted (Gen.fsharpModule "Probe" plain [ "K" ])
+              Expect.stringContains text "(if s.P = { Tag = \"\"; N = 0 } then None else " "tested by `=`, as before"
+              Expect.isFalse (text.Contains "match s.P with") "not by a match")
+
           testCase
               "the vocabulary is well-formed, and the interpreter and the compiled module re-write each document alike"
               (fun _ ->

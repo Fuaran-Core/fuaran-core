@@ -967,6 +967,46 @@ let instanceNames =
                               (InstanceNames.admits schema (doc m foreign))
                               (sprintf "%s: `%s` is refused at %s" what foreign m))
 
+          testCase
+              "a kind, an op and a union whose names hold `_` or are fixed words are filed and referenced under one spelling"
+              (fun _ ->
+                  let plainUnion (name: string) : IdlUnion =
+                      { Name = name
+                        Params = []
+                        Cases =
+                          [ { Tag = "One"
+                              Fields = [ InstanceNames.field "n" TInt Required ]
+                              Annotations = Annotations.Empty
+                              Hosted = None } ]
+                        Annotations = Annotations.Empty
+                        TagRule = UnionTagRule.CaseName
+                        Discrimination = UnionDiscrimination.Tagged }
+
+                  let kindNamed (tag: string) : IdlKind =
+                      { Tag = tag
+                        Category = "probe"
+                        Fields = [ InstanceNames.field "n" TInt Required ]
+                        Annotations = Annotations.Empty }
+
+                  let base' =
+                      InstanceNames.over [] [] [ "u", TUnion("my_union", []); "w", TUnion("list", []) ]
+
+                  let idl =
+                      { base' with
+                          Kinds = base'.Kinds @ [ kindNamed "my_kind"; kindNamed "map" ]
+                          Ops = [ kindNamed "my_op"; kindNamed "set" ]
+                          Unions = base'.Unions @ [ plainUnion "my_union"; plainUnion "list" ] }
+
+                  Expect.equal (InstanceNames.faults idl) [] "well-formed"
+                  let text = schemaOf idl
+                  // A definition filed under one spelling and referenced under another is a dangling
+                  // `$ref`, and the definition an orphan.
+                  assertClosed "declared names" text
+                  let defs = parsed text |> defsOf |> Map.keys |> Set.ofSeq
+
+                  for n in [ "my_0kind"; "_1map"; "my_0op"; "_1set"; "my_0union"; "_1list" ] do
+                      Expect.isTrue (defs.Contains n) (n + " is defined"))
+
           testCase "an instantiation named only in a hosted slot's wire form has its definition" (fun _ ->
               let slot (wire: IdlType) =
                   InstanceNames.hosted "A" (Some wire) None
