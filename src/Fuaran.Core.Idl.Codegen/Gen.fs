@@ -21,7 +21,7 @@ module Gen =
     let fsharpTypes (idl: Idl) : Result<string, CodegenError> =
         Decl.declared idl
         |> Decl.laidOut
-        |> Result.bind Decl.recordsApplied
+        |> Result.bind Decl.referencesApplied
         |> Result.bind FSharpTypes.fsharpTypes
 
     /// Emit a compiling, self-contained F# encoder module (`moduleName`) for the named kinds,
@@ -35,7 +35,7 @@ module Gen =
         : Result<string, CodegenError> =
         Decl.resolve idl sup.KindProjections kindTags
         |> Decl.laidOut
-        |> Result.bind Decl.recordsApplied
+        |> Result.bind Decl.referencesApplied
         |> Result.bind (FSharpCodec.fsharpModuleWith sup moduleName)
 
     /// `fsharpModuleWith` plus the requested structural derivations (Phase 374) and, under
@@ -51,7 +51,7 @@ module Gen =
         : Result<string, CodegenError> =
         Decl.resolve idl sup.KindProjections kindTags
         |> Decl.laidOut
-        |> Result.bind Decl.recordsApplied
+        |> Result.bind Decl.referencesApplied
         |> Result.bind (FSharpCodec.fsharpModuleDerived sup derivations moduleName)
 
     /// The pre-945 entry — `fsharpModuleWith` under an empty declared-support record,
@@ -70,7 +70,7 @@ module Gen =
         (moduleName: string)
         (idl: Idl)
         : Result<string, CodegenError> =
-        Decl.recordsAppliedIdl idl
+        Decl.referencesAppliedIdl idl
         |> Result.bind (fun () -> FSharpCodecOnly.fsharpCodecModule sup request moduleName idl)
 
     /// Phase 685 — `fsharpCodecModule` with a per-root visibility option: each root `internalWriters`
@@ -85,12 +85,15 @@ module Gen =
         (moduleName: string)
         (idl: Idl)
         : Result<string, CodegenError> =
-        Decl.recordsAppliedIdl idl
+        Decl.referencesAppliedIdl idl
         |> Result.bind (fun () -> FSharpCodecOnly.fsharpCodecModuleWith sup request internalWriters moduleName idl)
 
     /// The JSON Schema (draft 2020-12) of the vocabulary's wire.
     let jsonSchema (idl: Idl) : Result<string, CodegenError> =
-        Decl.declared idl |> Decl.laidOut |> Result.bind JsonSchema.jsonSchema
+        Decl.declared idl
+        |> Decl.laidOut
+        |> Result.bind Decl.referencesApplied
+        |> Result.bind JsonSchema.jsonSchema
 
     /// Phase 644 — the JSON Schema (draft 2020-12) of the arguments of every method of every
     /// contract, in the shape a tool definition takes: one object schema a method, keyed
@@ -100,6 +103,7 @@ module Gen =
     let contractArgumentSchemas (idl: Idl) : Result<(string * string) list, CodegenError> =
         Decl.declared idl
         |> Decl.laidOut
+        |> Result.bind Decl.referencesApplied
         |> Result.bind (fun decl ->
             (Ok [], idl.Contracts |> List.collect (fun c -> c.Methods |> List.map (fun m -> c, m)))
             ||> List.fold (fun acc (c, m) ->
@@ -169,7 +173,7 @@ module Gen =
     let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
         tsCodecAdmits idl
         |> Result.bind (fun () -> Decl.laidOut (Decl.resolve idl Map.empty kindTags))
-        |> Result.bind Decl.recordsApplied
+        |> Result.bind Decl.referencesApplied
         |> Result.bind TypeScriptCodec.typescriptModule
 
     /// Phase 380 — `typescriptModule` plus the requested derivations, the TypeScript host's
@@ -187,19 +191,19 @@ module Gen =
         tsDerives derivations
         |> Result.bind (fun () -> tsCodecAdmits idl)
         |> Result.bind (fun () -> Decl.laidOut (Decl.resolve idl Map.empty kindTags))
-        |> Result.bind Decl.recordsApplied
+        |> Result.bind Decl.referencesApplied
         |> Result.bind (TypeScriptDerived.typescriptModuleDerived derivations)
 
     /// A TypeScript value literal for an authored value of a declared type.
     let typescriptValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
-        Decl.recordsAppliedIdl idl
+        Decl.referencesAppliedIdl idl
         |> Result.bind (fun () -> TypeScriptDeclarations.typescriptValue idl t v)
 
     /// The TypeScript type declarations for the named kinds.
     let typescriptDeclarations (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
         Decl.resolve idl Map.empty kindTags
         |> Decl.laidOut
-        |> Result.bind Decl.recordsApplied
+        |> Result.bind Decl.referencesApplied
         |> Result.bind TypeScriptDeclarations.typescriptDeclarations
 
     /// Phase 381 — `typescriptDeclarations` plus one declaration per member
@@ -215,13 +219,13 @@ module Gen =
         : Result<string, CodegenError> =
         tsDerives derivations
         |> Result.bind (fun () -> Decl.laidOut (Decl.resolve idl Map.empty kindTags))
-        |> Result.bind Decl.recordsApplied
+        |> Result.bind Decl.referencesApplied
         |> Result.bind (TypeScriptDerived.typescriptDeclarationsDerived derivations)
 
     /// An authored value as compilable F# source — the scaffold leg: an expression of type
     /// `Result<'T, DecodeError>` since Phase 384, a hosted slot's codec refusal its `Error`.
     let fsharpValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<string, CodegenError> =
-        Decl.recordsAppliedIdl idl
+        Decl.referencesAppliedIdl idl
         |> Result.bind (fun () -> Scaffold.fsharpValue idl t v)
 
     /// The provenance header every scaffold leg emits.

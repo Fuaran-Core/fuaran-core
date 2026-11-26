@@ -1140,16 +1140,17 @@ module internal Decl =
     // fuaran#1068 — the instantiations of every GENERIC union, monomorphised.
     // -----------------------------------------------------------------------
 
-    /// The construct a backend names for a record reference no binding can be made for.
-    let private misappliedConstruct (name: string) (given: int) (declared: int) : string =
-        sprintf "a reference applying record '%s' to %d type argument(s) where it declares %d" name given declared
+    /// The construct a backend names for a union or record reference no binding can be made for:
+    /// one sentence, `what` the family (`union` / `record`).
+    let private misappliedConstruct (what: string) (name: string) (given: int) (declared: int) : string =
+        sprintf "a reference applying %s '%s' to %d type argument(s) where it declares %d" what name given declared
 
     /// The refusal of a backend handed such a reference ([[misappliedConstruct]]).
     let private misappliedRefusal (construct: string) : Result<'a, CodegenError> =
         refuse
             construct
             "GP5: the refusal names the construct and thereby the set that IS supported"
-            "apply the record to as many arguments as it declares parameters — `Declare.errors` names every fault of the vocabulary"
+            "apply the declaration to as many arguments as it declares parameters — `Declare.errors` names every fault of the vocabulary"
 
     /// Every instantiation of a generic union and of a generic record (Phase 732) the vocabulary
     /// names on the wire, each keyed and ordered by instance name. ONE worklist over the wire fields
@@ -1169,7 +1170,6 @@ module internal Decl =
 
         let mutable found: Map<string, Instantiation> = Map.empty
         let mutable foundRecords: Map<string, RecordInstantiation> = Map.empty
-        let mutable misapplied: string option = None
         let mutable queue: IdlType list = []
 
         let rec discover (t: IdlType) =
@@ -1212,11 +1212,9 @@ module internal Decl =
                                 foundRecords
 
                         queue <- t :: queue
-                    // A backend is handed an `Idl` value, not a declaration that was checked: a
-                    // reference no binding can be made for has no instantiation to name.
-                    | Some(r, None) ->
-                        if misapplied.IsNone then
-                            misapplied <- Some(misappliedConstruct n (List.length args) (List.length r.Params))
+                    // A reference no binding can be made for has no instantiation to name; every
+                    // entry refuses the vocabulary before it asks for this walk ([[referencesApplied]]).
+                    | Some(_, None)
                     | None -> ()
             | _ -> ()
 
@@ -1264,15 +1262,13 @@ module internal Decl =
         if guard > 1000 then
             Error(
                 CodegenError.UnsupportedConstruct(
-                    "a generic union whose instantiation walk did not close after 1000 expansions",
+                    "a generic union or record whose instantiation walk did not close after 1000 expansions",
                     "GP4: a typed value, not an exception",
                     "the vocabulary's recursion grows its type argument, so it has no finite JSON-Schema `$defs` — recurse at a FIXED argument instead"
                 )
             )
         else
-            match misapplied with
-            | Some construct -> misappliedRefusal construct
-            | None -> Ok(found |> Map.toList |> List.map snd, foundRecords |> Map.toList |> List.map snd)
+            Ok(found |> Map.toList |> List.map snd, foundRecords |> Map.toList |> List.map snd)
 
     /// Every instantiation of a generic union the vocabulary names on the wire ([[instantiated]]).
     let instantiations (idl: Idl) : Result<Instantiation list, CodegenError> = instantiated idl |> Result.map fst
@@ -1339,17 +1335,17 @@ module internal Decl =
                 )
             )
 
-    /// The first answer `pick` gives a record reference (its name and its arguments) anywhere in the
-    /// WHOLE vocabulary: every declared member's type and every contract method's, at any depth, a
-    /// reference's own arguments after the reference. Every case of the type is named.
-    let private firstRecordReference (pick: string -> IdlType list -> string option) (idl: Idl) : string option =
+    /// The first answer `pick` gives a union or record reference anywhere in the WHOLE vocabulary:
+    /// every declared member's type and every contract method's, at any depth, a reference's own
+    /// arguments after the reference. Every case of the type is named.
+    let private firstReference (pick: IdlType -> string option) (idl: Idl) : string option =
         let rec walk (t: IdlType) : string option =
             match t with
-            | TRecord(n, args) -> pick n args |> Option.orElseWith (fun () -> args |> List.tryPick walk)
+            | TUnion(_, args)
+            | TRecord(_, args) -> pick t |> Option.orElseWith (fun () -> args |> List.tryPick walk)
             | TList i
             | TMap i
             | TSet i -> walk i
-            | TUnion(_, args)
             | TTuple args -> args |> List.tryPick walk
             | TKeyedMap(k, v) -> [ k; v ] |> List.tryPick walk
             | THosted h -> h.Wire |> Option.bind walk
@@ -1380,25 +1376,35 @@ module internal Decl =
         (allFieldLists idl |> List.collect (List.map _.Type)) @ methodTypes
         |> List.tryPick walk
 
-    /// Phase 732 — what every backend's entries ask of a vocabulary before they emit a record:
-    /// that every reference applies as many arguments as its record declares parameters. A backend is
-    /// handed an `Idl` value, not a declaration that was checked, and a reference no binding can be
-    /// made for has no generic type or function to apply; it is refused by the record's name, in the
-    /// sentence the JSON schema refuses it in ([[instantiated]]).
-    let recordsAppliedIdl (idl: Idl) : Result<unit, CodegenError> =
-        let misapplied (name: string) (args: IdlType list) =
-            match CodegenLookup.tryRecord idl name with
-            | Some r when List.length r.Params <> List.length args ->
-                Some(misappliedConstruct name (List.length args) (List.length r.Params))
+    /// Phase 732 — what every backend's entries ask of a vocabulary before they emit: that every
+    /// reference applies as many arguments as its union or record declares parameters. A backend
+    /// is handed an `Idl` value, not a declaration that was checked, and a reference no binding can
+    /// be made for has no generic type, function, definition or model instance to name; it is
+    /// refused by the declaration's name, a union's in the sentence a record's is.
+    let referencesAppliedIdl (idl: Idl) : Result<unit, CodegenError> =
+        let misapplied (t: IdlType) =
+            let counted (what: string) (name: string) (args: IdlType list) (declared: string list option) =
+                match declared with
+                | Some pars when List.length pars <> List.length args ->
+                    Some(misappliedConstruct what name (List.length args) (List.length pars))
+                | _ -> None
+
+            match t with
+            | TUnion(n, args) ->
+                idl.Unions
+                |> List.tryFind (fun u -> u.Name = n)
+                |> Option.map _.Params
+                |> counted "union" n args
+            | TRecord(n, args) -> CodegenLookup.tryRecord idl n |> Option.map _.Params |> counted "record" n args
             | _ -> None
 
-        match firstRecordReference misapplied idl with
+        match firstReference misapplied idl with
         | Some construct -> misappliedRefusal construct
         | None -> Ok()
 
-    /// [[recordsAppliedIdl]] over a resolution, answering the resolution itself.
-    let recordsApplied (d: Decl) : Result<Decl, CodegenError> =
-        recordsAppliedIdl d.Idl |> Result.map (fun () -> d)
+    /// [[referencesAppliedIdl]] over a resolution, answering the resolution itself.
+    let referencesApplied (d: Decl) : Result<Decl, CodegenError> =
+        referencesAppliedIdl d.Idl |> Result.map (fun () -> d)
 
     /// A presence-keyed union's roster — see [[WireForm.keyedRoster]].
     [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]

@@ -1003,6 +1003,8 @@ module internal FStarModel =
 
                     Ok()
                 | Some u ->
+                    // As for a record above: [[model]] has refused a misapplied reference already, and
+                    // this arm keeps the function total over an unchecked value.
                     match TypeParams.bind u args, slotOf ("union " + n) t with
                     | None, _ -> unmodellable ("a union arity mismatch on '" + n + "'") ("union " + n)
                     | _, Error e -> Error e
@@ -1231,13 +1233,13 @@ module internal FStarModel =
     /// [[modelOf]] behind the Phase 539 refusal: the model's decoder reads each member under its one
     /// name and has no presence condition, so a vocabulary declaring either (or an enum alias) is
     /// refused by name rather than modelled as if it declared neither. And behind the one question
-    /// every backend asks of a record reference (Phase 732, [[Decl.recordsAppliedIdl]]): a reference
+    /// every backend asks of a record reference (Phase 732, [[Decl.referencesAppliedIdl]]): a reference
     /// no binding can be made for has no instantiation to model, and is refused in the other
     /// backends' sentence.
     let model (idl: Idl) (kindTags: string list) : Result<Model, CodegenError> =
         match Decl.canonicalFormDeclarations idl with
         | what :: _ -> unmodellable (what + " (a Phase 539 canonical-form declaration)") "the vocabulary"
-        | [] -> Decl.recordsAppliedIdl idl |> Result.bind (fun () -> modelOf idl kindTags)
+        | [] -> Decl.referencesAppliedIdl idl |> Result.bind (fun () -> modelOf idl kindTags)
 
     // -----------------------------------------------------------------------
     // 6. The expressibility partition — which of a vocabulary's kinds the target can

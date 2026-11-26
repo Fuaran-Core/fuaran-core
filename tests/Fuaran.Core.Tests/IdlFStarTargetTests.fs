@@ -506,8 +506,10 @@ let idlFStarTargetTests =
                     "an undeclared union",
                     "undeclared union",
                     fun () -> reached (tinyIdl (TUnion("Missing", [])) Required) onlyTag
+                    // Phase 732 — refused before the model is built, in the sentence every backend
+                    // entry refuses a misapplied union or record reference in.
                     "a union arity mismatch",
-                    "union arity mismatch",
+                    "a reference applying union 'Slot' to 2 type argument(s) where it declares 1",
                     fun () ->
                         tinyIdl (TUnion("Slot", [ TStr; TStr ])) Required
                         |> withUnion

@@ -220,6 +220,14 @@ let private backends (idl: Idl) : (string * Result<unit, string>) list =
       "FStarTarget.vocabularyModule", describe (FStarTarget.vocabularyModule "Boxed" idl tags)
       "FStarTarget.proofsModule", describe (FStarTarget.proofsModule "Boxed" "BoxedProofs" idl tags) ]
 
+/// The two JSON-schema entries, asked the same way.
+let private schemas (idl: Idl) : (string * Result<unit, string>) list =
+    let describe (r: Result<'a, CodegenError>) =
+        r |> Result.map ignore |> Result.mapError CodegenError.describe
+
+    [ "jsonSchema", describe (Gen.jsonSchema idl)
+      "contractArgumentSchemas", describe (Gen.contractArgumentSchemas idl) ]
+
 [<Tests>]
 let tests =
     testList
@@ -546,4 +554,173 @@ let tests =
                           Expect.stringContains
                               description
                               "a reference applying record 'Shape' to 1 type argument(s) where it declares 0"
-                              (sprintf "%s names the reference" entry)) ]
+                              (sprintf "%s names the reference" entry))
+
+          testCase "a misapplied reference is refused by every entry in one sentence, a union's as a record's" (fun _ ->
+              // Each way a reference can apply another number of arguments than its declaration
+              // declares, for a union and for a record, at a kind's member.
+              let misapplied (asUnion: bool) (pars: string list) (args: IdlType list) : Idl =
+                  let held =
+                      if asUnion then
+                          TUnion("Shape", args)
+                      else
+                          TRecord("Shape", args)
+
+                  let members = [ f "w" TInt Required ]
+
+                  vocabulary
+                      [ kind "Holder" [ f "shape" held Required ] ]
+                      (if asUnion then
+                           [ union "Shape" pars [ case "Mk" members ] ]
+                       else
+                           [])
+                      (if asUnion then [] else [ record "Shape" pars members ])
+
+              let ways: (string * string list * IdlType list) list =
+                  [ "arguments applied to a declaration that declares none", [], [ TStr ]
+                    "no argument applied to a declaration that declares one", [ "T" ], []
+                    "two arguments applied to a declaration that declares one", [ "T" ], [ TStr; TInt ] ]
+
+              // Every entry is asked of every way before the test answers, so a failure names
+              // all of the entries at fault, not the first.
+              let atFault = ResizeArray<string>()
+
+              let asked (where: string) (sentence: string) (idl: Idl) =
+                  for entry, answer in backends idl @ schemas idl do
+                      match answer with
+                      | Ok() -> atFault.Add(sprintf "%s: %s emitted" where entry)
+                      | Error description ->
+                          if not (description.Contains sentence) then
+                              atFault.Add(sprintf "%s: %s refused in other words: %s" where entry description)
+
+              for what, asUnion in [ "union", true; "record", false ] do
+                  for way, pars, args in ways do
+                      let idl = misapplied asUnion pars args
+                      Expect.isNonEmpty (Declare.errors idl) (sprintf "%s, %s: the declaration is refused" what way)
+
+                      let sentence =
+                          sprintf
+                              "a reference applying %s 'Shape' to %d type argument(s) where it declares %d"
+                              what
+                              (List.length args)
+                              (List.length pars)
+
+                      asked (what + ", " + way) sentence idl
+
+              // And at a contract method's argument, which no kind reaches.
+              for what, held in [ "union", TUnion("Maybe", []); "record", TRecord("Box", []) ] do
+                  let idl =
+                      { boxed with
+                          Contracts =
+                              [ { ContractsIdl.orders with
+                                    Methods =
+                                        ContractsIdl.orders.Methods
+                                        |> List.truncate 1
+                                        |> List.map (fun m ->
+                                            { m with
+                                                Result = None
+                                                Arguments =
+                                                    m.Arguments
+                                                    |> List.truncate 1
+                                                    |> List.map (fun x -> { x with Type = held }) }) } ] }
+
+                  asked (what + " at a method's argument") (sprintf "a reference applying %s '" what) idl
+
+              Expect.equal (List.ofSeq atFault) [] "every entry refuses every misapplied reference, by name")
+
+          testCase
+              "a declaration whose recursion grows its type argument: every entry answers, and each as pinned"
+              (fun _ ->
+                  // `Grow<T>` holds `Grow<T list>`: no finite set of instantiations. The declaration
+                  // check admits it. Every entry returns; the entries that need the finite set (the
+                  // F* model, the JSON schema) refuse it by name, and the F# and TypeScript entries,
+                  // whose hosts recurse polymorphically, emit it.
+                  let growing (asUnion: bool) : Idl =
+                      let self (t: IdlType) =
+                          if asUnion then
+                              TUnion("Grow", [ t ])
+                          else
+                              TRecord("Grow", [ t ])
+
+                      let members =
+                          [ f "value" (TVar "T") Required; f "next" (self (TList(TVar "T"))) Optional ]
+
+                      vocabulary
+                          [ kind "K" [ f "g" (self TStr) Required ] ]
+                          (if asUnion then
+                               [ union "Grow" [ "T" ] [ case "More" members ] ]
+                           else
+                               [])
+                          (if asUnion then [] else [ record "Grow" [ "T" ] members ])
+
+                  for what, asUnion in [ "union", true; "record", false ] do
+                      let idl = growing asUnion
+                      Expect.isEmpty (Declare.errors idl) (what + ": the declaration check admits it")
+
+                      let model =
+                          sprintf "the generic %s 'Grow', whose recursion grows its type argument" what
+
+                      let noSchema =
+                          "a generic union or record whose instantiation walk did not close after 1000 expansions"
+
+                      let answers =
+                          backends idl @ schemas idl
+                          |> List.map (fun (entry, answer) ->
+                              entry,
+                              (match answer with
+                               | Ok() -> "emits"
+                               | Error description when description.Contains model -> "refuses: " + model
+                               | Error description when description.Contains noSchema -> "refuses: " + noSchema
+                               | Error description -> "refuses otherwise: " + description))
+
+                      Expect.equal
+                          answers
+                          [ "fsharpTypes", "emits"
+                            "fsharpModule", "emits"
+                            "fsharpModuleDerived", "emits"
+                            "fsharpCodecModule", "emits"
+                            "fsharpValue", "emits"
+                            "typescriptModule", "emits"
+                            "typescriptModuleDerived", "emits"
+                            "typescriptDeclarations", "emits"
+                            "typescriptDeclarationsDerived", "emits"
+                            "typescriptValue", "emits"
+                            "FStarTarget.vocabularyModule", "refuses: " + model
+                            "FStarTarget.proofsModule", "refuses: " + model
+                            "jsonSchema", "refuses: " + noSchema
+                            // No contract is declared, so no definition is asked for.
+                            "contractArgumentSchemas", "emits" ]
+                          (what + ": what each entry answers"))
+
+          testCase "a long chain of declarations applied to no argument is not read as a growing recursion" (fun _ ->
+              // Seventy declarations each holding the next: deeper than the bound on NESTED
+              // INSTANTIATIONS, which counts a declaration only where a reference applies an argument.
+              let chain (asUnion: bool) : Idl =
+                  let name (i: int) = sprintf "Link%d" i
+
+                  let held (i: int) =
+                      if asUnion then TUnion(name i, []) else TRecord(name i, [])
+
+                  let members (i: int) =
+                      if i < 69 then
+                          [ f "next" (held (i + 1)) Required ]
+                      else
+                          [ f "last" TStr Required ]
+
+                  vocabulary
+                      [ kind "K" [ f "first" (held 0) Required ] ]
+                      (if asUnion then
+                           [ for i in 0..69 -> union (name i) [] [ case "Mk" (members i) ] ]
+                       else
+                           [])
+                      (if asUnion then
+                           []
+                       else
+                           [ for i in 0..69 -> record (name i) [] (members i) ])
+
+              for what, asUnion in [ "unions", true; "records", false ] do
+                  let idl = chain asUnion
+                  Expect.isEmpty (Declare.errors idl) (what + ": well-formed")
+
+                  for entry, answer in backends idl @ schemas idl do
+                      Expect.equal answer (Ok()) (sprintf "%s: %s emits the chain" what entry)) ]
