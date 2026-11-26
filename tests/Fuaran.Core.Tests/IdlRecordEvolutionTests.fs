@@ -376,8 +376,8 @@ let tests =
                                 "no reference shows what an old document held, so the move is not excused")
 
                     testCase (what + ": a recursion that grows its argument is graded, and read as moved") (fun _ ->
-                        // No member holds the parameter, so no document moves; the instantiations never
-                        // repeat, so the comparison stops at the generators' bound and does not excuse it.
+                        // No member holds the parameter, so no document moves; the instantiations are
+                        // infinitely many, so the comparison has no end to reach and does not excuse it.
                         let grow (at: IdlType) =
                             holder (refer asUnion "Grow" [ at ])
                             |> declare
@@ -391,8 +391,9 @@ let tests =
                             [ BreakingWire, "changed kind K.b" ]
                             "the classifier answers, on the side of the break"
 
-                        // And the walk that collects the instantiations reached ends on it too: `Box`,
-                        // made generic beside it, is still graded at its one instantiation.
+                        // And the instantiations the revision reaches cannot all be read either, so a
+                        // member restated beside it is not excused: `Box`, made generic at the type it
+                        // held, reads as moved, the grade that claims nothing of an old document.
                         let beside (idl: Idl) (pars: string list) (v: IdlType) (args: IdlType list) =
                             { idl with
                                 Kinds = idl.Kinds @ [ kind "L" [ f "c" (refer asUnion "Box" args) Required ] ] }
@@ -400,8 +401,8 @@ let tests =
 
                         Expect.contains
                             (rows (beside (grow TInt) [] TInt []) (beside (grow TInt) [ "T" ] (TVar "T") [ TInt ]))
-                            (HostSurfaceOnly, sprintf "restated %s.v" (owned asUnion "Box"))
-                            "the reach is finite over a growing declaration") ]
+                            (BreakingWire, sprintf "changed %s.v" (owned asUnion "Box"))
+                            "the classifier answers, and on the side of the break") ]
 
           testList
               "the snapshot"

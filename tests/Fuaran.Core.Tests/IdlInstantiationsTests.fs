@@ -1,0 +1,855 @@
+module Fuaran.Core.Tests.IdlInstantiationsTests
+
+// ---------------------------------------------------------------------------
+// Phase 732 — whether a vocabulary's generic declarations have finitely many instantiations is
+// decided from the declarations (the expanding-cycle test of ECMA-335, Partition II, 9.2), and
+// every walk over instantiations asks that instead of counting how deep it has gone.
+//
+// This file holds: the analysis against a walk that asks nothing first, over a family of
+// declarations; the sentence a growing declaration is refused in, and which walk follows what;
+// that every entry ANSWERS over a declaration that grows along two members (each is run under a
+// time limit: a walk bounded by depth does not return on one, it has 2^depth instantiations to
+// enter); that a long finite chain is read to its end, by every entry that once cut it; the count
+// an enumeration stops at; and that the default rule is exact over a family that holds growing
+// declarations and an instantiation no value reaches.
+// ---------------------------------------------------------------------------
+
+open System
+open Expecto
+open Fuaran.Core
+open Fuaran.Core.Idl
+open Fuaran.Core.Idl.Emit
+open Fuaran.Core.Idl.Codegen.Types
+open Fuaran.Core.Tests.IdlRecordParamsTests
+
+/// `work`'s answer, or a failed test where it has not answered in `seconds`. The work is left
+/// running on its own thread, which ends with the process.
+let private within (seconds: float) (what: string) (work: unit -> 'a) : 'a =
+    let task = Threading.Tasks.Task.Run(fun () -> work ())
+
+    if task.Wait(TimeSpan.FromSeconds seconds) then
+        task.Result
+    else
+        failtestf "%s did not answer in %.0f s" what seconds
+
+let private refer (asUnion: bool) (name: string) (args: IdlType list) : IdlType =
+    if asUnion then TUnion(name, args) else TRecord(name, args)
+
+/// One generic declaration, as a union of one case or as a record.
+let private declared
+    (asUnion: bool)
+    (name: string)
+    (pars: string list)
+    (members: IdlField list)
+    : IdlUnion list * IdlRecord list =
+    if asUnion then
+        [ union name pars [ case "Mk" members ] ], []
+    else
+        [], [ record name pars members ]
+
+let private sentence (what: string) (name: string) (from: string) (reaches: string) : string =
+    sprintf "the generic %s '%s', which has no finite set of instantiations: %s reaches %s" what name from reaches
+
+let private tooMany =
+    "more than 4096 instantiations of the vocabulary's generic declarations"
+
+/// `G<T>` growing along TWO members, a list and a map, beside the member `value`; held by `K` at
+/// `at`, beside a kind that reaches nothing generic.
+let private twoWay (asUnion: bool) (value: IdlField) (at: IdlType) : Idl =
+    let self (t: IdlType) = refer asUnion "G" [ t ]
+
+    let unions, records =
+        declared
+            asUnion
+            "G"
+            [ "T" ]
+            [ f "l" (self (TList(TVar "T"))) Optional
+              f "m" (self (TMap(TVar "T"))) Optional
+              value ]
+
+    vocabulary [ kind "K" [ f "g" (self at) Optional ]; kind "Plain" [ f "n" TInt Required ] ] unions records
+
+/// What a value on the wire holds from `roots`, read the slow way: every instantiation entered, its
+/// wire members substituted and descended, nothing asked of the declarations first. `None` once it
+/// has entered more than `budget` instantiations.
+let private walked (idl: Idl) (budget: int) (roots: IdlType list) : Set<string> option =
+    let seen = Collections.Generic.HashSet<IdlType>(HashIdentity.Structural)
+
+    let rec visit (t: IdlType) =
+        if seen.Count <= budget then
+            let enter (pars: string list) (args: IdlType list) (members: IdlField list) =
+                if pars.Length = args.Length && seen.Add t then
+                    let binding = Map.ofList (List.zip pars args)
+
+                    for m in members do
+                        if m.Opt <> HostOnly then
+                            visit (TypeParams.substitute binding m.Type)
+
+            match t with
+            | TList inner
+            | TMap inner
+            | TSet inner -> visit inner
+            | TTuple components -> components |> List.iter visit
+            | TKeyedMap(k, v) ->
+                visit k
+                visit v
+            | TRecord(n, args) ->
+                idl.Records
+                |> List.tryFind (fun r -> r.Name = n)
+                |> Option.iter (fun r -> enter r.Params args r.Fields)
+            | TUnion(n, args) ->
+                idl.Unions
+                |> List.tryFind (fun u -> u.Name = n)
+                |> Option.iter (fun u -> enter u.Params args (u.Cases |> List.collect _.Fields))
+            | _ -> ()
+
+    roots |> List.iter visit
+
+    if seen.Count > budget then
+        None
+    else
+        Some(seen |> Seq.map (sprintf "%A") |> Set.ofSeq)
+
+let private described (r: Result<'a, CodegenError>) : Result<unit, string> =
+    r |> Result.map ignore |> Result.mapError CodegenError.describe
+
+/// The document `K` writes holding `inner` at `g`.
+let private node (inner: IdlValue) : IdlValue = VNode("n", "K", [ "g", inner ])
+
+[<Tests>]
+let tests =
+    testList
+        "Phase 732 — the instantiations a vocabulary reaches: finitely many or not, decided from the declarations"
+        [ testList
+              "the analysis"
+              [ testCase "agrees with a walk that asks nothing first, over a family of declarations" (fun _ ->
+                    let options (p: string) : IdlType list =
+                        let v = TVar p
+
+                        [ v
+                          TList v
+                          TRecord("G", [ v ])
+                          TRecord("G", [ TList v ])
+                          TRecord("H", [ v ])
+                          TRecord("H", [ TList v ])
+                          TRecord("H", [ TRecord("G", [ v ]) ])
+                          // `Phantom` holds nothing at its parameter; `Box` holds it.
+                          TRecord("Phantom", [ TRecord("G", [ TList v ]) ])
+                          TRecord("Box", [ TRecord("G", [ TList v ]) ])
+                          TTuple [ TRecord("G", [ v ]); TInt ]
+                          TRecord("G", [ TInt ])
+                          TRecord("Box", [ v ])
+                          TRecord("Phantom", [ v ])
+                          TRecord("Box", [ TRecord("Box", [ v ]) ])
+                          TKeyedMap(TInt, TRecord("H", [ TSet v ])) ]
+
+                    let held (p: string) : IdlType list =
+                        let v = TVar p
+
+                        [ v
+                          TInt
+                          TRecord("G", [ v ])
+                          TRecord("G", [ TList v ])
+                          TRecord("H", [ v ])
+                          TRecord("H", [ TMap v ])
+                          TRecord("Box", [ TRecord("H", [ v ]) ]) ]
+
+                    let mutable finite = 0
+                    let mutable infinite = 0
+                    let roots = [ TRecord("G", [ TStr ]) ]
+
+                    for i, a in List.indexed (options "T") do
+                        for b in options "T" |> List.skip i do
+                            for h in held "U" do
+                                let idl =
+                                    vocabulary
+                                        [ kind "K" [ f "g" roots.Head Optional ] ]
+                                        []
+                                        [ record "G" [ "T" ] [ f "a" a Optional; f "b" b Optional ]
+                                          record "H" [ "U" ] [ f "h" h Optional ]
+                                          record "Phantom" [ "V" ] [ f "n" TInt Optional ]
+                                          record "Box" [ "W" ] [ f "item" (TVar "W") Optional ] ]
+
+                                let label = sprintf "G { a: %A; b: %A }, H { h: %A }" a b h
+
+                                match Decl.wireInstantiations idl roots, walked idl 300 roots with
+                                | Ok all, Some slow ->
+                                    finite <- finite + 1
+
+                                    Expect.equal
+                                        (all |> List.map (sprintf "%A") |> Set.ofList)
+                                        slow
+                                        (label + ": every instantiation the walk enters, and no other")
+
+                                    Expect.equal (List.length all) (Set.count slow) (label + ": each named once")
+                                | Error why, None ->
+                                    infinite <- infinite + 1
+
+                                    Expect.stringContains
+                                        why
+                                        "which has no finite set of instantiations: "
+                                        (label + ": refused as growing, in the one sentence")
+                                | Ok all, None ->
+                                    failtestf
+                                        "%s: read as finite (%d instantiations), and the walk passed 300"
+                                        label
+                                        all.Length
+                                | Error why, Some slow ->
+                                    failtestf "%s: refused (%s), and the walk ends at %d" label why slow.Count
+
+                    // Neither side is vacuous.
+                    Expect.isGreaterThan finite 100 "vocabularies that close"
+                    Expect.isGreaterThan infinite 100 "and vocabularies that grow")
+
+                testCase "names the declaration and what it reaches itself at" (fun _ ->
+                    let refusal (records: IdlRecord list) (root: IdlType) : string =
+                        match Decl.wireInstantiations (vocabulary [] [] records) [ root ] with
+                        | Error why -> why
+                        | Ok all -> failtestf "read as finite: %A" all
+
+                    Expect.equal
+                        (refusal
+                            [ record "G" [ "T" ] [ f "next" (TRecord("G", [ TList(TVar "T") ])) Optional ] ]
+                            (TRecord("G", [ TInt ])))
+                        (sentence "record" "G" "G<'T>" "G<list<'T>>")
+                        "a declaration that names itself at a larger argument"
+
+                    // The cycle passes two declarations, and only one of its edges expands: followed
+                    // once from the declaration first reached, which is where it comes back larger.
+                    Expect.equal
+                        (refusal
+                            [ record "A" [ "T" ] [ f "b" (TRecord("B", [ TVar "T" ])) Optional ]
+                              record "B" [ "U" ] [ f "a" (TRecord("A", [ TMap(TVar "U") ])) Optional ] ]
+                            (TRecord("A", [ TInt ])))
+                        (sentence "record" "A" "A<'T>" "A<map<str, 'T>>")
+                        "a cycle through two declarations"
+
+                    Expect.equal
+                        (refusal
+                            [ record
+                                  "G"
+                                  [ "A"; "B" ]
+                                  [ f "next" (TRecord("G", [ TVar "A"; TTuple [ TVar "B"; TInt ] ])) Optional ] ]
+                            (TRecord("G", [ TInt; TStr ])))
+                        (sentence "record" "G" "G<'A, 'B>" "G<'A, tuple<'B, int>>")
+                        "two parameters, one of them growing inside a tuple"
+
+                    Expect.equal
+                        (refusal
+                            [ record "Plain" [] [ f "g" (TRecord("G", [ TBool ])) Required ]
+                              record
+                                  "G"
+                                  [ "T" ]
+                                  [ f "next" (TKeyedMap(TInt, TRecord("G", [ TSet(TVar "T") ]))) Optional ] ]
+                            (TRecord("Plain", [])))
+                        (sentence "record" "G" "G<'T>" "G<set<'T>>")
+                        "reached through a declaration that declares no parameter, growing inside a set")
+
+                testCase "a cycle that only passes its arguments on is finite, however they are exchanged" (fun _ ->
+                    let swap =
+                        record "Swap" [ "A"; "B" ] [ f "s" (TRecord("Swap", [ TVar "B"; TVar "A" ])) Optional ]
+
+                    Expect.equal
+                        (Decl.wireInstantiations (vocabulary [] [] [ swap ]) [ TRecord("Swap", [ TInt; TStr ]) ])
+                        (Ok [ TRecord("Swap", [ TInt; TStr ]); TRecord("Swap", [ TStr; TInt ]) ])
+                        "two instantiations, each reaching the other"
+
+                    // A growing declaration nothing reaches refuses nothing.
+                    let unreached =
+                        record "G" [ "T" ] [ f "next" (TRecord("G", [ TList(TVar "T") ])) Optional ]
+
+                    Expect.equal
+                        (Decl.wireInstantiations
+                            (vocabulary [] [] [ swap; unreached ])
+                            [ TRecord("Swap", [ TInt; TInt ]) ])
+                        (Ok [ TRecord("Swap", [ TInt; TInt ]) ])
+                        "the roots decide, not the vocabulary")
+
+                testCase "a walk enters what it follows: a value, or every reference written" (fun _ ->
+                    // `G<T>` names itself at a larger argument only as the argument of `Phantom`,
+                    // which holds nothing at its parameter. No VALUE of `G<list<T>>` is ever held:
+                    // the wire reach is two instantiations. The JSON schema states a definition for
+                    // every instantiation WRITTEN, and those have no end.
+                    let phantom (members: IdlField list) =
+                        vocabulary
+                            [ kind "K" [ f "g" (TRecord("G", [ TInt ])) Optional ] ]
+                            []
+                            [ record
+                                  "G"
+                                  [ "T" ]
+                                  [ f "p" (TRecord("Phantom", [ TRecord("G", [ TList(TVar "T") ]) ])) Optional ]
+                              record "Phantom" [ "U" ] members ]
+
+                    let unheld = phantom [ f "n" TInt Optional ]
+                    let root = [ TRecord("G", [ TInt ]) ]
+
+                    Expect.equal
+                        (Decl.wireInstantiations unheld root)
+                        (Ok [ TRecord("G", [ TInt ]); TRecord("Phantom", [ TRecord("G", [ TList TInt ]) ]) ])
+                        "no value holds the larger instantiation"
+
+                    Expect.stringContains
+                        (match described (Gen.jsonSchema unheld) with
+                         | Error why -> why
+                         | Ok() -> "emitted")
+                        (sentence "record" "G" "G<'T>" "G<list<'T>>")
+                        "every instantiation written is named, and they are infinitely many"
+
+                    // Once `Phantom` holds its parameter, a value does hold it.
+                    Expect.equal
+                        (Decl.wireInstantiations (phantom [ f "held" (TList(TVar "U")) Optional ]) root)
+                        (Error(sentence "record" "G" "G<'T>" "G<list<'T>>"))
+                        "held through the member that names the parameter"
+
+                    // Held only through an argument position that is itself held: `Outer<V>` passes
+                    // its parameter to `Box`, which holds it.
+                    let through (inner: string) =
+                        vocabulary
+                            []
+                            []
+                            [ record
+                                  "G"
+                                  [ "T" ]
+                                  [ f "p" (TRecord("Outer", [ TRecord("G", [ TList(TVar "T") ]) ])) Optional ]
+                              record "Outer" [ "V" ] [ f "o" (TRecord(inner, [ TVar "V" ])) Optional ]
+                              record "Box" [ "W" ] [ f "item" (TVar "W") Optional ]
+                              record "Phantom" [ "U" ] [ f "n" TInt Optional ] ]
+
+                    Expect.isError
+                        (Decl.wireInstantiations (through "Box") root)
+                        "an argument position is held where the position it is passed to is"
+
+                    Expect.isOk
+                        (Decl.wireInstantiations (through "Phantom") root)
+                        "and is not where that position holds nothing")
+
+                testCase "an enumeration stops at its count, and says the count" (fun _ ->
+                    // FINITE, and enormous: each of twelve declarations names the next at two
+                    // arguments, so the last is reached at 2^12 instantiations.
+                    let chain (n: int) (last: IdlField) : Idl =
+                        vocabulary
+                            [ kind "K" [ f "d" (TRecord("D1", [ TInt ])) Optional ] ]
+                            []
+                            [ for i in 1..n do
+                                  record
+                                      (sprintf "D%d" i)
+                                      [ "T" ]
+                                      (if i = n then
+                                           [ last ]
+                                       else
+                                           [ f "a" (TRecord(sprintf "D%d" (i + 1), [ TList(TVar "T") ])) Optional
+                                             f "b" (TRecord(sprintf "D%d" (i + 1), [ TMap(TVar "T") ])) Optional ]) ]
+
+                    let plain = f "v" (TVar "T") Optional
+                    let root = [ TRecord("D1", [ TInt ]) ]
+
+                    // Under the count: 2^11 - 1 instantiations, every one named.
+                    match within 30.0 "the wire reach" (fun () -> Decl.wireInstantiations (chain 11 plain) root) with
+                    | Ok all -> Expect.equal all.Length 2047 "a chain of eleven is read to its end"
+                    | Error why -> failtestf "a chain of eleven: %s" why
+
+                    let over = chain 13 plain
+
+                    Expect.equal
+                        (within 30.0 "the wire reach" (fun () -> Decl.wireInstantiations over root))
+                        (Error tooMany)
+                        "over the count: said, in a sentence that is true of it"
+
+                    Expect.isEmpty (Declare.errors over) "the declaration check admits it: nothing asks for them all"
+
+                    let answers =
+                        within 60.0 "the backends" (fun () -> backends over @ schemas over)
+                        |> List.map (fun (entry, answer) ->
+                            entry,
+                            (match answer with
+                             | Ok() -> "emits"
+                             | Error description when description.Contains tooMany -> "refuses: " + tooMany
+                             | Error description -> "refuses otherwise: " + description))
+
+                    Expect.equal
+                        answers
+                        [ "fsharpTypes", "emits"
+                          "fsharpModule", "emits"
+                          "fsharpModuleDerived", "emits"
+                          "fsharpCodecModule", "emits"
+                          "fsharpValue", "emits"
+                          "typescriptModule", "emits"
+                          "typescriptModuleDerived", "emits"
+                          "typescriptDeclarations", "emits"
+                          "typescriptDeclarationsDerived", "emits"
+                          "typescriptValue", "emits"
+                          "FStarTarget.vocabularyModule", "refuses: " + tooMany
+                          "FStarTarget.proofsModule", "refuses: " + tooMany
+                          "jsonSchema", "refuses: " + tooMany
+                          "contractArgumentSchemas", "emits" ]
+                        "a backend that states a generic natively emits; one that names each instantiation refuses"
+
+                    // The default rule has every instantiation to judge, and says it did not.
+                    let unjudged =
+                        within 30.0 "the declaration check" (fun () ->
+                            Declare.errors (chain 13 (f "v" (TVar "T") (OmitDefault(VStr "")))))
+
+                    match unjudged with
+                    | [ only ] ->
+                        Expect.equal
+                            only.Detail
+                            ("record 'D13', field 'v': the omit-at-default value was not checked at every instantiation, because the vocabulary reaches "
+                             + tooMany)
+                            "the member, and why it was not judged"
+                    | other -> failtestf "one fault expected: %A" other) ]
+
+          testList
+              "every entry answers over a declaration that grows along two members"
+              [ for asUnion in [ false; true ] do
+                    let what = if asUnion then "union" else "record"
+                    let grows = sentence what "G" "G<'T>" "G<list<'T>>"
+
+                    testCase (what + ": the declaration check and the artifact reader") (fun _ ->
+                        let check (label: string) (idl: Idl) : string list =
+                            within 20.0 (label + ": Declare.errors") (fun () -> Declare.errors idl)
+                            |> List.map _.Detail
+
+                        // No defaulted member: nothing to judge.
+                        let plain = twoWay asUnion (f "v" (TVar "T") Optional) TStr
+                        Expect.isEmpty (check "no default" plain) "admitted"
+
+                        // A literal that fits whatever the parameter is: every instantiation, unread.
+                        let fitsAll = twoWay asUnion (f "v" (TList(TVar "T")) (OmitDefault(VList []))) TInt
+
+                        Expect.isEmpty (check "an empty list at list<T>" fitsAll) "admitted"
+
+                        // A literal that fits `G<str>` and not what it holds.
+                        let fitsFirst = twoWay asUnion (f "v" (TVar "T") (OmitDefault(VStr ""))) TStr
+
+                        match check "an empty string at T" fitsFirst with
+                        | [ only ] ->
+                            Expect.stringContains
+                                only
+                                "does not fit the field's type at the instantiation G<list<str>> ("
+                                "refused at the first instantiation reached that the literal does not fit"
+                        | other -> failtestf "one fault expected: %A" other
+
+                        // A literal that fits every instantiation the vocabulary reaches, though not
+                        // every type: `[]` at `T`, from `G<list<int>>` through lists alone.
+                        let self (t: IdlType) = refer asUnion "G" [ t ]
+
+                        let unions, records =
+                            declared
+                                asUnion
+                                "G"
+                                [ "T" ]
+                                [ f "l" (self (TList(TVar "T"))) Optional
+                                  f "v" (TVar "T") (OmitDefault(VList [])) ]
+
+                        let lists (at: IdlType) =
+                            vocabulary [ kind "K" [ f "g" (self at) Optional ] ] unions records
+
+                        Expect.isEmpty (check "an empty list at T, from a list" (lists (TList TInt))) "admitted"
+
+                        Expect.equal
+                            (check "an empty list at T, from an integer" (lists TInt) |> List.length)
+                            1
+                            "and refused from an argument it does not fit"
+
+                        for label, idl in [ "no default", plain; "an empty list at list<T>", fitsAll ] do
+                            let text = Artifact.render idl
+
+                            Expect.equal
+                                (within 20.0 (label + ": Artifact.parse") (fun () -> Artifact.parse text))
+                                (Ok(Artifact.canonicalise idl))
+                                (label + ": the artifact reads back")
+
+                        Expect.isError
+                            (within 20.0 "Artifact.parse" (fun () -> Artifact.parse (Artifact.render fitsFirst)))
+                            "and a refused vocabulary's artifact is refused")
+
+                    testCase (what + ": every generator entry") (fun _ ->
+                        let idl = twoWay asUnion (f "v" (TVar "T") Optional) TStr
+
+                        let answers =
+                            within 60.0 "the generator entries" (fun () -> backends idl @ schemas idl)
+                            |> List.map (fun (entry, answer) ->
+                                entry,
+                                (match answer with
+                                 | Ok() -> "emits"
+                                 | Error description when description.Contains grows -> "refuses: " + grows
+                                 | Error description -> "refuses otherwise: " + description))
+
+                        Expect.equal
+                            answers
+                            [ "fsharpTypes", "emits"
+                              "fsharpModule", "emits"
+                              "fsharpModuleDerived", "emits"
+                              "fsharpCodecModule", "emits"
+                              "fsharpValue", "emits"
+                              "typescriptModule", "emits"
+                              "typescriptModuleDerived", "emits"
+                              "typescriptDeclarations", "emits"
+                              "typescriptDeclarationsDerived", "emits"
+                              "typescriptValue", "emits"
+                              "FStarTarget.vocabularyModule", "refuses: " + grows
+                              "FStarTarget.proofsModule", "refuses: " + grows
+                              "jsonSchema", "refuses: " + grows
+                              "contractArgumentSchemas", "emits" ]
+                            "a generic stated natively is emitted; each instantiation named is refused, in one sentence"
+
+                        let partition =
+                            within 20.0 "FStarTarget.partition" (fun () -> FStarTarget.partition idl)
+
+                        Expect.equal
+                            (partition |> List.map (fun v -> v.Tag, v.Refusal.IsSome))
+                            [ "K", true; "Plain", false ]
+                            "only the kind that reaches the declaration is refused"
+
+                        Expect.equal
+                            (within 20.0 "FStarTarget.proofKinds" (fun () -> FStarTarget.proofKinds idl))
+                            [ "Plain" ]
+                            "and the other is modelled")
+
+                    testCase (what + ": the classifier") (fun _ ->
+                        // A member restated beside the growing declaration: `Box<T>.v` from `T` to
+                        // the `int` it is held at.
+                        let beside (v: IdlType) : Idl =
+                            let idl = twoWay asUnion (f "v" (TVar "T") Optional) TStr
+                            let unions, records = declared asUnion "Box" [ "T" ] [ f "v" v Required ]
+
+                            { idl with
+                                Kinds = idl.Kinds @ [ kind "L" [ f "b" (refer asUnion "Box" [ TInt ]) Optional ] ]
+                                Unions = idl.Unions @ unions
+                                Records = idl.Records @ records }
+
+                        let classify (before: Idl) (after: Idl) =
+                            within 20.0 "Diff.ofValues" (fun () -> Diff.ofValues (before, None) (after, None))
+
+                        match classify (beside (TVar "T")) (beside TInt) with
+                        | Ok verdict ->
+                            Expect.equal
+                                (verdict.Changes
+                                 |> List.map (fun c ->
+                                     c.Severity,
+                                     (match c.Change with
+                                      | FieldTypeChanged(_, n, _, _) -> "changed " + n
+                                      | other -> sprintf "%A" other)))
+                                [ BreakingWire, "changed v" ]
+                                "answered, and on the side of the break: the reach cannot be read to excuse it"
+                        | Error e -> failtestf "the pair did not classify: %s" e
+
+                        // The growing declaration held at another argument.
+                        let plain = twoWay asUnion (f "v" (TVar "T") Optional)
+
+                        match classify (plain TStr) (plain TInt) with
+                        | Ok verdict ->
+                            Expect.equal
+                                (verdict.Changes |> List.map _.Severity)
+                                [ BreakingWire ]
+                                "a moved argument is a break"
+                        | Error e -> failtestf "the pair did not classify: %s" e) ]
+
+          testList
+              "a long finite chain is read to its end"
+              [ testCase "sixty-five, seventy and seven hundred generic declarations: the default rule" (fun _ ->
+                    // `A1<T> { x: A2<T> } … An<T> { v: T = "" }` held at `A1<int>`: no recursion, and
+                    // one instantiation of each.
+                    let chain (n: int) : Idl =
+                        vocabulary
+                            [ kind "K" [ f "m" (TRecord("A1", [ TInt ])) Optional ] ]
+                            []
+                            [ for i in 1..n do
+                                  record
+                                      (sprintf "A%d" i)
+                                      [ "T" ]
+                                      [ if i = n then
+                                            f "v" (TVar "T") (OmitDefault(VStr ""))
+                                        else
+                                            f "x" (TRecord(sprintf "A%d" (i + 1), [ TVar "T" ])) Optional ] ]
+
+                    for n in [ 10; 64; 65; 70; 700 ] do
+                        match
+                            within 60.0 (sprintf "a chain of %d" n) (fun () -> Declare.errors (chain n))
+                            |> List.map _.Detail
+                        with
+                        | [ only ] ->
+                            Expect.stringContains
+                                only
+                                (sprintf "at the instantiation A%d<int> (" n)
+                                (sprintf "a chain of %d: refused at its last instantiation" n)
+                        | other -> failtestf "a chain of %d: one fault expected, got %A" n other
+
+                    // The document that leaves the member out is the one the rule is for.
+                    let idl = chain 70
+
+                    let inner = (VRecord [], [ 1..69 ]) ||> List.fold (fun v _ -> VRecord [ "x", v ])
+
+                    match Encode.encode idl (VNode("n", "K", [ "m", inner ])) with
+                    | Ok bytes ->
+                        Expect.notEqual
+                            (Decode.decode idl bytes |> Result.bind (Encode.encode idl))
+                            (Ok bytes)
+                            "the refused vocabulary's document does not read back"
+                    | Error e -> failtestf "the document was not written: %s" e)
+
+                testCase
+                    "sixty-five and seventy generic declarations, and a nest of seventy: the model and the schema"
+                    (fun _ ->
+                        let chain (n: int) : Idl =
+                            vocabulary
+                                [ kind "K" [ f "m" (TRecord("A1", [ TInt ])) Required ] ]
+                                []
+                                [ for i in 1..n do
+                                      record
+                                          (sprintf "A%d" i)
+                                          [ "T" ]
+                                          [ if i = n then
+                                                f "v" (TVar "T") Required
+                                            else
+                                                f "x" (TRecord(sprintf "A%d" (i + 1), [ TVar "T" ])) Required ] ]
+
+                        // `Lab<Lab<…<int>…>>`, n deep: n instantiations of one declaration, and finite.
+                        let nest (n: int) : Idl =
+                            vocabulary
+                                [ kind
+                                      "K"
+                                      [ f
+                                            "r"
+                                            ((TInt, [ 1..n ]) ||> List.fold (fun t _ -> TRecord("Lab", [ t ])))
+                                            Required ] ]
+                                []
+                                [ record "Lab" [ "T" ] [ f "value" (TVar "T") Required ] ]
+
+                        for label, idl in
+                            [ "a chain of 65", chain 65
+                              "a chain of 70", chain 70
+                              "a nest of 60", nest 60
+                              "a nest of 70", nest 70 ] do
+                            Expect.isEmpty (Declare.errors idl) (label + ": admitted")
+
+                            Expect.isOk
+                                (within 120.0 (label + ": the F* model") (fun () ->
+                                    described (FStarTarget.vocabularyModule "Probe" idl [ "K" ])))
+                                (label + ": modelled, one type per instantiation")
+
+                            Expect.isOk
+                                (within 60.0 (label + ": the JSON schema") (fun () -> described (Gen.jsonSchema idl)))
+                                (label + ": one definition per instantiation"))
+
+                testCase "a fold through seventy records that declare no parameter" (fun _ ->
+                    // `Tree` holds itself at the end of a chain of ordinary records: nothing here
+                    // is instantiated, and the fold descends every one.
+                    let chain (n: int) : Idl =
+                        let tree = TUnion("Tree", [])
+
+                        vocabulary
+                            [ kind "K" [ f "tree" tree Required ] ]
+                            [ union
+                                  "Tree"
+                                  []
+                                  [ case "Leaf" [ f "n" TInt Required ]
+                                    case "Branch" [ f "r" (TRecord("R0", [])) Required ] ] ]
+                            [ for i in 0 .. n - 1 do
+                                  record
+                                      (sprintf "R%d" i)
+                                      []
+                                      [ f
+                                            "next"
+                                            (if i = n - 1 then
+                                                 tree
+                                             else
+                                                 TRecord(sprintf "R%d" (i + 1), []))
+                                            Optional ] ]
+
+                    for n in [ 10; 64; 70; 200 ] do
+                        let idl = chain n
+
+                        Expect.isOk
+                            (described (
+                                Gen.fsharpModuleDerived GenSupport.Empty [ Derivation.Fold "Tree" ] "Probe" idl [ "K" ]
+                            ))
+                            (sprintf "F#: a fold through %d records" n)
+
+                        Expect.isOk
+                            (described (Gen.typescriptModuleDerived [ Derivation.Fold "Tree" ] idl [ "K" ]))
+                            (sprintf "TypeScript: a fold through %d records" n))
+
+                testCase "a fold is refused for the growth it would follow, and for no other" (fun _ ->
+                    // `Tree` holds itself through `R<T>`. Where `R` names itself at a larger argument
+                    // in a member the fold descends (a list), the fold has no last record to read.
+                    // Where it does so only inside a keyed map, which a fold does not descend, the
+                    // fold reads `R<int>` and ends.
+                    let through (larger: IdlType -> IdlType) : Idl =
+                        vocabulary
+                            [ kind "K" [ f "tree" (TUnion("Tree", [])) Required ] ]
+                            [ union
+                                  "Tree"
+                                  []
+                                  [ case "Leaf" [ f "n" TInt Required ]
+                                    case "Branch" [ f "r" (TRecord("R", [ TInt ])) Required ] ] ]
+                            [ record
+                                  "R"
+                                  [ "T" ]
+                                  [ f "tree" (TUnion("Tree", [])) Optional
+                                    f "more" (larger (TRecord("R", [ TList(TVar "T") ]))) Optional ] ]
+
+                    let fold (idl: Idl) =
+                        [ "F#",
+                          described (
+                              Gen.fsharpModuleDerived GenSupport.Empty [ Derivation.Fold "Tree" ] "Probe" idl [ "K" ]
+                          )
+                          "TypeScript", described (Gen.typescriptModuleDerived [ Derivation.Fold "Tree" ] idl [ "K" ]) ]
+
+                    for host, answer in fold (through TList) do
+                        match answer with
+                        | Error why ->
+                            Expect.stringContains
+                                why
+                                ("a fold over 'Tree' through " + sentence "record" "R" "R<'T>" "R<list<'T>>")
+                                (host + ": refused, naming the record and what it reaches itself at")
+                        | Ok() -> failtestf "%s: the fold was emitted" host
+
+                    for host, answer in fold (through (fun t -> TKeyedMap(TInt, t))) do
+                        Expect.isOk answer (host + ": the growth is in a member the fold does not descend")) ]
+
+          testList
+              "the default rule"
+              [ // Exact over this family: admitted exactly where every document the encoder writes
+                // reads back to its bytes. The family holds declarations that grow along one member
+                // and along two, an instantiation no value reaches (the argument of a declaration
+                // that holds nothing at its parameter), and literals that fit some instantiations of
+                // an infinite set and all of another.
+                testCase
+                    "is exact where the instantiations are infinitely many, and at an instantiation no value reaches"
+                    (fun _ ->
+                        let mutable admitted = 0
+                        let mutable refused = 0
+                        let mutable growing = 0
+
+                        for asUnion in [ false; true ] do
+                            for declaredAt, literal in
+                                [ TVar "T", VStr ""
+                                  TVar "T", VList []
+                                  TVar "T", VList [ VList [] ]
+                                  TList(TVar "T"), VList []
+                                  TList(TVar "T"), VList [ VStr "" ] ] do
+                                for growth in [ []; [ "l" ]; [ "m" ]; [ "l"; "m" ] ] do
+                                    for arg in [ TStr; TInt; TList TStr; TList(TList TInt); TMap TStr ] do
+                                        for holder in [ "direct"; "box"; "phantom" ] do
+                                            let self (t: IdlType) = refer asUnion "G" [ t ]
+
+                                            let grown (member': string) =
+                                                if member' = "l" then TList(TVar "T") else TMap(TVar "T")
+
+                                            let unions, records =
+                                                declared
+                                                    asUnion
+                                                    "G"
+                                                    [ "T" ]
+                                                    ([ f "v" declaredAt (OmitDefault literal) ]
+                                                     @ (growth |> List.map (fun m -> f m (self (grown m)) Optional)))
+
+                                            let held =
+                                                match holder with
+                                                | "direct" -> self arg
+                                                | "box" -> TRecord("Box", [ self arg ])
+                                                | _ -> TRecord("Phantom", [ self arg ])
+
+                                            let idl =
+                                                vocabulary
+                                                    [ kind "K" [ f "g" held Optional ] ]
+                                                    unions
+                                                    (records
+                                                     @ [ record "Box" [ "W" ] [ f "item" (TVar "W") Optional ]
+                                                         record "Phantom" [ "U" ] [ f "n" TInt Optional ] ])
+
+                                            let value (members: (string * IdlValue) list) =
+                                                if asUnion then VUnion("Mk", members) else VRecord members
+
+                                            // Every value of `G` three instantiations deep: each path
+                                            // of growing members, ending in the member left out or
+                                            // authored at the literal.
+                                            let rec values (depth: int) : IdlValue list =
+                                                [ yield value []
+                                                  yield value [ "v", literal ]
+                                                  if depth > 0 then
+                                                      for m in growth do
+                                                          for inner in values (depth - 1) do
+                                                              yield value [ m, inner ] ]
+
+                                            let documents =
+                                                match holder with
+                                                | "direct" -> values 3 |> List.map node
+                                                | "box" -> values 3 |> List.map (fun v -> node (VRecord [ "item", v ]))
+                                                | _ -> [ node (VRecord []); node (VRecord [ "n", VInt 1 ]) ]
+
+                                            let written =
+                                                documents
+                                                |> List.choose (fun document ->
+                                                    match Encode.encode idl document with
+                                                    | Ok bytes -> Some bytes
+                                                    | Error _ -> None)
+
+                                            let every =
+                                                written
+                                                |> List.forall (fun bytes ->
+                                                    (Decode.decode idl bytes |> Result.bind (Encode.encode idl)) = Ok
+                                                        bytes)
+
+                                            let label =
+                                                sprintf
+                                                    "%s G<T> { v: %A = %A; %A }, at %A, held %s"
+                                                    (if asUnion then "union" else "record")
+                                                    declaredAt
+                                                    literal
+                                                    growth
+                                                    arg
+                                                    holder
+
+                                            Expect.isNonEmpty written (label + ": the encoder writes some value")
+
+                                            let faults =
+                                                within 20.0 (label + ": Declare.errors") (fun () -> Declare.errors idl)
+
+                                            if not (List.isEmpty growth) && holder <> "phantom" then
+                                                growing <- growing + 1
+
+                                            if List.isEmpty faults then
+                                                admitted <- admitted + 1
+                                                Expect.isTrue every (label + ": admitted, so every value reads back")
+                                            else
+                                                refused <- refused + 1
+
+                                                Expect.isFalse
+                                                    every
+                                                    (label + ": refused, so some value does not read back")
+
+                        // No side is vacuous.
+                        Expect.isGreaterThan admitted 100 "declarations are admitted"
+                        Expect.isGreaterThan refused 100 "declarations are refused"
+                        Expect.isGreaterThan growing 200 "and most of them reach infinitely many instantiations")
+
+                testCase "a class is judged at its first member only where the cut decides it" (fun _ ->
+                    // `[[]]` fits `list<list<int>>` and does not fit `list<int>`: two instantiations
+                    // that agree one level down. The one reached first is admitted, and the other is
+                    // still judged.
+                    let idl =
+                        vocabulary
+                            [ kind "K" [ f "g" (TRecord("G", [ TList(TList TInt) ])) Optional ]
+                              kind "L" [ f "g" (TRecord("G", [ TList TInt ])) Optional ] ]
+                            []
+                            [ record
+                                  "G"
+                                  [ "T" ]
+                                  [ f "l" (TRecord("G", [ TList(TVar "T") ])) Optional
+                                    f "v" (TVar "T") (OmitDefault(VList [ VList [] ])) ] ]
+
+                    match within 20.0 "Declare.errors" (fun () -> Declare.errors idl) |> List.map _.Detail with
+                    | [ only ] ->
+                        Expect.stringContains
+                            only
+                            "at the instantiation G<list<int>> ("
+                            "the instantiation it does not fit"
+                    | other -> failtestf "one fault expected: %A" other
+
+                    // And from the deeper one alone every instantiation fits, without end.
+                    Expect.isEmpty
+                        (within 20.0 "Declare.errors" (fun () ->
+                            Declare.errors { idl with Kinds = [ idl.Kinds.Head ] }))
+                        "admitted") ] ]

@@ -176,14 +176,14 @@ let model =
 
               Expect.stringContains
                   (refusalOf record' "K")
-                  "the generic record 'Grow', whose recursion grows its type argument"
+                  "the generic record 'Grow', which has no finite set of instantiations: Grow<'T> reaches Grow<list<'T>>"
                   "by the record's name"
 
               Expect.isNone
                   (FStarTarget.partition record' |> List.find (fun v -> v.Tag = "Plain")).Refusal
                   "a kind that does not reach it is modelled"
 
-              // The union's same recursion: one walk bounds both.
+              // The union's same recursion: one analysis answers both.
               let union' =
                   vocabulary
                       [ kind "K" [ f "grown" (TUnion("Grow", [ TStr ])) Required ] ]
@@ -194,7 +194,7 @@ let model =
 
               Expect.stringContains
                   (refusalOf union' "K")
-                  "the generic union 'Grow', whose recursion grows its type argument"
+                  "the generic union 'Grow', which has no finite set of instantiations: Grow<'T> reaches Grow<list<'T>>"
                   "by the union's name"
 
               // Every backend resolves a vocabulary through the same reach, and the reach is finite:

@@ -124,48 +124,6 @@ module Declare =
 
     let private envelopeField (j: int) = [ key "nodeFields"; item j ]
 
-    /// How many instantiations of generic declarations one path is followed through before a
-    /// recursion that grows its type argument is left (Phase 732): the bound the generators' wire
-    /// reach uses.
-    [<Literal>]
-    let private growthBound = 64
-
-    /// A type as a fault spells an instantiation: the artifact's tags, a declaration by its name
-    /// and its arguments (`Opt<int>`, `Pair<str, list<bool>>`). Every case is named.
-    let rec private spell (t: IdlType) : string =
-        let applied (name: string) (args: IdlType list) =
-            match args with
-            | [] -> name
-            | _ -> sprintf "%s<%s>" name (args |> List.map spell |> String.concat ", ")
-
-        match t with
-        | TStr -> "str"
-        | TInt -> "int"
-        | TBool -> "bool"
-        | TFloat -> "float"
-        | TInt64 -> "int64"
-        | TDecimal -> "decimal"
-        | TBytes -> "bytes"
-        | TTimeOfDay -> "timeOfDay"
-        | TDuration -> "duration"
-        | TNode -> "node"
-        | TKind -> "kind"
-        | TOp -> "op"
-        | TJson -> "json"
-        | TClosure -> "closure"
-        | TOpaque -> "opaque"
-        | TFn _ -> "fn"
-        | THosted _ -> "hosted"
-        | TEnum n -> n
-        | TVar v -> "'" + v
-        | TRecord(n, args)
-        | TUnion(n, args) -> applied n args
-        | TList inner -> applied "list" [ inner ]
-        | TMap inner -> applied "map" [ TStr; inner ]
-        | TSet inner -> applied "set" [ inner ]
-        | TKeyedMap(k, v) -> applied "map" [ k; v ]
-        | TTuple components -> applied "tuple" components
-
     /// Well-formedness of every enum's case↔wire mapping — the backstop for a
     /// record built by literal rather than through [[enumOf]] / [[enumWith]].
     /// Empty list ⇒ well-formed. Checks the arity the pair-taking constructor
@@ -1226,19 +1184,36 @@ module Declare =
         /// Phase 732 — an omit-at-default member whose type names a type parameter has no one type
         /// to be checked at where it is declared: its literal is a value of `T` at `Opt<string>` and
         /// is none at `Opt<int>`, where a document that leaves the member out read to a value no
-        /// encoder writes. So it is checked at EVERY instantiation of its declaration the vocabulary
-        /// reaches, and refused at the declaration, naming the member and the instantiation.
+        /// encoder writes. So it is refused at the declaration, naming the member and the
+        /// instantiation, exactly where the vocabulary reaches an instantiation its literal does not
+        /// fit.
         ///
-        /// The instantiations are those reached from each owner that declares no parameter (a kind,
-        /// an op, the node envelope, a union or a record declaring none, a contract method), through
-        /// the members of each generic declaration at the arguments applied; a recursion that grows
-        /// its type argument is followed [[growthBound]] instantiations deep on one path. A
-        /// vocabulary that holds no such member is not walked at all.
+        /// A literal that fits its member's type with the parameters left UNBOUND (an empty list at
+        /// `list<T>`) fits every instantiation: the encoder refuses an unbound parameter wherever it
+        /// reads one, so it read none. Such a member asks nothing more, and a vocabulary holding no
+        /// other is not walked at all.
+        ///
+        /// The instantiations reached are those a document can hold a value of: from each owner that
+        /// declares no parameter (a kind, an op, the node envelope, a union or a record declaring
+        /// none, a contract method), through the wire members of each declaration at the arguments
+        /// applied. An instantiation named only as an argument no member holds (`Phantom<Opt<int>>`,
+        /// where `Phantom<T>` holds nothing at `T`) is not one: no document holds a value of it.
+        ///
+        /// Where they are finitely many ([[Instantiations.closure]]) each is judged. Where they are
+        /// not, they are judged in CLASSES: two instantiations whose arguments agree to a depth `k`
+        /// enter references that agree to that depth (a substitution places an argument no shallower
+        /// than it stood), so a class is judged at its first member wherever the cut decides the
+        /// verdict. A refusal it does: it names an instantiation the vocabulary reaches. An admission
+        /// it does where the literal also fits the member's type cut at `k`, what lies below left
+        /// unbound; where it does not, the depth is raised and the walk starts again. At any depth
+        /// the classes are finitely many, so the walk ends.
         let instantiatedDefaultErrors () : VocabularyFault list =
+            let wire = Instantiations.wire.Members
+
             let atParameter (fields: IdlField list) (place: int -> PathSegment list * string) =
                 [ for j, f in List.indexed fields do
                       match f.Opt with
-                      | OmitDefault d when mentionsVar f.Type ->
+                      | OmitDefault d when mentionsVar f.Type && Result.isError (Encode.renderValue idl f.Type d) ->
                           let path, owner = place j
 
                           yield
@@ -1248,13 +1223,14 @@ module Declare =
                               d
                       | _ -> () ]
 
-            // Each generic declaration holding such a member, by family and name.
-            let held: Map<string * string, (PathSegment list * string * IdlType * IdlValue) list> =
+            // Each generic declaration holding such a member, by its key in the reading.
+            let held: Map<string, (PathSegment list * string * IdlType * IdlValue) list> =
                 [ for i, r in List.indexed idl.Records do
-                      ("record", r.Name), atParameter r.Fields (fun j -> recordField i j, sprintf "record '%s'" r.Name)
+                      Instantiations.recordKey r.Name,
+                      atParameter r.Fields (fun j -> recordField i j, sprintf "record '%s'" r.Name)
 
                   for i, u in List.indexed idl.Unions do
-                      ("union", u.Name),
+                      Instantiations.unionKey u.Name,
                       [ for c, case in List.indexed u.Cases do
                             yield!
                                 atParameter case.Fields (fun j ->
@@ -1265,53 +1241,92 @@ module Declare =
             if Map.isEmpty held then
                 []
             else
-                let entered = System.Collections.Generic.HashSet<IdlType>(HashIdentity.Structural)
+                let analysis = Instantiations.analyse (Instantiations.ofIdl Instantiations.wire idl)
 
-                let reached = ResizeArray<(string * string) * IdlType * Map<string, IdlType>>()
+                let owned =
+                    [ for k in idl.Kinds @ idl.Ops do
+                          yield! wire k.Fields
+                      yield! wire idl.NodeFields
+                      for u in idl.Unions do
+                          if List.isEmpty u.Params then
+                              yield! u.Cases |> List.collect (fun c -> wire c.Fields)
+                      for r in idl.Records do
+                          if List.isEmpty r.Params then
+                              yield! wire r.Fields ]
+                    |> List.map _.Type
 
-                let rec visit (depth: int) (t: IdlType) : unit =
-                    // One instantiation: entered once, its members visited at its own arguments.
-                    let instance
-                        (family: string)
-                        (name: string)
-                        (args: IdlType list)
-                        (members: unit -> (Map<string, IdlType> * IdlField list) option)
-                        =
-                        args |> List.iter (visit depth)
+                let methodTypes =
+                    idl.Contracts
+                    |> List.collect _.Methods
+                    |> List.collect (fun m -> (m.Arguments |> List.map _.Type) @ Option.toList m.Result)
 
-                        if
-                            not (List.isEmpty args)
-                            && not (List.exists mentionsVar args)
-                            && depth < growthBound
-                            && entered.Add t
-                        then
-                            match members () with
-                            | Some(binding, fields) ->
-                                reached.Add((family, name), t, binding)
+                let roots = owned @ methodTypes
 
-                                for f in fields do
-                                    visit (depth + 1) (TypeParams.substitute binding f.Type)
-                            | None -> ()
+                // One instantiation: a fault for each literal that does not fit it, and whether each
+                // literal that does fit it also fits it cut by `cut`. A reference that names a
+                // parameter where its owner declares none is no instantiation, and is that owner's
+                // own fault.
+                let judged (cut: IdlType -> IdlType) (instantiation: string * IdlType list) =
+                    match Map.tryFind (fst instantiation) held, Instantiations.binding analysis instantiation with
+                    | Some members, Some binding when not (List.exists mentionsVar (snd instantiation)) ->
+                        let cutBinding = binding |> Map.map (fun _ t -> cut t)
+
+                        (([], true), members)
+                        ||> List.fold (fun (faults, decided) (path, at, declared, literal) ->
+                            match Encode.renderValue idl (TypeParams.substitute binding declared) literal with
+                            | Error m ->
+                                let refusal: VocabularyFault =
+                                    { At = path
+                                      Detail =
+                                        sprintf
+                                            "%s: the omit-at-default value does not fit the field's type at the instantiation %s (%s)"
+                                            at
+                                            (Instantiations.spell (Instantiations.applies instantiation))
+                                            m }
+
+                                faults @ [ refusal ], decided
+                            | Ok _ ->
+                                faults,
+                                decided
+                                && Result.isOk (
+                                    Encode.renderValue idl (TypeParams.substitute cutBinding declared) literal
+                                ))
+                    | _ -> [], true
+
+                // More than [[Instantiations.limit]] instantiations were read: said, never guessed.
+                let unchecked () : VocabularyFault list =
+                    held
+                    |> Map.toList
+                    |> List.collect snd
+                    |> List.truncate 1
+                    |> List.map (fun (path, at, _, _) ->
+                        { At = path
+                          Detail =
+                            sprintf
+                                "%s: the omit-at-default value was not checked at every instantiation, because the vocabulary reaches %s"
+                                at
+                                Instantiations.exceeds })
+
+                // `t` with every type held `k` levels down replaced by an unbound parameter (no
+                // declared parameter is named by the empty string). A type that holds none is kept.
+                let rec cutAt (k: int) (t: IdlType) : IdlType =
+                    let below = cutAt (k - 1)
 
                     match t with
-                    | TList inner
-                    | TMap inner
-                    | TSet inner -> visit depth inner
-                    | TTuple components -> components |> List.iter (visit depth)
-                    | TKeyedMap(k, v) ->
-                        visit depth k
-                        visit depth v
-                    | THosted h -> h.Wire |> Option.iter (visit depth)
-                    | TRecord(n, args) ->
-                        instance "record" n args (fun () ->
-                            IdlLookup.tryRecord idl n
-                            |> Option.bind (fun r -> TypeParams.bindRecord r args |> Option.map (fun b -> b, r.Fields)))
-                    | TUnion(n, args) ->
-                        instance "union" n args (fun () ->
-                            IdlLookup.tryUnion idl n
-                            |> Option.bind (fun u ->
-                                TypeParams.bind u args
-                                |> Option.map (fun b -> b, u.Cases |> List.collect _.Fields)))
+                    | TList _
+                    | TMap _
+                    | TSet _
+                    | TTuple _
+                    | TKeyedMap _
+                    | TRecord(_, _ :: _)
+                    | TUnion(_, _ :: _) when k = 0 -> TVar ""
+                    | TList inner -> TList(below inner)
+                    | TMap inner -> TMap(below inner)
+                    | TSet inner -> TSet(below inner)
+                    | TTuple components -> TTuple(List.map below components)
+                    | TKeyedMap(key, value) -> TKeyedMap(below key, below value)
+                    | TRecord(n, args) -> TRecord(n, List.map below args)
+                    | TUnion(n, args) -> TUnion(n, List.map below args)
                     | TStr
                     | TInt
                     | TBool
@@ -1325,43 +1340,57 @@ module Declare =
                     | TOpaque
                     | TFn _
                     | TJson
+                    | THosted _
                     | TInt64
                     | TDecimal
                     | TBytes
                     | TTimeOfDay
-                    | TDuration -> ()
+                    | TDuration -> t
 
-                let roots =
-                    [ for k in idl.Kinds @ idl.Ops do
-                          yield! k.Fields
-                      yield! idl.NodeFields
-                      for u in idl.Unions do
-                          if List.isEmpty u.Params then
-                              yield! u.Cases |> List.collect _.Fields
-                      for r in idl.Records do
-                          if List.isEmpty r.Params then
-                              yield! r.Fields ]
-                    |> List.map _.Type
+                // The classes at depth `k`, breadth first; `read` is how many instantiations of
+                // generic declarations the walk has judged so far, at every depth it has tried.
+                let rec classes (k: int) (read: int) : VocabularyFault list =
+                    let cut = cutAt k
 
-                let methodTypes =
-                    idl.Contracts
-                    |> List.collect _.Methods
-                    |> List.collect (fun m -> (m.Arguments |> List.map _.Type) @ Option.toList m.Result)
+                    let seen =
+                        System.Collections.Generic.HashSet<string * IdlType list>(HashIdentity.Structural)
 
-                roots @ methodTypes |> List.iter (visit 0)
+                    let queue = System.Collections.Generic.Queue<string * IdlType list>()
+                    let faults = ResizeArray<VocabularyFault>()
+                    let mutable read = read
+                    let mutable undecided = false
 
-                [ for declaration, instantiation, binding in reached do
-                      for path, at, declared, literal in held |> Map.tryFind declaration |> Option.defaultValue [] do
-                          match Encode.renderValue idl (TypeParams.substitute binding declared) literal with
-                          | Ok _ -> ()
-                          | Error m ->
-                              fault
-                                  path
-                                  (sprintf
-                                      "%s: the omit-at-default value does not fit the field's type at the instantiation %s (%s)"
-                                      at
-                                      (spell instantiation)
-                                      m) ]
+                    for root in roots do
+                        Instantiations.entered analysis root |> List.iter queue.Enqueue
+
+                    while queue.Count > 0 && not undecided && read <= Instantiations.limit do
+                        let declaration, args = queue.Dequeue()
+
+                        if seen.Add((declaration, List.map cut args)) then
+                            if not (List.isEmpty args) then
+                                read <- read + 1
+
+                            let found, decided = judged cut (declaration, args)
+                            faults.AddRange found
+
+                            if decided then
+                                Instantiations.successors analysis (declaration, args)
+                                |> List.iter queue.Enqueue
+                            else
+                                undecided <- true
+
+                    if read > Instantiations.limit then
+                        unchecked ()
+                    elif undecided then
+                        classes (k + 1) read
+                    else
+                        // The first instantiation reached that each member's literal does not fit.
+                        faults |> List.ofSeq |> List.distinctBy _.At
+
+                match Instantiations.closure analysis roots with
+                | Instantiations.Closure.Finite all -> all |> List.collect (judged id >> fst)
+                | Instantiations.Closure.Exceeds -> unchecked ()
+                | Instantiations.Closure.Infinite _ -> classes 1 0
 
         [ yield! wireShapeErrors idl
           yield! enumWireErrors idl

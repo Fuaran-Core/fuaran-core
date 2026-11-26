@@ -606,7 +606,7 @@ let printerAndRefusalTests =
 
               Expect.stringContains
                   (refusal (Gen.fsharpModuleDerived GenSupport.Empty [ Derivation.Fold "Tree" ] "Probe" idl [ "K" ]))
-                  "a fold over 'Tree' through the record 'Grow', whose recursion grows its type argument"
+                  "a fold over 'Tree' through the generic record 'Grow', which has no finite set of instantiations: Grow<'T> reaches Grow<list<'T>>"
                   "by the union's and the record's names")
 
           testCase

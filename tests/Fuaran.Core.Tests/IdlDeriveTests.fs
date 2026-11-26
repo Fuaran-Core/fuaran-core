@@ -1816,8 +1816,11 @@ let declLaws =
           testCase "a recursion that grows its type argument has no finite instantiation set, and says so" (fun () ->
               match Decl.instantiations DeclLaws.growing with
               | Error(CodegenError.UnsupportedConstruct(construct, _, _)) ->
-                  Expect.stringContains construct "did not close" "the bound, named"
-              | other -> failtestf "expected the bounded refusal, got %A" other)
+                  Expect.equal
+                      construct
+                      "the generic union 'Grow', which has no finite set of instantiations: Grow<'T> reaches Grow<list<'T>>"
+                      "the declaration, and what it reaches itself at"
+              | other -> failtestf "expected the refusal, got %A" other)
 
           testCase "an instance name is a declaration's own name, with its arguments mangled after it" (fun () ->
               Expect.equal (Decl.instName (TUnion("Binding", []))) "Binding" "non-generic"

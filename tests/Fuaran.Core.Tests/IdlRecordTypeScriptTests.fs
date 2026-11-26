@@ -855,7 +855,7 @@ let printerAndRefusalTests =
               refusedAsFSharp
                   [ Derivation.Fold "Tree" ]
                   idl
-                  "a fold over 'Tree' through the record 'Grow', whose recursion grows its type argument"
+                  "a fold over 'Tree' through the generic record 'Grow', which has no finite set of instantiations: Grow<'T> reaches Grow<list<'T>>"
 
               // The codec is one function per record whatever it is applied to: it reads and writes the
               // growing record, two instantiations deep, under node.

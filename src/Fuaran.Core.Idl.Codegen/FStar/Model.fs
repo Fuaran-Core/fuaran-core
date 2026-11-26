@@ -1083,13 +1083,12 @@ module internal FStarModel =
                 (Ok [])
             |> Result.map (fun ks -> caseMap["vkind"] <- List.rev ks)
 
-        // Phase 732 — a declaration whose recursion grows its type argument has no finite set of
-        // instances, so no model: the reach stopped following it and names it.
+        // Phase 732 — the model states one type per instantiation, so a vocabulary whose
+        // instantiations cannot all be named has no model: the reach was not walked and says why.
         let finite () =
-            match reach.Grows with
+            match reach.Unread with
             | None -> Ok()
-            | Some grows ->
-                unmodellable (sprintf "the generic %s, whose recursion grows its type argument" grows) "the vocabulary"
+            | Some why -> unmodellable why "the vocabulary"
 
         let translated =
             sequence (

@@ -208,7 +208,7 @@ let fixtures: (string * Idl) list =
 /// `IdlRecordTypeScriptTests` and `IdlThreeHostTests`) and the F* entries (whose model is held to it
 /// by the decode vectors, `IdlRecordFStarTests`). The JSON-schema entries are held to the interpreter
 /// in `IdlSchemaValidatorTests`.
-let private backends (idl: Idl) : (string * Result<unit, string>) list =
+let backends (idl: Idl) : (string * Result<unit, string>) list =
     let tags = idl.Kinds |> List.map _.Tag
 
     let describe (r: Result<'a, CodegenError>) =
@@ -244,7 +244,7 @@ let private backends (idl: Idl) : (string * Result<unit, string>) list =
       "FStarTarget.proofsModule", describe (FStarTarget.proofsModule "Boxed" "BoxedProofs" idl tags) ]
 
 /// The two JSON-schema entries, asked the same way.
-let private schemas (idl: Idl) : (string * Result<unit, string>) list =
+let schemas (idl: Idl) : (string * Result<unit, string>) list =
     let describe (r: Result<'a, CodegenError>) =
         r |> Result.map ignore |> Result.mapError CodegenError.describe
 
@@ -636,11 +636,11 @@ let tests =
                       let idl = growing asUnion
                       Expect.isEmpty (Declare.errors idl) (what + ": the declaration check admits it")
 
+                      // The one sentence of every entry that must name each instantiation.
                       let model =
-                          sprintf "the generic %s 'Grow', whose recursion grows its type argument" what
-
-                      let noSchema =
-                          "a generic union or record whose instantiation walk did not close after 1000 expansions"
+                          sprintf
+                              "the generic %s 'Grow', which has no finite set of instantiations: Grow<'T> reaches Grow<list<'T>>"
+                              what
 
                       let answers =
                           backends idl @ schemas idl
@@ -649,7 +649,6 @@ let tests =
                               (match answer with
                                | Ok() -> "emits"
                                | Error description when description.Contains model -> "refuses: " + model
-                               | Error description when description.Contains noSchema -> "refuses: " + noSchema
                                | Error description -> "refuses otherwise: " + description))
 
                       Expect.equal
@@ -666,14 +665,14 @@ let tests =
                             "typescriptValue", "emits"
                             "FStarTarget.vocabularyModule", "refuses: " + model
                             "FStarTarget.proofsModule", "refuses: " + model
-                            "jsonSchema", "refuses: " + noSchema
+                            "jsonSchema", "refuses: " + model
                             // No contract is declared, so no definition is asked for.
                             "contractArgumentSchemas", "emits" ]
                           (what + ": what each entry answers"))
 
           testCase "a long chain of declarations applied to no argument is not read as a growing recursion" (fun _ ->
-              // Seventy declarations each holding the next: deeper than the bound on NESTED
-              // INSTANTIATIONS, which counts a declaration only where a reference applies an argument.
+              // Seventy declarations each holding the next: deep, and nothing in it grows. How deep a
+              // walk has gone says nothing of whether the instantiations it reaches have an end.
               let chain (asUnion: bool) : Idl =
                   let name (i: int) = sprintf "Link%d" i
 
@@ -785,8 +784,9 @@ let tests =
                       | other -> failtestf "one fault expected: %A" other
 
                       // A declaration that holds itself at its own parameter is entered once, so the
-                      // fault is stated once; one whose recursion grows its argument is followed to the
-                      // bound on nested instantiations, each instantiation on the way checked.
+                      // fault is stated once; one whose recursion grows its argument has no last
+                      // instantiation, and is refused at the first one reached that the literal does
+                      // not fit.
                       let recursive (name: string) (next: IdlType) (at: IdlType) : Idl =
                           let self (arg: IdlType) =
                               if asUnion then
@@ -818,10 +818,7 @@ let tests =
                           "at the instantiation Grow<list<str>> ("
                           "the literal fits `Grow<str>`, and not the instantiation it holds"
 
-                      Expect.equal
-                          (List.length grown, List.length (List.distinct grown))
-                          (63, 63)
-                          "one fault for each of the sixty-four instantiations followed but the first")
+                      Expect.equal (List.length grown) 1 "and the member is refused once, there")
 
           // The rule is exact over this family: a declaration is admitted exactly where every value
           // the encoder writes at each instantiation reads back to the bytes it had.

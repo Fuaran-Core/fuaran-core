@@ -128,62 +128,134 @@ module internal DiffInstances =
             | _ -> None
         | _ -> None
 
+    // -----------------------------------------------------------------------
+    // Whether one revision's instantiations can all be named (`Instantiations`): asked before any
+    // walk below starts, because a walk over them ends only where they are finitely many.
+    // -----------------------------------------------------------------------
+
+    /// A type shape as the instantiation analysis reads it: a parameter, a reference to a
+    /// declaration at its arguments, or anything else with the shapes it holds.
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+    let private shapeOf (v: JVal) : Fuaran.Core.Idl.Instantiations.Shape<JVal> =
+        match reference v, v with
+        | Some(family, name, args), _ -> Fuaran.Core.Idl.Instantiations.Shape.Reference(family + " " + name, args)
+        | None, JObj fs ->
+            match DiffSnapshot.str "$type" v, DiffSnapshot.str "name" v with
+            | Some "var", Some n -> Fuaran.Core.Idl.Instantiations.Shape.Parameter n
+            | _ -> Fuaran.Core.Idl.Instantiations.Shape.Holds(fs |> List.map snd)
+        | None, JArr xs -> Fuaran.Core.Idl.Instantiations.Shape.Holds xs
+        | None, _ -> Fuaran.Core.Idl.Instantiations.Shape.Holds []
+
+    /// Every declaration of one revision: its key as [[shapeOf]] names it, its parameters and its
+    /// members' type shapes.
+    let private declarations (s: Snapshot) : (string * string list * JVal list) list =
+        [ for KeyValue(name, u) in s.Unions do
+              "union " + name,
+              u.Params,
+              [ for KeyValue(_, c) in u.Cases do
+                    for f in c.Fields do
+                        f.Wire.Shape ]
+          for KeyValue(name, fields) in s.Records do
+              "record " + name,
+              s.RecordParams |> Map.tryFind name |> Option.defaultValue [],
+              fields |> List.map (fun f -> f.Wire.Shape) ]
+
+    /// One revision's declarations, analysed.
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+    let private analysed (s: Snapshot) : Fuaran.Core.Idl.Instantiations.Analysis<JVal> =
+        Fuaran.Core.Idl.Instantiations.analyse (
+            Fuaran.Core.Idl.Instantiations.reading (declarations s) shapeOf substitute false
+        )
+
+    /// Whether the instantiations one revision reaches from `roots` cannot all be named: they are
+    /// infinitely many, or more than an enumeration reads.
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+    let private unread (analysis: Fuaran.Core.Idl.Instantiations.Analysis<JVal>) (roots: JVal list) : bool =
+        match Fuaran.Core.Idl.Instantiations.closure analysis roots with
+        | Fuaran.Core.Idl.Instantiations.Closure.Finite _ -> false
+        | Fuaran.Core.Idl.Instantiations.Closure.Infinite _
+        | Fuaran.Core.Idl.Instantiations.Closure.Exceeds -> true
+
+    /// Every type shape an owner that declares no parameter carries in one revision: where the
+    /// walk of [[reached]] starts.
+    let private roots (s: Snapshot) : JVal list =
+        let shapes (fields: FieldSnap list) =
+            fields |> List.map (fun f -> f.Wire.Shape)
+
+        [ for KeyValue(_, fields) in s.Kinds do
+              yield! shapes fields
+          for KeyValue(_, fields) in s.Ops do
+              yield! shapes fields
+          yield! shapes s.NodeFields
+          for family in [ "union"; "record" ] do
+              for name in
+                  (if family = "union" then
+                       Map.keys s.Unions
+                   else
+                       Map.keys s.Records) do
+                  match declaration s family name with
+                  | Some d when d.Params.IsEmpty ->
+                      for KeyValue(_, fields) in d.Members do
+                          yield! shapes fields
+                  | _ -> ()
+          for KeyValue(_, c) in s.Contracts do
+              for KeyValue(_, m) in c.Methods do
+                  for x in m.Arguments do
+                      x.Wire.Shape
+
+                  match m.Result with
+                  | Some r -> r.Shape
+                  | None -> () ]
+
     /// Are `b` (a closed type of the old revision) and `a` (of the new) the same type to a stored
     /// document: equal as written, except that a reference to a generic declaration is compared
     /// by the type each paired member is at the reference's instantiation, not by its arguments.
-    /// An instantiation met again on the way down is taken as agreeing (the comparison is
-    /// coinductive, as the types are recursive); one nested past the generators' own bound
-    /// (`Decl.instantiationDepth`) is a recursion that grows its argument, and reads as differing.
-    let rec private same
-        (before: Snapshot)
-        (after: Snapshot)
-        (entered: Set<string>)
-        (depth: int)
-        (b: JVal)
-        (a: JVal)
-        : bool =
-        match instance before after b a with
-        | Some(i, db, da) ->
-            entered.Contains i.Key
-            || (depth < Decl.instantiationDepth
-                && match bind db i.Before, bind da i.After with
+    /// An instantiation pair met again is taken as agreeing (the comparison is coinductive, as the
+    /// types are recursive): the answer is a conjunction over every pair reached, so one that
+    /// differs anywhere is found wherever it is first met. The caller asks first that both types
+    /// reach finitely many instantiations ([[unread]]); the pairs are then finitely many too.
+    let private same (before: Snapshot) (after: Snapshot) (b: JVal) (a: JVal) : bool =
+        let entered = System.Collections.Generic.HashSet<string>()
+
+        let rec agree (b: JVal) (a: JVal) : bool =
+            match instance before after b a with
+            | Some(i, db, da) ->
+                not (entered.Add i.Key)
+                || match bind db i.Before, bind da i.After with
                    | Some bb, Some ba ->
                        paired db da
                        |> List.forall (fun (bf, af) ->
-                           same
-                               before
-                               after
-                               (entered.Add i.Key)
-                               (depth + 1)
-                               (substitute bb bf.Wire.Shape)
-                               (substitute ba af.Wire.Shape))
-                   | _ -> false)
-        | None ->
-            match b, a with
-            | JObj bs, JObj afs when (reference b).IsNone && (reference a).IsNone ->
-                List.map fst bs = List.map fst afs
-                && List.forall2 (fun (_, x) (_, y) -> same before after entered depth x y) bs afs
-            | JArr bs, JArr afs -> bs.Length = afs.Length && List.forall2 (same before after entered depth) bs afs
-            | _ -> b = a
+                           agree (substitute bb bf.Wire.Shape) (substitute ba af.Wire.Shape))
+                   | _ -> false
+            | None ->
+                match b, a with
+                | JObj bs, JObj afs when (reference b).IsNone && (reference a).IsNone ->
+                    List.map fst bs = List.map fst afs
+                    && List.forall2 (fun (_, x) (_, y) -> agree x y) bs afs
+                | JArr bs, JArr afs -> bs.Length = afs.Length && List.forall2 agree bs afs
+                | _ -> b = a
+
+        agree b a
 
     /// Every instantiation pair the two revisions reach together: from each field, contract
     /// argument and contract result both carry on an owner that declares no parameter in either,
     /// down through the members of each generic declaration at the arguments applied. Positions
     /// whose types are not both references to one declaration are descended member by member
     /// where their shapes allow, and otherwise end the walk there: a position that changed shape
-    /// has its own row.
+    /// has its own row. The caller asks first that each revision reaches finitely many
+    /// instantiations ([[unread]]): a pair is one of each, so the walk ends.
     let private reached (before: Snapshot) (after: Snapshot) : Map<string * string, Instance list> =
-        let rec walk (acc: Map<string, Instance>) (depth: int) (b: JVal) (a: JVal) : Map<string, Instance> =
+        let rec walk (acc: Map<string, Instance>) (b: JVal) (a: JVal) : Map<string, Instance> =
             match instance before after b a with
             | Some(i, db, da) ->
-                if acc.ContainsKey i.Key || depth >= Decl.instantiationDepth then
+                if acc.ContainsKey i.Key then
                     acc
                 else
                     match bind db i.Before, bind da i.After with
                     | Some bb, Some ba ->
                         (acc.Add(i.Key, i), paired db da)
                         ||> List.fold (fun acc (bf, af) ->
-                            walk acc (depth + 1) (substitute bb bf.Wire.Shape) (substitute ba af.Wire.Shape))
+                            walk acc (substitute bb bf.Wire.Shape) (substitute ba af.Wire.Shape))
                     | _ -> acc.Add(i.Key, i)
             | None ->
                 match b, a with
@@ -191,17 +263,17 @@ module internal DiffInstances =
                     (acc, bs)
                     ||> List.fold (fun acc (k, x) ->
                         match afs |> List.tryFind (fun (ak, _) -> ak = k) with
-                        | Some(_, y) -> walk acc depth x y
+                        | Some(_, y) -> walk acc x y
                         | None -> acc)
                 | JArr bs, JArr afs when bs.Length = afs.Length ->
-                    (acc, List.zip bs afs) ||> List.fold (fun acc (x, y) -> walk acc depth x y)
+                    (acc, List.zip bs afs) ||> List.fold (fun acc (x, y) -> walk acc x y)
                 | _ -> acc
 
         let fields (acc: Map<string, Instance>) (bfs: FieldSnap list) (afs: FieldSnap list) =
             (acc, bfs)
             ||> List.fold (fun acc bf ->
                 match afs |> List.tryFind (fun af -> af.Name = bf.Name) with
-                | Some af -> walk acc 0 bf.Wire.Shape af.Wire.Shape
+                | Some af -> walk acc bf.Wire.Shape af.Wire.Shape
                 | None -> acc)
 
         let owners (acc: Map<string, Instance>) (b: Map<string, FieldSnap list>) (a: Map<string, FieldSnap list>) =
@@ -239,11 +311,11 @@ module internal DiffInstances =
                                 (acc, bm.Arguments)
                                 ||> List.fold (fun acc bx ->
                                     match am.Arguments |> List.tryFind (fun ax -> ax.Name = bx.Name) with
-                                    | Some ax -> walk acc 0 bx.Wire.Shape ax.Wire.Shape
+                                    | Some ax -> walk acc bx.Wire.Shape ax.Wire.Shape
                                     | None -> acc)
 
                             match bm.Result, am.Result with
-                            | Some br, Some ar -> walk acc 0 br.Shape ar.Shape
+                            | Some br, Some ar -> walk acc br.Shape ar.Shape
                             | _ -> acc))
 
         let all =
@@ -262,8 +334,22 @@ module internal DiffInstances =
 
     /// The judge of one snapshot pair: what the type of a field both revisions carry did, by
     /// what an old document does. The reach is computed once, when a field first needs it.
+    ///
+    /// A revision whose instantiations cannot all be named (a declaration that reaches itself at a
+    /// larger argument) has no reach to read a restated member at, and a type that reaches such a
+    /// declaration cannot be compared to its end: each reads as MOVED, the grade that claims
+    /// nothing of an old document.
     let judge (before: Snapshot) (after: Snapshot) : Owner -> FieldSnap -> FieldSnap -> TypeMove =
-        let reach = lazy (reached before after)
+        let analyses = lazy (analysed before, analysed after)
+
+        let reach =
+            lazy
+                (let old, now = analyses.Value
+
+                 if unread old (roots before) || unread now (roots after) then
+                     Map.empty
+                 else
+                     reached before after)
 
         let declared (s: Snapshot) (owner: Owner) : string list =
             match owner with
@@ -275,7 +361,12 @@ module internal DiffInstances =
 
         fun owner old now ->
             let agrees (bb: Map<string, JVal>) (ba: Map<string, JVal>) =
-                same before after Set.empty 0 (substitute bb old.Wire.Shape) (substitute ba now.Wire.Shape)
+                let b, a = substitute bb old.Wire.Shape, substitute ba now.Wire.Shape
+                let analysedOld, analysedNow = analyses.Value
+
+                not (unread analysedOld [ b ])
+                && not (unread analysedNow [ a ])
+                && same before after b a
 
             match declared before owner, declared after owner with
             | [], [] ->
