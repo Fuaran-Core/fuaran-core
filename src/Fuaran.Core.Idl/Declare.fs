@@ -1242,9 +1242,10 @@ module Declare =
         /// depth count against one step budget for each kind of walk (`stepsRead`).
         ///
         /// A member is refused in ONE fault: the first instantiation found that it does not fit,
-        /// and how many more it does not fit, every other where each instantiation was found
-        /// (`… and at 4095 more`), else those found, a lower bound (`… and at least 3 more`). A
-        /// member the walk that finds each instantiation cannot judge, past one of its counts, is
+        /// and how many more of those found it does not fit, always as a lower bound, `0` included
+        /// (`… and at least 4095 more`, `… and at least 0 more`): not every instantiation reached is
+        /// found, so the count never claims to be every one. A
+        /// member the walk that reads each argument whole cannot judge, past one of its counts, is
         /// judged in classes; one the walks in classes cannot judge either, past
         /// [[Instantiations.parameterLimit]] classes at a parameter it reads or once they have
         /// read [[Instantiations.stepLimit]] instantiations short of its declaration, is refused in
@@ -1282,12 +1283,10 @@ module Declare =
                 match outcome with
                 | Instantiations.Outcome.Admitted
                 | Instantiations.Outcome.Deeper -> None
-                | Instantiations.Outcome.Refused(instantiation, why, more, every) ->
+                | Instantiations.Outcome.Refused(instantiation, why, more) ->
                     let spelled =
                         Instantiations.spellAbbreviated instantiation
-                        + (if more = 0 then ""
-                           elif every then sprintf " and at %d more" more
-                           else sprintf " and at least %d more" more)
+                        + sprintf " and at least %d more" more
 
                     Some
                         { At = a.At

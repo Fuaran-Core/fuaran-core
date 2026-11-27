@@ -74,9 +74,9 @@ let private twoWay (asUnion: bool) (value: IdlField) (at: IdlType) : Idl =
     vocabulary [ kind "K" [ f "g" (self at) Optional ]; kind "Plain" [ f "n" TInt Required ] ] unions records
 
 /// What a value on the wire holds from `roots`, read the slow way: every instantiation entered, its
-/// wire members substituted and descended, nothing asked of the declarations first. `None` once it
+/// wire members substituted and descended, nothing asked of the declarations first. It stops once it
 /// has entered more than `budget` instantiations.
-let private walked (idl: Idl) (budget: int) (roots: IdlType list) : Set<string> option =
+let private reached (idl: Idl) (budget: int) (roots: IdlType list) : Collections.Generic.HashSet<IdlType> =
     let seen = Collections.Generic.HashSet<IdlType>(HashIdentity.Structural)
 
     let rec visit (t: IdlType) =
@@ -108,11 +108,58 @@ let private walked (idl: Idl) (budget: int) (roots: IdlType list) : Set<string> 
             | _ -> ()
 
     roots |> List.iter visit
+    seen
+
+/// [[reached]], spelled; `None` once it has entered more than `budget` instantiations.
+let private walked (idl: Idl) (budget: int) (roots: IdlType list) : Set<string> option =
+    let seen = reached idl budget roots
 
     if seen.Count > budget then
         None
     else
         Some(seen |> Seq.map (sprintf "%A") |> Set.ofSeq)
+
+/// How many instantiations of the declaration `name` reached from the kinds' members ([[reached]])
+/// the omit-at-default literal of its member `field` does not fit: the brute force a fault's count
+/// is held to. Each is asked of the encoder at the member's type there, through a kind holding it.
+let private failing (idl: Idl) (name: string) (field: string) : int =
+    let declared =
+        (idl.Records |> List.map (fun r -> r.Name, (r.Params, r.Fields)))
+        @ (idl.Unions
+           |> List.map (fun u -> u.Name, (u.Params, u.Cases |> List.collect _.Fields)))
+        |> Map.ofList
+
+    let pars, members = declared[name]
+    let m = members |> List.find (fun x -> x.Name = field)
+
+    let literal =
+        match m.Opt with
+        | OmitDefault v -> v
+        | other -> failtestf "%s.%s holds no default: %A" name field other
+
+    let fits (t: IdlType) =
+        let probe =
+            { idl with
+                Kinds = idl.Kinds @ [ kind "Probe" [ f "m" t Required ] ] }
+
+        Result.isOk (Encode.encode probe (VNode("n", "Probe", [ "m", literal ])))
+
+    reached idl 1_000_000 (idl.Kinds |> List.collect (fun k -> k.Fields |> List.map _.Type))
+    |> Seq.filter (fun t ->
+        match t with
+        | TRecord(n, args)
+        | TUnion(n, args) when n = name -> not (fits (TypeParams.substitute (Map.ofList (List.zip pars args)) m.Type))
+        | _ -> false)
+    |> Seq.length
+
+/// The `N` of a fault's `and at least N more`; a failed test where it says none.
+let private atLeast (detail: string) : int =
+    let m = Text.RegularExpressions.Regex.Match(detail, " and at least (\d+) more")
+
+    if m.Success then
+        int m.Groups[1].Value
+    else
+        failtestf "no count: %s" detail
 
 let private described (r: Result<'a, CodegenError>) : Result<unit, string> =
     r |> Result.map ignore |> Result.mapError CodegenError.describe
@@ -497,8 +544,13 @@ let tests =
 
                     Expect.stringContains
                         judged.Head.Detail
-                        " and at 4095 more ("
-                        "and counts every other instantiation of D13")
+                        " and at least 4095 more ("
+                        "and counts the other instantiations of D13 it found, here every one"
+
+                    Expect.equal
+                        (failing (chain 13 (f "v" (TVar "T") (OmitDefault(VStr "")))) "D13" "v")
+                        4096
+                        "the brute force: every one of D13's 4096 fails")
 
                 testCase
                     "the declaration check counts the types ONE parameter takes, and judges in classes past them"
@@ -605,7 +657,7 @@ let tests =
                         Expect.equal
                             (answer
                              |> List.filter (fun x -> x.Detail.StartsWith "union 'E'")
-                             |> List.map (fun x -> x.Detail.Contains " and at 14 more ("))
+                             |> List.map (fun x -> x.Detail.Contains " and at least 14 more ("))
                             [ true ]
                             "E judged at each of its sixteen, and refused in one fault at each but E<str>"
 
@@ -922,7 +974,7 @@ let tests =
                         | [ only ] ->
                             Expect.stringContains
                                 only
-                                "does not fit the field's type at the instantiation Opt<int> ("
+                                "does not fit the field's type at the instantiation Opt<int> and at least 0 more ("
                                 "and refused where it does not fit"
                         | other -> failtestf "one fault expected: %A" other
 
@@ -1125,7 +1177,7 @@ let tests =
                             Expect.equal
                                 (within 20.0 "Declare.errors" (fun () -> Declare.errors idl)
                                  |> List.map (fun x ->
-                                     x.Detail.Contains "the instantiation Opt<int> and at 1 more (",
+                                     x.Detail.Contains "the instantiation Opt<int> and at least 1 more (",
                                      x.Detail.Contains "Opt<bool>"))
                                 [ true, false ]
                                 "both instantiations refused, in one fault")
@@ -1617,7 +1669,7 @@ let tests =
                         | [ only ] ->
                             Expect.stringContains
                                 only
-                                (sprintf "at the instantiation A%d<int> (" n)
+                                (sprintf "at the instantiation A%d<int> and at least 0 more (" n)
                                 (sprintf "a chain of %d: refused at its last instantiation" n)
                         | other -> failtestf "a chain of %d: one fault expected, got %A" n other
 
@@ -1965,7 +2017,7 @@ let tests =
                     | [ only ] ->
                         Expect.stringContains
                             only
-                            "at the instantiation G<list<map<str, int>>> ("
+                            "at the instantiation G<list<map<str, int>>> and at least 0 more ("
                             "the instantiation it does not fit"
                     | other -> failtestf "one fault expected: %A" other
 
@@ -1987,7 +2039,8 @@ let tests =
                           TKeyedMap(TStr, TInt), "Opt<keyedMap<str, int>>" ] do
                         Expect.equal
                             (Declare.errors (at t)
-                             |> List.filter (fun d -> d.Detail.Contains("at the instantiation " + spelled + " ("))
+                             |> List.filter (fun d ->
+                                 d.Detail.Contains("at the instantiation " + spelled + " and at least 0 more ("))
                              |> List.length)
                             1
                             (spelled + ": one fault names it")) ] ]
@@ -2098,8 +2151,10 @@ let perParameterTests =
               // in one fault that names the first and counts the rest. The encoder renders the literal
               // once for all of them: they are one class at their outermost form.
               for n, more in [ 13, 4095; 15, 16383 ] do
+                  let idl = branching n (VStr "")
+
                   let faults =
-                      within 10.0 (sprintf "Declare.errors at %d" n) (fun () -> Declare.errors (branching n (VStr "")))
+                      within 10.0 (sprintf "Declare.errors at %d" n) (fun () -> Declare.errors idl)
 
                   Expect.equal faults.Length 1 (sprintf "n = %d: one fault" n)
 
@@ -2113,8 +2168,13 @@ let perParameterTests =
 
                   Expect.stringContains
                       faults.Head.Detail
-                      (sprintf " and at %d more (authored value does not match IDL type " more)
+                      (sprintf " and at least %d more (authored value does not match IDL type " more)
                       (sprintf "n = %d: it counts the others, and gives the encoder's sentence" n)
+
+                  // Every one of U<n>'s 2^(n-1) instantiations fails, so the count is a true bound, and
+                  // here every other: the brute force agrees where it is small enough to run.
+                  if n = 13 then
+                      Expect.equal (failing idl "U13" "v") (more + 1) "n = 13: the brute force"
 
               // Eight such members: eight faults, the literal of each rendered once for its 16384
               // instantiations, not once for each (which took seconds a member).
@@ -2137,7 +2197,7 @@ let perParameterTests =
 
               Expect.equal
                   (within 10.0 "Declare.errors, eight members" (fun () -> Declare.errors eight)
-                   |> List.map (fun x -> x.Detail.Contains " and at 16383 more ("))
+                   |> List.map (fun x -> x.Detail.Contains " and at least 16383 more ("))
                   (List.replicate 8 true)
                   "one fault a member, each counting the rest"
 
@@ -2152,16 +2212,19 @@ let perParameterTests =
                   within 10.0 "Declare.errors" (fun () -> Declare.errors (branching 3 pair))
                   |> List.map _.Detail
 
+              Expect.equal (failing (branching 3 pair) "U3" "v") 2 "the brute force: two of the four fail"
+
               Expect.equal faults.Length 1 "one fault"
 
               Expect.stringContains
                   faults.Head
-                  "at the instantiation U3<list<list<str>>> and at 1 more ("
+                  "at the instantiation U3<list<list<str>>> and at least 1 more ("
                   "the first it does not fit, and the one other"
 
               // Past the count (`U16` takes 32768 types): judged in classes. Every one is a list, one
               // class at the outermost form, so `[]` is admitted and `""` refused in one fault naming
-              // the instantiation that carried the class, and claiming no count it has not found.
+              // the instantiation that carried the class and counting no other, since it found none:
+              // `and at least 0 more`, a true lower bound of the 32767 others it does not fit.
               Expect.isEmpty
                   (within 10.0 "Declare.errors at 16, []" (fun () -> Declare.errors (branching 16 (VList []))))
                   "n = 16, []: judged in classes and admitted"
@@ -2177,7 +2240,10 @@ let perParameterTests =
                   "union 'U16' case 'Mk', field 'v': the omit-at-default value does not fit the field's type at the instantiation U16<list<"
                   "n = 16: refused, naming the member and an instantiation reached"
 
-              Expect.isFalse (sixteen.Head.Contains " and at ") "n = 16: one class found, so no count claimed")
+              Expect.stringContains
+                  sixteen.Head
+                  " and at least 0 more ("
+                  "n = 16: one class found, so no other counted, and the count a lower bound")
 
           testCase "the count is of the types one parameter takes, and of no other parameter's" (fun _ ->
               // `Vk<T, S>` doubles `S` (at `list<S>` and `list<tuple<S, int>>`) and passes `T` on;
@@ -2222,7 +2288,7 @@ let perParameterTests =
               Expect.equal
                   (at
                    |> List.map (fun x ->
-                       x.StartsWith "union 'V15' case 'Mk', field 'v': ", x.Contains " and at 16383 more ("))
+                       x.StartsWith "union 'V15' case 'Mk', field 'v': ", x.Contains " and at least 16383 more ("))
                   [ true, true ]
                   "exactly the count at S: v refused at every one of the 16384, w admitted"
 
@@ -2269,9 +2335,9 @@ let perParameterTests =
                    |> List.map (fun x ->
                        x.Detail.StartsWith
                            "union 'C2' case 'Mk', field 'v': the omit-at-default value does not fit the field's type at the instantiation C2<list<",
-                       x.Detail.Contains " and at "))
-                  [ true, false ]
-                  "judged in classes, as the declaration it is copied from is")
+                       x.Detail.Contains " and at least 0 more ("))
+                  [ true, true ]
+                  "judged in classes, as the declaration it is copied from is, the one class found counting no other")
 
           testCase "in classes a refusal decides beside a class the cut leaves open" (fun _ ->
               // `G<T> { l: G<list<T>>; m: G<map<T>>; v: T = [[]] }` held at `G<str>`: at depth one
@@ -2310,13 +2376,63 @@ let perParameterTests =
 
               Expect.exists
                   faults
-                  (fun x -> x.Detail.Contains "at the instantiation Opt<int> (unsubstituted type variable '')")
+                  (fun x ->
+                      x.Detail.Contains
+                          "at the instantiation Opt<int> and at least 0 more (unsubstituted type variable '')")
                   "refused at its instantiation, in the encoder's words")
 
-          testCase "a count is exact only where every instantiation was found, and a lower bound elsewhere" (fun _ ->
+          testCase "a count is a lower bound on every path, 0 included, and never claims to be every one" (fun _ ->
+              // Each fault names the first instantiation found that its literal does not fit and says
+              // `and at least N more`, N the others found that it does not fit. Each case holds N to
+              // the brute force over every instantiation reached (`failing`), and the sentence whole.
+              let refusal (idl: Idl) =
+                  within 10.0 "Declare.errors" (fun () -> Declare.errors idl) |> List.map _.Detail
+
+              let bounded (label: string) (idl: Idl) (name: string) (field: string) (truth: int) (said: string) =
+                  let faults = refusal idl
+                  Expect.equal faults [ said ] (label + ": one fault, in the one form")
+                  Expect.equal (failing idl name field) truth (label + ": the brute force")
+                  Expect.isLessThanOrEqual (atLeast faults.Head) (truth - 1) (label + ": a true lower bound")
+
+              // `G<A, B> { y: Y<tuple<A, B>> }` and `Y<P> { v: P = L }` held at `G<str, int>`,
+              // `G<int, str>` and `G<str, str>`: the last brings no type new at `A` or at `B`, so the
+              // walk does not enter it, and `Y<tuple<str, str>>`, which it reaches, is not found.
+              let gy (literal: IdlValue) =
+                  vocabulary
+                      [ kind
+                            "K"
+                            [ for i, (a, b) in List.indexed [ TStr, TInt; TInt, TStr; TStr, TStr ] ->
+                                  f (sprintf "r%d" i) (TRecord("G", [ a; b ])) Optional ] ]
+                      []
+                      [ record "G" [ "A"; "B" ] [ f "y" (TRecord("Y", [ TTuple [ TVar "A"; TVar "B" ] ])) Optional ]
+                        record "Y" [ "P" ] [ f "v" (TVar "P") (OmitDefault literal) ] ]
+
+              let atY (first: string) (more: int) (why: string) =
+                  sprintf
+                      "record 'Y', field 'v': the omit-at-default value does not fit the field's type at the instantiation Y<%s> and at least %d more (authored value does not match IDL type %s)"
+                      first
+                      more
+                      why
+
+              bounded
+                  "all three fail, two found"
+                  (gy (VStr ""))
+                  "Y"
+                  "v"
+                  3
+                  (atY "tuple<str, int>" 1 "TTuple [TStr; TInt]")
+
+              bounded
+                  "a pair of a string and an integer fails two, one found"
+                  (gy (VList [ VStr ""; VInt 0 ]))
+                  "Y"
+                  "v"
+                  2
+                  (atY "tuple<int, str>" 0 "TInt")
+
               // `H<A, B>` held at each of the nine pairs of `int`, `bool` and `str`. `v: A = ""` reads
               // only `A`: the walk keeps one instantiation for each type `A` takes, so of the six it
-              // does not fit (`A` an `int` or a `bool`) it finds two, and says so as a lower bound.
+              // does not fit it finds two.
               let pairs =
                   [ for a in [ TInt; TBool; TStr ] do
                         for b in [ TInt; TBool; TStr ] -> a, b ]
@@ -2329,36 +2445,44 @@ let perParameterTests =
                       []
                       [ record "H" [ "A"; "B" ] members ]
 
-              let refusal (idl: Idl) =
-                  within 10.0 "Declare.errors" (fun () -> Declare.errors idl) |> List.map _.Detail
-
-              let fault (more: string) =
+              let atH (more: int) =
                   sprintf
-                      "record 'H', field 'v': the omit-at-default value does not fit the field's type at the instantiation H<int, int> and at %s more (authored value does not match IDL type TInt)"
+                      "record 'H', field 'v': the omit-at-default value does not fit the field's type at the instantiation H<int, int> and at least %d more (authored value does not match IDL type TInt)"
                       more
 
-              Expect.equal
-                  (refusal (held pairs [ f "v" (TVar "A") (OmitDefault(VStr "")); f "w" (TVar "B") Optional ]))
-                  [ fault "least 1" ]
-                  "six of nine fail: two found, a lower bound"
+              bounded
+                  "six of nine"
+                  (held pairs [ f "v" (TVar "A") (OmitDefault(VStr "")); f "w" (TVar "B") Optional ])
+                  "H"
+                  "v"
+                  6
+                  (atH 1)
 
               // `v: tuple<A, B> = ["", ""]` reads both and fits only `H<str, str>`: the walk keeps
               // the five that bring a type new at `A` or at `B`, each of which it fails.
               let both =
                   [ f "v" (TTuple [ TVar "A"; TVar "B" ]) (OmitDefault(VList [ VStr ""; VStr "" ])) ]
 
-              Expect.equal
-                  (refusal (held pairs both))
-                  [ fault "least 4" ]
-                  "eight of nine fail: five found, a lower bound"
+              bounded "eight of nine" (held pairs both) "H" "v" 8 (atH 4)
 
-              // Where the types found at each parameter multiply to the instantiations found, every
-              // instantiation was found, and the count is exact, for two parameters as for one (the
-              // chains of thirteen and fifteen above count 4095 and 16383 more at one parameter).
-              Expect.equal
-                  (refusal (held [ TInt, TInt; TInt, TBool ] both))
-                  [ fault "1" ]
-                  "one type at A, two at B, two found: every one, counted exactly")
+              // Where every instantiation happens to be found the count is every other, and the
+              // sentence is the same: one type at `A`, two at `B`.
+              bounded "two of two" (held [ TInt, TInt; TInt, TBool ] both) "H" "v" 2 (atH 1)
+
+              // A member failing once: `Opt<T> { v: T = "" }` at `Opt<int>` and `Opt<str>`.
+              bounded
+                  "one of two"
+                  (vocabulary
+                      [ kind
+                            "K"
+                            [ f "a" (TRecord("Opt", [ TInt ])) Optional
+                              f "b" (TRecord("Opt", [ TStr ])) Optional ] ]
+                      []
+                      [ record "Opt" [ "T" ] [ f "v" (TVar "T") (OmitDefault(VStr "")) ] ])
+                  "Opt"
+                  "v"
+                  1
+                  "record 'Opt', field 'v': the omit-at-default value does not fit the field's type at the instantiation Opt<int> and at least 0 more (authored value does not match IDL type TInt)")
 
           testCase
               "the walk that reads each instantiation stops at the step budget, exactly; what it read whole is judged, the rest in classes"
@@ -2401,10 +2525,10 @@ let perParameterTests =
                   let chain (j: int) (x: string) =
                       x.StartsWith(sprintf "union 'C%d_14' case 'Mk', field 'v': " j)
 
-                  let counted (x: string) = x.Contains " and at 8191 more ("
+                  let counted (x: string) = x.Contains " and at least 8191 more ("
 
                   // At the budget exactly, every chain was read whole: each is judged at its 8192
-                  // instantiations and counted exactly. Beside them, `Hold<T> { u: T1<T> }` held at
+                  // instantiations and counts the 8191 others, every one. Beside them, `Hold<T> { u: T1<T> }` held at
                   // `Hold<Box<int>>` and `Hold<Box<str>>`, `T1`'s case `V` transparent at its
                   // parameter: the other rule, which shares the budget, has none left, so it judges
                   // `Hold.u` in classes, where it is refused at both and counts the other as found.
@@ -2427,7 +2551,7 @@ let perParameterTests =
                   Expect.equal
                       [ for j in 1..chains -> atBudget |> List.filter (chain j) |> List.map counted ]
                       (List.replicate chains [ true ])
-                      "at the budget exactly: each chain read whole, judged and counted exactly"
+                      "at the budget exactly: each chain read whole, judged and counting every other"
 
                   Expect.equal
                       (atBudget |> List.filter (fun x -> x.StartsWith "record 'Hold'"))
@@ -2436,7 +2560,7 @@ let perParameterTests =
 
                   // One past it: the walk stops with the last reference unread, which leads to the
                   // last chain only. Each other chain was read whole and is judged as before; the
-                  // last is judged in classes, one class at the outermost form, so no count.
+                  // last is judged in classes, one class at the outermost form, so it counts no other.
                   let past =
                       within 60.0 "Declare.errors one past the budget" (fun () ->
                           Declare.errors (parallel (chains + 1) [] [] []))
@@ -2446,8 +2570,8 @@ let perParameterTests =
                       [ for j in 1..chains ->
                             past
                             |> List.filter (chain j)
-                            |> List.map (fun x -> counted x, x.Contains " and at ") ]
-                      (List.replicate (chains - 1) [ true, true ] @ [ [ false, false ] ])
+                            |> List.map (fun x -> counted x, x.Contains " and at least 0 more (") ]
+                      (List.replicate (chains - 1) [ true, false ] @ [ [ false, true ] ])
                       "one past the budget: every chain read whole judged as before, the last in classes"
 
                   Expect.isFalse
@@ -2543,7 +2667,8 @@ let transparentTests =
                       PathSegment.Key "fields"
                       PathSegment.Index 0
                       PathSegment.Key "type" ],
-                    "record 'Hold', field 'u': at the instantiation Hold<Box<int>>" + ending ]
+                    "record 'Hold', field 'u': at the instantiation Hold<Box<int>> and at least 0 more"
+                    + ending ]
                   "a generic record as the holder"
 
               Expect.equal
@@ -2559,7 +2684,7 @@ let transparentTests =
                       PathSegment.Key "fields"
                       PathSegment.Index 0
                       PathSegment.Key "type" ],
-                    "union 'HoldU' case 'C', field 'u': at the instantiation HoldU<map<str, int>>"
+                    "union 'HoldU' case 'C', field 'u': at the instantiation HoldU<map<str, int>> and at least 0 more"
                     + ending ]
                   "a generic union as the holder, at a map"
 
@@ -2627,7 +2752,8 @@ let transparentTests =
                       PathSegment.Key "fields"
                       PathSegment.Index 0
                       PathSegment.Key "type" ],
-                    "record 'F', field 'h': at the instantiation F<Box<int>>, " + ending ]
+                    "record 'F', field 'h': at the instantiation F<Box<int>> and at least 0 more, "
+                    + ending ]
                   "a generic origin"
 
               // `Hold<Box<int>, int>` and `Hold<int, T1<Box<int>>>` are reached and

@@ -772,7 +772,7 @@ let tests =
                       Expect.stringStarts
                           detail
                           (owner
-                           + ": the omit-at-default value does not fit the field's type at the instantiation Opt<int> (")
+                           + ": the omit-at-default value does not fit the field's type at the instantiation Opt<int> and at least 0 more (")
                           "the declaration, the member and the instantiation; `Opt<str>` is not named"
 
                       // Reached through a generic holder's own parameter, and at a contract method's
@@ -782,7 +782,7 @@ let tests =
 
                       Expect.stringContains
                           (theFault through |> snd)
-                          "at the instantiation Opt<list<bool>> ("
+                          "at the instantiation Opt<list<bool>> and at least 0 more ("
                           "the argument the holder passes down"
 
                       let atMethod =
@@ -799,7 +799,7 @@ let tests =
 
                       Expect.isTrue
                           (details atMethod
-                           |> List.exists (fun d -> d.Contains "at the instantiation Opt<int> ("))
+                           |> List.exists (fun d -> d.Contains "at the instantiation Opt<int> and at least 0 more ("))
                           "a contract method's result is an instantiation reached"
 
                       // No instantiation reached: nothing for the literal to fail to fit.
@@ -846,7 +846,7 @@ let tests =
 
                       Expect.stringContains
                           (theFault (recursive "Tree" (TVar "T") TInt) |> snd)
-                          "at the instantiation Tree<int> ("
+                          "at the instantiation Tree<int> and at least 0 more ("
                           "a recursive declaration, once"
 
                       let grown = details (recursive "Grow" (TList(TVar "T")) TStr)

@@ -1096,10 +1096,10 @@ module internal Instantiations =
     type Outcome =
         /// It fits every instantiation the walk reached.
         | Admitted
-        /// It does not fit the first instantiation named, for the reason given, nor `more` others:
-        /// every other it does not fit where `every` (each instantiation was found), else those
-        /// found, a lower bound.
-        | Refused of instantiation: IdlType * why: string * more: int * every: bool
+        /// It does not fit the first instantiation named, for the reason given, nor at least `more`
+        /// others: those found that it does not fit, each a distinct instantiation reached, so a
+        /// lower bound of those reached, never claimed to be every one.
+        | Refused of instantiation: IdlType * why: string * more: int
         /// A parameter it reads takes more than [[parameterLimit]] types (in classes, classes).
         | TooMany
         /// The walk read [[stepLimit]] instantiations with one unread that leads to its declaration.
@@ -1149,16 +1149,15 @@ module internal Instantiations =
 
     /// The member `m` over the instantiations `found` of its declaration, judged in groups whose
     /// arguments at the positions it reads agree to a depth, from `depth`. A group the cut leaves
-    /// undecided is split a level deeper where every instantiation was found (`exact`); in classes
-    /// only one of each class at the walk's depth was, so the member is walked for again. A
+    /// undecided is split a level deeper where the walk read each argument whole (`exact`), each
+    /// type at a position read being among those found; in classes only one of each class at the
+    /// walk's depth was, so the member is walked for again. A
     /// refusal decides: it names an instantiation the vocabulary reaches, and in classes a group
-    /// left undecided beside it is not counted among those that fail. `every` says the
-    /// instantiations found are every one reached, so the count of those it fails is exact.
+    /// left undecided beside it is not counted among those that fail.
     let private judgedOver
         (analysis: Analysis<IdlType>)
         (m: Judged)
         (exact: bool)
-        (every: bool)
         (depth: int)
         (found: IdlType array list)
         : Outcome =
@@ -1206,10 +1205,10 @@ module internal Instantiations =
                 | Verdict.Fits
                 | Verdict.Undecided -> cutWhy
 
-            Outcome.Refused(applies (m.Declaration, List.ofArray args), why, failing.Count - 1, exact && every)
+            Outcome.Refused(applies (m.Declaration, List.ofArray args), why, failing.Count - 1)
 
     /// How many instantiations the walks of one declaration check have read, each kind against
-    /// [[stepLimit]]: those that find each instantiation (`Each`), and those in classes.
+    /// [[stepLimit]]: those that read each argument whole (`Each`), and those in classes.
     type Steps =
         { Each: int ref
           InClasses: int ref }
@@ -1333,24 +1332,6 @@ module internal Instantiations =
             else
                 Set.empty
 
-        // Whether the instantiations found of `d` are every one reached: each of its positions is
-        // read, and the types found there multiply to as many as were found, so each combination
-        // was. (A position past the count is read no more: it fed only members past it.)
-        let everyFound (d: string) =
-            match positions.TryGetValue d with
-            | true, at when at.Length = (parameters analysis d).Length ->
-                let count = int64 found[d].Count
-
-                let product =
-                    (1L, at)
-                    ||> Array.fold (fun acc i ->
-                        match types.TryGetValue((d, i)) with
-                        | true, seen -> min (acc * int64 seen.Count) (count + 1L)
-                        | false, _ -> 0L)
-
-                product = count
-            | _ -> false
-
         live
         |> List.map (fun m ->
             if pastCount m then
@@ -1358,7 +1339,7 @@ module internal Instantiations =
             elif unfinished.Contains m.Declaration then
                 Outcome.TooLong
             else
-                judgedOver analysis m exact (everyFound m.Declaration) depth (List.ofSeq found[m.Declaration]))
+                judgedOver analysis m exact depth (List.ofSeq found[m.Declaration]))
 
     /// What becomes of each of `members` at the instantiations a document can hold a value of,
     /// reached from `roots` through the members the analysis's walk follows; `steps` counts the
@@ -1374,11 +1355,15 @@ module internal Instantiations =
     /// reads the arguments only at the positions that can become part of an argument a member reads
     /// ([[relevant]]), keeps for each such position the types found there, and enters what an
     /// instantiation enters only where it brings a type new at one of them. One whose every type
-    /// was found before enters nothing new: each argument it would place was placed already, at the
-    /// same position of the same reference, by the instantiation that first brought it. Each type
-    /// found is carried by that instantiation, a real one reached, and a member is judged at those
-    /// of its declaration, so every instantiation a refusal names is one the vocabulary reaches, and
-    /// the types they place at each parameter are every type the parameter takes.
+    /// was found before is not entered, though it can place a COMBINATION not placed before further
+    /// down: from `G<A, B> { y: Y<tuple<A, B>> }`, `G<str, str>`, after `G<str, int>` and
+    /// `G<int, str>`, places `tuple<str, str>` at `Y`, which no instantiation found does. So not
+    /// every instantiation reached is found, and a count of those found is a lower bound. No verdict
+    /// reads the combination: each node of it a check reads was placed at the same place by an
+    /// instantiation found (the first `str` by `G<str, int>`, the second by `G<int, str>`). Each type
+    /// found is carried by the instantiation that brought it, a real one reached, and a member is
+    /// judged at those of its declaration, so every instantiation a refusal names is one the
+    /// vocabulary reaches.
     ///
     /// Where the instantiations are finitely many ([[unbounded]]), every type a parameter takes is
     /// found. Where they are not, the walk is taken in CLASSES: each argument is read cut at a depth
@@ -1392,12 +1377,12 @@ module internal Instantiations =
     /// a depth, and each group is judged once, at its arguments cut there. An answer that reads
     /// nothing the cut left unbound is the answer at every instantiation of the group; one that does
     /// splits the group a level deeper (in classes, walks again). A member is refused once, naming
-    /// the first instantiation found that it does not fit and how many more it does not fit: every
-    /// other, where the instantiations found are every one reached (each position of the
-    /// declaration is read, and the types found there multiply to the instantiations found), else
-    /// how many more of those found, a lower bound, as in classes, where a class stands for many.
+    /// the first instantiation found that it does not fit and how many more of those found it does
+    /// not fit: each is a distinct instantiation reached, so that is a lower bound of those reached,
+    /// on every path (each instantiation found, in classes, past a count, past a budget), and it is
+    /// never claimed to be every one, since not every instantiation reached is found.
     ///
-    /// Two counts bound the walk that finds each instantiation, and past each a member is judged in
+    /// Two counts bound the walk that reads each argument whole, and past each a member is judged in
     /// classes instead: a parameter that takes more than [[parameterLimit]] types, for each member
     /// reading it or a position an argument at it is placed at (a position an argument is placed at
     /// takes at least as many types as the one it is placed from, [[downstream]], so no type is lost
@@ -1430,7 +1415,7 @@ module internal Instantiations =
         : Outcome list =
         let unbounded = unbounded analysis roots
 
-        // What became of each of `live`: walked once where every instantiation is found (`exact`),
+        // What became of each of `live`: walked once reading each argument whole (`exact`),
         // in classes from depth `k` otherwise, deepened for those the cut leaves undecided.
         let rec verdicts (live: (int * Judged) list) (exact: bool) (k: int) : (int * Outcome) list =
             if List.isEmpty live then
@@ -1465,7 +1450,7 @@ module internal Instantiations =
             |> List.indexed
             |> List.partition (fun (_, m) -> not (unbounded.Contains m.Declaration))
 
-        // A member the walk that finds each instantiation could not judge, past one of its counts,
+        // A member the walk that reads each argument whole could not judge, past one of its counts,
         // is judged in classes with those whose instantiations are infinitely many.
         let judged, again =
             verdicts finite true 1
