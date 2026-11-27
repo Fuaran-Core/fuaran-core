@@ -2110,6 +2110,31 @@ let perParameterTests =
                       (sprintf " and at %d more (authored value does not match IDL type " more)
                       (sprintf "n = %d: it counts the others, and gives the encoder's sentence" n)
 
+              // Eight such members: eight faults, the literal of each rendered once for its 16384
+              // instantiations, not once for each (which took seconds a member).
+              let eight =
+                  let idl = branching 15 (VStr "")
+
+                  { idl with
+                      Unions =
+                          idl.Unions
+                          |> List.map (fun u ->
+                              if u.Name = "U15" then
+                                  { u with
+                                      Cases =
+                                          [ case
+                                                "Mk"
+                                                [ for j in 1..8 ->
+                                                      f (sprintf "v%d" j) (TVar "T") (OmitDefault(VStr "")) ] ] }
+                              else
+                                  u) }
+
+              Expect.equal
+                  (within 10.0 "Declare.errors, eight members" (fun () -> Declare.errors eight)
+                   |> List.map (fun x -> x.Detail.Contains " and at 16383 more ("))
+                  (List.replicate 8 true)
+                  "one fault a member, each counting the rest"
+
               // A literal that fits some instantiations: one fault, counting only those it does not
               // fit. `U3` is reached at `list<X>` for X each of `list<str>`, `tuple<list<str>, int>`,
               // `list<tuple<str, int>>` and `tuple<list<tuple<str, int>>, int>`; a list of one pair of
