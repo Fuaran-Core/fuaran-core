@@ -45,16 +45,25 @@
   instantiates union '<U>' so that its transparent case's field '<v>' can encode to an object — a bare object is
   indistinguishable from a tagged case`. Inside a generic union holder this loaded at `0.45.0`, and the encoder wrote
   documents the decoder refused. A consumer applies the holder at an argument that is no object, or tags the case.
-  Where the instantiations are infinitely many each rule judges them in classes and names the first it refuses at.
-  Each judges an instantiation without printing it, so how large one is decides nothing; a refusal names the
-  instantiation to its first 256 nodes, `...` standing for the rest. The one count is of ONE declaration's own
-  instantiations (in classes, its own classes judged): past 16384, each member the rule asks of it is refused,
-  `more than 16384 instantiations of record '<D>' reach record '<D>', field '<f>'; its default cannot be checked at
-  each` (`the transparent case it holds cannot be checked at each` likewise), and no other declaration's
-  instantiations count against it. A declaration no document can hold a value of, and one held at no more than 16384
-  of its own instantiations, only where the literal fits and no case meets an object, load as before, whatever the
-  rest of the vocabulary reaches and however large its instantiations are. SIXTH, sentences a consumer may have
-  matched. A type variable where no parameter is declared is refused as `type variable '<T>' names a type parameter,
+  Each rule refuses a member once, naming the first instantiation it refuses at and how many more of those the check
+  found it refuses at (`… at the instantiation <R><int> and at 3 more (…)`; with none more the sentence is as above),
+  and where the instantiations are infinitely many it judges them in classes. Each judges an instantiation without
+  printing it, so how large one is decides nothing; a refusal names the instantiation to its first 256 nodes, `...`
+  standing for the rest. Rule (b) asks only a reference written where a value of the member holds it: in `Pair<T1<T>,
+  Q>`, where `Pair` holds nothing at its first parameter, `T1<T>` is asked nothing. Two counts bound the check. One is
+  of the types ONE type parameter takes (in classes, its classes at one depth): past 16384, each member reading that
+  parameter, or a parameter its arguments are placed at, is refused, `more than 16384 instantiations of record '<D>'
+  reach record '<D>', field '<f>'; its default cannot be checked at each` (`the transparent case it holds cannot be
+  checked at each` likewise), and no other parameter's types count against it. The other is of the instantiations the
+  whole check reads: past 1048576, each member not yet judged is refused, `the declaration check reads more than
+  1048576 instantiations before it reaches every instantiation of record '<D>' that reaches record '<D>', field '<f>';
+  its default cannot be checked at each`. A declaration no document can hold a value of, and one each of whose
+  members reads parameters taking no more than 16384 types, only where the literal fits, no case meets an object and
+  the check reads no more than 1048576 instantiations, load as before, whatever the rest of the vocabulary reaches and
+  however large its instantiations are. SIXTH, sentences a consumer may have
+  matched. The FIFTH's two rules report one fault per member, naming one instantiation and counting the rest (`and at
+  <n> more`), where they reported one per instantiation, and rule (b) reports none at a member that holds no value of the
+  union it writes; a consumer that counted those faults reads the count. A type variable where no parameter is declared is refused as `type variable '<T>' names a type parameter,
   and a kind declares none` (an op, the node envelope, a contract's method), where it said `is not a parameter of the
   union declaring it`; a type variable in a record's field that is not the record's parameter is refused as `is not
   a parameter of the record declaring it`, where it said `of the union declaring it`; the sampler's fault for a type
@@ -78,8 +87,8 @@
   vocabulary's generic declarations`, and emitted by the F# and TypeScript entries; a vocabulary whose instantiations
   print that large (a chain of declarations each naming the next at two arguments or at a tuple of its parameter, and
   one wrapping its argument in a list, whose n declarations hold n (n + 3) / 2 nodes, from 361) was emitted by
-  `0.45.0`'s schema and is refused now. Every analysis over instantiations interns their types, so it
-  answers at once however large an instantiation prints. EIGHTH, the JSON schema's definition names (`$defs` keys and the `$ref`s to them) are injective
+  `0.45.0`'s schema and is refused now. Every analysis over instantiations interns their types, so how
+  large an instantiation prints decides nothing of what it costs. EIGHTH, the JSON schema's definition names (`$defs` keys and the `$ref`s to them) are injective
   over the type on the wire, so four spellings move. A tuple inside an argument writes its arity (`Box_tuple_int_str`
   is `Box_tuple2_int_str`); a hosted slot that declares a wire form inside an argument writes it and its format
   (`Box_hosted` is `Box_hostedAs_str`, `Box_hostedDate_str`, `Box_hostedDateTime_str` or `Box_hostedUuid_str`; with
