@@ -823,6 +823,36 @@ let tests =
                             (Ok(Artifact.canonicalise idl))
                             "the artifact reads back")
 
+                    testCase
+                        (what
+                         + ": a parameter on a cycle that only copies it is judged at each instantiation")
+                        (fun _ ->
+                            // `Opt<T> { next: Opt<T>; v: T = "" }` held at `Opt<int>` and `Opt<bool>`: the
+                            // cycle holds no expanding edge, so the instantiations are finitely many and
+                            // each the literal does not fit is refused by name, in the order reached.
+                            let opt =
+                                declared
+                                    asUnion
+                                    "Opt"
+                                    [ "T" ]
+                                    [ f "next" (refer asUnion "Opt" [ TVar "T" ]) Optional
+                                      f "v" (TVar "T") (OmitDefault(VStr "")) ]
+
+                            let idl =
+                                vocabulary
+                                    [ kind
+                                          "K"
+                                          [ f "a" (refer asUnion "Opt" [ TInt ]) Optional
+                                            f "b" (refer asUnion "Opt" [ TBool ]) Optional ] ]
+                                    (fst opt)
+                                    (snd opt)
+
+                            Expect.equal
+                                (within 20.0 "Declare.errors" (fun () -> Declare.errors idl)
+                                 |> List.map (fun x -> x.Detail.Contains "Opt<int>", x.Detail.Contains "Opt<bool>"))
+                                [ true, false; false, true ]
+                                "each instantiation refused")
+
                     testCase (what + ": a thousand declarations, each holding a default, are checked at once") (fun _ ->
                         // `D1<T> { x: D2<T>; v: T = "" } … D1000<T> { v: T = "" }`, held at `D1<str>`:
                         // what the walks share is found once, and the declarations' instantiations are
@@ -851,6 +881,29 @@ let tests =
 
                         let idl = held false TStr
                         Expect.isEmpty (within 10.0 "Declare.errors" (fun () -> Declare.errors idl)) "admitted"
+
+                        // Four thousand, still under the count, are read in the one enumeration too: a
+                        // walk per declaration enters each declaration's predecessors again, eight
+                        // million steps here.
+                        let longer =
+                            let d =
+                                [ for i in 1..4000 ->
+                                      declared
+                                          asUnion
+                                          (sprintf "D%d" i)
+                                          [ "T" ]
+                                          [ if i < 4000 then
+                                                f "x" (refer asUnion (sprintf "D%d" (i + 1)) [ TVar "T" ]) Optional
+                                            f "v" (TVar "T") (OmitDefault(VStr "")) ] ]
+
+                            vocabulary
+                                [ kind "K" [ f "g" (refer asUnion "D1" [ TStr ]) Optional ] ]
+                                (List.collect fst d)
+                                (List.collect snd d)
+
+                        Expect.isEmpty
+                            (within 10.0 "Declare.errors" (fun () -> Declare.errors longer))
+                            "four thousand admitted"
 
                         Expect.equal
                             (within 10.0 "Artifact.parse" (fun () -> Artifact.parse (Artifact.render idl)))
