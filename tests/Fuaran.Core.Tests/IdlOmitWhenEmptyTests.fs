@@ -200,7 +200,7 @@ let tests =
               Expect.isFalse ((fsModule plain).Contains "dMember") "no F# member-reading helper"
 
               match Gen.typescriptModule plain kinds with
-              | Ok s -> Expect.isFalse (s.Contains "dNonEmpty") "no TypeScript view helper"
+              | Ok s -> Expect.isFalse (s.Contains "dEmpty") "no TypeScript reading helper"
               | Error e -> failtestf "refused: %s" (CodegenError.describe e)
 
           testCase "the generated TypeScript codec writes [] and undefined alike and reads [] as absent (under node)"
@@ -248,13 +248,6 @@ let tests =
                       File.Delete tmp
                   with _ ->
                       ()
-
-          testCase "the TypeScript codec still refuses every presence condition it does not apply"
-          <| fun _ ->
-              match Gen.typescriptModule CanonicalFormVectorExport.idl [ "Grid" ] with
-              | Error(CodegenError.UnsupportedConstruct(construct, _, _)) ->
-                  Expect.stringContains construct "presence condition" "named"
-              | other -> failtestf "the TypeScript codec admitted a sibling condition: %A" (Result.map ignore other)
 
           testCase "the JSON Schema states what the encoder writes: the member optional, an empty array readable"
           <| fun _ ->

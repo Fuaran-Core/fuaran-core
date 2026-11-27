@@ -421,6 +421,8 @@
          refuse one malformed document with one code and one path. -->
     <Compile Include="DecodeVectorsGenerated.fs" />
     <Compile Include="RefusalCornersGenerated.fs" />
+    <!-- Phase 723 - the F# emitted for `CanonicalFormHostsIdl`, every canonical-form shape. -->
+    <Compile Include="CanonicalFormGenerated.fs" />
     <Compile Include="IdlRefusalHostTests.fs" />
 
     <!-- Phase 364 — the wire layer's clock leg and the freeze of the benchmark corpus. The corpus and
@@ -488,6 +490,9 @@
          runner), LayoutGenerated, LayoutDerivedGenerated and the fixtures library's LayoutIdl. -->
     <Compile Include="IdlLayoutTypeScriptTests.fs" />
     <Compile Include="IdlRecordParamsTests.fs" />
+    <!-- Phase 723 - a vocabulary declaring no alias and no presence condition emits the TypeScript it
+         emitted before the phase. Depends on IdlRecordParamsTests (the fixture list). -->
+    <Compile Include="IdlCanonicalFormEmissionTests.fs" />
     <Compile Include="IdlInstantiationsTests.fs" />
     <Compile Include="IdlRecordInstantiationTests.fs" />
     <!-- Phase 732 - the F# emitted for `ParameterisedRecordsIdl.derived` with every derivation

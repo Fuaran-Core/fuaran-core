@@ -74,6 +74,14 @@ let regen () : int =
         RefusalCornersIdl.idl
         (RefusalCornersIdl.idl.Kinds |> List.map _.Tag)
 
+    // Phase 723 — the canonical-form vocabulary, so the mutation law reads it through a COMPILED host.
+    writeGen
+        CanonicalFormHostsIdl.generatedFile
+        CanonicalFormHostsIdl.moduleName
+        GenSupport.Empty
+        CanonicalFormHostsIdl.idl
+        (CanonicalFormHostsIdl.idl.Kinds |> List.map _.Tag)
+
     // Phase 374 — the derivations vocabulary, with every structural derivation requested.
     match DeriveIdl.generate () with
     | Ok src ->

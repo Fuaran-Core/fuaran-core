@@ -533,24 +533,27 @@ module internal TypeScriptCodec =
             fun src t d ->
                 tsIsDefault idl disc src t d
                 |> Result.map (fun pred present -> "(" + pred + " ? null : " + present + ")")
-          // Phase 539 — this codec applies one presence condition, [[WhenNonEmpty]] (Phase 660): an
-          // optional list written only when it holds an item, so `[]` and `undefined` write the same
-          // bytes. [[Gen.typescriptModule]] refuses a vocabulary declaring any other before a member is
-          // printed, and this refusal names it should one ever reach here.
+          // Phase 539 — a member whose presence condition fails is written as absent, whatever it holds,
+          // as the interpreter's encoder writes it. A presence test reads an optional sibling's
+          // `undefined`; an equality test compares the sibling's host value with the scalar's literal (an
+          // enum case is its wire string on this host, and an absent optional sibling is `undefined`,
+          // which equals no literal). Phase 660 — a non-empty test reads the guarded member itself, an
+          // optional list, so `[]` and `undefined` write the same bytes. Phase 723 — all four apply here.
           When =
-            fun _ srcOf self c ->
+            fun fields srcOf self c ->
+                let guarded (test: string) =
+                    Ok(fun piece -> "(" + test + " ? " + piece + " : null)")
+
                 match c with
+                | WhenPresent s -> guarded (srcOf s + " !== undefined")
+                | WhenAbsent s -> guarded (srcOf s + " === undefined")
                 | WhenNonEmpty ->
                     let src = srcOf self.Name
-                    Ok(fun piece -> "(" + src + " !== undefined && " + src + ".length > 0 ? " + piece + " : null)")
-                | _ ->
-                    Error(
-                        CodegenError.UnsupportedConstruct(
-                            "a presence condition",
-                            "GP5: a backend applies a canonical-form declaration or refuses it by name, never ignores it",
-                            "generate this vocabulary's codec with the F# backend, which applies it"
-                        )
-                    )
+                    guarded (src + " !== undefined && " + src + ".length > 0")
+                | WhenEquals(s, v) ->
+                    match fields |> List.tryFind (fun g -> g.Name = s) with
+                    | Some g -> guarded (srcOf s + " === " + tsLiteralValue idl g.Type v)
+                    | None -> Error(CodegenError.UnsupportedDefault(TStr, v))
           // Phase 722 — an inline declaration's member pieces, read off the holder ([[tsMemberAt]]).
           Inline =
             fun src f ->
@@ -910,17 +913,63 @@ module internal TypeScriptCodec =
     /// Phase 524 — the TypeScript printer of a member READ back out
     /// ([[MemberTraversal.decMember]]): a sentinel slot decodes to `null`, a host-only member to
     /// `undefined`, an omit-at-default one to [[tsDefaultLit]]'s literal.
+    /// Phase 723 (DECISIONS.md D190, D288) — the reading of a member declaring an alias or a presence
+    /// condition ([[Decl.memberReading]], the one reading the F# decoders print too), over the object
+    /// `fs`: the KEY the member is read under and the OBJECT it is read from. The key is the spelling the
+    /// object carries ([[tsCanonicalFormHelpers]]' `dSpelt`), so a refusal inside the member is located as
+    /// written, and an absent member's is its canonical spelling. The condition is tested over the raw
+    /// object; where it fails the member is read from an empty object, so it decodes as its absence,
+    /// unread. `None` for a member declaring neither, read under its one name from `fs`.
+    let tsMemberRead (idl: Idl) (fields: IdlField list) (f: IdlField) : (string * string) option =
+        let names (spellings: string list) =
+            "[" + (spellings |> List.map SourceLit.tsString |> String.concat ", ") + "]"
+
+        let scalar (j: JVal) =
+            match j with
+            | JStr s -> SourceLit.tsString s
+            | other -> Canonical.write Rendering.CrossHost other
+
+        Decl.memberReading idl fields f
+        |> Option.map (fun r ->
+            let spelt = "dSpelt(" + names r.Spellings + ", fs)"
+
+            let test =
+                match r.Presence with
+                | PresenceReading.Unconditional -> None
+                | PresenceReading.SiblingPresent s -> Some("dSpelling(" + names s + ", fs) !== undefined")
+                | PresenceReading.SiblingAbsent s -> Some("dSpelling(" + names s + ", fs) === undefined")
+                | PresenceReading.SiblingEquals(s, values, absent) ->
+                    Some(
+                        "dHolds("
+                        + names s
+                        + ", fs, ["
+                        + (values |> List.map scalar |> String.concat ", ")
+                        + "], "
+                        + (if absent then "true" else "false")
+                        + ")"
+                    )
+                | PresenceReading.SelfNonEmpty -> Some("!dEmpty(" + names r.Spellings + ", fs)")
+
+            match test with
+            | None -> spelt, "fs"
+            | Some t ->
+                // A member with no alias is read under its one spelling whether or not it holds.
+                (if List.isEmpty f.Aliases then
+                     SourceLit.tsString f.Name
+                 else
+                     "(" + t + " ? " + spelt + " : " + SourceLit.tsString f.Name + ")"),
+                "(" + t + " ? fs : {})")
+
     let tsMemberDecPrinter (idl: Idl) (disc: string) : MemberDecPrinter =
         { Slot = tsDecPrinter
-          // The member's one spelling: this codec still refuses a vocabulary declaring an alias.
-          Key = fun _ f -> SourceLit.tsString f.Name
-          // Phase 660 — a member declared [[WhenNonEmpty]] is read from a view of the object without it
-          // when it holds an explicit empty array ([[tsNonEmptyHelper]]), so `[]` decodes as absent.
-          Object =
-            fun _ f ->
-                match f.Presence with
-                | Some WhenNonEmpty -> "dNonEmpty(fs, " + SourceLit.tsString f.Name + ")"
-                | _ -> "fs"
+          // Phase 723 — a member declaring an alias or a presence condition is read as
+          // [[tsMemberRead]] reads it; any other under its one name, from the object.
+          Key =
+            fun fields f ->
+                tsMemberRead idl fields f
+                |> Option.map fst
+                |> Option.defaultValue (SourceLit.tsString f.Name)
+          Object = fun fields f -> tsMemberRead idl fields f |> Option.map snd |> Option.defaultValue "fs"
           Req = fun key o d -> "dReq(" + key + ", " + o + ", " + d + ")"
           Opt = fun key o d -> "dOpt(" + key + ", " + o + ", " + d + ")"
           Def = fun key o d lit -> "dDef(" + key + ", " + o + ", " + d + ", " + lit + ")"
@@ -981,16 +1030,26 @@ module internal TypeScriptCodec =
             |> List.collect (fun c ->
                 tsAnnotationLines "" (e.Name + "." + SourceLit.tsString (e.WireOf c)) (e.AnnotationsOf c))
 
+        // Phase 723 (DECISIONS.md D190.1) — each declared alias of a case decodes to the case's wire
+        // string (`dAliased`, [[tsCanonicalFormHelpers]]); an enum declaring none is read as before.
+        let aliases =
+            e.Cases
+            |> List.collect (fun c ->
+                e.AliasesOf c
+                |> List.map (fun a -> "[" + SourceLit.tsString a + ", " + SourceLit.tsString (e.WireOf c) + "]"))
+
+        let dec = "dEnum(" + SourceLit.tsString e.Name + ", [" + cases + "])"
+
         (match ann with
          | [] -> ""
          | ls -> (ls |> String.concat "\n") + "\n")
         + "const dec"
         + e.Name
-        + " = dEnum("
-        + SourceLit.tsString e.Name
-        + ", ["
-        + cases
-        + "]);"
+        + " = "
+        + (match aliases with
+           | [] -> dec
+           | pairs -> "dAliased(" + dec + ", [" + String.concat ", " pairs + "])")
+        + ";"
 
     let tsUnionDecoder (decl: Decl) (disc: string) (u: IdlUnion) =
         let idl = decl.Idl
@@ -1185,22 +1244,36 @@ module internal TypeScriptCodec =
 
         (Template.text "ts-decode-prelude.js").Replace("__DISC__", discLit)
 
-    /// Phase 660 (DECISIONS.md D256) — the one presence condition this codec applies, [[WhenNonEmpty]].
-    let applies (c: PresenceCondition) : bool = (c = WhenNonEmpty)
-
-    /// Whether the vocabulary declares a [[WhenNonEmpty]] member anywhere, so [[tsNonEmptyHelper]] is
-    /// emitted only then and every other module is byte-for-byte what it was.
-    let declaresNonEmpty (idl: Idl) : bool =
-        Decl.fieldOwners idl
-        |> List.exists (fun (_, fields) -> fields |> List.exists (fun f -> f.Presence = Some WhenNonEmpty))
-
-    /// Phase 660 — the decoder's view of an object for a member declared [[WhenNonEmpty]]: an explicit
-    /// EMPTY array is the member absent (an empty object stands for the view, read for that member
-    /// alone), and anything else, a member of the wrong kind included, reaches its decoder.
-    let tsNonEmptyHelper =
-        "// Phase 660 — an optional list declared non-empty: an explicit empty array reads as absent.
-"
-        + "const dNonEmpty = (fs, name) => hasOwn(fs, name) && Array.isArray(fs[name]) && fs[name].length === 0 ? {} : fs;"
+    /// Phase 723 (DECISIONS.md D190, D256, D288) — the decode helpers [[tsMemberRead]] and
+    /// [[tsEnumDecoder]] call, emitted only into a module whose vocabulary declares an alias or a presence
+    /// condition ([[Decl.canonicalFormDeclarations]]), so every other module is byte-for-byte what it was.
+    /// They are the JS face of `WireForm.memberAt` and `WireForm.holdsOnWire`: the canonical spelling
+    /// first, then each alias; a sibling compared by its wire value, where a whole number the reader met
+    /// as a float token is not an int (`dFloatAt`), as the F# reader reads it; and an explicit EMPTY array
+    /// alone is a non-empty member's absence, so one of the wrong kind still reaches its decoder.
+    let tsCanonicalFormHelpers =
+        """// Phase 723 — a member's canonical reading. `dSpelling` is the spelling an object carries a member
+// under, the canonical one first, then each alias; `dSpelt` is the key it is read under, that spelling,
+// or the canonical one where none is present, at which an absent member is missing. A presence condition
+// is tested over the raw object, a sibling under its own spellings: `dHolds` compares it with the wire
+// values the condition names, and `dEmpty` finds an explicit empty array. `dAliased` reads an enum
+// case's aliases as the case's wire string.
+const dSpelling = (names, fs) => names.find((n) => hasOwn(fs, n));
+const dSpelt = (names, fs) => dSpelling(names, fs) ?? names[0];
+const dHolds = (names, fs, values, absent) => {
+  const k = dSpelling(names, fs);
+  if (k === undefined) return absent;
+  const at = dFloatAt.get(fs);
+  return values.includes(fs[k]) && !(typeof fs[k] === 'number' && at !== undefined && at.has(k));
+};
+const dEmpty = (names, fs) => {
+  const k = dSpelling(names, fs);
+  return k !== undefined && Array.isArray(fs[k]) && fs[k].length === 0;
+};
+const dAliased = (dec, aliases) => (j) => {
+  const a = aliases.find(([w]) => w === j);
+  return a === undefined ? dec(j) : a[1];
+};"""
 
     /// Phase 337 — the parse leg of the TypeScript `decodeNode`, held to the F# reader's
     /// answers (`Decoder.parse`): text the reader cannot parse is `InvalidJson` at the root, and
@@ -1558,7 +1631,10 @@ const plain = (pairs) =>
           [ kindDispatch ]
           Ok(tsDecodePrelude disc)
           :: (if decl.HostedFormat then [ Ok tsFormatHelper ] else [])
-          @ (if declaresNonEmpty idl then [ Ok tsNonEmptyHelper ] else [])
+          @ (if List.isEmpty (Decl.canonicalFormDeclarations idl) then
+                 []
+             else
+                 [ Ok tsCanonicalFormHelpers ])
           @ (if Decl.reachesWider idl then
                  [ Ok(Template.text "ts-wider-helpers.js") ]
              else

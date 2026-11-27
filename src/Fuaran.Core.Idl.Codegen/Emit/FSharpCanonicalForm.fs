@@ -1,6 +1,5 @@
 namespace Fuaran.Core.Idl.Emit
 
-open System.Runtime.CompilerServices
 open Fuaran.Core
 open Fuaran.Core.Idl
 open Fuaran.Core.Idl.Emit.Core
@@ -11,8 +10,8 @@ open Fuaran.Core.Idl.Emit.FSharpDefaults
 /// reading of a member under its aliases and its presence condition (`dSpelt` and `dMember` over the
 /// raw object, as [[WireForm.readMember]] reads it in the interpreter). Read by [[FSharpCodec]].
 ///
-/// The functions that read [[WireForm]] — internal to `Fuaran.Core.Idl` — are `NoInlining` (D129):
-/// a body that can be inlined into another assembly must not reach another assembly's internals.
+/// What reads [[WireForm]] — internal to `Fuaran.Core.Idl` — is [[Decl.memberReading]]'s, behind
+/// `NoInlining` (D129).
 module internal FSharpCanonicalForm =
 
     /// Phase 539 — the host-side test of a presence condition: `srcOf` names the expression each
@@ -43,62 +42,41 @@ module internal FSharpCanonicalForm =
                     | _ -> sprintf "(%s) = %s" (srcOf s) l)
             | None -> Error(CodegenError.UnsupportedDefault(TStr, v))
 
-    /// A member's spellings ([[WireForm.spellings]]), read where no closure can carry the internal
-    /// reference into another assembly (D129).
-    [<MethodImpl(MethodImplOptions.NoInlining)>]
-    let private spellingsOf (f: IdlField) : string list = WireForm.spellings f
-
     /// Phase 539 — the generated reading of a member a vocabulary declares aliases or a presence
-    /// condition for, over the object under its spellings and with the condition's test over the RAW
-    /// members, as [[WireForm.readMember]] reads it: the KEY the member is read under and the VIEW of
-    /// the object it is read from (see [[canonicalFormHelpers]]). Phase 723 (DECISIONS.md D288) — the
-    /// key is the spelling the object carries (`dSpelt`), so a refusal inside the member is located as
-    /// written, and an absent member's is its canonical spelling. `None` for a member that declares
-    /// neither, which reads the object as it always has.
-    [<MethodImpl(MethodImplOptions.NoInlining)>]
+    /// condition for ([[Decl.memberReading]], the one reading every decoder prints), over the object under
+    /// its spellings and with the condition's test over the RAW members, as [[WireForm.readMember]] reads
+    /// it: the KEY the member is read under and the VIEW of the object it is read from (see
+    /// [[canonicalFormHelpers]]). Phase 723 (DECISIONS.md D288) — the key is the spelling the object
+    /// carries (`dSpelt`), so a refusal inside the member is located as written, and an absent member's is
+    /// its canonical spelling. `None` for a member that declares neither, which reads the object as it
+    /// always has.
     let memberRead (idl: Idl) (fields: IdlField list) (f: IdlField) : (string * string) option =
-        let names (g: IdlField) =
-            "[ "
-            + (spellingsOf g |> List.map SourceLit.fsString |> String.concat "; ")
-            + " ]"
+        let names (spellings: string list) =
+            "[ " + (spellings |> List.map SourceLit.fsString |> String.concat "; ") + " ]"
 
-        let sibling (name: string) =
-            fields |> List.tryFind (fun g -> g.Name = name)
+        let pick (spellings: string list) =
+            sprintf "dPick %s __o" (names spellings)
 
-        let pick (name: string) =
-            match sibling name with
-            | Some g -> sprintf "dPick %s __o" (names g)
-            | None -> sprintf "dPick [ %s ] __o" (SourceLit.fsString name)
+        Decl.memberReading idl fields f
+        |> Option.map (fun r ->
+            let holds =
+                match r.Presence with
+                | PresenceReading.Unconditional -> "(fun _ -> true)"
+                | PresenceReading.SiblingPresent s -> sprintf "(fun __o -> Option.isSome (%s))" (pick s)
+                | PresenceReading.SiblingAbsent s -> sprintf "(fun __o -> Option.isNone (%s))" (pick s)
+                | PresenceReading.SiblingEquals(s, values, absent) ->
+                    sprintf
+                        "(fun __o -> match %s with | Some __v -> List.contains __v [ %s ] | None -> %s)"
+                        (pick s)
+                        (values |> List.map FSharpDefaults.fsJValLit |> String.concat "; ")
+                        (if absent then "true" else "false")
+                // Phase 660 — the member itself: an explicit EMPTY array is its absence, and anything
+                // else (a member of the wrong kind included) reaches its decoder.
+                | PresenceReading.SelfNonEmpty ->
+                    sprintf "(fun __o -> match %s with | Some(JArr []) -> false | _ -> true)" (pick r.Spellings)
 
-        let holds =
-            match f.Presence with
-            | None -> "(fun _ -> true)"
-            | Some(WhenPresent s) -> sprintf "(fun __o -> Option.isSome (%s))" (pick s)
-            | Some(WhenAbsent s) -> sprintf "(fun __o -> Option.isNone (%s))" (pick s)
-            | Some(WhenEquals(s, v)) ->
-                let spellings, absent =
-                    match sibling s with
-                    | Some g ->
-                        WireForm.scalarSpellings idl g.Type v,
-                        (match g.Opt with
-                         | OmitDefault d -> d = v
-                         | _ -> false)
-                    | None -> [], false
-
-                sprintf
-                    "(fun __o -> match %s with | Some __v -> List.contains __v [ %s ] | None -> %s)"
-                    (pick s)
-                    (spellings |> List.map FSharpDefaults.fsJValLit |> String.concat "; ")
-                    (if absent then "true" else "false")
-            // Phase 660 — the member itself: an explicit EMPTY array is its absence, and anything else
-            // (a member of the wrong kind included) reaches its decoder.
-            | Some WhenNonEmpty ->
-                sprintf "(fun __o -> match %s with | Some(JArr []) -> false | _ -> true)" (pick f.Name)
-
-        if List.isEmpty f.Aliases && f.Presence.IsNone then
-            None
-        else
-            Some(sprintf "(dSpelt %s %s __fs)" (names f) holds, sprintf "(dMember %s %s __fs)" (names f) holds)
+            sprintf "(dSpelt %s %s __fs)" (names r.Spellings) holds,
+            sprintf "(dMember %s %s __fs)" (names r.Spellings) holds)
 
     /// Whether any member of a field list reads through [[memberRead]].
     let declaresCanonicalForm (fields: IdlField list) : bool =

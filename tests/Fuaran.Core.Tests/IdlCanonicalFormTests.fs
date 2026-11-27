@@ -7,7 +7,9 @@ module Fuaran.Core.Tests.IdlCanonicalFormTests
 //  `CanonicalFormVectorExport.idl`: the interpreter's reading (which the law file
 //  exports), the generated F# codec's (compiled and run, which must equal it), the
 //  sampler's, the validator's refusals, the artifact's round trip, the stability
-//  classifier's verdicts, and the backends that refuse a declaration by name.
+//  classifier's verdicts, the generated TypeScript codec's (run under node, which
+//  must equal it too, Phase 723), and the F* model, which refuses a declaration
+//  by name.
 // ============================================================================
 
 open Expecto
@@ -73,6 +75,56 @@ let private strictAsWritten: (string * PathSegment list) list =
     [ """{"$type":"Place","position":{"left":1,"y":2,"z":3}}""", [ k "position"; k "z" ]
       """{"$type":"Place","mark":{"$type":"Pin","text":"a","where":{"x":1,"y":2,"q":0}}}""",
       [ k "mark"; k "where"; k "q" ] ]
+
+/// Run a script under node: its non-empty stdout lines, or `None` when node is not on PATH.
+let private nodeLines (script: string) : string list option =
+    let tmp =
+        System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            sprintf "fuaran-723-ts-%s.mjs" (System.Guid.NewGuid().ToString "N")
+        )
+
+    System.IO.File.WriteAllText(tmp, script)
+
+    try
+        match ChildProcess.run (ChildProcess.command "node" ("\"" + tmp + "\"")) with
+        | Error _ -> None
+        | Ok p ->
+            Expect.equal p.Exit 0 (sprintf "node ran the generated module: %s" p.Stderr)
+
+            p.Stdout.Replace("\r\n", "\n").Split('\n')
+            |> Array.filter (fun l -> l <> "")
+            |> List.ofArray
+            |> Some
+    finally
+        try
+            System.IO.File.Delete tmp
+        with _ ->
+            ()
+
+/// Phase 723 — a refusal as the TypeScript host prints it below: `[code, path]`, the path as
+/// `DecodePath.toJson` writes it.
+let private refusalLine (code: string) (path: PathSegment list) : string =
+    Canonical.write Rendering.CrossHost (JArr [ JStr code; DecodePath.toJson path ])
+
+/// Phase 723 — authored values whose canonical form omits a member its condition makes meaningless, or
+/// writes a member read under an alias at its canonical spelling.
+let private authored: IdlValue list =
+    [ node "Grid" [ "cols", VInt 3; "template", VStr "t" ]
+      node "Grid" [ "cols", VInt 3 ]
+      node
+          "Select"
+          [ "multiple", VBool true
+            "value", VStr "x"
+            "values", VList [ VStr "y" ]
+            "options", VList [ VStr "o" ] ]
+      node "Select" [ "value", VStr "x"; "values", VList [ VStr "y" ] ]
+      node "Notify" [ "args", VMap []; "payload", VJson(JObj []); "tone", VEnum "Default" ]
+      node "Notify" [ "heading", VStr "h"; "tone", VEnum "Critical" ]
+      node
+          "Place"
+          [ "at", VRecord [ "x", VInt 1; "y", VInt 2 ]
+            "mark", VUnion("Pin", [ "label", VStr "a" ]) ] ]
 
 [<Tests>]
 let tests =
@@ -422,13 +474,188 @@ let tests =
               | Ok s -> Expect.isFalse (s.Contains "dMember") "no member-reading helper"
               | Error e -> failtestf "refused: %s" (CodegenError.describe e)
 
-          testCase "the TypeScript codec and the F* model refuse the declarations by name"
-          <| fun _ ->
-              match Gen.typescriptModule idl kinds with
-              | Error(CodegenError.UnsupportedConstruct(construct, _, _)) ->
-                  Expect.stringContains construct "field '" "the refusal names the declaration"
-              | other -> failtestf "the TypeScript codec did not refuse: %A" (Result.map ignore other)
+              // Phase 723 — nor in the TypeScript module (every byte of it is pinned in
+              // `IdlCanonicalFormEmissionTests`, over the fixture library).
+              match Gen.typescriptModule plain kinds with
+              | Ok s -> Expect.isFalse (s.Contains "dSpelling") "no TypeScript member-reading helper"
+              | Error e -> failtestf "refused: %s" (CodegenError.describe e)
 
+          // Phase 723 (DECISIONS.md D190, D288) — the TypeScript host applies every declaration, defect for
+          // defect with the interpreter (and so with the F# host above): each vector decodes to the
+          // reference's bytes, each refusal vector is refused with the reference's code at the path as
+          // written, by the short-circuiting and the collecting decoder alike, and the encoder omits a
+          // member whose condition fails and writes an aliased one at its canonical spelling.
+          testCase
+              "the generated TypeScript codec reads every vector as the reference does, and omits as the encoder does (under node)"
+          <| fun _ ->
+              let moduleText =
+                  match Gen.typescriptModuleDerived [ Derivation.SpecDecoders ] idl kinds with
+                  | Ok s -> s
+                  | Error e -> failtestf "the TypeScript backend refused the fixture: %s" (CodegenError.describe e)
+
+              let js (s: string) =
+                  System.Text.Json.JsonSerializer.Serialize s
+
+              let value (v: IdlValue) =
+                  match Gen.typescriptValue idl TNode v with
+                  | Ok src -> src
+                  | Error e -> failtestf "the TypeScript value emitter refused %A: %s" v (CodegenError.describe e)
+
+              let documents =
+                  (CanonicalFormVectorExport.inputs @ CanonicalFormVectorExport.refusalInputs)
+                  |> List.map (fun (_, _, body) -> js (CanonicalFormVectorExport.document body))
+
+              let harness =
+                  moduleText
+                  + "\n\nconst __refusal = (e) => JSON.stringify([e.code, e.path]);\n"
+                  + "for (const s of ["
+                  + String.concat ", " documents
+                  + "]) {\n"
+                  + "  const r = decodeNode(s);\n"
+                  + "  console.log(r.ok ? encodeNode(r.value) : __refusal(r.error));\n"
+                  + "  const all = decodeNodeAll(s);\n"
+                  + "  console.log(all.ok ? encodeNode(all.value) : all.errors.map(__refusal).join('; '));\n"
+                  + "}\n"
+                  + "for (const v of ["
+                  + String.concat ", " (authored |> List.map value)
+                  + "]) console.log(encodeNode(v));\n"
+
+              let expected =
+                  (CanonicalFormVectorExport.inputs
+                   |> List.collect (fun (id, _, body) ->
+                       match CanonicalFormVectorExport.canonical (CanonicalFormVectorExport.document body) with
+                       | Ok b -> [ b; b ]
+                       | Error e -> failtestf "%s: %s" id e))
+                  @ (CanonicalFormVectorExport.refusalInputs
+                     |> List.collect (fun (id, _, body) ->
+                         match CanonicalFormVectorExport.refusal (CanonicalFormVectorExport.document body) with
+                         | Some(code, path) -> [ refusalLine code path; refusalLine code path ]
+                         | None -> failtestf "%s decoded" id))
+                  @ (authored |> List.map (Encode.encode idl >> Result.defaultWith failtest))
+
+              match nodeLines harness with
+              | None -> skiptest "node not on PATH - the executed TypeScript leg is skipped"
+              | Some lines ->
+                  Expect.equal lines expected "the TypeScript host agrees with the interpreter, line for line"
+
+          testCase
+              "with a TypeScript compiler, the canonical-form vocabularies' derived modules and declarations compile"
+          <| fun _ ->
+              match IdlDeriveTests.tscJs () with
+              | None -> skiptest "FUARAN_CORE_TSC names no TypeScript compiler - the type-check leg cannot run"
+              | Some tsc ->
+                  IdlDeriveTests.derivedDeclarationsCompile tsc "canonical-form laws" idl
+                  IdlDeriveTests.derivedDeclarationsCompile tsc "canonical-form hosts" CanonicalFormHostsIdl.idl
+
+          // Phase 723 — the four presence conditions and the aliases they read, one document per rule,
+          // through the interpreter, the compiled F# host and the TypeScript host: each answers the
+          // interpreter's bytes or its refusal at the path as written. And the TypeScript encoder omits a
+          // member exactly where the interpreter's does, under each condition.
+          testCase "every presence condition reads and writes alike on the three hosts, over aliased siblings"
+          <| fun _ ->
+              let hosts = CanonicalFormHostsIdl.idl
+
+              let gate (body: string) =
+                  """{"id":"n","kind":{"$type":"Gate",""" + body + "}}"
+
+              let documents =
+                  [ // `unit` only while `count` is the int 1: a float token is not, so `unit` is dropped
+                    // unread and the refusal is at `count`.
+                    gate "\"measure\":5,\"count\":1.0"
+                    gate "\"measure\":5,\"count\":1"
+                    gate "\"measure\":\"m\",\"count\":1"
+                    // `note` while `open` (spelt `isOpen`) is present, `fallback` while it is absent.
+                    gate "\"isOpen\":true,\"note\":\"n\",\"backup\":7"
+                    gate "\"note\":7,\"backup\":\"b\""
+                    gate "\"backup\":7"
+                    gate "\"open\":true,\"isOpen\":5"
+                    gate "\"isOpen\":\"yes\""
+                    // `tags` (spelt `labels`) only when it holds an item; one of the wrong kind is read.
+                    gate "\"labels\":[]"
+                    gate "\"labels\":[1]"
+                    gate "\"labels\":\"x\""
+                    // `alert` while `level` (spelt `severity`) is `Critical`, which `Danger` spells too.
+                    gate "\"severity\":\"Danger\",\"alert\":\"a\""
+                    gate "\"severity\":\"Danger\",\"alert\":3"
+                    gate "\"severity\":\"Positive\",\"alert\":3"
+                    gate "\"alert\":3"
+                    gate "\"severity\":\"Grave\"" ]
+
+              let answer (r: Result<string, DecodeError>) =
+                  match r with
+                  | Ok bytes -> bytes
+                  | Error e -> refusalLine (DecodeError.codeName e.Code) e.Path
+
+              let interpreter =
+                  documents
+                  |> List.map (fun d ->
+                      answer (
+                          Decode.decodeDetailed hosts d
+                          |> Result.map (Encode.encode hosts >> Result.defaultWith failtest)
+                      ))
+
+              let compiled =
+                  documents
+                  |> List.map (fun d ->
+                      answer (
+                          CanonicalFormGenerated.decodeNode d
+                          |> Result.map CanonicalFormGenerated.encodeNode
+                      ))
+
+              Expect.equal compiled interpreter "the compiled F# host answers as the interpreter does"
+
+              // Non-vacuity: some documents are refused under an alias, some read.
+              Expect.isTrue (interpreter |> List.exists (fun l -> l.Contains "\"measure\"]")) "a refusal at an alias"
+              Expect.isTrue (interpreter |> List.exists (fun l -> l.StartsWith "{")) "a document read"
+
+              let gateValue (members: (string * IdlValue) list) = node "Gate" members
+
+              let values =
+                  [ gateValue [ "unit", VStr "u"; "count", VInt 2 ]
+                    gateValue [ "unit", VStr "u"; "count", VInt 1 ]
+                    gateValue [ "note", VStr "n"; "fallback", VStr "f" ]
+                    gateValue [ "open", VBool false; "note", VStr "n"; "fallback", VStr "f" ]
+                    gateValue [ "tags", VList [] ]
+                    gateValue [ "tags", VList [ VStr "t" ] ]
+                    gateValue [ "level", VEnum "Critical"; "alert", VStr "a" ]
+                    gateValue [ "level", VEnum "Success"; "alert", VStr "a" ]
+                    gateValue [ "alert", VStr "a" ] ]
+
+              let ts =
+                  match Gen.typescriptModule hosts (hosts.Kinds |> List.map _.Tag) with
+                  | Ok s -> s
+                  | Error e -> failtestf "the TypeScript backend refused: %s" (CodegenError.describe e)
+
+              let literal (v: IdlValue) =
+                  match Gen.typescriptValue hosts TNode v with
+                  | Ok src -> src
+                  | Error e -> failtestf "the TypeScript value emitter refused %A: %s" v (CodegenError.describe e)
+
+              let js (s: string) =
+                  System.Text.Json.JsonSerializer.Serialize s
+
+              let harness =
+                  ts
+                  + "\n\nfor (const s of ["
+                  + String.concat ", " (List.map js documents)
+                  + "]) { const r = decodeNode(s); console.log(r.ok ? encodeNode(r.value) : JSON.stringify([r.error.code, r.error.path])); }\n"
+                  + "for (const v of ["
+                  + String.concat ", " (List.map literal values)
+                  + "]) console.log(encodeNode(v));\n"
+
+              let written =
+                  values |> List.map (Encode.encode hosts >> Result.defaultWith failtest)
+
+              match nodeLines harness with
+              | None -> skiptest "node not on PATH - the executed TypeScript leg is skipped"
+              | Some lines ->
+                  Expect.equal
+                      lines
+                      (interpreter @ written)
+                      "the TypeScript host answers and writes as the interpreter does"
+
+          testCase "the F* model refuses the declarations by name"
+          <| fun _ ->
               match FStarTarget.vocabularyModule "M" idl kinds with
               | Error e -> Expect.stringContains (CodegenError.describe e) "canonical-form" "named as one"
               | Ok _ -> failtest "the F* model admitted a canonical-form declaration"

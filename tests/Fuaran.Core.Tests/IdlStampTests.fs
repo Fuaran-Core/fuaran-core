@@ -103,7 +103,7 @@ let private ok what (r: Result<string, CodegenError>) =
     | Ok s -> s
     | Error e -> failtestf "%s refused: %s" what (CodegenError.describe e)
 
-/// The twenty-one committed artefacts the stamp heads: nine F# fixtures, the five seam codec modules
+/// The twenty-two committed artefacts the stamp heads: ten F# fixtures, the five seam codec modules
 /// (Phase 551), seven F* modules.
 let private committed =
     [ "tests/Fuaran.Core.Tests/MiniGenerated.fs"
@@ -115,6 +115,7 @@ let private committed =
       "tests/Fuaran.Core.Tests/DecodeVectorsGenerated.fs"
       "tests/Fuaran.Core.Tests/SpecDecodersGenerated.fs"
       "tests/Fuaran.Core.Tests/RefusalCornersGenerated.fs"
+      "tests/Fuaran.Core.Tests/CanonicalFormGenerated.fs"
       "src/Fuaran.Core.Function/CapabilitySeamCodec.fs"
       "src/Fuaran.Core.Function/PipelineSeamCodec.fs"
       "src/Fuaran.Core.Query/QuerySeamCodec.fs"

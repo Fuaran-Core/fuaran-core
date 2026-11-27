@@ -224,6 +224,30 @@ type internal Decl =
         Wire: WireReach
     }
 
+/// Phase 723 (DECISIONS.md D190.1, D190.2, D288) — the test a decoder applies, over the RAW object, before
+/// it reads a member declaring a presence condition: each sibling read under its spellings, as
+/// `WireForm.holdsOnWire` reads it. Stated once here, so the F# and the TypeScript decoders print one
+/// reading rather than each restating the rule.
+[<RequireQualifiedAccess>]
+type internal PresenceReading =
+    /// The member declares no condition: it is read whenever it is present.
+    | Unconditional
+    /// The sibling read under these spellings is present.
+    | SiblingPresent of spellings: string list
+    /// The sibling read under these spellings is absent.
+    | SiblingAbsent of spellings: string list
+    /// The sibling read under these spellings holds one of these wire values; `absentHolds` says whether
+    /// its absence holds (an `OmitDefault` sibling whose default is the value compared).
+    | SiblingEquals of spellings: string list * values: JVal list * absentHolds: bool
+    /// The member itself, read under its own spellings, is anything but an explicit empty array.
+    | SelfNonEmpty
+
+/// Phase 723 — a member declaring an alias or a presence condition as a decoder reads it: the spellings it
+/// is read under, the canonical one first, and the test it is read under.
+type internal MemberReading =
+    { Spellings: string list
+      Presence: PresenceReading }
+
 [<RequireQualifiedAccess>]
 module internal Decl =
 
@@ -798,27 +822,66 @@ module internal Decl =
         fieldOwners idl
         |> List.exists (fun (_, fields) -> fields |> List.exists (fun f -> widerType f.Type))
 
-    /// Each alias or presence condition the vocabulary declares that a backend applying the conditions
-    /// `applied` does not apply, as a phrase naming it — `[]` for a vocabulary that declares none
-    /// (Phase 660: the TypeScript codec applies [[WhenNonEmpty]] and refuses the rest).
-    let canonicalFormDeclarationsBeyond (applied: PresenceCondition -> bool) (idl: Idl) : string list =
+    /// Each alias or presence condition the vocabulary declares, as a phrase naming it — `[]` for a
+    /// vocabulary that declares none. The F\* model refuses each by name (D190.4).
+    let canonicalFormDeclarations (idl: Idl) : string list =
         [ for owner, fields in fieldOwners idl do
               for f in fields do
                   if not (List.isEmpty f.Aliases) then
                       yield sprintf "the aliases of field '%s' of %s" f.Name owner
 
-                  match f.Presence with
-                  | Some c when not (applied c) ->
+                  if f.Presence.IsSome then
                       yield sprintf "the presence condition of field '%s' of %s" f.Name owner
-                  | _ -> ()
           for e in idl.Enums do
               if e.Aliases |> List.exists (fun (_, a) -> not (List.isEmpty a)) then
                   yield sprintf "the case aliases of enum '%s'" e.Name ]
 
-    /// Each alias or presence condition the vocabulary declares, as a phrase naming it — `[]` for a
-    /// vocabulary that declares none.
-    let canonicalFormDeclarations (idl: Idl) : string list =
-        canonicalFormDeclarationsBeyond (fun _ -> false) idl
+    /// A member's spellings ([[WireForm.spellings]]); `NoInlining`, since it reads an internal of
+    /// another assembly (D129).
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+    let private spellingsOf (f: IdlField) : string list = WireForm.spellings f
+
+    /// The wire values a sibling holding `v` at `t` is read as ([[WireForm.scalarSpellings]]).
+    [<System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)>]
+    let private scalarSpellingsOf (idl: Idl) (t: IdlType) (v: IdlValue) : JVal list = WireForm.scalarSpellings idl t v
+
+    /// Phase 723 (DECISIONS.md D288) — how a decoder reads the member `f` of `fields`: under its spellings
+    /// and its presence condition, the test evaluated over the raw object with each sibling read under its
+    /// own spellings, as `WireForm.readMember` reads it in the interpreter. `None` for a member declaring
+    /// neither, which every backend reads under its one name. The F# and TypeScript decoders print this.
+    let memberReading (idl: Idl) (fields: IdlField list) (f: IdlField) : MemberReading option =
+        let sibling (name: string) =
+            fields |> List.tryFind (fun g -> g.Name = name)
+
+        let spellingsNamed (name: string) =
+            match sibling name with
+            | Some g -> spellingsOf g
+            | None -> [ name ]
+
+        let presence =
+            match f.Presence with
+            | None -> PresenceReading.Unconditional
+            | Some(WhenPresent s) -> PresenceReading.SiblingPresent(spellingsNamed s)
+            | Some(WhenAbsent s) -> PresenceReading.SiblingAbsent(spellingsNamed s)
+            | Some(WhenEquals(s, v)) ->
+                let values, absent =
+                    match sibling s with
+                    | Some g ->
+                        scalarSpellingsOf idl g.Type v,
+                        (match g.Opt with
+                         | OmitDefault d -> d = v
+                         | _ -> false)
+                    | None -> [], false
+
+                PresenceReading.SiblingEquals(spellingsNamed s, values, absent)
+            | Some WhenNonEmpty -> PresenceReading.SelfNonEmpty
+
+        if List.isEmpty f.Aliases && f.Presence.IsNone then
+            None
+        else
+            Some
+                { Spellings = spellingsOf f
+                  Presence = presence }
 
     // -----------------------------------------------------------------------
     // Phase 525 — the ONE admissibility of a declared default (see [[Literal]]).

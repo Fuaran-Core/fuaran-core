@@ -132,23 +132,6 @@ module Gen =
     let internal typescriptValueWith (shape: WireShape) (v: IdlValue) : string =
         TypeScriptCodec.typescriptValueWith shape v
 
-    /// Phase 539 (DECISIONS.md D190) — the TypeScript codec reads each member under its one name and
-    /// applies one presence condition, [[WhenNonEmpty]] (Phase 660, D256), so it REFUSES a vocabulary
-    /// that declares an alias or any other presence condition, naming the first, rather than emitting a
-    /// codec that would read the canonical form differently from the F# host. The declarations leg is
-    /// unaffected: neither shape moves a type.
-    let private tsCodecAdmits (idl: Idl) : Result<unit, CodegenError> =
-        match Decl.canonicalFormDeclarationsBeyond TypeScriptCodec.applies idl with
-        | [] -> Ok()
-        | what :: _ ->
-            Error(
-                CodegenError.UnsupportedConstruct(
-                    what,
-                    "GP5: a backend applies a canonical-form declaration or refuses it by name, never ignores it",
-                    "generate this vocabulary's codec with the F# backend, which applies it"
-                )
-            )
-
     /// Phase 689 (DECISIONS.md D278) — the per-kind table lookup is emitted by the F# backend only, so the
     /// TypeScript backend refuses a `Derivation.KindTable` request by name rather than export nothing for it.
     let private tsDerives (derivations: Derivation list) : Result<unit, CodegenError> =
@@ -169,10 +152,12 @@ module Gen =
         | None -> Ok()
         | Some e -> Error e
 
-    /// The TypeScript structural encoder/decoder module for the named kinds.
+    /// The TypeScript structural encoder/decoder module for the named kinds. Phase 723 (DECISIONS.md
+    /// D190, D288) — it applies a member's aliases, an enum case's aliases and every presence condition,
+    /// as the interpreter and the F# codec do; the declarations leg is unaffected, since neither shape
+    /// moves a type.
     let typescriptModule (idl: Idl) (kindTags: string list) : Result<string, CodegenError> =
-        tsCodecAdmits idl
-        |> Result.bind (fun () -> Decl.laidOut (Decl.resolve idl Map.empty kindTags))
+        Decl.laidOut (Decl.resolve idl Map.empty kindTags)
         |> Result.bind Decl.referencesApplied
         |> Result.bind TypeScriptCodec.typescriptModule
 
@@ -189,7 +174,6 @@ module Gen =
         (kindTags: string list)
         : Result<string, CodegenError> =
         tsDerives derivations
-        |> Result.bind (fun () -> tsCodecAdmits idl)
         |> Result.bind (fun () -> Decl.laidOut (Decl.resolve idl Map.empty kindTags))
         |> Result.bind Decl.referencesApplied
         |> Result.bind (TypeScriptDerived.typescriptModuleDerived derivations)

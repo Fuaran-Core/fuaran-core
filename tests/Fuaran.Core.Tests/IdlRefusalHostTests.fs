@@ -267,6 +267,11 @@ let private certified: Certified list =
       { Name = "corners"
         Idl = RefusalCornersIdl.idl
         Compiled = fun s -> ofResult (RefusalCornersGenerated.decodeNode s)
+        Verbatim = [] }
+      // Phase 723 — every canonical-form shape: member and enum-case aliases, the four conditions.
+      { Name = "canonical form"
+        Idl = CanonicalFormHostsIdl.idl
+        Compiled = fun s -> ofResult (CanonicalFormGenerated.decodeNode s)
         Verbatim = [] } ]
 
 /// Whether a vocabulary declares a wire-visible sentinel slot.
@@ -446,6 +451,57 @@ let private mutate (rng: Random) (verbatim: string list) (bytes: string) : strin
 
             mutated |> Option.map (Canonical.write Rendering.CrossHost)
 
+/// Phase 723 — a valid document respelled under the vocabulary's aliases before it is mutated: each
+/// member whose canonical name some field declares aliases for, and each enum value whose case declares
+/// aliases, takes one of them at even odds, so the hosts are asked to read every alias, and to locate a
+/// refusal beneath one, as the interpreter does. A vocabulary declaring no alias is handed its document
+/// unchanged, and draws nothing from `rng`, so its mutations are the ones they were.
+let private respell (rng: Random) (idl: Idl) (bytes: string) : string =
+    let members =
+        [ for f in
+              (idl.Kinds |> List.collect _.Fields)
+              @ (idl.Records |> List.collect _.Fields)
+              @ (idl.Unions |> List.collect (fun u -> u.Cases |> List.collect _.Fields)) do
+              if not (List.isEmpty f.Aliases) then
+                  yield f.Name, f.Aliases ]
+        |> List.groupBy fst
+        |> List.map (fun (name, xs) -> name, xs |> List.collect snd |> List.distinct |> List.toArray)
+        |> Map.ofList
+
+    let cases =
+        [ for e in idl.Enums do
+              for c in e.Cases do
+                  match e.AliasesOf c with
+                  | [] -> ()
+                  | aliases -> yield e.WireOf c, List.toArray aliases ]
+        |> Map.ofList
+
+    let pick (spellings: string array) = spellings[rng.Next spellings.Length]
+
+    let rec walk (v: JVal) : JVal =
+        match v with
+        | JObj fields ->
+            JObj(
+                fields
+                |> List.map (fun (k, x) ->
+                    match members.TryFind k with
+                    | Some aliases when rng.Next 2 = 0 -> pick aliases, walk x
+                    | _ -> k, walk x)
+            )
+        | JArr items -> JArr(List.map walk items)
+        | JStr s ->
+            match cases.TryFind s with
+            | Some aliases when rng.Next 2 = 0 -> JStr(pick aliases)
+            | _ -> v
+        | _ -> v
+
+    if members.IsEmpty && cases.IsEmpty then
+        bytes
+    else
+        match Json.parse bytes with
+        | Ok d -> Canonical.write Rendering.CrossHost (walk d)
+        | Error e -> failtestf "a valid document did not parse: %s" e
+
 /// The mutated documents for one vocabulary, drawn from its sampled valid documents.
 let private mutationsOf (c: Certified) (count: int) : string list =
     let rng = Random(337 + c.Name.Length)
@@ -463,7 +519,13 @@ let private mutationsOf (c: Certified) (count: int) : string list =
 
     seq {
         while true do
-            yield mutate rng c.Verbatim valid[rng.Next valid.Length]
+            let drawn = valid[rng.Next valid.Length]
+            let respelled = respell rng c.Idl drawn
+
+            // A respelled document the draw leaves unmutated is asked as it is: the aliases alone.
+            match mutate rng c.Verbatim respelled with
+            | None when respelled <> drawn -> yield Some respelled
+            | mutated -> yield mutated
     }
     |> Seq.choose id
     |> Seq.truncate count
@@ -523,7 +585,32 @@ let private lawOn (c: Certified) =
 
             Expect.isTrue
                 (docs |> List.exists (fun d -> d.Contains "\"__proto__\""))
-                "some mutation writes a __proto__ member")
+                "some mutation writes a __proto__ member"
+
+            // Phase 723 — a vocabulary declaring member aliases has a refusal located beneath one, as
+            // written, and a document read under one.
+            let aliases =
+                (c.Idl.Kinds |> List.collect _.Fields)
+                @ (c.Idl.Records |> List.collect _.Fields)
+                @ (c.Idl.Unions |> List.collect (fun u -> u.Cases |> List.collect _.Fields))
+                |> List.collect _.Aliases
+
+            if not (List.isEmpty aliases) then
+                let quoted = aliases |> List.map (fun a -> "\"" + a + "\"")
+
+                Expect.isTrue
+                    (answers
+                     |> List.exists (fun (_, interp, _, _) ->
+                         match interp with
+                         | Refused(_, path) -> quoted |> List.exists path.Contains
+                         | Accepted -> false))
+                    "some refusal is located beneath a member read under an alias"
+
+                Expect.isTrue
+                    (answers
+                     |> List.exists (fun (doc, interp, _, _) ->
+                         interp = Accepted && quoted |> List.exists (fun a -> doc.Contains(a + ":"))))
+                    "some document read under an alias is accepted")
 
 [<Tests>]
 let mutationLaw =
@@ -531,6 +618,18 @@ let mutationLaw =
         "Phase 337 — sampled mutations: the interpreter and both generated hosts refuse alike"
         [ for c in certified do
               lawOn c
+
+          // Phase 723 — the canonical-form vocabulary's compiled host is the generator's output.
+          testCase "drift guard: the generator still reproduces the committed CanonicalFormGenerated.fs" (fun _ ->
+              let idl = CanonicalFormHostsIdl.idl
+
+              match Gen.fsharpModule CanonicalFormHostsIdl.moduleName idl (idl.Kinds |> List.map _.Tag) with
+              | Error e -> failtestf "codegen refused the canonical-form vocabulary: %s" (CodegenError.describe e)
+              | Ok src ->
+                  Expect.equal
+                      (File.ReadAllText(Snapshots.repoFile CanonicalFormHostsIdl.generatedFile).Replace("\r\n", "\n"))
+                      src
+                      "the committed module is not what the generator emits — regenerate it with: dotnet run --project tools/Fuaran.Core.Tools -- render generated")
 
           testCase "a refusal carries the interpreter's code, path, expectation and projected sentence" (fun _ ->
               // A pinned example: an int slot given a string, two levels down a document node.
