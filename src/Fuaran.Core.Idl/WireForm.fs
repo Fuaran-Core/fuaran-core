@@ -443,11 +443,17 @@ module internal WireForm =
 
     /// The member `f` as the DECODER reads it from a wire object: under its [[spellings]], and absent when its presence condition fails — so a
     /// meaningless member decodes as its optionality's absence, exactly as if the document had not
-    /// carried it.
-    let readMember (idl: Idl) (fields: IdlField list) (f: IdlField) (members: (string * JVal) list) : JVal option =
+    /// carried it. Phase 723 (DECISIONS.md D288) — with the spelling it was read under, which is where
+    /// a refusal inside it is located: the document as written.
+    let readMember
+        (idl: Idl)
+        (fields: IdlField list)
+        (f: IdlField)
+        (members: (string * JVal) list)
+        : (string * JVal) option =
         match f.Presence with
         | Some c when not (holdsOnWire idl fields f c members) -> None
-        | _ -> memberAt f members |> Option.map snd
+        | _ -> memberAt f members
 
     // -----------------------------------------------------------------------
     // Phase 474 (DECISIONS.md D220) — the INLINE declarations: an inline record and a presence-keyed

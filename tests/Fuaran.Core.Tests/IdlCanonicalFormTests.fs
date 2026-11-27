@@ -16,7 +16,7 @@ open Fuaran.Core.Idl
 open Fuaran.Core.Idl.Codegen.Types
 
 let private idl = CanonicalFormVectorExport.idl
-let private kinds = [ "Grid"; "Select"; "Notify" ]
+let private kinds = [ "Grid"; "Select"; "Notify"; "Place" ]
 
 let private kindOf (tag: string) =
     idl.Kinds |> List.find (fun k -> k.Tag = tag)
@@ -50,6 +50,29 @@ let private severities (before: Idl) (after: Idl) : Severity list =
     | _, Error e -> failtestf "the artifact did not read back: %s" e
 
 let private node (tag: string) (fields: (string * IdlValue) list) = VNode("n", tag, fields)
+
+/// Phase 723 (DECISIONS.md D288) — each refusal vector's code and path below the node's `kind`, stated
+/// here rather than read from the reference, so a reference that moved a path is caught: every segment
+/// names a member as the document writes it, or an index.
+let private asWritten: (string * (DecodeCode * PathSegment list)) list =
+    let k = PathSegment.Key
+
+    [ "refusal-alias-member", (DecodeCode.WrongKind, [ k "source" ])
+      "refusal-alias-list-element", (DecodeCode.WrongKind, [ k "suggestions"; PathSegment.Index 1 ])
+      "refusal-alias-both-spellings", (DecodeCode.WrongKind, [ k "options" ])
+      "refusal-alias-nested-record", (DecodeCode.WrongKind, [ k "position"; k "left" ])
+      "refusal-alias-union-case-field", (DecodeCode.WrongKind, [ k "mark"; k "text" ])
+      "refusal-alias-union-case-record", (DecodeCode.WrongKind, [ k "mark"; k "where"; k "left" ])
+      "refusal-alias-missing-at-canonical", (DecodeCode.MissingField, [ k "position"; k "x" ]) ]
+
+/// The strict reading's undeclared member beneath a member read under an alias, and its path below
+/// `kind`: at the alias as written, then the undeclared key.
+let private strictAsWritten: (string * PathSegment list) list =
+    let k = PathSegment.Key
+
+    [ """{"$type":"Place","position":{"left":1,"y":2,"z":3}}""", [ k "position"; k "z" ]
+      """{"$type":"Place","mark":{"$type":"Pin","text":"a","where":{"x":1,"y":2,"q":0}}}""",
+      [ k "mark"; k "where"; k "q" ] ]
 
 [<Tests>]
 let tests =
@@ -147,24 +170,49 @@ let tests =
                     "presence-equals-default-fails-unread" ] do
                   Expect.contains caught pinned (sprintf "%s pins the decoder's drop" pinned)
 
-          testCase "an alias decodes to the canonical member, and a refusal inside it is at the canonical spelling"
+          // Phase 723 (DECISIONS.md D288, amending D190.1) — a decode error's path names the document AS
+          // WRITTEN: a refusal inside a member read under an alias is at the alias, in both readings.
+          testCase "a refusal inside a member read under an alias is located at the alias as written"
           <| fun _ ->
-              match
-                  Decode.decodeDetailed
-                      idl
-                      (CanonicalFormVectorExport.document """{"$type":"Select","source":"not a list"}""")
-              with
-              | Ok v -> failtestf "a malformed aliased member decoded: %A" v
-              | Error e ->
-                  Expect.equal
-                      e.Path
-                      [ PathSegment.Key "kind"; PathSegment.Key "options" ]
-                      "the path names the member, not the spelling"
+              let refusalOf (doc: string) =
+                  CanonicalFormVectorExport.refusalInputs
+                  |> List.find (fun (id, _, _) -> id = doc)
+                  |> fun (_, _, body) -> CanonicalFormVectorExport.document body
+
+              for id, (code, path) in asWritten do
+                  for reading, read in
+                      [ "lenient", Decode.decodeDetailed idl
+                        "strict", Decode.decodeStrictDetailed idl ] do
+                      match read (refusalOf id) with
+                      | Ok v -> failtestf "%s (%s) decoded: %A" id reading v
+                      | Error e ->
+                          Expect.equal (e.Code, e.Path) (code, PathSegment.Key "kind" :: path) (id + ", " + reading)
+
+              // The strict reading's own refusal under an alias, at any depth beneath it.
+              for body, path in strictAsWritten do
+                  match Decode.decodeStrictDetailed idl (CanonicalFormVectorExport.document body) with
+                  | Ok v -> failtestf "%s decoded strictly: %A" body v
+                  | Error e ->
+                      Expect.equal
+                          (e.Code, e.Path)
+                          (DecodeCode.UndeclaredMember, PathSegment.Key "kind" :: path)
+                          ("strict " + body)
+
+          testCase "every refusal vector is authored with the path this suite pins"
+          <| fun _ ->
+              Expect.equal
+                  (CanonicalFormVectorExport.refusalInputs |> List.map (fun (id, _, _) -> id))
+                  (asWritten |> List.map fst)
+                  "one pinned path per refusal vector, in the file's order"
 
           testCase "the generated F# codec reads every vector to the reference's bytes, and omits as the encoder does"
           <| fun _ ->
+              // Phase 723 — with the collecting decoder beside the short-circuiting one, so both readers
+              // locate a refusal under an alias as the interpreter does.
               let moduleText =
-                  match Gen.fsharpModule "CanonicalForm" idl kinds with
+                  match
+                      Gen.fsharpModuleDerived GenSupport.Empty [ Derivation.SpecDecoders ] "CanonicalForm" idl kinds
+                  with
                   | Ok s -> s
                   | Error e -> failtestf "the F# backend refused the fixture: %s" (CodegenError.describe e)
 
@@ -176,6 +224,32 @@ let tests =
                       sprintf
                           "printfn \"%%s\" (match decodeNode %s with | Ok n -> encodeNode n | Error e -> \"ERR \" + DecodeError.describe e)"
                           (lit (CanonicalFormVectorExport.document body)))
+
+              let at =
+                  "(fun (e: DecodeError) -> DecodeError.codeName e.Code + \" \" + DecodePath.render e.Path)"
+
+              let refusals =
+                  CanonicalFormVectorExport.refusalInputs
+                  |> List.collect (fun (_, _, body) ->
+                      let doc = lit (CanonicalFormVectorExport.document body)
+
+                      [ sprintf
+                            "printfn \"%%s\" (match decodeNode %s with | Ok n -> encodeNode n | Error e -> %s e)"
+                            doc
+                            at
+                        sprintf
+                            "printfn \"%%s\" (match decodeNodeAll %s with | Ok n -> encodeNode n | Error es -> es |> List.map %s |> String.concat \"; \")"
+                            doc
+                            at ])
+
+              let refused =
+                  CanonicalFormVectorExport.refusalInputs
+                  |> List.collect (fun (id, _, body) ->
+                      match CanonicalFormVectorExport.refusal (CanonicalFormVectorExport.document body) with
+                      | Some(code, path) ->
+                          let line = code + " " + DecodePath.render path
+                          [ line; line ]
+                      | None -> failtestf "%s decoded" id)
 
               let encodes =
                   [ "printfn \"%s\" (encodeNode { Id = \"n\"; Kind = NodeKind.Grid { Cols = Some 3; Template = Some \"t\" } })"
@@ -191,9 +265,13 @@ let tests =
                   @ [ """{"id":"n","kind":{"$type":"Grid","template":"t"}}"""
                       """{"id":"n","kind":{"$type":"Select","multiple":true,"options":["o"],"values":["y"]}}"""
                       """{"id":"n","kind":{"$type":"Notify"}}""" ]
+                  @ refused
 
               let script =
-                  IdlDeriveTests.Projected.scriptOf "CanonicalForm" moduleText (String.concat "\n" (reads @ encodes))
+                  IdlDeriveTests.Projected.scriptOf
+                      "CanonicalForm"
+                      moduleText
+                      (String.concat "\n" (reads @ encodes @ refusals))
 
               match IdlDeriveTests.Projected.runFsiWith "--checknulls+ --warnaserror+ " script with
               | None -> skiptest "dotnet not on PATH - the generated-codec run is skipped"
@@ -206,6 +284,88 @@ let tests =
                       |> List.ofArray
 
                   Expect.equal lines expected "the generated codec agrees with the interpreter, line for line"
+
+          // Phase 723 (DECISIONS.md D288) — the codec-only module's lenient and STRICT readers locate a
+          // refusal under an alias as the interpreter's two readings do, at the alias as written.
+          testCase "the codec-only readers, lenient and strict, locate a refusal under an alias as the interpreter does"
+          <| fun _ ->
+              let request: CodecOnly =
+                  { Roots = [ "Point"; "Mark" ]
+                    HostTypes = Map.ofList [ "Point", "Host.Point"; "Mark", "Host.Mark" ] }
+
+              let codecText =
+                  match Gen.fsharpCodecModule GenSupport.Empty request "AliasCodec" idl with
+                  | Ok s -> s
+                  | Error e -> failtestf "the codec-only module refused the fixture: %s" (CodegenError.describe e)
+
+              let host =
+                  "module Host =\n    type Point = { X: int; Y: int }\n\n    type Mark =\n        | Pin of label: string * at: Point option\n        | Dot\n\n"
+
+              let rows =
+                  [ "Point", """{"left":"one","y":2}"""
+                    "Point", """{"y":2}"""
+                    "Point", """{"x":1,"left":"bad","y":2}"""
+                    "Point", """{"left":1,"y":2,"z":0}"""
+                    "Mark", """{"$type":"Pin","text":5}"""
+                    "Mark", """{"$type":"Pin","label":"a","where":{"left":true,"y":2}}"""
+                    "Mark", """{"$type":"Pin","label":"a","where":{"x":1,"y":2,"q":0}}""" ]
+
+              let shown (r: Result<'a, DecodeError>) =
+                  match r with
+                  | Ok _ -> "ok"
+                  | Error e -> DecodeError.codeName e.Code + " " + DecodePath.render e.Path
+
+              let reference =
+                  rows
+                  |> List.map (fun (root, doc) ->
+                      let t =
+                          if root = "Mark" then
+                              TUnion(root, [])
+                          else
+                              TRecord(root, [])
+
+                      let j = Json.parse doc |> Result.defaultWith failtest
+
+                      shown (Decode.valueDetailed idl t j)
+                      + "\t"
+                      + shown (Decode.valueStrictDetailed idl t j))
+
+              Expect.equal
+                  (reference |> List.map (fun l -> l.Split('\t')[1]))
+                  [ "WrongKind $[\"left\"]"
+                    "MissingField $[\"x\"]"
+                    "ok"
+                    "UndeclaredMember $[\"z\"]"
+                    "WrongKind $[\"text\"]"
+                    "WrongKind $[\"where\"][\"left\"]"
+                    "UndeclaredMember $[\"where\"][\"q\"]" ]
+                  "the interpreter's strict reading, at the alias as written"
+
+              let probe =
+                  rows
+                  |> List.map (fun (root, doc) ->
+                      sprintf "probe decode%s decode%sStrict %s" root root (SourceLit.fsString doc))
+
+              let body =
+                  "let probe (lenient: JVal -> Result<'a, DecodeError>) (strict: JVal -> Result<'b, DecodeError>) (doc: string) =\n"
+                  + "    let j = match Json.parse doc with Ok j -> j | Error m -> failwith m\n"
+                  + "    let shown r = match r with Ok _ -> \"ok\" | Error (e: DecodeError) -> DecodeError.codeName e.Code + \" \" + DecodePath.render e.Path\n"
+                  + "    printfn \"%s\\t%s\" (shown (lenient j)) (shown (strict j))\n\n"
+                  + String.concat "\n" probe
+
+              let script = IdlDeriveTests.Projected.scriptOf "AliasCodec" (host + codecText) body
+
+              match IdlDeriveTests.Projected.runFsiWith "--checknulls+ --warnaserror+ " script with
+              | None -> skiptest "dotnet not on PATH - the generated-codec run is skipped"
+              | Some(code, out, err) ->
+                  Expect.equal code 0 (sprintf "the codec-only module compiles and runs: %s" err)
+
+                  let lines =
+                      out.Replace("\r\n", "\n").Split('\n')
+                      |> Array.filter (fun l -> l <> "")
+                      |> List.ofArray
+
+                  Expect.equal lines reference "the generated readers agree with the interpreter, line for line"
 
           testCase "the sampler draws canonical values: a meaningless member is never drawn present"
           <| fun _ ->
@@ -238,13 +398,18 @@ let tests =
 
           testCase "a vocabulary that declares none of them renders and generates exactly as before"
           <| fun _ ->
+              let bare (fs: IdlField list) =
+                  fs |> List.map (fun f -> { f with Aliases = []; Presence = None })
+
               let plain =
                   { idl with
-                      Kinds =
-                          idl.Kinds
-                          |> List.map (fun k ->
-                              { k with
-                                  Fields = k.Fields |> List.map (fun f -> { f with Aliases = []; Presence = None }) })
+                      Kinds = idl.Kinds |> List.map (fun k -> { k with Fields = bare k.Fields })
+                      Records = idl.Records |> List.map (fun r -> { r with Fields = bare r.Fields })
+                      Unions =
+                          idl.Unions
+                          |> List.map (fun u ->
+                              { u with
+                                  Cases = u.Cases |> List.map (fun c -> { c with Fields = bare c.Fields }) })
                       Enums = idl.Enums |> List.map (fun e -> { e with Aliases = [] }) }
 
               Expect.isFalse ((Artifact.render plain).Contains "\"aliases\"") "no aliases member"

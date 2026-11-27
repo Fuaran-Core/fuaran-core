@@ -153,11 +153,12 @@ module internal FSharpCodecOnly =
                         (pickRules keyed)
                         (String.concat "" arms)
             | None when walker f.Type <> "sNone" ->
-                sprintf
-                    " |> Result.bind (fun () -> sMember %s %s %s)"
-                    (SourceLit.fsString f.Name)
-                    (memberView idl fields f |> Option.defaultValue "__fs")
-                    (walker f.Type)
+                // Phase 723 — under the key the decoders read the member under.
+                let key, view =
+                    memberRead idl fields f
+                    |> Option.defaultValue (SourceLit.fsString f.Name, "__fs")
+
+                sprintf " |> Result.bind (fun () -> sMember %s %s %s)" key view (walker f.Type)
             | None -> "")
         |> String.concat ""
 

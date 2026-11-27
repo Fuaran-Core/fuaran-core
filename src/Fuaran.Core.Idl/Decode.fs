@@ -367,16 +367,17 @@ module Decode =
             | (f: IdlField) :: rest ->
                 // Phase 539 — the member is read under its spellings and dropped when its presence
                 // condition fails ([[WireForm.readMember]]), so it reaches the optionality rules below
-                // as the canonical form has it; a refusal inside it is at its CANONICAL spelling, the
-                // generated decoders' path too.
+                // as the canonical form has it. Phase 723 (D288) — a refusal inside it is at the
+                // spelling it was read under, as written, the generated decoders' path too; an absent
+                // one is missing at its canonical spelling.
                 match WireForm.readMember idl fields f jfields, f.Opt with
                 | _, HostOnly -> go acc rest
                 | None, Optional -> go acc rest
                 // omit-at-default: an absent field restores its identity default
                 | None, OmitDefault d -> go ((f.Name, d) :: acc) rest
                 | None, Required -> Error(Decoder.missing f.Name)
-                | Some j, _ ->
-                    match decodeValue idl f.Type j |> under (PathSegment.Key f.Name) with
+                | Some(spelt, j), _ ->
+                    match decodeValue idl f.Type j |> under (PathSegment.Key spelt) with
                     | Ok v -> go ((f.Name, v) :: acc) rest
                     | Error e -> Error e
 
@@ -559,9 +560,10 @@ module Decode =
                         | KeyedPick.Picked(c, _) -> strictFields idl c.Fields fs
                         | _ -> Ok()
                     | None, None ->
-                        // At the CANONICAL spelling, as every refusal inside a member is (Phase 539).
+                        // At the spelling it was read under, as every refusal inside a member is
+                        // (Phase 723, D288).
                         match WireForm.readMember idl fields f fs with
-                        | Some v -> strictValue idl f.Type v |> under (PathSegment.Key f.Name)
+                        | Some(spelt, v) -> strictValue idl f.Type v |> under (PathSegment.Key spelt)
                         | None -> Ok()))
             (Ok())
 

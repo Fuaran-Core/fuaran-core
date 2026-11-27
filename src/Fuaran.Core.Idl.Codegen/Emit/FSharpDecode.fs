@@ -152,9 +152,14 @@ module internal FSharpDecode =
     /// placeholder, an omit-at-default one to [[fsDefaultLit]]'s literal.
     let memberDecPrinter (idl: Idl) : MemberDecPrinter =
         { Slot = decPrinter
-          Key = SourceLit.fsString
-          // Phase 539 — a member declaring an alias or a presence condition reads its canonical view.
-          Object = fun fields f -> memberView idl fields f |> Option.defaultValue "__fs"
+          // Phase 539 — a member declaring an alias or a presence condition reads its view of the
+          // object, under the spelling the object carries (Phase 723).
+          Key =
+            fun fields f ->
+                memberRead idl fields f
+                |> Option.map fst
+                |> Option.defaultValue (SourceLit.fsString f.Name)
+          Object = fun fields f -> memberRead idl fields f |> Option.map snd |> Option.defaultValue "__fs"
           Req = sprintf "dReq %s %s %s"
           Opt = sprintf "dOpt %s %s %s"
           Def = sprintf "dDef %s %s %s (%s)"

@@ -912,7 +912,8 @@ module internal TypeScriptCodec =
     /// `undefined`, an omit-at-default one to [[tsDefaultLit]]'s literal.
     let tsMemberDecPrinter (idl: Idl) (disc: string) : MemberDecPrinter =
         { Slot = tsDecPrinter
-          Key = SourceLit.tsString
+          // The member's one spelling: this codec still refuses a vocabulary declaring an alias.
+          Key = fun _ f -> SourceLit.tsString f.Name
           // Phase 660 — a member declared [[WhenNonEmpty]] is read from a view of the object without it
           // when it holds an explicit empty array ([[tsNonEmptyHelper]]), so `[]` decodes as absent.
           Object =

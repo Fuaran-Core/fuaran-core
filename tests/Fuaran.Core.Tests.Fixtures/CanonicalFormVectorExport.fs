@@ -42,7 +42,10 @@ module CanonicalFormVectorExport =
     ///   equality test over an `OmitDefault` sibling, so its absence holds `false`), and `options`
     ///   is read under the retired spellings `source` then `suggestions`;
     /// - `Notify.args` and `Notify.payload` default to the empty map and the empty JSON object,
-    ///   `heading` is read under `title`, and `tone` takes the enum's lenient spellings.
+    ///   `heading` is read under `title`, and `tone` takes the enum's lenient spellings;
+    /// - Phase 723 — `Place` holds an alias at each position a refusal can be located under one: its
+    ///   `at` (read under `position`) is a `Point` record whose `x` is read under `left`, and its `mark`
+    ///   is a `Mark` union whose `Pin` case reads `label` under `text` and `at` under `where`.
     let idl: Idl =
         { Kinds =
             [ kind
@@ -65,12 +68,43 @@ module CanonicalFormVectorExport =
                     field "payload" TJson (OmitDefault(VJson(JObj [])))
                     { field "heading" TStr Optional with
                         Aliases = [ "title" ] }
-                    field "tone" (TEnum "Tone") (OmitDefault(VEnum "Default")) ] ]
-          Unions = []
+                    field "tone" (TEnum "Tone") (OmitDefault(VEnum "Default")) ]
+              kind
+                  "Place"
+                  [ { field "at" (TRecord("Point", [])) Optional with
+                        Aliases = [ "position" ] }
+                    field "mark" (TUnion("Mark", [])) Optional ] ]
+          Unions =
+            [ { Name = "Mark"
+                Params = []
+                Cases =
+                  [ { Tag = "Pin"
+                      Fields =
+                        [ { field "label" TStr Required with
+                              Aliases = [ "text" ] }
+                          { field "at" (TRecord("Point", [])) Optional with
+                              Aliases = [ "where" ] } ]
+                      Annotations = Annotations.Empty
+                      Hosted = None }
+                    { Tag = "Dot"
+                      Fields = []
+                      Annotations = Annotations.Empty
+                      Hosted = None } ]
+                Annotations = Annotations.Empty
+                TagRule = UnionTagRule.CaseName
+                Discrimination = UnionDiscrimination.Tagged } ]
           Enums =
             [ { Declare.enumOf "Tone" [ "Default"; "Success"; "Critical" ] with
                   Aliases = [ "Success", [ "Positive" ]; "Critical", [ "Danger"; "Negative" ] ] } ]
-          Records = []
+          Records =
+            [ { Name = "Point"
+                Params = []
+                Fields =
+                  [ { field "x" TInt Required with
+                        Aliases = [ "left" ] }
+                    field "y" TInt Required ]
+                Annotations = Annotations.Empty
+                Inline = false } ]
           Defaults = []
           NodeFields = []
           Ops = []
@@ -112,7 +146,27 @@ module CanonicalFormVectorExport =
           "default-map-kept", "default", """{"$type":"Notify","args":{"k":"v"}}"""
           "default-empty-json-omitted", "default", """{"$type":"Notify","payload":{}}"""
           "default-json-kept", "default", """{"$type":"Notify","payload":{"b":[true],"a":"x"}}"""
-          "default-enum-omitted", "default", """{"$type":"Notify","tone":"Default"}""" ]
+          "default-enum-omitted", "default", """{"$type":"Notify","tone":"Default"}"""
+          // Phase 723 — an alias at a member holding a record, inside the record, and inside a union case.
+          "alias-record-member", "alias", """{"$type":"Place","position":{"left":1,"y":2}}"""
+          "alias-union-case-field",
+          "alias",
+          """{"$type":"Place","mark":{"$type":"Pin","text":"a","where":{"x":1,"left":9,"y":2}}}""" ]
+
+    /// Phase 723 (DECISIONS.md D288) — authored inputs the reference REFUSES. A defect inside a member
+    /// read under an alias is located at the member AS WRITTEN, the alias, one vector per kind of
+    /// position; where both spellings are present the canonical one is read, so the path names it; and a
+    /// missing member's path ends at the absent key, its canonical spelling.
+    let refusalInputs: (string * string * string) list =
+        [ "refusal-alias-member", "alias", """{"$type":"Select","source":"not a list"}"""
+          "refusal-alias-list-element", "alias", """{"$type":"Select","suggestions":["a",3]}"""
+          "refusal-alias-both-spellings", "alias", """{"$type":"Select","options":5,"source":["a"]}"""
+          "refusal-alias-nested-record", "alias", """{"$type":"Place","position":{"left":"one","y":2}}"""
+          "refusal-alias-union-case-field", "alias", """{"$type":"Place","mark":{"$type":"Pin","text":5}}"""
+          "refusal-alias-union-case-record",
+          "alias",
+          """{"$type":"Place","mark":{"$type":"Pin","label":"a","where":{"left":true,"y":2}}}"""
+          "refusal-alias-missing-at-canonical", "alias", """{"$type":"Place","position":{"y":2}}""" ]
 
     /// The node document an input's kind body is carried in.
     let document (body: string) : string = """{"id":"n","kind":""" + body + "}"
@@ -120,6 +174,13 @@ module CanonicalFormVectorExport =
     /// The canonical bytes the reference reads a document to.
     let canonical (doc: string) : Result<string, string> =
         Decode.decode idl doc |> Result.bind (Encode.encode idl)
+
+    /// Phase 723 — the reference's refusal of a document: its code's name and its path, each segment a
+    /// key as the document writes it or an index; `None` when the document decodes.
+    let refusal (doc: string) : (string * PathSegment list) option =
+        match Decode.decodeDetailed idl doc with
+        | Ok _ -> None
+        | Error e -> Some(DecodeError.codeName e.Code, e.Path)
 
     let private vector (id: string, law: string, body: string) : CorpusCell =
         let doc = document body
@@ -135,7 +196,24 @@ module CanonicalFormVectorExport =
                   VectorOracle.stamp id (CorpusFile.str bytes) None ]
         | Error e -> failwithf "the canonical-form input %s did not read: %s" id e
 
-    let internal allVectors () : CorpusCell list = inputs |> List.map vector
+    let private refusalVector (id: string, law: string, body: string) : CorpusCell =
+        let doc = document body
+
+        match refusal doc with
+        | Some(code, path) ->
+            let refused =
+                CorpusCell.Value(JObj [ "code", JStr code; "path", DecodePath.toJson path ])
+
+            CorpusCell.Row
+                [ "id", CorpusFile.str id
+                  "law", CorpusFile.str law
+                  "document", CorpusFile.str doc
+                  "refusal", refused
+                  VectorOracle.stamp id refused None ]
+        | None -> failwithf "the canonical-form refusal input %s decoded" id
+
+    let internal allVectors () : CorpusCell list =
+        (inputs |> List.map vector) @ (refusalInputs |> List.map refusalVector)
 
     let private description =
         "The canonical-form declarations of an IDL vocabulary (Phase 539): a member's ALIASES (retired spellings a "
@@ -147,7 +225,11 @@ module CanonicalFormVectorExport =
         + "whatever its value, ill-typed included, and it decodes as its optionality's absence), and an empty-map or JSON default literal (omitted at its default, "
         + "compared by canonical bytes). `vocabulary` is the fixture's idl.json; each vector reads `document` (a node "
         + "over that vocabulary) and expects `expected`, the canonical bytes the reference decodes and re-encodes it to, "
-        + "computed by calling the pinned kit."
+        + "or `refusal`, the decode `code` and the `path` to the fault (each segment a member's key or an index), "
+        + "computed by calling the pinned kit. A path names the document AS WRITTEN (Phase 723): a fault inside a member "
+        + "read under an alias is located at the alias, whether the member is a kind's, a record's or a union case's, "
+        + "and at any depth beneath it; where both spellings are present the canonical one is read, so the path names "
+        + "it; and a missing member's path ends at the absent key, its canonical spelling."
 
     /// Rendered with an explicit `kitVersion`, as its siblings in `LawVectorExport` are.
     let renderAt (stamp: string) : string =

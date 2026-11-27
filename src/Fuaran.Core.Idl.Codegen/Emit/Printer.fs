@@ -186,10 +186,12 @@ type internal MemberDecPrinter =
     {
         /// The point-free decoders.
         Slot: SlotPrinter
-        /// The member's wire key as a literal.
-        Key: string -> string
+        /// The key a member of `fields` is read under: its wire key as a literal, or (Phase 723) for a
+        /// member declaring an alias or a presence condition the spelling its object carries, which is
+        /// where a refusal inside it is located.
+        Key: IdlField list -> IdlField -> string
         /// The object a member of `fields` is read from (Phase 539: a member declaring an alias or a
-        /// presence condition is read from its canonical view of the object).
+        /// presence condition is read from its view of the object).
         Object: IdlField list -> IdlField -> string
         /// A required member read with a decoder, from its key, its object and its decoder.
         Req: string -> string -> string -> string
@@ -222,7 +224,7 @@ module internal MemberTraversal =
     /// Phase 124 — an omit-at-default member's restore and the encoder's omit test are rendered from
     /// ONE literal, so they cannot disagree.
     let decMember (p: MemberDecPrinter) (fields: IdlField list) (f: IdlField) : Result<string, CodegenError> =
-        let key = p.Key f.Name
+        let key = p.Key fields f
         let o = p.Object fields f
 
         match p.Inline o f with
