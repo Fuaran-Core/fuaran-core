@@ -853,8 +853,8 @@ let tests =
 
                       Expect.stringContains
                           (List.head grown)
-                          "at the instantiation Grow<list<str>> ("
-                          "the literal fits `Grow<str>`, and not the instantiation it holds"
+                          "at the instantiation Grow<list<str>> and at 1 more ("
+                          "the literal fits `Grow<str>`, and not the instantiation it holds, nor the one class beneath that at depth one"
 
                       Expect.equal (List.length grown) 1 "and the member is refused once, there")
 

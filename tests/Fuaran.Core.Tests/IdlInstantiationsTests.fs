@@ -480,29 +480,28 @@ let tests =
                         (Declare.errors (chain 13 (f "v" (TList(TVar "T")) (OmitDefault(VList [])))))
                         "an empty list at list<T> is admitted without reading an instantiation"
 
-                    // Any other literal has every instantiation to be judged at, and the declaration
-                    // check counts only those of the declaration holding it: `D13`'s 4096 are each
-                    // judged, however many the twelve before it have between them.
+                    // Any other literal has every type its parameter takes to be judged at, and the
+                    // declaration check counts only those: `D13`'s 4096 are each judged, however many
+                    // the twelve before it have between them, and the member is refused in one fault
+                    // that names the first it does not fit and counts the others.
                     let judged =
                         within 60.0 "the declaration check" (fun () ->
                             Declare.errors (chain 13 (f "v" (TVar "T") (OmitDefault(VStr "")))))
 
-                    Expect.equal judged.Length 4096 "one refusal for each instantiation of D13, none past it"
+                    Expect.equal judged.Length 1 "one refusal for the member"
 
-                    Expect.equal
-                        (judged
-                         |> List.map (fun x -> x.Detail.Substring(0, x.Detail.IndexOf ':'))
-                         |> List.distinct)
-                        [ "record 'D13', field 'v'" ]
-                        "each names the member"
+                    Expect.stringStarts
+                        judged.Head.Detail
+                        "record 'D13', field 'v': the omit-at-default value does not fit the field's type at the instantiation D13<"
+                        "it names the member and an instantiation of it"
 
-                    Expect.equal
-                        (judged |> List.distinctBy (fun x -> x.Detail) |> List.length)
-                        4096
-                        "and its own instantiation")
+                    Expect.stringContains
+                        judged.Head.Detail
+                        " and at 4095 more ("
+                        "and counts every other instantiation of D13")
 
                 testCase
-                    "the declaration check counts ONE declaration's instantiations, and refuses only past them"
+                    "the declaration check counts the types ONE parameter takes, and refuses only past them"
                     (fun _ ->
                         let limit = 16384
 
@@ -533,51 +532,14 @@ let tests =
                                  @ beside)
                                 []
 
-                        // 2^39 instantiations of U40: refused at once, in the one sentence, for the
-                        // count of U40's own, which the walk reads off the declarations before it
-                        // (each writes its parameter into the next) long before it reaches U40.
+                        // 2^39 types at U40's parameter: refused at once, in the one sentence, for the
+                        // count of the types it takes, which a position the parameter is placed at is
+                        // given at least as many of: past it at U16, so at every position after it.
                         Expect.equal
                             (within 10.0 "Declare.errors" (fun () -> Declare.errors (doubling 40 [] [] []))
                              |> List.map _.Detail)
                             [ refusal "U40" ]
                             "past the count: refused, naming the declaration, the member and the number"
-
-                        // The count's edge, exactly, where every instantiation fits: `Vk<T, S>`
-                        // doubles `S` and passes `T` on, the last holding `v: T = ""`, so its 2^14
-                        // instantiations are judged at str, each; one more is one past the count.
-                        let edge (extra: bool) =
-                            vocabulary
-                                [ kind
-                                      "K"
-                                      [ f "g" (TUnion("V1", [ TStr; TInt ])) Optional
-                                        if extra then
-                                            f "h" (TUnion("V15", [ TStr; TBool ])) Optional ] ]
-                                [ for k in 1..15 ->
-                                      mk
-                                          (sprintf "V%d" k)
-                                          [ "T"; "S" ]
-                                          (if k < 15 then
-                                               [ f
-                                                     "a"
-                                                     (TUnion(sprintf "V%d" (k + 1), [ TVar "T"; TList(TVar "S") ]))
-                                                     Optional
-                                                 f
-                                                     "b"
-                                                     (TUnion(sprintf "V%d" (k + 1), [ TVar "T"; TMap(TVar "S") ]))
-                                                     Optional ]
-                                           else
-                                               [ f "v" (TVar "T") (OmitDefault(VStr "")) ]) ]
-                                []
-
-                        Expect.isEmpty
-                            (within 60.0 "Declare.errors" (fun () -> Declare.errors (edge false)))
-                            "exactly the count: each of V15's 16384 instantiations judged, and each fits"
-
-                        Expect.equal
-                            (within 60.0 "Declare.errors" (fun () -> Declare.errors (edge true))
-                             |> List.map _.Detail)
-                            [ refusal "V15" ]
-                            "one past it: refused"
 
                         // A neighbour past the count decides nothing for a declaration it does not
                         // reach: `W<T> { v: T = "" }`, reached once at str beside U40, is judged and
@@ -595,11 +557,11 @@ let tests =
                             [ refusal "U40" ]
                             "the neighbour admitted, U40 refused"
 
-                        // A declaration a refused one reaches, through a reference that does not write
-                        // every parameter it is counted at, is still judged at each of its
-                        // instantiations, the walk reading the refused one on for it: `Wk<T, S> { a: W(k+1)<list<T>, S>; b: W(k+1)<map<T>, list<S>> }`,
-                        // the last holding `v: T = ""` and `e: E<S>`, with `E<T> { v: T = "" }`. W16 has
-                        // 2^15 instantiations and is refused; E has sixteen, `E<str>` and `E<list^j<str>>`
+                        // A declaration reached only through a member refused for the count, at a
+                        // parameter that member does not read, is still judged at each of its
+                        // instantiations, the walk reading on for it: `Wk<T, S> { a: W(k+1)<list<T>, S>; b: W(k+1)<map<T>, list<S>> }`,
+                        // the last holding `v: T = ""` and `e: E<S>`, with `E<T> { v: T = "" }`. W16's `T`
+                        // takes 2^15 types and its `v` is refused; E has sixteen, `E<str>` and `E<list^j<str>>`
                         // for j from 1 to 15, the last of them reached only at the last of W16's.
                         let downstream =
                             vocabulary
@@ -629,9 +591,11 @@ let tests =
                         let answer = within 20.0 "Declare.errors" (fun () -> Declare.errors downstream)
 
                         Expect.equal
-                            (answer |> List.filter (fun x -> x.Detail.StartsWith "union 'E'") |> List.length)
-                            15
-                            "E judged at each of its sixteen, and refused at each but E<str>"
+                            (answer
+                             |> List.filter (fun x -> x.Detail.StartsWith "union 'E'")
+                             |> List.map (fun x -> x.Detail.Contains " and at 14 more ("))
+                            [ true ]
+                            "E judged at each of its sixteen, and refused in one fault at each but E<str>"
 
                         Expect.equal
                             (answer
@@ -663,17 +627,18 @@ let tests =
 
                         // Two declarations judged, each fed one parameter of a chain that doubles the
                         // other: `Xk<T, S> { a: X(k+1)<list<T>, S>; b: X(k+1)<map<T>, S> }`, the
-                        // fortieth holding `d: D<T>` and `e: E<S>`, each of D and E holding
+                        // eightieth holding `d: D<T>` and `e: E<S>`, each of D and E holding
                         // `v: T = ""`. No reference writes both parameters, and D, past the count, is
-                        // still refused at once; E, at its one instantiation `E<str>`, is admitted.
+                        // still refused at once; E, at its one instantiation `E<str>`, is admitted, and the
+                        // walk reads no more of the doubled parameter once D is refused, which feeds only D.
                         let lossy =
                             vocabulary
                                 [ kind "K" [ f "g" (TUnion("X1", [ TStr; TStr ])) Optional ] ]
-                                ([ for k in 1..40 ->
+                                ([ for k in 1..80 ->
                                        mk
                                            (sprintf "X%d" k)
                                            [ "T"; "S" ]
-                                           (if k < 40 then
+                                           (if k < 80 then
                                                 [ f
                                                       "a"
                                                       (TUnion(sprintf "X%d" (k + 1), [ TList(TVar "T"); TVar "S" ]))
@@ -695,10 +660,11 @@ let tests =
                             [ refusal "D" ]
                             "D refused at once, E admitted"
 
-                        // In classes the count is of the declaration's own classes judged, across the
-                        // depths: `D<T, S> { a: D<T, list<S>>; b: D<T, map<S>>; v: T = [[…[]…]] }` (fourteen
-                        // lists deep) held at `D<list^14<str>, str>` fits every instantiation, and is decided
-                        // only from depth fifteen, where it has 2^15 classes: refused.
+                        // In classes the count is of the classes one parameter takes, at one depth, and
+                        // only a parameter a member reads is read: `D<T, S> { a: D<T, list<S>>; b: D<T,
+                        // map<S>>; v: T = [[…[]…]] }` (sixty lists deep) held at `D<list^60<str>, str>` is
+                        // decided only from depth sixty-one, and `S` has 2^k classes at depth k; but `v`
+                        // reads `T`, which takes one type, so each depth is a few steps, and it fits.
                         let rec nest (k: int) =
                             if k = 0 then VList [] else VList [ nest (k - 1) ]
 
@@ -707,17 +673,44 @@ let tests =
 
                         let deep =
                             vocabulary
-                                [ kind "K" [ f "g" (TUnion("D", [ lists 14 TStr; TStr ])) Optional ] ]
+                                [ kind "K" [ f "g" (TUnion("D", [ lists 60 TStr; TStr ])) Optional ] ]
                                 [ mk
                                       "D"
                                       [ "T"; "S" ]
                                       [ f "a" (TUnion("D", [ TVar "T"; TList(TVar "S") ])) Optional
                                         f "b" (TUnion("D", [ TVar "T"; TMap(TVar "S") ])) Optional
-                                        f "v" (TVar "T") (OmitDefault(nest 13)) ] ]
+                                        f "v" (TVar "T") (OmitDefault(nest 59)) ] ]
                                 []
 
+                        Expect.isEmpty
+                            (within 60.0 "Declare.errors" (fun () -> Declare.errors deep))
+                            "the parameter read takes one type: judged, and admitted"
+
+                        // `D<T> { a: D<Box<T>>; b: D<Bag<T>>; v: T = { item: { item: … "" } } }` (fourteen
+                        // records, a string inside), `Box` and `Bag` each holding `item: W`, held at
+                        // `D<Box^14<str>>`: the two records agree on the literal at every level, so no
+                        // class is answered above depth fifteen, and at depth fourteen `T` has 2^15 - 1
+                        // classes: refused for the count.
+                        let rec boxes (k: int) (t: IdlType) =
+                            if k = 0 then t else TRecord("Box", [ boxes (k - 1) t ])
+
+                        let rec items (k: int) =
+                            if k = 0 then VStr "" else VRecord [ "item", items (k - 1) ]
+
+                        let wide =
+                            vocabulary
+                                [ kind "K" [ f "g" (TUnion("D", [ boxes 14 TStr ])) Optional ] ]
+                                [ mk
+                                      "D"
+                                      [ "T" ]
+                                      [ f "a" (TUnion("D", [ TRecord("Box", [ TVar "T" ]) ])) Optional
+                                        f "b" (TUnion("D", [ TRecord("Bag", [ TVar "T" ]) ])) Optional
+                                        f "v" (TVar "T") (OmitDefault(items 14)) ] ]
+                                [ record "Box" [ "W" ] [ f "item" (TVar "W") Required ]
+                                  record "Bag" [ "W" ] [ f "item" (TVar "W") Required ] ]
+
                         Expect.equal
-                            (within 60.0 "Declare.errors" (fun () -> Declare.errors deep)
+                            (within 60.0 "Declare.errors" (fun () -> Declare.errors wide)
                              |> List.map _.Detail)
                             [ refusal "D" ]
                             "past the count of its classes: refused")
@@ -1097,8 +1090,9 @@ let tests =
                          + ": a parameter on a cycle that only copies it is judged at each instantiation")
                         (fun _ ->
                             // `Opt<T> { next: Opt<T>; v: T = "" }` held at `Opt<int>` and `Opt<bool>`: the
-                            // cycle holds no expanding edge, so the instantiations are finitely many and
-                            // each the literal does not fit is refused by name, in the order reached.
+                            // cycle holds no expanding edge, so the instantiations are finitely many, each
+                            // is judged, and the member is refused once, naming the first reached and
+                            // counting the other.
                             let opt =
                                 declared
                                     asUnion
@@ -1118,9 +1112,11 @@ let tests =
 
                             Expect.equal
                                 (within 20.0 "Declare.errors" (fun () -> Declare.errors idl)
-                                 |> List.map (fun x -> x.Detail.Contains "Opt<int>", x.Detail.Contains "Opt<bool>"))
-                                [ true, false; false, true ]
-                                "each instantiation refused")
+                                 |> List.map (fun x ->
+                                     x.Detail.Contains "the instantiation Opt<int> and at 1 more (",
+                                     x.Detail.Contains "Opt<bool>"))
+                                [ true, false ]
+                                "both instantiations refused, in one fault")
 
                     testCase (what + ": a thousand declarations, each holding a default, are checked at once") (fun _ ->
                         // `D1<T> { x: D2<T>; v: T = "" } … D1000<T> { v: T = "" }`, held at `D1<str>`:
@@ -1462,8 +1458,8 @@ let tests =
                         | [ only ] ->
                             Expect.stringContains
                                 only
-                                "does not fit the field's type at the instantiation G<list<str>> ("
-                                "refused at the first instantiation reached that the literal does not fit"
+                                "does not fit the field's type at the instantiation G<list<str>> and at 3 more ("
+                                "refused at the first instantiation reached that the literal does not fit, counting one of each other class at depth one it does not fit"
                         | other -> failtestf "one fault expected: %A" other
 
                         // A literal that fits every instantiation the vocabulary reaches, though not
@@ -1968,24 +1964,337 @@ let tests =
                         "admitted")
 
                 testCase "an instantiation is spelled one way, and a keyed map of strings is not a map" (fun _ ->
-                    let idl =
+                    let at (t: IdlType) =
                         vocabulary
-                            [ kind
-                                  "K"
-                                  [ f "m" (TRecord("Opt", [ TMap TInt ])) Optional
-                                    f "k" (TRecord("Opt", [ TKeyedMap(TStr, TInt) ])) Optional ] ]
+                            [ kind "K" [ f "m" (TRecord("Opt", [ t ])) Optional ] ]
                             []
                             [ record "Opt" [ "T" ] [ f "v" (TVar "T") (OmitDefault(VStr "")) ] ]
 
-                    let details = Declare.errors idl |> List.map _.Detail
-
-                    for spelled in [ "Opt<map<str, int>>"; "Opt<keyedMap<str, int>>" ] do
+                    for t, spelled in
+                        [ TMap TInt, "Opt<map<str, int>>"
+                          TKeyedMap(TStr, TInt), "Opt<keyedMap<str, int>>" ] do
                         Expect.equal
-                            (details
-                             |> List.filter (fun d -> d.Contains("at the instantiation " + spelled + " "))
+                            (Declare.errors (at t)
+                             |> List.filter (fun d -> d.Detail.Contains("at the instantiation " + spelled + " ("))
                              |> List.length)
                             1
                             (spelled + ": one fault names it")) ] ]
+
+// ---------------------------------------------------------------------------
+// The declaration check's walk is kept per PARAMETER: what a member's answer reads is the types each
+// parameter it names takes, never which go together, so two parameters carried along one chain are
+// not multiplied; a member is refused in ONE fault, judged once per class of the instantiations
+// found; and two counts bound the walk, each failing closed in its own sentence.
+// ---------------------------------------------------------------------------
+
+/// `G1..Gn<A, B>` each name the next at `list<A>` and at `list<tuple<A, int>>`, carrying `B`;
+/// `Gn+1..G2n` do the same to `B`, carrying `A`; `G2n+1<A, B> { h: H<A>; i: H<B> }`, held at
+/// `G1<list<int>, list<int>>`. `H` has 2^(n+1) instantiations and `G2n+1` has 4^n.
+let private carried (n: int) (judged: IdlUnion list) : Idl =
+    let g (k: int) (a: IdlType) (b: IdlType) = TUnion(sprintf "G%d" k, [ a; b ])
+    let a, b = TVar "A", TVar "B"
+    let w1 (t: IdlType) = TList t
+    let w2 (t: IdlType) = TList(TTuple [ t; TInt ])
+
+    vocabulary
+        [ kind "K" [ f "g" (g 1 (TList TInt) (TList TInt)) Optional ] ]
+        ([ for k in 1 .. 2 * n + 1 ->
+               union
+                   (sprintf "G%d" k)
+                   [ "A"; "B" ]
+                   [ case
+                         "Mk"
+                         (if k <= n then
+                              [ f "p" (g (k + 1) (w1 a) b) Optional; f "q" (g (k + 1) (w2 a) b) Optional ]
+                          elif k <= 2 * n then
+                              [ f "r" (g (k + 1) a (w1 b)) Optional; f "s" (g (k + 1) a (w2 b)) Optional ]
+                          else
+                              [ f "h" (TUnion("H", [ a ])) Optional; f "i" (TUnion("H", [ b ])) Optional ]) ] ]
+         @ judged)
+        []
+
+/// `U1..Un<T>` each name the next at `list<T>` and at `list<tuple<T, int>>`, the last holding
+/// `v: T = literal`, held at `U1<str>`: the last has 2^(n-1) instantiations, every one a list.
+let private branching (n: int) (literal: IdlValue) : Idl =
+    vocabulary
+        [ kind "K" [ f "g" (TUnion("U1", [ TStr ])) Optional ] ]
+        [ for k in 1..n ->
+              union
+                  (sprintf "U%d" k)
+                  [ "T" ]
+                  [ case
+                        "Mk"
+                        (if k < n then
+                             [ f "a" (TUnion(sprintf "U%d" (k + 1), [ TList(TVar "T") ])) Optional
+                               f "b" (TUnion(sprintf "U%d" (k + 1), [ TList(TTuple [ TVar "T"; TInt ]) ])) Optional ]
+                         else
+                             [ f "v" (TVar "T") (OmitDefault literal) ]) ] ]
+        []
+
+let private pastCount (declaration: string) (memberName: string) (what: string) : string =
+    sprintf "more than 16384 instantiations of %s reach %s; %s cannot be checked at each" declaration memberName what
+
+[<Tests>]
+let perParameterTests =
+    testList
+        "Phase 732 — the declaration check walks each parameter, not each combination"
+        [ testCase "two parameters carried together are not multiplied" (fun _ ->
+              let defaulted =
+                  [ union "H" [ "T" ] [ case "Mk" [ f "v" (TVar "T") (OmitDefault(VList [])) ] ] ]
+
+              // Every instantiation of `H` is a list, so `[]` fits each: admitted, at once, where a
+              // walk over the instantiations of `G2n+1` reads 4^n of them.
+              for n in [ 10; 12 ] do
+                  Expect.isEmpty
+                      (within 10.0 (sprintf "Declare.errors at %d" n) (fun () -> Declare.errors (carried n defaulted)))
+                      (sprintf "n = %d: admitted" n)
+
+              let twelve = carried 12 defaulted
+
+              Expect.equal
+                  (within 10.0 "Artifact.parse" (fun () -> Artifact.parse (Artifact.render twelve)))
+                  (Ok(Artifact.canonicalise twelve))
+                  "its artifact reads back"
+
+              // Past the count at `H`'s parameter (2^21 and 2^41 types): refused in the one sentence.
+              for n in [ 20; 40 ] do
+                  Expect.equal
+                      (within 10.0 (sprintf "Declare.errors at %d" n) (fun () -> Declare.errors (carried n defaulted))
+                       |> List.map _.Detail)
+                      [ pastCount "union 'H'" "union 'H' case 'Mk', field 'v'" "its default" ]
+                      (sprintf "n = %d: refused for the count" n)
+
+              // The transparent rule reads the same walk.
+              let transparentAt (n: int) =
+                  { carried
+                        n
+                        [ union "H" [ "T" ] [ case "Mk" [ f "u" (TUnion("T1", [ TVar "T" ])) Optional ] ]
+                          union
+                              "T1"
+                              [ "X" ]
+                              [ case "V" [ f "v" (TVar "X") Required ]; case "Tag" [ f "n" TInt Required ] ] ] with
+                      Harden =
+                          { HardenPolicy.Undeclared with
+                              TransparentUnions = [ "T1", "V" ] } }
+
+              Expect.isEmpty
+                  (within 10.0 "Declare.errors, the transparent rule" (fun () -> Declare.errors (transparentAt 10)))
+                  "a list is never an object: admitted"
+
+              Expect.equal
+                  (within 10.0 "Declare.errors, the transparent rule" (fun () -> Declare.errors (transparentAt 20))
+                   |> List.map _.Detail)
+                  [ pastCount "union 'H'" "union 'H' case 'Mk', field 'u'" "the transparent case it holds" ]
+                  "past the count: refused")
+
+          testCase "a literal is refused in one fault, judged once per class of instantiations" (fun _ ->
+              // `""` fits no list: refused at each of `U13`'s 4096 and `U15`'s 16384 instantiations,
+              // in one fault that names the first and counts the rest. The encoder renders the literal
+              // once for all of them: they are one class at their outermost form.
+              for n, more in [ 13, 4095; 15, 16383 ] do
+                  let faults =
+                      within 10.0 (sprintf "Declare.errors at %d" n) (fun () -> Declare.errors (branching n (VStr "")))
+
+                  Expect.equal faults.Length 1 (sprintf "n = %d: one fault" n)
+
+                  Expect.stringStarts
+                      faults.Head.Detail
+                      (sprintf
+                          "union 'U%d' case 'Mk', field 'v': the omit-at-default value does not fit the field's type at the instantiation U%d<list<"
+                          n
+                          n)
+                      (sprintf "n = %d: it names the member and the first instantiation" n)
+
+                  Expect.stringContains
+                      faults.Head.Detail
+                      (sprintf " and at %d more (authored value does not match IDL type " more)
+                      (sprintf "n = %d: it counts the others, and gives the encoder's sentence" n)
+
+              // A literal that fits some instantiations: one fault, counting only those it does not
+              // fit. `U3` is reached at `list<X>` for X each of `list<str>`, `tuple<list<str>, int>`,
+              // `list<tuple<str, int>>` and `tuple<list<tuple<str, int>>, int>`; a list of one pair of
+              // an empty list and an integer fits the two tuples, and is judged a level deeper at each
+              // class until it is answered.
+              let pair = VList [ VList [ VList []; VInt 0 ] ]
+
+              let faults =
+                  within 10.0 "Declare.errors" (fun () -> Declare.errors (branching 3 pair))
+                  |> List.map _.Detail
+
+              Expect.equal faults.Length 1 "one fault"
+
+              Expect.stringContains
+                  faults.Head
+                  "at the instantiation U3<list<list<str>>> and at 1 more ("
+                  "the first it does not fit, and the one other"
+
+              // Past the count: the one sentence, and no fault besides.
+              Expect.equal
+                  (within 10.0 "Declare.errors at 16" (fun () -> Declare.errors (branching 16 (VStr "")))
+                   |> List.map _.Detail)
+                  [ pastCount "union 'U16'" "union 'U16' case 'Mk', field 'v'" "its default" ]
+                  "n = 16: refused for the count")
+
+          testCase "the count is of the types one parameter takes, and of no other parameter's" (fun _ ->
+              // `Vk<T, S>` doubles `S` (at `list<S>` and `list<tuple<S, int>>`) and passes `T` on;
+              // `V15` holds `v: S = []` and `w: T = ""`. `S` takes 2^14 types at `V15`, each a list,
+              // and `T` takes one: every one is judged and fits.
+              let edge (extra: bool) =
+                  vocabulary
+                      [ kind
+                            "K"
+                            [ f "g" (TUnion("V1", [ TStr; TStr ])) Optional
+                              if extra then
+                                  f "h" (TUnion("V15", [ TStr; TList TBool ])) Optional ] ]
+                      [ for k in 1..15 ->
+                            union
+                                (sprintf "V%d" k)
+                                [ "T"; "S" ]
+                                [ case
+                                      "Mk"
+                                      (if k < 15 then
+                                           [ f
+                                                 "a"
+                                                 (TUnion(sprintf "V%d" (k + 1), [ TVar "T"; TList(TVar "S") ]))
+                                                 Optional
+                                             f
+                                                 "b"
+                                                 (TUnion(
+                                                     sprintf "V%d" (k + 1),
+                                                     [ TVar "T"; TList(TTuple [ TVar "S"; TInt ]) ]
+                                                 ))
+                                                 Optional ]
+                                       else
+                                           [ f "v" (TVar "S") (OmitDefault(VList []))
+                                             f "w" (TVar "T") (OmitDefault(VStr "")) ]) ] ]
+                      []
+
+              Expect.isEmpty
+                  (within 20.0 "Declare.errors" (fun () -> Declare.errors (edge false)))
+                  "exactly the count at S: each of its 16384 types judged, and each fits"
+
+              // One more type at `S` is one past the count: `v`, which reads `S`, is refused; `w`,
+              // which reads only `T`, is judged and admitted.
+              Expect.equal
+                  (within 20.0 "Declare.errors" (fun () -> Declare.errors (edge true))
+                   |> List.map _.Detail)
+                  [ pastCount "union 'V15'" "union 'V15' case 'Mk', field 'v'" "its default" ]
+                  "one past it: the member reading S refused, the member reading T admitted")
+
+
+          testCase "a position an argument past the count is placed at is past it too" (fun _ ->
+              // `U1..U15` double `T` (2^14 types at `U15`), `U15` names `C1` at the two wrappings
+              // (2^15 at `C1`, past the count) and `C1<T>` copies `T` to `C2<T> { v: T = [] }`. The
+              // walk stops reading types at `C1` at the count, so it finds no more than the count at
+              // `C2`; `C2` is given every one of `C1`'s, so it is past the count too, and refused.
+              let idl =
+                  vocabulary
+                      [ kind "K" [ f "g" (TUnion("U1", [ TStr ])) Optional ] ]
+                      ([ for k in 1..15 ->
+                             union
+                                 (sprintf "U%d" k)
+                                 [ "T" ]
+                                 [ case
+                                       "Mk"
+                                       [ let next = if k < 15 then sprintf "U%d" (k + 1) else "C1"
+
+                                         f "a" (TUnion(next, [ TList(TVar "T") ])) Optional
+                                         f "b" (TUnion(next, [ TList(TTuple [ TVar "T"; TInt ]) ])) Optional ] ] ]
+                       @ [ union "C1" [ "T" ] [ case "Mk" [ f "c" (TUnion("C2", [ TVar "T" ])) Optional ] ]
+                           union "C2" [ "T" ] [ case "Mk" [ f "v" (TVar "T") (OmitDefault(VList [])) ] ] ])
+                      []
+
+              Expect.equal
+                  (within 20.0 "Declare.errors" (fun () -> Declare.errors idl) |> List.map _.Detail)
+                  [ pastCount "union 'C2'" "union 'C2' case 'Mk', field 'v'" "its default" ]
+                  "refused for the count, as the declaration it is copied from would be")
+
+          testCase "in classes a refusal decides beside a class the cut leaves open" (fun _ ->
+              // `G<T> { l: G<list<T>>; m: G<map<T>>; v: T = [[]] }` held at `G<str>`: at depth one
+              // the classes are `str`, `list<str>`, `map<str>`, `list<…>` and `map<…>`, and the literal
+              // fails four, the cut leaving `list<…>` open: refused there, counting the three.
+              let idl =
+                  vocabulary
+                      [ kind "K" [ f "g" (TUnion("G", [ TStr ])) Optional ] ]
+                      [ union
+                            "G"
+                            [ "T" ]
+                            [ case
+                                  "Mk"
+                                  [ f "l" (TUnion("G", [ TList(TVar "T") ])) Optional
+                                    f "m" (TUnion("G", [ TMap(TVar "T") ])) Optional
+                                    f "v" (TVar "T") (OmitDefault(VList [ VList [] ])) ] ] ]
+                      []
+
+              Expect.equal
+                  (within 10.0 "Declare.errors" (fun () -> Declare.errors idl)
+                   |> List.map (fun x -> x.Detail.Contains "at the instantiation G<str> and at 3 more ("))
+                  [ true ]
+                  "one fault, at depth one")
+
+          testCase "a member naming a variable no parameter binds is refused, and the check returns" (fun _ ->
+              // `Opt<T> { v: '' = "" }`: no binding replaces the variable, so the literal is refused at
+              // each instantiation whatever the cut, and no deeper cut is asked.
+              let idl =
+                  vocabulary
+                      [ kind "K" [ f "g" (TRecord("Opt", [ TInt ])) Optional ] ]
+                      []
+                      [ record "Opt" [ "T" ] [ f "v" (TVar "") (OmitDefault(VStr "")) ] ]
+
+              let faults = within 10.0 "Declare.errors" (fun () -> Declare.errors idl)
+
+              Expect.exists
+                  faults
+                  (fun x -> x.Detail.Contains "at the instantiation Opt<int> (unsubstituted type variable '')")
+                  "refused at its instantiation, in the encoder's words")
+
+          testCase "the whole check reads at most the step budget, and says so past it" (fun _ ->
+              // `U1..U14<T>` double `T` as above, so `U14` is reached at 8192 types and `C1` at 16384;
+              // `C1..C18<T>` each copy it to the next twice, so a walk reads each of those types again
+              // at each, and `C18` holds `v: T = []` (the default rule) and `u: T1<T>`, `T1`'s case
+              // `V` transparent at its parameter (the other rule). Each rule's walk reads about
+              // 620,000 instantiations: the first is judged, admitted, and the second meets the
+              // budget, which the two share.
+              let copies = 18
+
+              let idl =
+                  { vocabulary
+                        [ kind "K" [ f "g" (TUnion("U1", [ TStr ])) Optional ] ]
+                        ([ for k in 1..14 ->
+                               union
+                                   (sprintf "U%d" k)
+                                   [ "T" ]
+                                   [ case
+                                         "Mk"
+                                         [ let next = if k < 14 then sprintf "U%d" (k + 1) else "C1"
+
+                                           f "a" (TUnion(next, [ TList(TVar "T") ])) Optional
+                                           f "b" (TUnion(next, [ TList(TTuple [ TVar "T"; TInt ]) ])) Optional ] ] ]
+                         @ [ for k in 1..copies ->
+                                 union
+                                     (sprintf "C%d" k)
+                                     [ "T" ]
+                                     [ case
+                                           "Mk"
+                                           (if k < copies then
+                                                [ f "a" (TUnion(sprintf "C%d" (k + 1), [ TVar "T" ])) Optional
+                                                  f "b" (TUnion(sprintf "C%d" (k + 1), [ TVar "T" ])) Optional ]
+                                            else
+                                                [ f "v" (TVar "T") (OmitDefault(VList []))
+                                                  f "u" (TUnion("T1", [ TVar "T" ])) Optional ]) ] ]
+                         @ [ union
+                                 "T1"
+                                 [ "X" ]
+                                 [ case "V" [ f "v" (TVar "X") Required ]; case "Tag" [ f "n" TInt Required ] ] ])
+                        [] with
+                      Harden =
+                          { HardenPolicy.Undeclared with
+                              TransparentUnions = [ "T1", "V" ] } }
+
+              Expect.equal
+                  (within 60.0 "Declare.errors" (fun () -> Declare.errors idl) |> List.map _.Detail)
+                  [ "the declaration check reads more than 1048576 instantiations before it reaches every instantiation of union 'C18' that reaches union 'C18' case 'Mk', field 'u'; the transparent case it holds cannot be checked at each" ]
+                  "past the budget: refused in its own sentence") ]
 
 // ---------------------------------------------------------------------------
 // A transparent case typed at a type parameter, instantiated through a generic HOLDER. The case is
@@ -2062,6 +2371,76 @@ let transparentTests =
                           (TRecord("Hold", [ TList(TRecord("Box", [ TInt ])) ]))
                   ))
                   "a list of objects is an array")
+
+          // A reference written where the member holds no value of it writes no bytes of it, so it is
+          // judged nowhere, whatever another parameter's argument is: `Pair<X, Y> { y: Y }` holds
+          // nothing at `X`, so `Hold<T, Q> { u: Pair<T1<T>, Q> }` writes no `T1<T>`, even where `Q`
+          // is the same `T1<Box<int>>` that `T` would make. Each vocabulary is refused exactly where a
+          // value of the union is written, as it was; no fault repeats another at a second member.
+          testCase "a reference is judged only where a value of the member holds it" (fun _ ->
+              let box (t: IdlType) = TRecord("Box", [ t ])
+
+              let at (fields: IdlField list) (extra: IdlRecord list) =
+                  transparent
+                      (TVar "T")
+                      [ kind "K" fields ]
+                      []
+                      ([ record "Box" [ "W" ] [ f "item" (TVar "W") Required ]
+                         record "Pair" [ "X"; "Y" ] [ f "y" (TVar "Y") Required ]
+                         record "Hold" [ "T"; "Q" ] [ f "u" (TRecord("Pair", [ t1 (TVar "T"); TVar "Q" ])) Required ] ]
+                       @ extra)
+
+              let faults (idl: Idl) =
+                  Declare.errors idl |> List.map (fun e -> e.At, e.Detail)
+
+              let ending =
+                  "instantiates union 'T1' so that its transparent case's field 'v' can encode to an object — a bare object is indistinguishable from a tagged case"
+
+              let atKind (i: int) (name: string) =
+                  [ PathSegment.Key "kinds"
+                    PathSegment.Index 0
+                    PathSegment.Key "fields"
+                    PathSegment.Index i
+                    PathSegment.Key "type" ],
+                  sprintf "kind 'K', field '%s': %s" name ending
+
+              // `T` and `Q` both `Box<int>`-made: the one fault where `T1<Box<int>>` is written held.
+              Expect.equal
+                  (faults (at [ f "g" (TRecord("Hold", [ box TInt; t1 (box TInt) ])) Optional ] []))
+                  [ atKind 0 "g" ]
+                  "a closed origin whose two arguments meet"
+
+              Expect.equal
+                  (faults (at [ f "g" (TRecord("Hold", [ TInt; t1 (box TInt) ])) Optional ] []))
+                  [ atKind 0 "g" ]
+                  "a closed origin whose arguments do not meet"
+
+              // `F<P> { h: Hold<P, T1<P>> }` at `F<Box<int>>`: `Q` holds `T1<P>`, so `F.h` writes it.
+              Expect.equal
+                  (faults (
+                      at
+                          [ f "g" (TRecord("F", [ box TInt ])) Optional ]
+                          [ record "F" [ "P" ] [ f "h" (TRecord("Hold", [ TVar "P"; t1 (TVar "P") ])) Required ] ]
+                  ))
+                  [ [ PathSegment.Key "records"
+                      PathSegment.Index 3
+                      PathSegment.Key "fields"
+                      PathSegment.Index 0
+                      PathSegment.Key "type" ],
+                    "record 'F', field 'h': at the instantiation F<Box<int>>, " + ending ]
+                  "a generic origin"
+
+              // `Hold<Box<int>, int>` and `Hold<int, T1<Box<int>>>` are reached and
+              // `Hold<Box<int>, T1<Box<int>>>` is not: nothing is asked of a combination.
+              Expect.equal
+                  (faults (
+                      at
+                          [ f "g" (TRecord("Hold", [ box TInt; TInt ])) Optional
+                            f "g2" (TRecord("Hold", [ TInt; t1 (box TInt) ])) Optional ]
+                          []
+                  ))
+                  [ atKind 1 "g2" ]
+                  "two instantiations, neither meeting")
 
           // Exact over this family: admitted exactly where every document the encoder writes reads
           // back to its bytes. It holds each way a holder passes its parameter to the union (bare,

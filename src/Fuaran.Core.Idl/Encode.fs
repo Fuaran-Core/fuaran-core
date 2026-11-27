@@ -63,6 +63,12 @@ module Encode =
     let private arity (what: string) (name: string) (args: IdlType list) (pars: string list) : Result<'T, string> =
         Error(sprintf "%s '%s' given %d type args, expects %d" what name (List.length args) (List.length pars))
 
+    /// The refusal of a type variable the encoder meets unbound: the one sentence, so a caller
+    /// that binds a parameter to a type cut short (Phase 732, the declaration check's classes) can
+    /// tell the encoder reaching the cut from the value not fitting what lies above it.
+    let internal unsubstituted (variable: string) : string =
+        sprintf "unsubstituted type variable '%s'" variable
+
     let rec private encodeValue (idl: Idl) (t: IdlType) (v: IdlValue) : Result<JVal, string> =
         // Phase 513 — the type's wire form is decided once, by [[WireForm.ofType]]; this arm list only
         // writes it.
@@ -103,7 +109,7 @@ module Encode =
                         encodeFields idl caseFields fields
                         |> Result.map (typedWith idl.Wire.Discriminator tag)
         | WireForm.Undeclared(Undeclared.Union(name, _)), VUnion _ -> Error(sprintf "unknown union '%s'" name)
-        | WireForm.Unbound v, _ -> Error(sprintf "unsubstituted type variable '%s'" v)
+        | WireForm.Unbound v, _ -> Error(unsubstituted v)
         | WireForm.Sentinel(value, wire), v when v = value -> Ok(JStr wire)
         // fuaran#676 — verbatim passthrough. Emitting the `JVal` unchanged is what keeps the bytes
         // canonical: `Canonical.write Rendering.CrossHost` already sorts keys Ordinal, escapes per rule 6 and lays floats

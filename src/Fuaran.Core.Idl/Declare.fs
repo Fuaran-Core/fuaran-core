@@ -38,6 +38,20 @@ module Declare =
         /// node envelope, a contract's method.
         | DeclaresNone of owner: string
 
+    /// One member an instantiation rule judges at the instantiations of its declaration, and how
+    /// its refusal reads (Phase 732).
+    type private Asked =
+        {
+            /// The path the fault is reported at.
+            At: PathSegment list
+            /// The member, as a sentence names it (`record 'Opt', field 'v'`).
+            Name: string
+            /// The fault's sentence, given the instantiation as spelled and why it fails.
+            Refusal: string -> string -> string
+            /// What the walk judges ([[Instantiations.judgeAtParameters]]).
+            Judged: Instantiations.Judged
+        }
+
     /// An enum whose wire strings ARE its case names — the common case, and the
     /// shape every declaration had before fuaran#707.
     let enumOf (name: string) (cases: string list) : IdlEnum =
@@ -1207,73 +1221,35 @@ module Declare =
                       k.Fields
               yield! keyedErrors (what = "kind") label (fun j -> owner @ [ key "fields"; item j ]) k.Fields ]
 
-        /// Phase 732 — the walk the two rules below share: every instantiation of a generic
-        /// declaration a document can hold a value of, each handed to `judged`.
+        // The analysis both instantiation rules read, of what a value on the wire holds: found once
+        // per check, and only where a rule has a member to judge.
+        let wireAnalysis =
+            lazy (Instantiations.analyse (Instantiations.ofIdl Instantiations.wire idl))
+
+        // How many instantiations the walks of this check have read, both rules' and every depth's
+        // together, against [[Instantiations.stepLimit]].
+        let stepsRead = ref 0
+
+        /// Phase 732 — the walk the two rules below share ([[Instantiations.judgeAtParameters]]),
+        /// and each member's fault from what became of it.
         ///
         /// The instantiations reached are those a document can hold a value of: from each owner that
         /// declares no parameter (a kind, an op, the node envelope, a union or a record declaring
         /// none, a contract method), through the wire members of each declaration at the arguments
         /// applied. An instantiation named only as an argument no member holds (`Phantom<Opt<int>>`,
         /// where `Phantom<T>` holds nothing at `T`) is not one: no document holds a value of it.
+        /// What the walks share is found once per check (`wireAnalysis`), and both rules and every
+        /// depth count against one step budget (`stepsRead`).
         ///
-        /// What the declarations `held` names share is found ONCE for them all: the analysis (which
-        /// argument positions a value reaches, which declarations enter which, the parameter graph's
-        /// cycles) and which declarations have finitely many instantiations
-        /// ([[Instantiations.unbounded]]). A declaration that has is judged at each of them. The
-        /// others are judged in CLASSES: two instantiations whose arguments agree to a depth `k`
-        /// enter references that agree to that depth (a substitution places an argument no
-        /// shallower than it stood), so a class is judged at its first member wherever the cut
-        /// decides the verdict, which `judged` says beside its faults (it is handed the cut). Where
-        /// the cut does not decide for a declaration, the depth is raised for it and the walk starts
-        /// again. Each is ONE walk for every declaration it judges, entering only the declarations
-        /// that reach one of them ([[Instantiations.reachingAny]]) and reading an instantiation's
-        /// arguments only at the positions that can become part of an argument of one of them
-        /// ([[Instantiations.relevant]]): instantiations that differ only elsewhere reach the same
-        /// instantiations of the declarations judged, so they are one step.
-        ///
-        /// The one count is of ONE declaration's instantiations. A declaration with more than
-        /// [[Instantiations.declarationLimit]] of its own instantiations reached is judged no
-        /// further, and each member the rule asks of it is refused in a sentence naming the
-        /// declaration, the member and the number (`tooMany`). Nothing else is counted against it,
-        /// so no verdict depends on how many instantiations another declaration has. In classes it
-        /// counts the declaration's own classes judged, across the depths. A declaration refused is
-        /// judged no further, and the walk reads the others on: it still enters the refused one,
-        /// and what reaches it, at the positions the others are read at (none, where it reaches
-        /// none of them, so each such declaration is one step), so every other's instantiations are
-        /// all reached. Where every instantiation is judged, they
-        /// are judged once the walk has read them all, so a declaration refused is judged at none.
-        ///
-        /// The walk is depth-first: it follows each reference it enters before the next, so the
-        /// instantiations of a declaration at the end of a long chain are reached as the chain is
-        /// entered, not after every instantiation of every declaration before it, and a declaration
-        /// past the count is refused within a few times the count's steps of entering it (a chain
-        /// of forty declarations each naming the next at two arguments is refused at once).
-        ///
-        /// Nothing is printed to be judged, so how large an instantiation is decides nothing: a type
-        /// shared in memory is read once per node however large it prints, and only a refusal's text
-        /// names an instantiation, to its first [[Instantiations.spelledLimit]] nodes.
-        ///
-        /// The cost, for declarations whose member types hold `s` nodes between them, `N` the count
-        /// and `h` the declarations held: the analysis is linear in `s`; a walk takes one step per
-        /// instantiation it reads (at the positions it reads), each costing what the member types
-        /// of its declaration cost, and reads at most `N + 1` instantiations of each declaration it
-        /// judges; the classes walk is taken again only for the declarations its cut left
-        /// undecided. Each declaration is given its own `N`, so the rules cost O(s + h N) steps over
-        /// the chains the tests build, and a vocabulary of `n` declarations each instantiated once
-        /// costs O(s + n).
-        let overInstantiations
-            (held: string list)
-            (judged:
-                Instantiations.Analysis<IdlType>
-                    -> (IdlType -> IdlType)
-                    -> string * IdlType list
-                    -> VocabularyFault list * bool)
-            (tooMany: string -> VocabularyFault list)
-            : VocabularyFault list =
+        /// A member is refused in ONE fault: the first instantiation found that it does not fit,
+        /// and how many more of those found it does not fit (`… and at 4095 more`). A member that
+        /// reads a parameter given more than [[Instantiations.parameterLimit]] types, or that was not
+        /// judged when the whole check had read [[Instantiations.stepLimit]] instantiations, is
+        /// refused in a sentence of its own, never admitted unjudged.
+        let overInstantiations (what: string) (asked: Asked list) : VocabularyFault list =
             let wire = Instantiations.wire.Members
-            let analysis = Instantiations.analyse (Instantiations.ofIdl Instantiations.wire idl)
 
-            let owned =
+            let roots =
                 [ for k in idl.Kinds @ idl.Ops do
                       yield! wire k.Fields
                   yield! wire idl.NodeFields
@@ -1284,185 +1260,41 @@ module Declare =
                       if List.isEmpty r.Params then
                           yield! wire r.Fields ]
                 |> List.map _.Type
+                |> fun owned ->
+                    owned
+                    @ (idl.Contracts
+                       |> List.collect _.Methods
+                       |> List.collect (fun m -> (m.Arguments |> List.map _.Type) @ Option.toList m.Result))
 
-            let methodTypes =
-                idl.Contracts
-                |> List.collect _.Methods
-                |> List.collect (fun m -> (m.Arguments |> List.map _.Type) @ Option.toList m.Result)
+            Instantiations.judgeAtParameters
+                (wireAnalysis.Force())
+                roots
+                mentionsVar
+                stepsRead
+                (asked |> List.map _.Judged)
+            |> List.zip asked
+            |> List.choose (fun (a, outcome) ->
+                let declaration = a.Judged.Declaration
 
-            let roots = owned @ methodTypes
+                match outcome with
+                | Instantiations.Outcome.Admitted
+                | Instantiations.Outcome.Deeper -> None
+                | Instantiations.Outcome.Refused(instantiation, why, more) ->
+                    let spelled =
+                        Instantiations.spellAbbreviated instantiation
+                        + (if more > 0 then sprintf " and at %d more" more else "")
 
-            // `t` with every type held `k` levels down replaced by an unbound parameter (no
-            // declared parameter is named by the empty string). A type that holds none is kept.
-            let rec cutAt (k: int) (t: IdlType) : IdlType =
-                let below = cutAt (k - 1)
-
-                match t with
-                | TList _
-                | TMap _
-                | TSet _
-                | TTuple _
-                | TKeyedMap _
-                | TRecord(_, _ :: _)
-                | TUnion(_, _ :: _) when k = 0 -> TVar ""
-                | TList inner -> TList(below inner)
-                | TMap inner -> TMap(below inner)
-                | TSet inner -> TSet(below inner)
-                | TTuple components -> TTuple(List.map below components)
-                | TKeyedMap(key, value) -> TKeyedMap(below key, below value)
-                | TRecord(n, args) -> TRecord(n, List.map below args)
-                | TUnion(n, args) -> TUnion(n, List.map below args)
-                | TStr
-                | TInt
-                | TBool
-                | TFloat
-                | TEnum _
-                | TVar _
-                | TNode
-                | TKind
-                | TOp
-                | TClosure
-                | TOpaque
-                | TFn _
-                | TJson
-                | THosted _
-                | TInt64
-                | TDecimal
-                | TBytes
-                | TTimeOfDay
-                | TDuration -> t
-
-            let hole = TVar ""
-
-            // One walk over the declarations `pending`, every instantiation read at `cut` (`None`:
-            // read whole, and every one judged). `counts` holds how many instantiations of each
-            // pending declaration have been judged. The faults of each declaration the walk decided,
-            // those it could not decide at the cut, and those refused for the count.
-            let walk
-                (pending: Set<string>)
-                (cut: (IdlType -> IdlType) option)
-                (counts: System.Collections.Generic.Dictionary<string, int>)
-                =
-                let exact = Option.isNone cut
-                let cut = defaultArg cut id
-                let faults = pending |> Seq.map (fun d -> d, ResizeArray<VocabularyFault>()) |> dict
-
-                // Where every instantiation is judged, those of each declaration, judged once the walk
-                // has read them all: a declaration refused for the count is judged at none.
-                let toJudge =
-                    pending |> Seq.map (fun d -> d, ResizeArray<string * IdlType list>()) |> dict
-
-                let undecided = System.Collections.Generic.HashSet<string>()
-                let refused = System.Collections.Generic.HashSet<string>()
-                let mutable live = pending
-                let within = Instantiations.reachingAny analysis (Set.toList live)
-                let mutable relevant = Instantiations.relevant analysis live
-                let mutable deciding = live.Count
-
-                let seen =
-                    System.Collections.Generic.HashSet<string * int list>(HashIdentity.Structural)
-
-                let stack = System.Collections.Generic.Stack<string * IdlType list>()
-
-                let refuse (d: string) =
-                    refused.Add d |> ignore
-                    live <- live.Remove d
-                    relevant <- Instantiations.relevant analysis live
-                    deciding <- live |> Seq.filter (undecided.Contains >> not) |> Seq.length
-
-                // Pushed last first, so the first reference an instantiation enters is read first.
-                let offer (found: (string * IdlType list) list) =
-                    for (name, _) as instantiation in List.rev found do
-                        if within.Contains name then
-                            stack.Push instantiation
-
-                offer (roots |> List.collect (Instantiations.entered analysis))
-
-                while stack.Count > 0 && deciding > 0 do
-                    let name, written = stack.Pop()
-
-                    let args =
-                        written |> List.mapi (fun i a -> if relevant.Contains(name, i) then a else hole)
-
-                    let ids = args |> List.map (cut >> Instantiations.identity analysis)
-
-                    if seen.Add((name, ids)) then
-                        if live.Contains name && not (undecided.Contains name) then
-                            if not (List.isEmpty args) then
-                                counts[name] <- counts[name] + 1
-
-                            if counts[name] > Instantiations.declarationLimit then
-                                refuse name
-                            elif exact then
-                                toJudge[name].Add((name, args))
-                            else
-                                let found, decided = judged analysis cut (name, args)
-
-                                if decided then
-                                    faults[name].AddRange found
-                                else
-                                    undecided.Add name |> ignore
-                                    deciding <- deciding - 1
-
-                        offer (Instantiations.successors analysis (name, args))
-
-                let decided =
-                    [ for d in live do
-                          if exact then
-                              d, toJudge[d] |> List.ofSeq |> List.collect (judged analysis id >> fst)
-                          elif not (undecided.Contains d) then
-                              d, List.ofSeq faults[d] ]
-
-                decided, Set.intersect live (Set.ofSeq undecided), Set.ofSeq refused
-
-            let zero (pending: Set<string>) =
-                System.Collections.Generic.Dictionary<string, int>(
-                    pending |> Seq.map (fun d -> System.Collections.Generic.KeyValuePair(d, 0))
-                )
-
-            // Every declaration of `pending` with its faults: judged at each instantiation (`exact`),
-            // or in classes from depth `k`, deepened for those the cut leaves undecided.
-            let rec verdicts
-                (pending: Set<string>)
-                (exact: bool)
-                (k: int)
-                (counts: System.Collections.Generic.Dictionary<string, int>)
-                : (string * VocabularyFault list) list =
-                if pending.IsEmpty then
-                    []
-                else
-                    let decided, undecided, refused =
-                        walk pending (if exact then None else Some(cutAt k)) counts
-
-                    [ for d, found in decided do
-                          // In classes, the first instantiation reached that each member is
-                          // refused at.
-                          d, (if exact then found else List.distinctBy _.At found)
-                      for d in refused do
-                          d, tooMany d
-                      yield! verdicts undecided exact (k + 1) counts ]
-
-            let unbounded = Instantiations.unbounded analysis roots
-            let finite, infinite = held |> List.partition (unbounded.Contains >> not)
-            let finite, infinite = Set.ofList finite, Set.ofList infinite
-
-            let byDeclaration =
-                verdicts finite true 1 (zero finite) @ verdicts infinite false 1 (zero infinite)
-                |> Map.ofList
-
-            held |> List.collect (fun d -> byDeclaration[d])
-
-        // The faults that say a rule judged no member of `declaration` at each instantiation,
-        // because more than the count of them are reached: one for each member it asks of it.
-        let tooManyAt
-            (declaration: string)
-            (what: string)
-            (members: (PathSegment list * string) list)
-            : VocabularyFault list =
-            members
-            |> List.map (fun (path, at) ->
-                { At = path
-                  Detail = Instantiations.tooManyToJudge declaration at what })
+                    Some
+                        { At = a.At
+                          Detail = a.Refusal spelled why }
+                | Instantiations.Outcome.TooMany ->
+                    Some
+                        { At = a.At
+                          Detail = Instantiations.tooManyToJudge declaration a.Name what }
+                | Instantiations.Outcome.TooLong ->
+                    Some
+                        { At = a.At
+                          Detail = Instantiations.tooLongToJudge declaration a.Name what })
 
         /// Phase 732 — an omit-at-default member whose type names a type parameter has no one type
         /// to be checked at where it is declared: its literal is a value of `T` at `Opt<string>` and
@@ -1474,80 +1306,65 @@ module Declare =
         /// A literal that fits its member's type with the parameters left UNBOUND (an empty list at
         /// `list<T>`) fits every instantiation: the encoder refuses an unbound parameter wherever it
         /// reads one, so it read none. Such a member asks nothing more, and a vocabulary holding no
-        /// other is not walked at all.
-        ///
-        /// In a class, a refusal decides: it names an instantiation the vocabulary reaches. An
-        /// admission does where the literal also fits the member's type cut at the class's depth,
-        /// what lies below left unbound.
+        /// other is not walked at all. By the same property, a literal that fits the member's type at
+        /// arguments cut at a depth fits it at every argument that agrees to that depth, and one the
+        /// encoder refuses there for anything but an unbound parameter it refuses at each of them:
+        /// up to that refusal it read only what they share.
         let instantiatedDefaultErrors () : VocabularyFault list =
-            let atParameter (fields: IdlField list) (place: int -> PathSegment list * string) =
+            let atParameter (declaration: string) (fields: IdlField list) (place: int -> PathSegment list * string) =
                 [ for j, f in List.indexed fields do
                       match f.Opt with
                       | OmitDefault d when mentionsVar f.Type && Result.isError (Encode.renderValue idl f.Type d) ->
                           let path, owner = place j
+                          let name = sprintf "%s, field '%s'" owner f.Name
 
                           yield
-                              path @ [ key "optionality"; key "default" ],
-                              sprintf "%s, field '%s'" owner f.Name,
-                              f.Type,
-                              d
+                              { At = path @ [ key "optionality"; key "default" ]
+                                Name = name
+                                Judged =
+                                  { Declaration = declaration
+                                    Reads = Instantiations.positionsNamed (wireAnalysis.Force()) declaration f.Type
+                                    Judge =
+                                      fun cut binding ->
+                                          match Encode.renderValue idl (TypeParams.substitute binding f.Type) d with
+                                          | Ok _ -> Instantiations.Verdict.Fits
+                                          | Error m when cut && m = Encode.unsubstituted "" ->
+                                              Instantiations.Verdict.Undecided
+                                          | Error m -> Instantiations.Verdict.Fails m }
+                                Refusal =
+                                  fun instantiation why ->
+                                      sprintf
+                                          "%s: the omit-at-default value does not fit the field's type at the instantiation %s (%s)"
+                                          name
+                                          instantiation
+                                          why }
                       | _ -> () ]
 
-            // Each generic declaration holding such a member, by its key in the reading.
-            let held: Map<string, (PathSegment list * string * IdlType * IdlValue) list> =
+            // Each declaration holding such a member, by its key in the reading.
+            let held: Asked list =
                 [ for i, r in List.indexed idl.Records do
-                      Instantiations.recordKey r.Name,
-                      atParameter r.Fields (fun j -> recordField i j, sprintf "record '%s'" r.Name)
+                      let declaration = Instantiations.recordKey r.Name
+
+                      declaration,
+                      atParameter declaration r.Fields (fun j -> recordField i j, sprintf "record '%s'" r.Name)
 
                   for i, u in List.indexed idl.Unions do
-                      Instantiations.unionKey u.Name,
+                      let declaration = Instantiations.unionKey u.Name
+
+                      declaration,
                       [ for c, case in List.indexed u.Cases do
                             yield!
-                                atParameter case.Fields (fun j ->
+                                atParameter declaration case.Fields (fun j ->
                                     caseField i c j, sprintf "union '%s' case '%s'" u.Name case.Tag) ] ]
                 |> List.filter (fun (_, members) -> not (List.isEmpty members))
                 |> Map.ofList
+                |> Map.toList
+                |> List.collect snd
 
-            // One instantiation: a fault for each literal that does not fit it, and whether each
-            // literal that does fit it also fits it cut by `cut`. A reference that names a
-            // parameter where its owner declares none is no instantiation, and is that owner's
-            // own fault.
-            let judged
-                (analysis: Instantiations.Analysis<IdlType>)
-                (cut: IdlType -> IdlType)
-                (instantiation: string * IdlType list)
-                =
-                match Map.tryFind (fst instantiation) held, Instantiations.binding analysis instantiation with
-                | Some members, Some binding when not (List.exists mentionsVar (snd instantiation)) ->
-                    let cutBinding = binding |> Map.map (fun _ t -> cut t)
-
-                    (([], true), members)
-                    ||> List.fold (fun (faults, decided) (path, at, declared, literal) ->
-                        match Encode.renderValue idl (TypeParams.substitute binding declared) literal with
-                        | Error m ->
-                            let refusal: VocabularyFault =
-                                { At = path
-                                  Detail =
-                                    sprintf
-                                        "%s: the omit-at-default value does not fit the field's type at the instantiation %s (%s)"
-                                        at
-                                        (Instantiations.spellAbbreviated (Instantiations.applies instantiation))
-                                        m }
-
-                            faults @ [ refusal ], decided
-                        | Ok _ ->
-                            faults,
-                            decided
-                            && Result.isOk (Encode.renderValue idl (TypeParams.substitute cutBinding declared) literal))
-                | _ -> [], true
-
-            if Map.isEmpty held then
+            if List.isEmpty held then
                 []
             else
-                overInstantiations (held |> Map.toList |> List.map fst) judged (fun declaration ->
-                    held[declaration]
-                    |> List.map (fun (path, at, _, _) -> path, at)
-                    |> tooManyAt declaration "its default")
+                overInstantiations "its default" held
 
         /// Phase 732 — a transparent case whose field is typed at a type parameter is refused at a
         /// reference that instantiates it to an object ([[typeErrors]]). A reference that applies the
@@ -1555,14 +1372,16 @@ module Declare =
         /// and the holder may be instantiated to one (`Hold<Box<int>>`): the encoder then writes the
         /// case bare, as an object no decoder reads back. So it is asked again at every
         /// instantiation of the holder a document can hold a value of ([[overInstantiations]]), and
-        /// refused at the holder's member, naming the instantiation.
+        /// refused at the holder's member that writes the reference, naming the instantiation.
         ///
         /// Judged there: each union reference WRITTEN in the member's type with an argument that names
-        /// a parameter, where a value of the member holds one of that union at the instantiation's
-        /// arguments. A reference written with no parameter is the first rule's, wherever it stands.
+        /// a parameter, where a value of the member holds one, as written (a walk over the member's
+        /// type enters it: [[Instantiations.entered]]). A value written is what cannot be read back,
+        /// and where the member holds no value of the union no bytes of it are written. A reference
+        /// written with no parameter is the first rule's, wherever it stands.
         ///
         /// Whether a type can encode to an object is read off its outermost form, which a cut one
-        /// level down or deeper keeps, so a class's first member decides for the class.
+        /// level down or deeper keeps, so a group of instantiations is decided at its first member.
         let instantiatedTransparentErrors () : VocabularyFault list =
             // The union references written in `t` with an argument that names a parameter.
             let rec openReferences (t: IdlType) : IdlType list =
@@ -1607,89 +1426,119 @@ module Declare =
                 |> List.map _.Name
                 |> Set.ofList
 
-            let atParameter (fields: IdlField list) (place: int -> PathSegment list * string) =
+            // Whether `applied` is answered by an argument cut short: its transparent case's field is
+            // typed at what the cut left unbound.
+            let atHole (applied: UnionForm) : bool =
+                match applied.Binding, transparentField applied with
+                | Some binding, Some field -> TypeParams.substitute binding field.Type = TVar ""
+                | _ -> false
+
+            let atParameter (declaration: string) (fields: IdlField list) (place: int -> PathSegment list * string) =
                 [ for j, f in List.indexed fields do
-                      if f.Opt <> HostOnly then
-                          let references =
+                      let candidates =
+                          if f.Opt = HostOnly then
+                              []
+                          else
                               openReferences f.Type
                               |> List.filter (fun r ->
                                   match r with
                                   | TUnion(n, _) -> transparentAtParameter.Contains n
                                   | _ -> false)
 
+                      if not (List.isEmpty candidates) then
+                          let analysis = wireAnalysis.Force()
+                          let entered = Instantiations.entered analysis f.Type
+
+                          let references =
+                              candidates
+                              |> List.filter (fun r ->
+                                  match r with
+                                  | TUnion(n, args) -> List.contains (Instantiations.unionKey n, args) entered
+                                  | _ -> false)
+
                           if not (List.isEmpty references) then
                               let path, owner = place j
-                              yield path @ [ key "type" ], sprintf "%s, field '%s'" owner f.Name, f.Type, references ]
+                              let name = sprintf "%s, field '%s'" owner f.Name
+
+                              yield
+                                  { At = path @ [ key "type" ]
+                                    Name = name
+                                    Judged =
+                                      { Declaration = declaration
+                                        Reads =
+                                          references
+                                          |> List.collect (Instantiations.positionsNamed analysis declaration)
+                                          |> List.distinct
+                                          |> List.sort
+                                        Judge =
+                                          fun cut binding ->
+                                              let answers =
+                                                  [ for r in references do
+                                                        match WireForm.ofType idl (TypeParams.substitute binding r) with
+                                                        | WireForm.Union u ->
+                                                            match objectAtReference u with
+                                                            | Some field ->
+                                                                Instantiations.Verdict.Fails(
+                                                                    sprintf
+                                                                        "union '%s' so that its transparent case's field '%s'"
+                                                                        u.Name
+                                                                        field.Name
+                                                                )
+                                                            | None when cut && atHole u ->
+                                                                Instantiations.Verdict.Undecided
+                                                            | None -> Instantiations.Verdict.Fits
+                                                        | _ -> Instantiations.Verdict.Fits ]
+
+                                              // The first reference made an object answers; one read
+                                              // at a cut short argument leaves the rest open.
+                                              answers
+                                              |> List.tryFind (fun a ->
+                                                  match a with
+                                                  | Instantiations.Verdict.Fails _ -> true
+                                                  | Instantiations.Verdict.Fits
+                                                  | Instantiations.Verdict.Undecided -> false)
+                                              |> Option.defaultValue (
+                                                  if List.contains Instantiations.Verdict.Undecided answers then
+                                                      Instantiations.Verdict.Undecided
+                                                  else
+                                                      Instantiations.Verdict.Fits
+                                              ) }
+                                    Refusal =
+                                      fun instantiation why ->
+                                          sprintf
+                                              "%s: at the instantiation %s, instantiates %s can encode to an object — %s"
+                                              name
+                                              instantiation
+                                              why
+                                              bareObject } ]
 
             // Each generic declaration holding such a member, by its key in the reading.
-            let held: Map<string, (PathSegment list * string * IdlType * IdlType list) list> =
+            let held: Asked list =
                 [ for i, r in List.indexed idl.Records do
                       if not (List.isEmpty r.Params) then
-                          Instantiations.recordKey r.Name,
-                          atParameter r.Fields (fun j -> recordField i j, sprintf "record '%s'" r.Name)
+                          let declaration = Instantiations.recordKey r.Name
+
+                          declaration,
+                          atParameter declaration r.Fields (fun j -> recordField i j, sprintf "record '%s'" r.Name)
 
                   for i, u in List.indexed idl.Unions do
                       if not (List.isEmpty u.Params) then
-                          Instantiations.unionKey u.Name,
+                          let declaration = Instantiations.unionKey u.Name
+
+                          declaration,
                           [ for c, case in List.indexed u.Cases do
                                 yield!
-                                    atParameter case.Fields (fun j ->
+                                    atParameter declaration case.Fields (fun j ->
                                         caseField i c j, sprintf "union '%s' case '%s'" u.Name case.Tag) ] ]
                 |> List.filter (fun (_, members) -> not (List.isEmpty members))
                 |> Map.ofList
+                |> Map.toList
+                |> List.collect snd
 
-            let judged
-                (analysis: Instantiations.Analysis<IdlType>)
-                (cut: IdlType -> IdlType)
-                (instantiation: string * IdlType list)
-                =
-                // The members a binding instantiates to an object, each with the union and its field.
-                let objects
-                    (members: (PathSegment list * string * IdlType * IdlType list) list)
-                    (binding: Map<string, IdlType>)
-                    =
-                    [ for path, at, declared, references in members do
-                          let substituted = TypeParams.substitute binding declared
-
-                          for reference in references do
-                              match TypeParams.substitute binding reference with
-                              | TUnion _ as applied when Instantiations.enters analysis substituted applied ->
-                                  match WireForm.ofType idl applied with
-                                  | WireForm.Union u ->
-                                      match objectAtReference u with
-                                      | Some f -> yield path, at, u.Name, f.Name
-                                      | None -> ()
-                                  | _ -> ()
-                              | _ -> () ]
-                    |> List.distinct
-
-                match Map.tryFind (fst instantiation) held, Instantiations.binding analysis instantiation with
-                | Some members, Some binding when not (List.exists mentionsVar (snd instantiation)) ->
-                    let found = objects members binding
-
-                    let faults: VocabularyFault list =
-                        found
-                        |> List.map (fun (path, at, union, field) ->
-                            { At = path
-                              Detail =
-                                sprintf
-                                    "%s: at the instantiation %s, instantiates union '%s' so that its transparent case's field '%s' can encode to an object — %s"
-                                    at
-                                    (Instantiations.spellAbbreviated (Instantiations.applies instantiation))
-                                    union
-                                    field
-                                    bareObject })
-
-                    faults, found = objects members (binding |> Map.map (fun _ t -> cut t))
-                | _ -> [], true
-
-            if Map.isEmpty held then
+            if List.isEmpty held then
                 []
             else
-                overInstantiations (held |> Map.toList |> List.map fst) judged (fun declaration ->
-                    held[declaration]
-                    |> List.map (fun (path, at, _, _) -> path, at)
-                    |> tooManyAt declaration "the transparent case it holds")
+                overInstantiations "the transparent case it holds" held
 
         [ yield! wireShapeErrors idl
           yield! enumWireErrors idl

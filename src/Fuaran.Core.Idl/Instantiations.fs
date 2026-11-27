@@ -113,14 +113,23 @@ module internal Instantiations =
     [<Literal>]
     let sizeLimit = 65536
 
-    /// How many instantiations of ONE declaration the declaration check judges a member of it at
-    /// before it says it cannot judge that member at each. It counts that declaration's own
-    /// instantiations and no other's, so no declaration's verdict depends on how many
-    /// instantiations another has; a declaration past it has more instantiations than any
-    /// vocabulary written by hand or built for this library's tests (the most any of those gives
-    /// one declaration is 4096), and is refused, never admitted unjudged.
+    /// How many types the declaration check finds at ONE type parameter of a generic declaration
+    /// before it says it cannot judge a member that reads that parameter at each instantiation. It
+    /// counts that parameter's own types and no other's, so no member's verdict depends on how many
+    /// types another parameter takes; a parameter past it takes more types than any vocabulary
+    /// written by hand or built for this library's tests gives one (the most any of those gives one
+    /// is 4096), and each member reading it is refused, never admitted unjudged. More types at a
+    /// parameter than this is more instantiations of its declaration than this.
     [<Literal>]
-    let declarationLimit = 16384
+    let parameterLimit = 16384
+
+    /// How many instantiations the declaration check reads, across every walk of one check, before
+    /// it says it cannot judge the members it has not judged yet. A safety net: the walks read at
+    /// most one instantiation per type new at a parameter (and the references it enters), which
+    /// [[parameterLimit]] bounds, and every vocabulary built for this library's tests reads far
+    /// fewer than this; past it each member not yet judged is refused, never admitted unjudged.
+    [<Literal>]
+    let stepLimit = 1048576
 
     /// A sum of printed sizes, saturating: a size past the range is still more than every cap.
     let private add (a: int64) (b: int64) : int64 =
@@ -195,8 +204,6 @@ module internal Instantiations =
                 /// expanding edge ([[expansive]]).
                 Expansive: Lazy<Set<string>>
                 Interner: Interner<'T>
-                /// The references a walk enters in a type, by the type's number ([[enters]]).
-                EnteredBy: System.Collections.Generic.Dictionary<int, System.Collections.Generic.HashSet<int>>
             }
 
     let private applied (reading: Reading<'T>) (declaration: string) (args: 'T list) : Declaration<'T> option =
@@ -457,8 +464,7 @@ module internal Instantiations =
                  |> Map.ofList)
           Into = into
           Expansive = expansive
-          Interner = Interner reading.Split
-          EnteredBy = System.Collections.Generic.Dictionary() }
+          Interner = Interner reading.Split }
 
     /// The references a walk enters in `t` ([[references]]).
     let entered (analysis: Analysis<'T>) (t: 'T) : (string * 'T list) list =
@@ -476,39 +482,20 @@ module internal Instantiations =
     let printedSize (analysis: Analysis<'T>) (instantiations: (string * 'T list) list) : int64 =
         (0L, instantiations) ||> List.fold (fun acc i -> add acc (size analysis i))
 
-    /// Whether a walk over `t` enters the reference `r` ([[entered]]), read off the shared graph:
-    /// the references entered in each node of `t` are found once per analysis however often that
-    /// node is held, so the answer costs a constant per node of `t` as it is shared in memory.
-    let enters (analysis: Analysis<'T>) (t: 'T) (r: 'T) : bool =
-        let reading = analysis.Reading
+    /// The type parameters `declaration` declares, in order; none where it is not declared.
+    let parameters (analysis: Analysis<'T>) (declaration: string) : string list =
+        analysis.Reading.Declarations
+        |> Map.tryFind declaration
+        |> Option.map _.Params
+        |> Option.defaultValue []
 
-        let rec found (t: 'T) : System.Collections.Generic.HashSet<int> =
-            let id = analysis.Interner.Id t
-
-            match analysis.EnteredBy.TryGetValue id with
-            | true, set -> set
-            | false, _ ->
-                let set = System.Collections.Generic.HashSet<int>()
-
-                match reading.Shape t with
-                | Shape.Parameter _
-                | Shape.Names _ -> ()
-                | Shape.Holds parts ->
-                    for p in parts do
-                        set.UnionWith(found p)
-                | Shape.Reference(declaration, args) ->
-                    args
-                    |> List.iteri (fun i a ->
-                        if reading.Arguments || analysis.Held.Contains(declaration, i) then
-                            set.UnionWith(found a))
-
-                    if (applied reading declaration args).IsSome then
-                        set.Add id |> ignore
-
-                analysis.EnteredBy[id] <- set
-                set
-
-        (found t).Contains(analysis.Interner.Id r)
+    /// The positions of `declaration`'s parameters that `t` names where a substitution replaces
+    /// them: the only arguments an answer about `t` at an instantiation of `declaration` can read.
+    let positionsNamed (analysis: Analysis<'T>) (declaration: string) (t: 'T) : int list =
+        parameters analysis declaration
+        |> List.indexed
+        |> List.filter (fun (_, p) -> mentions analysis.Reading p t)
+        |> List.map fst
 
     /// The declarations whose instantiations can reach one of the `declarations` through the
     /// members a walk follows, those declarations themselves included: the only ones a walk for
@@ -539,37 +526,47 @@ module internal Instantiations =
 
         Set.ofSeq found
 
-    /// The argument positions whose argument can become part of an argument of one of the
-    /// `declarations`: each of their own positions, and each position of another declaration
-    /// whose parameter is written in an argument at such a position (the parameter graph read
-    /// backwards). An instantiation's arguments at the other positions decide nothing about which
-    /// instantiations of the `declarations` are reached: a substitution places an argument only
-    /// where its parameter is written. Linear in the edges it reads.
-    let relevant
-        (analysis: Analysis<'T>)
-        (declarations: string seq)
+    /// The nodes of the parameter graph `next` reaches from `positions`, those included. Linear in
+    /// the edges it reads.
+    let private closed
+        (next: string * int -> (string * int) list)
+        (positions: (string * int) seq)
         : System.Collections.Generic.HashSet<string * int> =
-        let back = analysis.Back.Force()
-
         let found =
-            System.Collections.Generic.HashSet<string * int>(HashIdentity.Structural)
+            System.Collections.Generic.HashSet<string * int>(positions, HashIdentity.Structural)
 
-        let frontier = System.Collections.Generic.Queue<string * int>()
-
-        for d in declarations do
-            match Map.tryFind d analysis.Reading.Declarations with
-            | Some declaration ->
-                for i in 0 .. declaration.Params.Length - 1 do
-                    if found.Add((d, i)) then
-                        frontier.Enqueue((d, i))
-            | None -> ()
+        let frontier = System.Collections.Generic.Queue<string * int>(found)
 
         while frontier.Count > 0 do
-            for from in back |> Map.tryFind (frontier.Dequeue()) |> Option.defaultValue [] do
-                if found.Add from then
-                    frontier.Enqueue from
+            for node in next (frontier.Dequeue()) do
+                if found.Add node then
+                    frontier.Enqueue node
 
         found
+
+    /// The argument positions whose argument can become part of an argument at one of
+    /// `positions`: each of them, and each position of a declaration whose parameter is written in
+    /// an argument at such a position (the parameter graph read backwards). An instantiation's
+    /// arguments at the other positions decide nothing about which arguments are reached at
+    /// `positions`: a substitution places an argument only where its parameter is written.
+    let relevant
+        (analysis: Analysis<'T>)
+        (positions: (string * int) seq)
+        : System.Collections.Generic.HashSet<string * int> =
+        let back = analysis.Back.Force()
+        closed (fun node -> back |> Map.tryFind node |> Option.defaultValue []) positions
+
+    /// The argument positions an argument at one of `positions` can become part of: each of them,
+    /// and each position an edge of the parameter graph leads to from one (the graph read
+    /// forwards). Each instantiation of a declaration enters the references the declaration
+    /// enters, and a substitution places different arguments where it places its parameter
+    /// differently, so a position reached so is given at least as many arguments as the one it is
+    /// reached from.
+    let downstream
+        (analysis: Analysis<'T>)
+        (positions: (string * int) seq)
+        : System.Collections.Generic.HashSet<string * int> =
+        closed (fun node -> analysis.Edges |> Map.tryFind node |> Option.defaultValue [] |> List.map _.To) positions
 
     /// The binding an instantiation makes: each parameter of its declaration to the argument at its
     /// position. None where the reference applies another number of arguments, or names nothing.
@@ -1024,12 +1021,23 @@ module internal Instantiations =
         let family, name = named declaration
         sprintf "%s '%s'" family name
 
-    /// What the declaration check says of a member of a declaration with more than
-    /// [[declarationLimit]] instantiations reached: the declaration, the member, the number.
+    /// What the declaration check says of a member that reads a parameter of its declaration given
+    /// more than [[parameterLimit]] types: the declaration, the member, the number. It is true of
+    /// the instantiations, since each type at the parameter is another instantiation.
     let tooManyToJudge (declaration: string) (memberName: string) (what: string) : string =
         sprintf
             "more than %d instantiations of %s reach %s; %s cannot be checked at each"
-            declarationLimit
+            parameterLimit
+            (spelledKey declaration)
+            memberName
+            what
+
+    /// What the declaration check says of a member it had not judged when its walks had read
+    /// [[stepLimit]] instantiations: the declaration, the member, the number.
+    let tooLongToJudge (declaration: string) (memberName: string) (what: string) : string =
+        sprintf
+            "the declaration check reads more than %d instantiations before it reaches every instantiation of %s that reaches %s; %s cannot be checked at each"
+            stepLimit
             (spelledKey declaration)
             memberName
             what
@@ -1055,3 +1063,352 @@ module internal Instantiations =
         match reached walk idl roots with
         | Ok _ -> None
         | Error why -> Some why
+
+    // -----------------------------------------------------------------------
+    // The walk the declaration check's two instantiation rules share (Phase 732).
+    // -----------------------------------------------------------------------
+
+    /// What a rule answers of one member at one binding of its declaration's parameters.
+    [<RequireQualifiedAccess>]
+    type Verdict =
+        | Fits
+        /// It does not, and why, in the rule's words.
+        | Fails of why: string
+        /// A parameter is bound to a type cut short, and the answer reads what was cut.
+        | Undecided
+
+    /// One member a rule judges at the instantiations of its declaration.
+    type Judged =
+        {
+            /// The declaration, by its key in the reading.
+            Declaration: string
+            /// The positions of the declaration's parameters the answer reads.
+            Reads: int list
+            /// The answer at a binding of the declaration's parameters, the flag saying whether an
+            /// argument it reads was cut short ([[Verdict.Undecided]] is answered only then).
+            Judge: bool -> Map<string, IdlType> -> Verdict
+        }
+
+    /// What became of one member.
+    [<RequireQualifiedAccess>]
+    type Outcome =
+        /// It fits every instantiation the walk reached.
+        | Admitted
+        /// It does not fit the first instantiation named, for the reason given, nor `more` others found.
+        | Refused of instantiation: IdlType * why: string * more: int
+        /// A parameter it reads takes more than [[parameterLimit]] types.
+        | TooMany
+        /// The walks read [[stepLimit]] instantiations before it was judged.
+        | TooLong
+        /// Its classes were cut too short to answer: judged again a level deeper.
+        | Deeper
+
+    /// `t` with every type held `k` levels down replaced by an unbound parameter (no declared
+    /// parameter is named by the empty string). A type that holds none is kept.
+    let rec private cutAt (k: int) (t: IdlType) : IdlType =
+        let below = cutAt (k - 1)
+
+        match t with
+        | TList _
+        | TMap _
+        | TSet _
+        | TTuple _
+        | TKeyedMap _
+        | TRecord(_, _ :: _)
+        | TUnion(_, _ :: _) when k = 0 -> TVar ""
+        | TList inner -> TList(below inner)
+        | TMap inner -> TMap(below inner)
+        | TSet inner -> TSet(below inner)
+        | TTuple components -> TTuple(List.map below components)
+        | TKeyedMap(key, value) -> TKeyedMap(below key, below value)
+        | TRecord(n, args) -> TRecord(n, List.map below args)
+        | TUnion(n, args) -> TUnion(n, List.map below args)
+        | TStr
+        | TInt
+        | TBool
+        | TFloat
+        | TEnum _
+        | TVar _
+        | TNode
+        | TKind
+        | TOp
+        | TClosure
+        | TOpaque
+        | TFn _
+        | TJson
+        | THosted _
+        | TInt64
+        | TDecimal
+        | TBytes
+        | TTimeOfDay
+        | TDuration -> t
+
+    /// The member `m` over the instantiations `found` of its declaration, judged in groups whose
+    /// arguments at the positions it reads agree to a depth, from `depth`. A group the cut leaves
+    /// undecided is split a level deeper where every instantiation was found (`exact`); in classes
+    /// only one of each class at the walk's depth was, so the member is walked for again. A
+    /// refusal decides: it names an instantiation the vocabulary reaches, and in classes a group
+    /// left undecided beside it is not counted among those that fail.
+    let private judgedOver
+        (analysis: Analysis<IdlType>)
+        (m: Judged)
+        (exact: bool)
+        (depth: int)
+        (found: IdlType array list)
+        : Outcome =
+        let identity = identity analysis
+        let pars = parameters analysis m.Declaration
+
+        let binding (args: IdlType array) =
+            Map.ofList (List.zip pars (List.ofArray args))
+
+        let judged = found |> List.indexed
+        let failing = ResizeArray<int * string>()
+
+        // Whether every group of `group` was answered; each that fails is recorded.
+        let rec sort (k: int) (group: (int * IdlType array) list) : bool =
+            group
+            |> List.groupBy (fun (_, args) -> m.Reads |> List.map (fun i -> identity (cutAt k args[i])))
+            |> List.map (fun (_, members) ->
+                let _, args = List.head members
+
+                let cut =
+                    args |> Array.mapi (fun i a -> if List.contains i m.Reads then cutAt k a else a)
+
+                let whole = m.Reads |> List.forall (fun i -> identity cut[i] = identity args[i])
+
+                match m.Judge (not whole) (binding cut) with
+                | Verdict.Fits -> true
+                | Verdict.Fails why ->
+                    failing.AddRange(members |> List.map (fun (i, _) -> i, why))
+                    true
+                | Verdict.Undecided -> exact && sort (k + 1) members)
+            |> List.forall id
+
+        let answered = sort depth judged
+
+        if failing.Count = 0 then
+            if answered then Outcome.Admitted else Outcome.Deeper
+        else
+            let first, cutWhy = failing |> Seq.minBy fst
+            let args = snd judged[first]
+
+            // The sentence of the instantiation itself; a group's was read with its arguments cut.
+            let why =
+                match m.Judge false (binding args) with
+                | Verdict.Fails why -> why
+                | Verdict.Fits
+                | Verdict.Undecided -> cutWhy
+
+            Outcome.Refused(applies (m.Declaration, List.ofArray args), why, failing.Count - 1)
+
+    /// One walk for the members `live`, every argument read at `cut`; what became of each, in order.
+    let private walk
+        (analysis: Analysis<IdlType>)
+        (roots: IdlType list)
+        (holdsVariable: IdlType -> bool)
+        (steps: int ref)
+        (live: Judged list)
+        (exact: bool)
+        (depth: int)
+        (cut: IdlType -> IdlType)
+        : Outcome list =
+        let identity = identity analysis
+
+        // The positions read, by declaration, for the members `judged`: those whose arguments can
+        // become part of an argument one of them reads.
+        let positionsFor (judged: Judged list) =
+            relevant
+                analysis
+                [ for m in judged do
+                      for i in m.Reads -> m.Declaration, i ]
+            |> Seq.groupBy fst
+            |> Seq.map (fun (d, at) -> d, at |> Seq.map snd |> Seq.sort |> Array.ofSeq)
+            |> dict
+
+        let mutable positions = positionsFor live
+
+        let declarations = live |> List.map _.Declaration |> List.distinct
+        let within = reachingAny analysis declarations
+
+        let types =
+            System.Collections.Generic.Dictionary<string * int, System.Collections.Generic.HashSet<int>>(
+                HashIdentity.Structural
+            )
+
+        let over = System.Collections.Generic.HashSet<string * int>(HashIdentity.Structural)
+
+        // A declaration none of whose positions is read is one step, however it is reached.
+        let enteredOnce = System.Collections.Generic.HashSet<string>()
+
+        // The instantiations found of each declaration a member is judged at, in the order found.
+        let found =
+            declarations |> List.map (fun d -> d, ResizeArray<IdlType array>()) |> dict
+
+        let pastCount (m: Judged) =
+            m.Reads |> List.exists (fun i -> over.Contains(m.Declaration, i))
+
+        let mutable judging = live.Length
+        let mutable exhausted = false
+        let stack = System.Collections.Generic.Stack<string * IdlType list>()
+
+        // Pushed last first, so the first reference an instantiation enters is read first.
+        let offer (instantiations: (string * IdlType list) list) =
+            for (name, _) as instantiation in List.rev instantiations do
+                if within.Contains name then
+                    stack.Push instantiation
+
+        offer (roots |> List.collect (entered analysis))
+
+        while stack.Count > 0 && judging > 0 && not exhausted do
+            if steps.Value >= stepLimit then
+                exhausted <- true
+            else
+                steps.Value <- steps.Value + 1
+                let (name, written) as instantiation = stack.Pop()
+                let args = Array.ofList written
+
+                let fresh =
+                    match positions.TryGetValue name with
+                    | true, at ->
+                        let mutable fresh = false
+
+                        for i in at do
+                            if not (over.Contains(name, i)) then
+                                let seen =
+                                    match types.TryGetValue((name, i)) with
+                                    | true, seen -> seen
+                                    | false, _ ->
+                                        let seen = System.Collections.Generic.HashSet<int>()
+                                        types[(name, i)] <- seen
+                                        seen
+
+                                if seen.Add(identity (cut args[i])) then
+                                    if seen.Count > parameterLimit then
+                                        over.UnionWith(downstream analysis [ name, i ])
+
+                                        // Each position read feeds one a member left reads, so this
+                                        // one past the count put a member past it; what fed only
+                                        // such members is read no more.
+                                        let judged = live |> List.filter (pastCount >> not)
+
+                                        if judged.Length < judging then
+                                            judging <- judged.Length
+                                            positions <- positionsFor judged
+                                    else
+                                        fresh <- true
+
+                        fresh
+                    | false, _ -> enteredOnce.Add name
+
+                if fresh then
+                    // An argument naming a parameter is applied where its owner declares none: no
+                    // instantiation to judge, and that owner's own fault.
+                    match found.TryGetValue name with
+                    | true, those when not (Array.exists holdsVariable args) -> those.Add args
+                    | _ -> ()
+
+                    offer (successors analysis instantiation)
+
+        live
+        |> List.map (fun m ->
+            if pastCount m then
+                Outcome.TooMany
+            elif exhausted then
+                Outcome.TooLong
+            else
+                judgedOver analysis m exact depth (List.ofSeq found[m.Declaration]))
+
+    /// What becomes of each of `members` at the instantiations a document can hold a value of,
+    /// reached from `roots` through the members the analysis's walk follows; `steps` counts the
+    /// instantiations read, against [[stepLimit]], across every call that shares it.
+    ///
+    /// A member's answer at an instantiation reads only the arguments at the parameters its type
+    /// names ([[Judged.Reads]]), and depends only on the TYPES each of those parameters takes, never
+    /// on which go together: whether a literal fits is a conjunction of checks each reading one node
+    /// of the member's type at the instantiation, and each node lies in the member's own type or in
+    /// ONE parameter's argument (a set's element and a keyed map's key cannot be a parameter, so no
+    /// substitution splits the subtree their check reads); whether a transparent case can encode to
+    /// an object reads the outermost form of one argument. So the walk is kept per PARAMETER: it
+    /// reads the arguments only at the positions that can become part of an argument a member reads
+    /// ([[relevant]]), keeps for each such position the types found there, and enters what an
+    /// instantiation enters only where it brings a type new at one of them. One whose every type
+    /// was found before enters nothing new: each argument it would place was placed already, at the
+    /// same position of the same reference, by the instantiation that first brought it. Each type
+    /// found is carried by that instantiation, a real one reached, and a member is judged at those
+    /// of its declaration, so every instantiation a refusal names is one the vocabulary reaches, and
+    /// the types they place at each parameter are every type the parameter takes.
+    ///
+    /// Where the instantiations are finitely many ([[unbounded]]), every type a parameter takes is
+    /// found. Where they are not, the walk is taken in CLASSES: each argument is read cut at a depth
+    /// `k`, what lies below it left unbound, and two that agree to that depth are one type at the
+    /// position. A substitution places an argument no shallower than it stood, so the classes are
+    /// finitely many at any depth; a member the cut leaves undecided is walked for again a level
+    /// deeper.
+    ///
+    /// A member is judged in groups too, so a literal is rendered once for many instantiations: the
+    /// instantiations found are grouped by their arguments at the positions the member reads, cut at
+    /// a depth, and each group is judged once, at its arguments cut there. An answer that reads
+    /// nothing the cut left unbound is the answer at every instantiation of the group; one that does
+    /// splits the group a level deeper (in classes, walks again). A member is refused once, naming
+    /// the first instantiation found that it does not fit and how many more of those found it does
+    /// not fit either.
+    ///
+    /// Two counts bound it, and past each a member is refused, never admitted unjudged: a parameter
+    /// that takes more than [[parameterLimit]] types, for each member reading it or a position an
+    /// argument at it is placed at (a position an argument is placed at takes at least as many types
+    /// as the one it is placed from, [[downstream]], so no type is lost to a member that is judged);
+    /// and [[stepLimit]] instantiations read, a safety net, for each member not judged by then. Every
+    /// position read feeds one a member reads, so a position past the count puts a member past it,
+    /// and what fed only members past it is read no more.
+    ///
+    /// The walk is depth-first: it follows each reference it enters before the next, so a parameter
+    /// at the end of a long chain is given its types as the chain is entered.
+    ///
+    /// The cost, for declarations whose member types hold `s` nodes between them, `p` the argument
+    /// positions read, `r` the most references one declaration enters and `N` [[parameterLimit]]:
+    /// the analysis is linear in `s`; a walk enters what an instantiation enters at most once per
+    /// type new at a position it reads, so at most `p N` times, and reads at most `r p N`
+    /// instantiations besides the roots', each costing what its declaration's member types cost
+    /// however large its arguments have grown; a member's literal is rendered once per group per
+    /// depth. The classes walk is taken again only for the members its cut left undecided, which a
+    /// literal's depth bounds. A vocabulary of `n` declarations each instantiated once costs
+    /// O(s + n).
+    let judgeAtParameters
+        (analysis: Analysis<IdlType>)
+        (roots: IdlType list)
+        (holdsVariable: IdlType -> bool)
+        (steps: int ref)
+        (members: Judged list)
+        : Outcome list =
+        let unbounded = unbounded analysis roots
+
+        // What became of each of `live`: walked once where every instantiation is found (`exact`),
+        // in classes from depth `k` otherwise, deepened for those the cut leaves undecided.
+        let rec verdicts (live: (int * Judged) list) (exact: bool) (k: int) : (int * Outcome) list =
+            if List.isEmpty live then
+                []
+            else
+                let outcomes =
+                    walk analysis roots holdsVariable steps (List.map snd live) exact k (if exact then id else cutAt k)
+
+                let answered, deeper =
+                    List.zip live outcomes
+                    |> List.partition (fun (_, o) ->
+                        match o with
+                        | Outcome.Deeper -> false
+                        | Outcome.Admitted
+                        | Outcome.Refused _
+                        | Outcome.TooMany
+                        | Outcome.TooLong -> true)
+
+                (answered |> List.map (fun ((i, _), o) -> i, o))
+                @ verdicts (List.map fst deeper) exact (k + 1)
+
+        let finite, infinite =
+            members
+            |> List.indexed
+            |> List.partition (fun (_, m) -> not (unbounded.Contains m.Declaration))
+
+        let outcomes = verdicts finite true 1 @ verdicts infinite false 1 |> Map.ofList
+        members |> List.mapi (fun i _ -> outcomes[i])
