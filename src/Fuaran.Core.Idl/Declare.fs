@@ -1219,33 +1219,44 @@ module Declare =
         /// What the declarations `held` names share is found ONCE for them all: the analysis (which
         /// argument positions a value reaches, which declarations enter which, the parameter graph's
         /// cycles) and which declarations have finitely many instantiations
-        /// ([[Instantiations.unbounded]]). A declaration that has is judged at each of them, read
-        /// from ONE enumeration of every such declaration's instantiations: the walk that keeps only
-        /// the declarations reaching it reads the same ones. The others are judged in CLASSES, in one
-        /// walk for them all: two instantiations whose arguments agree to a depth `k` enter
-        /// references that agree to that depth (a substitution places an argument no shallower than
-        /// it stood), so a class is judged at its first member wherever the cut decides the verdict,
-        /// which `judged` says beside its faults (it is handed the cut). Where the cut does not decide
-        /// for a declaration, the depth is raised for it and the walk starts again. At any depth the
-        /// classes are finitely many, so the walk ends.
+        /// ([[Instantiations.unbounded]]). A declaration that has is judged at each of them. The
+        /// others are judged in CLASSES: two instantiations whose arguments agree to a depth `k`
+        /// enter references that agree to that depth (a substitution places an argument no
+        /// shallower than it stood), so a class is judged at its first member wherever the cut
+        /// decides the verdict, which `judged` says beside its faults (it is handed the cut). Where
+        /// the cut does not decide for a declaration, the depth is raised for it and the walk starts
+        /// again. Each is ONE walk for every declaration it judges, entering only the declarations
+        /// that reach one of them ([[Instantiations.reachingAny]]) and reading an instantiation's
+        /// arguments only at the positions that can become part of an argument of one of them
+        /// ([[Instantiations.relevant]]): instantiations that differ only elsewhere reach the same
+        /// instantiations of the declarations judged, so they are one step.
         ///
-        /// A walk that reads more than [[Instantiations.limit]] instantiations is taken again for each
-        /// declaration it was reading for, ON ITS OWN: entering only it and the declarations that
-        /// reach it ([[Instantiations.reaching]]), so a part of the vocabulary that cannot reach it,
-        /// however many instantiations it has, is not read for it. One that still reads more is
-        /// `unchecked` for that declaration: said, in the sentence that names it, never guessed.
+        /// The one count is of ONE declaration's instantiations. A declaration with more than
+        /// [[Instantiations.declarationLimit]] of its own instantiations reached is judged no
+        /// further, and each member the rule asks of it is refused in a sentence naming the
+        /// declaration, the member and the number (`tooMany`). Nothing else is counted against it,
+        /// so no verdict depends on how many instantiations another declaration has. Where every
+        /// instantiation is judged, the count is read from the declaration's own instantiations
+        /// judged, and from those read of any declaration that reaches it through references each
+        /// writing every parameter it is read at, which it has at least as many of
+        /// ([[Instantiations.atLeastAsMany]]); in classes, from its own classes judged, across the
+        /// depths. A declaration refused is judged no further, and the walk reads the others on: it
+        /// still enters the refused one wherever that reaches another, at the positions that one is
+        /// read at, so the instantiations of every other are all reached.
         ///
         /// Nothing is printed to be judged, so how large an instantiation is decides nothing: a type
         /// shared in memory is read once per node however large it prints, and only a refusal's text
         /// names an instantiation, to its first [[Instantiations.spelledLimit]] nodes.
         ///
-        /// The cost, for declarations whose member types hold `s` nodes between them, `L` the count
-        /// and `h` the declarations held: the analysis is linear in `s`; each walk enters at most `L`
-        /// instantiations of generic declarations across every depth it tries, each step costing what
-        /// the member types of the declaration it reads cost; and only a declaration whose shared
-        /// walk stopped at the count is walked again, on its own and bounded the same way. So the
-        /// rules cost O(s + L) steps where no shared walk stops at the count, and O(s + h L) at most,
-        /// whatever the arguments have grown to.
+        /// The cost, for declarations whose member types hold `s` nodes between them, `N` the count
+        /// and `h` the declarations held: the analysis is linear in `s`; a walk takes one step per
+        /// instantiation it reads, each costing what the member types of its declaration cost,
+        /// and reads at most `N + 1` instantiations of each declaration it judges; the classes walk
+        /// is taken again only for the declarations its cut left undecided. Where each declaration
+        /// a walk enters writes all it is read at into a declaration judged, through references as
+        /// above (every chain the tests build), it reads at most `N + 1` instantiations of each
+        /// between two refusals, and the rules cost O(s + h N) steps; a vocabulary of `n`
+        /// declarations each instantiated once costs O(s + n).
         let overInstantiations
             (held: string list)
             (judged:
@@ -1253,7 +1264,7 @@ module Declare =
                     -> (IdlType -> IdlType)
                     -> string * IdlType list
                     -> VocabularyFault list * bool)
-            (unchecked: string -> string -> VocabularyFault list)
+            (tooMany: string -> VocabularyFault list)
             : VocabularyFault list =
             let wire = Instantiations.wire.Members
             let analysis = Instantiations.analyse (Instantiations.ofIdl Instantiations.wire idl)
@@ -1317,139 +1328,166 @@ module Declare =
                 | TTimeOfDay
                 | TDuration -> t
 
-            // The classes at depth `k` of the declarations `pending`, in one walk over the
-            // declarations that reach one of them; `read` is how many instantiations of generic
-            // declarations the walks have entered so far, at every depth tried. The faults of each
-            // declaration the walks decided, and the declarations left where a walk read past the
-            // count. A walk ends early once no pending declaration is still deciding at its depth.
-            let rec classes
+            let hole = TVar ""
+
+            // One walk over the declarations `pending`, every instantiation read at `cut` (`None`:
+            // read whole, and every one judged). `counts` holds how many instantiations of each
+            // pending declaration have been judged. The faults of each declaration the walk decided,
+            // those it could not decide at the cut, and those refused for the count.
+            let walk
                 (pending: Set<string>)
-                (k: int)
-                (read: int)
-                : Map<string, VocabularyFault list> * Set<string> =
-                let within = Instantiations.reachingAny analysis (Set.toList pending)
-                let cut = cutAt k
+                (cut: (IdlType -> IdlType) option)
+                (counts: System.Collections.Generic.Dictionary<string, int>)
+                =
+                let exact = Option.isNone cut
+                let cut = defaultArg cut id
+                let faults = pending |> Seq.map (fun d -> d, ResizeArray<VocabularyFault>()) |> dict
+
+                // Where every instantiation is judged, those of each declaration, judged once the walk
+                // has read them all: a declaration refused for the count is judged at none.
+                let toJudge =
+                    pending |> Seq.map (fun d -> d, ResizeArray<string * IdlType list>()) |> dict
+
+                let undecided = System.Collections.Generic.HashSet<string>()
+                let refused = System.Collections.Generic.HashSet<string>()
+                let mutable live = pending
+                let mutable within = Instantiations.reachingAny analysis (Set.toList live)
+                let mutable relevant = Instantiations.relevant analysis live
+                let mutable deciding = live.Count
+
+                // The instantiations read of each declaration not judged here, at the relevant
+                // positions: a lower bound on those of a declaration judged that it reaches.
+                let read =
+                    System.Collections.Generic.Dictionary<string, System.Collections.Generic.HashSet<int list>>()
 
                 let seen =
                     System.Collections.Generic.HashSet<string * int list>(HashIdentity.Structural)
 
                 let queue = System.Collections.Generic.Queue<string * IdlType list>()
 
-                let faults = pending |> Seq.map (fun d -> d, ResizeArray<VocabularyFault>()) |> dict
-
-                let undecided = System.Collections.Generic.HashSet<string>()
-                let mutable read = read
+                let refuse (found: Set<string>) =
+                    refused.UnionWith(Set.intersect found live)
+                    live <- Set.difference live found
+                    within <- Instantiations.reachingAny analysis (Set.toList live)
+                    relevant <- Instantiations.relevant analysis live
+                    read.Clear()
+                    deciding <- live |> Seq.filter (undecided.Contains >> not) |> Seq.length
 
                 let offer (found: (string * IdlType list) list) =
-                    found |> List.filter (fst >> within.Contains) |> List.iter queue.Enqueue
+                    for (name, _) as instantiation in found do
+                        if within.Contains name then
+                            queue.Enqueue instantiation
 
                 for root in roots do
                     offer (Instantiations.entered analysis root)
 
-                while queue.Count > 0
-                      && undecided.Count < pending.Count
-                      && read <= Instantiations.limit do
-                    let (name, args) as instantiation = queue.Dequeue()
+                while queue.Count > 0 && deciding > 0 do
+                    let name, written = queue.Dequeue()
 
-                    if seen.Add((name, args |> List.map (cut >> Instantiations.identity analysis))) then
-                        if not (List.isEmpty args) then
-                            read <- read + 1
+                    if within.Contains name then
+                        let args =
+                            written |> List.mapi (fun i a -> if relevant.Contains(name, i) then a else hole)
 
-                        if pending.Contains name && not (undecided.Contains name) then
-                            let found, decided = judged analysis cut instantiation
+                        let ids = args |> List.map (cut >> Instantiations.identity analysis)
 
-                            if decided then
-                                faults[name].AddRange found
-                            else
-                                undecided.Add name |> ignore
+                        if seen.Add((name, ids)) then
+                            if live.Contains name then
+                                if not (undecided.Contains name) then
+                                    if not (List.isEmpty args) then
+                                        counts[name] <- counts[name] + 1
 
-                        offer (Instantiations.successors analysis instantiation)
+                                    if counts[name] > Instantiations.declarationLimit then
+                                        refuse (
+                                            if exact then
+                                                Instantiations.atLeastAsMany analysis relevant name
+                                            else
+                                                Set.singleton name
+                                        )
+                                    elif exact then
+                                        toJudge[name].Add((name, args))
+                                    else
+                                        let found, decided = judged analysis cut (name, args)
 
-                if read > Instantiations.limit then
-                    Map.empty, pending
+                                        if decided then
+                                            faults[name].AddRange found
+                                        else
+                                            undecided.Add name |> ignore
+                                            deciding <- deciding - 1
+                            elif exact && not (List.isEmpty args) then
+                                let mine =
+                                    match read.TryGetValue name with
+                                    | true, mine -> mine
+                                    | false, _ ->
+                                        let mine = System.Collections.Generic.HashSet<int list>(HashIdentity.Structural)
+                                        read[name] <- mine
+                                        mine
+
+                                if mine.Add ids && mine.Count > Instantiations.declarationLimit then
+                                    let over = Set.intersect (Instantiations.atLeastAsMany analysis relevant name) live
+
+                                    if not over.IsEmpty then
+                                        refuse over
+
+                            if within.Contains name then
+                                offer (Instantiations.successors analysis (name, args))
+
+                let decided =
+                    [ for d in live do
+                          if exact then
+                              d, toJudge[d] |> List.ofSeq |> List.collect (judged analysis id >> fst)
+                          elif not (undecided.Contains d) then
+                              d, List.ofSeq faults[d] ]
+
+                decided, Set.intersect live (Set.ofSeq undecided), Set.ofSeq refused
+
+            let zero (pending: Set<string>) =
+                System.Collections.Generic.Dictionary<string, int>(
+                    pending |> Seq.map (fun d -> System.Collections.Generic.KeyValuePair(d, 0))
+                )
+
+            // Every declaration of `pending` with its faults: judged at each instantiation (`exact`),
+            // or in classes from depth `k`, deepened for those the cut leaves undecided.
+            let rec verdicts
+                (pending: Set<string>)
+                (exact: bool)
+                (k: int)
+                (counts: System.Collections.Generic.Dictionary<string, int>)
+                : (string * VocabularyFault list) list =
+                if pending.IsEmpty then
+                    []
                 else
-                    // The first instantiation reached that each member is refused at.
-                    let here =
-                        [ for d in pending do
-                              if not (undecided.Contains d) then
-                                  d, faults[d] |> List.ofSeq |> List.distinctBy _.At ]
-                        |> Map.ofList
+                    let decided, undecided, refused =
+                        walk pending (if exact then None else Some(cutAt k)) counts
 
-                    if undecided.Count = 0 then
-                        here, Set.empty
-                    else
-                        let deeper, left = classes (Set.ofSeq undecided) (k + 1) read
-                        Map.fold (fun acc d fs -> Map.add d fs acc) here deeper, left
-
-            // Judged in classes: in one walk for them all, then each the walk could not finish on
-            // its own.
-            let inClasses (pending: string list) : (string * VocabularyFault list) list =
-                let decided, _ = classes (Set.ofList pending) 1 0
-
-                [ for d in pending do
-                      match Map.tryFind d decided with
-                      | Some fs -> d, fs
-                      | None when List.length pending = 1 -> d, unchecked d (Instantiations.exceedsReaching d)
-                      | None ->
-                          match classes (Set.singleton d) 1 0 with
-                          | alone, _ when alone.ContainsKey d -> d, alone[d]
-                          | _ -> d, unchecked d (Instantiations.exceedsReaching d) ]
-
-            // Judged at each instantiation: the enumeration's own, for `d`.
-            let atEach (all: (string * IdlType list) list) (d: string) : VocabularyFault list =
-                all
-                |> List.filter (fun (name, _) -> name = d)
-                |> List.collect (judged analysis id >> fst)
-
-            // One declaration whose instantiations are finitely many, walked on its own.
-            let alone (d: string) : VocabularyFault list =
-                match Instantiations.closureWithin analysis (Instantiations.reaching analysis d).Contains roots with
-                | Instantiations.Closure.Finite(all, _) -> atEach all d
-                | Instantiations.Closure.Exceeds -> unchecked d (Instantiations.exceedsReaching d)
-                | Instantiations.Closure.Infinite _ -> inClasses [ d ] |> List.collect snd
+                    [ for d, found in decided do
+                          // In classes, the first instantiation reached that each member is
+                          // refused at.
+                          d, (if exact then found else List.distinctBy _.At found)
+                      for d in refused do
+                          d, tooMany d
+                      yield! verdicts undecided exact (k + 1) counts ]
 
             let unbounded = Instantiations.unbounded analysis roots
             let finite, infinite = held |> List.partition (unbounded.Contains >> not)
-
-            let atInstantiations =
-                if List.isEmpty finite then
-                    []
-                else
-                    // No declaration kept is unbounded, so the enumeration finds no growth.
-                    match Instantiations.closureWithin analysis (unbounded.Contains >> not) roots with
-                    | Instantiations.Closure.Finite(all, _) ->
-                        let byDeclaration = all |> List.groupBy fst |> dict
-
-                        finite
-                        |> List.map (fun d ->
-                            match byDeclaration.TryGetValue d with
-                            | true, mine -> d, atEach mine d
-                            | false, _ -> d, [])
-                    | Instantiations.Closure.Exceeds
-                    | Instantiations.Closure.Infinite _ -> finite |> List.map (fun d -> d, alone d)
+            let finite, infinite = Set.ofList finite, Set.ofList infinite
 
             let byDeclaration =
-                atInstantiations @ (if List.isEmpty infinite then [] else inClasses infinite)
+                verdicts finite true 1 (zero finite) @ verdicts infinite false 1 (zero infinite)
                 |> Map.ofList
 
             held |> List.collect (fun d -> byDeclaration[d])
 
-        // The fault that says a rule did not judge every instantiation, for the first member it holds.
-        let uncheckedAt
+        // The faults that say a rule judged no member of `declaration` at each instantiation,
+        // because more than the count of them are reached: one for each member it asks of it.
+        let tooManyAt
+            (declaration: string)
             (what: string)
-            (why: string)
             (members: (PathSegment list * string) list)
             : VocabularyFault list =
             members
-            |> List.truncate 1
             |> List.map (fun (path, at) ->
                 { At = path
-                  Detail =
-                    sprintf
-                        "%s: %s was not checked at every instantiation, because the vocabulary reaches %s"
-                        at
-                        what
-                        why })
+                  Detail = Instantiations.tooManyToJudge declaration at what })
 
         /// Phase 732 — an omit-at-default member whose type names a type parameter has no one type
         /// to be checked at where it is declared: its literal is a value of `T` at `Opt<string>` and
@@ -1531,10 +1569,10 @@ module Declare =
             if Map.isEmpty held then
                 []
             else
-                overInstantiations (held |> Map.toList |> List.map fst) judged (fun declaration why ->
+                overInstantiations (held |> Map.toList |> List.map fst) judged (fun declaration ->
                     held[declaration]
                     |> List.map (fun (path, at, _, _) -> path, at)
-                    |> uncheckedAt "the omit-at-default value" why)
+                    |> tooManyAt declaration "its default")
 
         /// Phase 732 — a transparent case whose field is typed at a type parameter is refused at a
         /// reference that instantiates it to an object ([[typeErrors]]). A reference that applies the
@@ -1673,10 +1711,10 @@ module Declare =
             if Map.isEmpty held then
                 []
             else
-                overInstantiations (held |> Map.toList |> List.map fst) judged (fun declaration why ->
+                overInstantiations (held |> Map.toList |> List.map fst) judged (fun declaration ->
                     held[declaration]
                     |> List.map (fun (path, at, _, _) -> path, at)
-                    |> uncheckedAt "the transparent case" why)
+                    |> tooManyAt declaration "the transparent case it holds")
 
         [ yield! wireShapeErrors idl
           yield! enumWireErrors idl

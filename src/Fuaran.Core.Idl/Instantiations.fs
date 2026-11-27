@@ -113,6 +113,15 @@ module internal Instantiations =
     [<Literal>]
     let sizeLimit = 65536
 
+    /// How many instantiations of ONE declaration the declaration check judges a member of it at
+    /// before it says it cannot judge that member at each. It counts that declaration's own
+    /// instantiations and no other's, so no declaration's verdict depends on how many
+    /// instantiations another has; a declaration past it has more instantiations than any
+    /// vocabulary written by hand or built for this library's tests (the most any of those gives
+    /// one declaration is 4096), and is refused, never admitted unjudged.
+    [<Literal>]
+    let declarationLimit = 16384
+
     /// A sum of printed sizes, saturating: a size past the range is still more than every cap.
     let private add (a: int64) (b: int64) : int64 =
         if a > System.Int64.MaxValue - b then
@@ -178,6 +187,8 @@ module internal Instantiations =
                 Held: Set<string * int>
                 Entered: Map<string, (string * 'T list) list>
                 Edges: Map<string * int, Edge<'T> list>
+                /// Each node of the parameter graph, and the nodes with an edge to it.
+                Back: Lazy<Map<string * int, (string * int) list>>
                 /// Each declaration, and the declarations that enter it.
                 Into: Map<string, string list>
                 /// The declarations with a parameter on a cycle of the parameter graph that holds an
@@ -435,6 +446,15 @@ module internal Instantiations =
           Held = held
           Entered = entered
           Edges = edges
+          Back =
+            lazy
+                ([ for KeyValue(_, out) in edges do
+                       for e in out do
+                           e.To, e.From ]
+                 |> List.distinct
+                 |> List.groupBy fst
+                 |> List.map (fun (target, pairs) -> target, pairs |> List.map snd)
+                 |> Map.ofList)
           Into = into
           Expansive = expansive
           Interner = Interner reading.Split
@@ -506,8 +526,88 @@ module internal Instantiations =
 
         Set.ofSeq found
 
-    /// The declarations whose instantiations can reach one of `declaration`'s ([[reachingAny]]).
-    let reaching (analysis: Analysis<'T>) (declaration: string) : Set<string> = reachingAny analysis [ declaration ]
+    /// The declarations the `declarations` enter, directly or through others, those declarations
+    /// included: every one an instantiation of theirs can reach. Linear in the edges it reads.
+    let entering (analysis: Analysis<'T>) (declarations: string seq) : Set<string> =
+        let found = System.Collections.Generic.HashSet<string>(declarations)
+        let frontier = System.Collections.Generic.Queue<string>(found)
+
+        while frontier.Count > 0 do
+            for inner, _ in analysis.Entered |> Map.tryFind (frontier.Dequeue()) |> Option.defaultValue [] do
+                if found.Add inner then
+                    frontier.Enqueue inner
+
+        Set.ofSeq found
+
+    /// The argument positions whose argument can become part of an argument of one of the
+    /// `declarations`: each of their own positions, and each position of another declaration
+    /// whose parameter is written in an argument at such a position (the parameter graph read
+    /// backwards). An instantiation's arguments at the other positions decide nothing about which
+    /// instantiations of the `declarations` are reached: a substitution places an argument only
+    /// where its parameter is written. Linear in the edges it reads.
+    let relevant
+        (analysis: Analysis<'T>)
+        (declarations: string seq)
+        : System.Collections.Generic.HashSet<string * int> =
+        let back = analysis.Back.Force()
+
+        let found =
+            System.Collections.Generic.HashSet<string * int>(HashIdentity.Structural)
+
+        let frontier = System.Collections.Generic.Queue<string * int>()
+
+        for d in declarations do
+            match Map.tryFind d analysis.Reading.Declarations with
+            | Some declaration ->
+                for i in 0 .. declaration.Params.Length - 1 do
+                    if found.Add((d, i)) then
+                        frontier.Enqueue((d, i))
+            | None -> ()
+
+        while frontier.Count > 0 do
+            for from in back |> Map.tryFind (frontier.Dequeue()) |> Option.defaultValue [] do
+                if found.Add from then
+                    frontier.Enqueue from
+
+        found
+
+    /// The declarations reached at least as many times as `declaration`, counting an
+    /// instantiation by its arguments at the `relevant` positions alone: it, and each one a
+    /// declaration found enters through a reference that writes every parameter at a relevant
+    /// position of that declaration into an argument at a relevant position. Such a reference is
+    /// a different instantiation, read at those positions, for each instantiation of the
+    /// declaration so read (the arguments there are read back from where each parameter is
+    /// written), and each one an instantiation reached enters is reached. A declaration counted
+    /// at every position is counted by its instantiations.
+    let atLeastAsMany
+        (analysis: Analysis<'T>)
+        (relevant: System.Collections.Generic.HashSet<string * int>)
+        (declaration: string)
+        : Set<string> =
+        let reading = analysis.Reading
+        let found = System.Collections.Generic.HashSet<string>([ declaration ])
+        let frontier = System.Collections.Generic.Queue<string>([ declaration ])
+
+        while frontier.Count > 0 do
+            let d = frontier.Dequeue()
+
+            let read =
+                reading.Declarations[d].Params
+                |> List.indexed
+                |> List.filter (fun (i, _) -> relevant.Contains(d, i))
+                |> List.map snd
+
+            if not (List.isEmpty read) then
+                for inner, args in analysis.Entered[d] do
+                    let writes (p: string) =
+                        args
+                        |> List.indexed
+                        |> List.exists (fun (j, a) -> relevant.Contains(inner, j) && mentions reading p a)
+
+                    if List.forall writes read && found.Add inner then
+                        frontier.Enqueue inner
+
+        Set.ofSeq found
 
     /// The binding an instantiation makes: each parameter of its declaration to the argument at its
     /// position. None where the reference applies another number of arguments, or names nothing.
@@ -576,13 +676,12 @@ module internal Instantiations =
     /// are: a reached declaration with a parameter on a cycle that holds an expanding edge (the
     /// first one found, taking the declarations in first-reach order), and what following that
     /// cycle once reaches it at. Every expanding edge of a reached declaration is tried as the
-    /// cycle's first edge, so no such cycle is missed. Only the declarations `keep` answers are
-    /// asked; a cycle through one of [[reaching]]'s declarations passes only through others.
+    /// cycle's first edge, so no such cycle is missed.
     ///
     /// Whether there is such a cycle is read off the parameter graph's components, found once per
     /// analysis ([[Analysis.Expansive]]); only the declarations on one are searched for the
     /// witness, and only where there is one.
-    let growth (analysis: Analysis<'T>) (keep: string -> bool) (roots: 'T list) : Growth<'T> option =
+    let growth (analysis: Analysis<'T>) (roots: 'T list) : Growth<'T> option =
         let expansive = analysis.Expansive.Force()
 
         let cycle (declaration: string) : Edge<'T> list option =
@@ -606,7 +705,7 @@ module internal Instantiations =
                 |> Option.filter (List.exists _.Expanding))
 
         declarationsReached analysis roots
-        |> List.filter (fun d -> expansive.Contains d && keep d)
+        |> List.filter expansive.Contains
         |> List.tryPick (fun declaration ->
             cycle declaration
             |> Option.map (fun edges ->
@@ -628,22 +727,16 @@ module internal Instantiations =
                   Reaches = reaches }))
 
     /// The declarations whose walk [[growth]] finds infinite: each one that a reached declaration on
-    /// an expanding cycle enters, directly or through others, those declarations included. For
-    /// each other declaration `D`, the walk that keeps only [[reaching]]'s declarations for `D` is
-    /// finite, and every declaration reaching `D` is another such. Found once, in time linear in
-    /// the declarations and the references they enter.
+    /// an expanding cycle enters, directly or through others, those declarations included. Every
+    /// declaration that reaches another declaration is another such ([[reachingAny]]), so a walk
+    /// over the declarations reaching one that is not, keeping only those, is finite. Found once,
+    /// in time linear in the declarations and the references they enter.
     let unbounded (analysis: Analysis<'T>) (roots: 'T list) : Set<string> =
         let expansive = analysis.Expansive.Force()
-        let start = declarationsReached analysis roots |> List.filter expansive.Contains
-        let found = System.Collections.Generic.HashSet<string>(start)
-        let frontier = System.Collections.Generic.Queue<string>(start)
 
-        while frontier.Count > 0 do
-            for inner, _ in analysis.Entered[frontier.Dequeue()] do
-                if found.Add inner then
-                    frontier.Enqueue inner
-
-        Set.ofSeq found
+        declarationsReached analysis roots
+        |> List.filter expansive.Contains
+        |> entering analysis
 
     /// The instantiations a set of roots reaches.
     [<RequireQualifiedAccess>]
@@ -656,12 +749,11 @@ module internal Instantiations =
         /// Finitely many, and more than [[limit]].
         | Exceeds
 
-    /// Every instantiation the roots reach of the declarations `keep` answers: a worklist and a
-    /// visited set, with no bound on depth. An instantiation is keyed by its declaration and the
-    /// [[identity]] of each argument, so a step costs what the declarations' own types cost
+    /// Every instantiation the roots reach: a worklist and a visited set, with no bound on depth.
+    /// An instantiation is keyed by its declaration and the [[identity]] of each argument, so a step costs what the declarations' own types cost
     /// however large the arguments it substitutes have grown.
-    let closureWithin (analysis: Analysis<'T>) (keep: string -> bool) (roots: 'T list) : Closure<'T> =
-        match growth analysis keep roots with
+    let closure (analysis: Analysis<'T>) (roots: 'T list) : Closure<'T> =
+        match growth analysis roots with
         | Some g -> Closure.Infinite g
         | None ->
             let seen =
@@ -678,7 +770,6 @@ module internal Instantiations =
                 for (declaration, args) as instantiation in found do
                     if
                         generic <= limit
-                        && keep declaration
                         && seen.Add((declaration, args |> List.map (identity analysis)))
                     then
                         if not (List.isEmpty args) then
@@ -697,10 +788,6 @@ module internal Instantiations =
                 Closure.Exceeds
             else
                 Closure.Finite(List.ofSeq order, printed)
-
-    /// Every instantiation the roots reach ([[closureWithin]], every declaration kept).
-    let closure (analysis: Analysis<'T>) (roots: 'T list) : Closure<'T> =
-        closureWithin analysis (fun _ -> true) roots
 
     // -----------------------------------------------------------------------
     // The reading of a vocabulary's own declarations.
@@ -975,13 +1062,15 @@ module internal Instantiations =
         let family, name = named declaration
         sprintf "%s '%s'" family name
 
-    /// What a walk for the instantiations of ONE declaration says when it stopped at [[limit]]: it
-    /// counts that declaration's and those of the declarations that reach it ([[reaching]]).
-    let exceedsReaching (declaration: string) : string =
+    /// What the declaration check says of a member of a declaration with more than
+    /// [[declarationLimit]] instantiations reached: the declaration, the member, the number.
+    let tooManyToJudge (declaration: string) (memberName: string) (what: string) : string =
         sprintf
-            "more than %d instantiations of %s and the generic declarations that reach it"
-            limit
+            "more than %d instantiations of %s reach %s; %s cannot be checked at each"
+            declarationLimit
             (spelledKey declaration)
+            memberName
+            what
 
     /// What an entry that prints every instantiation says of a vocabulary whose instantiations
     /// hold more than [[sizeLimit]] nodes between them.

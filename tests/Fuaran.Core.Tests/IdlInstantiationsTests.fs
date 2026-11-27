@@ -480,19 +480,254 @@ let tests =
                         (Declare.errors (chain 13 (f "v" (TList(TVar "T")) (OmitDefault(VList [])))))
                         "an empty list at list<T> is admitted without reading an instantiation"
 
-                    // Any other literal has every instantiation to be judged at, and the rule says
-                    // it did not judge them.
-                    let unjudged =
-                        within 30.0 "the declaration check" (fun () ->
+                    // Any other literal has every instantiation to be judged at, and the declaration
+                    // check counts only those of the declaration holding it: `D13`'s 4096 are each
+                    // judged, however many the twelve before it have between them.
+                    let judged =
+                        within 60.0 "the declaration check" (fun () ->
                             Declare.errors (chain 13 (f "v" (TVar "T") (OmitDefault(VStr "")))))
 
-                    match unjudged with
-                    | [ only ] ->
+                    Expect.equal judged.Length 4096 "one refusal for each instantiation of D13, none past it"
+
+                    Expect.equal
+                        (judged
+                         |> List.map (fun x -> x.Detail.Substring(0, x.Detail.IndexOf ':'))
+                         |> List.distinct)
+                        [ "record 'D13', field 'v'" ]
+                        "each names the member"
+
+                    Expect.equal
+                        (judged |> List.distinctBy (fun x -> x.Detail) |> List.length)
+                        4096
+                        "and its own instantiation")
+
+                testCase
+                    "the declaration check counts ONE declaration's instantiations, and refuses only past them"
+                    (fun _ ->
+                        let limit = 16384
+
+                        let mk (name: string) (pars: string list) (members: IdlField list) =
+                            union name pars [ case "Mk" members ]
+
+                        let refusal (name: string) =
+                            sprintf
+                                "more than %d instantiations of union '%s' reach union '%s' case 'Mk', field 'v'; its default cannot be checked at each"
+                                limit
+                                name
+                                name
+
+                        // `Uk<T> { a: U(k+1)<list<T>>; b: U(k+1)<map<T>> }`, the last holding `v: T = ""`
+                        // and `more`: the last has 2^(n-1) instantiations, each its own.
+                        let doubling (n: int) (more: IdlField list) (beside: IdlUnion list) (roots: IdlField list) =
+                            vocabulary
+                                [ kind "K" (f "g" (TUnion("U1", [ TStr ])) Optional :: roots) ]
+                                ([ for k in 1..n ->
+                                       mk
+                                           (sprintf "U%d" k)
+                                           [ "T" ]
+                                           (if k < n then
+                                                [ f "a" (TUnion(sprintf "U%d" (k + 1), [ TList(TVar "T") ])) Optional
+                                                  f "b" (TUnion(sprintf "U%d" (k + 1), [ TMap(TVar "T") ])) Optional ]
+                                            else
+                                                f "v" (TVar "T") (OmitDefault(VStr "")) :: more) ]
+                                 @ beside)
+                                []
+
+                        // 2^39 instantiations of U40: refused at once, in the one sentence, for the
+                        // count of U40's own, which the walk reads off the declarations before it
+                        // (each writes its parameter into the next) long before it reaches U40.
                         Expect.equal
-                            only.Detail
-                            "record 'D13', field 'v': the omit-at-default value was not checked at every instantiation, because the vocabulary reaches more than 4096 instantiations of record 'D13' and the generic declarations that reach it"
-                            "the member, the declaration it was walked for, and why it was not judged"
-                    | other -> failtestf "one fault expected: %A" other)
+                            (within 10.0 "Declare.errors" (fun () -> Declare.errors (doubling 40 [] [] []))
+                             |> List.map _.Detail)
+                            [ refusal "U40" ]
+                            "past the count: refused, naming the declaration, the member and the number"
+
+                        // The count's edge, exactly, where every instantiation fits: `Vk<T, S>`
+                        // doubles `S` and passes `T` on, the last holding `v: T = ""`, so its 2^14
+                        // instantiations are judged at str, each; one more is one past the count.
+                        let edge (extra: bool) =
+                            vocabulary
+                                [ kind
+                                      "K"
+                                      [ f "g" (TUnion("V1", [ TStr; TInt ])) Optional
+                                        if extra then
+                                            f "h" (TUnion("V15", [ TStr; TBool ])) Optional ] ]
+                                [ for k in 1..15 ->
+                                      mk
+                                          (sprintf "V%d" k)
+                                          [ "T"; "S" ]
+                                          (if k < 15 then
+                                               [ f
+                                                     "a"
+                                                     (TUnion(sprintf "V%d" (k + 1), [ TVar "T"; TList(TVar "S") ]))
+                                                     Optional
+                                                 f
+                                                     "b"
+                                                     (TUnion(sprintf "V%d" (k + 1), [ TVar "T"; TMap(TVar "S") ]))
+                                                     Optional ]
+                                           else
+                                               [ f "v" (TVar "T") (OmitDefault(VStr "")) ]) ]
+                                []
+
+                        Expect.isEmpty
+                            (within 60.0 "Declare.errors" (fun () -> Declare.errors (edge false)))
+                            "exactly the count: each of V15's 16384 instantiations judged, and each fits"
+
+                        Expect.equal
+                            (within 60.0 "Declare.errors" (fun () -> Declare.errors (edge true))
+                             |> List.map _.Detail)
+                            [ refusal "V15" ]
+                            "one past it: refused"
+
+                        // A neighbour past the count decides nothing for a declaration it does not
+                        // reach: `W<T> { v: T = "" }`, reached once at str beside U40, is judged and
+                        // admitted; U40 alone is refused.
+                        Expect.equal
+                            (within 10.0 "Declare.errors" (fun () ->
+                                Declare.errors (
+                                    doubling
+                                        40
+                                        []
+                                        [ mk "W" [ "T" ] [ f "v" (TVar "T") (OmitDefault(VStr "")) ] ]
+                                        [ f "w" (TUnion("W", [ TStr ])) Optional ]
+                                ))
+                             |> List.map _.Detail)
+                            [ refusal "U40" ]
+                            "the neighbour admitted, U40 refused"
+
+                        // A declaration a refused one reaches, through a reference that does not write
+                        // every parameter it is counted at, is still judged at each of its
+                        // instantiations, the walk reading the refused one on for it: `Wk<T, S> { a: W(k+1)<list<T>, S>; b: W(k+1)<map<T>, list<S>> }`,
+                        // the last holding `v: T = ""` and `e: E<S>`, with `E<T> { v: T = "" }`. W16 has
+                        // 2^15 instantiations and is refused; E has sixteen, `E<str>` and `E<list^j<str>>`
+                        // for j from 1 to 15, the last of them reached only at the last of W16's.
+                        let downstream =
+                            vocabulary
+                                [ kind "K" [ f "g" (TUnion("W1", [ TStr; TStr ])) Optional ] ]
+                                ([ for k in 1..16 ->
+                                       mk
+                                           (sprintf "W%d" k)
+                                           [ "T"; "S" ]
+                                           (if k < 16 then
+                                                [ f
+                                                      "a"
+                                                      (TUnion(sprintf "W%d" (k + 1), [ TList(TVar "T"); TVar "S" ]))
+                                                      Optional
+                                                  f
+                                                      "b"
+                                                      (TUnion(
+                                                          sprintf "W%d" (k + 1),
+                                                          [ TMap(TVar "T"); TList(TVar "S") ]
+                                                      ))
+                                                      Optional ]
+                                            else
+                                                [ f "v" (TVar "T") (OmitDefault(VStr ""))
+                                                  f "e" (TUnion("E", [ TVar "S" ])) Optional ]) ]
+                                 @ [ mk "E" [ "T" ] [ f "v" (TVar "T") (OmitDefault(VStr "")) ] ])
+                                []
+
+                        let answer = within 20.0 "Declare.errors" (fun () -> Declare.errors downstream)
+
+                        Expect.equal
+                            (answer |> List.filter (fun x -> x.Detail.StartsWith "union 'E'") |> List.length)
+                            15
+                            "E judged at each of its sixteen, and refused at each but E<str>"
+
+                        Expect.equal
+                            (answer
+                             |> List.filter (fun x -> not (x.Detail.StartsWith "union 'E'"))
+                             |> List.map _.Detail)
+                            [ refusal "W16" ]
+                            "W16 refused for the count"
+
+                        // Instantiations that differ only where nothing judged reads them are one step:
+                        // U40 holding no default but `d: E<str>` is walked at once, and E admitted.
+                        let upstream =
+                            vocabulary
+                                [ kind "K" [ f "g" (TUnion("U1", [ TStr ])) Optional ] ]
+                                ([ for k in 1..40 ->
+                                       mk
+                                           (sprintf "U%d" k)
+                                           [ "T" ]
+                                           (if k < 40 then
+                                                [ f "a" (TUnion(sprintf "U%d" (k + 1), [ TList(TVar "T") ])) Optional
+                                                  f "b" (TUnion(sprintf "U%d" (k + 1), [ TMap(TVar "T") ])) Optional ]
+                                            else
+                                                [ f "d" (TUnion("E", [ TStr ])) Optional ]) ]
+                                 @ [ mk "E" [ "T" ] [ f "v" (TVar "T") (OmitDefault(VStr "")) ] ])
+                                []
+
+                        Expect.isEmpty
+                            (within 10.0 "Declare.errors" (fun () -> Declare.errors upstream))
+                            "E admitted at its one instantiation, at once"
+
+                        // In classes the count is of the declaration's own classes judged, across the
+                        // depths: `D<T, S> { a: D<T, list<S>>; b: D<T, map<S>>; v: T = [[…[]…]] }` (fourteen
+                        // lists deep) held at `D<list^14<str>, str>` fits every instantiation, and is decided
+                        // only from depth fifteen, where it has 2^15 classes: refused.
+                        let rec nest (k: int) =
+                            if k = 0 then VList [] else VList [ nest (k - 1) ]
+
+                        let rec lists (k: int) (t: IdlType) =
+                            if k = 0 then t else TList(lists (k - 1) t)
+
+                        let deep =
+                            vocabulary
+                                [ kind "K" [ f "g" (TUnion("D", [ lists 14 TStr; TStr ])) Optional ] ]
+                                [ mk
+                                      "D"
+                                      [ "T"; "S" ]
+                                      [ f "a" (TUnion("D", [ TVar "T"; TList(TVar "S") ])) Optional
+                                        f "b" (TUnion("D", [ TVar "T"; TMap(TVar "S") ])) Optional
+                                        f "v" (TVar "T") (OmitDefault(nest 13)) ] ]
+                                []
+
+                        Expect.equal
+                            (within 60.0 "Declare.errors" (fun () -> Declare.errors deep)
+                             |> List.map _.Detail)
+                            [ refusal "D" ]
+                            "past the count of its classes: refused")
+
+                testCase
+                    "the count is four times the most instantiations of one declaration a fixture reaches"
+                    (fun _ ->
+                        // Every instantiation a document can hold, from each owner declaring no parameter,
+                        // counted by its declaration, over every fixture vocabulary of the suite's library.
+                        let roots (idl: Idl) : IdlType list =
+                            [ for k in idl.Kinds @ idl.Ops do
+                                  for x in k.Fields -> x.Type
+                              for x in idl.NodeFields -> x.Type
+                              for u in idl.Unions do
+                                  if List.isEmpty u.Params then
+                                      for c in u.Cases do
+                                          for x in c.Fields -> x.Type
+                              for r in idl.Records do
+                                  if List.isEmpty r.Params then
+                                      for x in r.Fields -> x.Type
+                              for c in idl.Contracts do
+                                  for m in c.Methods do
+                                      yield! (m.Arguments |> List.map _.Type) @ Option.toList m.Result ]
+
+                        let most =
+                            [ for name, idl in ("parameterised records", ParameterisedRecordsIdl.idl) :: fixtures do
+                                  match Decl.wireInstantiations idl (roots idl) with
+                                  | Ok all ->
+                                      all
+                                      |> List.countBy (fun t ->
+                                          match t with
+                                          | TRecord(n, _)
+                                          | TUnion(n, _) -> n
+                                          | _ -> "")
+                                      |> List.map snd
+                                      |> List.fold max 0
+                                  | Error why -> failtestf "%s: %s" name why ]
+                            |> List.fold max 0
+
+                        // The vocabularies built here to reach many reach 4096 of one declaration (`D13`
+                        // above); a fixture reaches far fewer.
+                        Expect.isLessThanOrEqual most 4096 (sprintf "a fixture reaches %d of one declaration" most)
+
+                        Expect.isGreaterThan most 0 "the measure is not vacuous")
 
                 testCase
                     "a list around a parameter expands, and a declaration naming itself closes a cycle at once"
@@ -882,29 +1117,6 @@ let tests =
                         let idl = held false TStr
                         Expect.isEmpty (within 10.0 "Declare.errors" (fun () -> Declare.errors idl)) "admitted"
 
-                        // Four thousand, still under the count, are read in the one enumeration too: a
-                        // walk per declaration enters each declaration's predecessors again, eight
-                        // million steps here.
-                        let longer =
-                            let d =
-                                [ for i in 1..4000 ->
-                                      declared
-                                          asUnion
-                                          (sprintf "D%d" i)
-                                          [ "T" ]
-                                          [ if i < 4000 then
-                                                f "x" (refer asUnion (sprintf "D%d" (i + 1)) [ TVar "T" ]) Optional
-                                            f "v" (TVar "T") (OmitDefault(VStr "")) ] ]
-
-                            vocabulary
-                                [ kind "K" [ f "g" (refer asUnion "D1" [ TStr ]) Optional ] ]
-                                (List.collect fst d)
-                                (List.collect snd d)
-
-                        Expect.isEmpty
-                            (within 10.0 "Declare.errors" (fun () -> Declare.errors longer))
-                            "four thousand admitted"
-
                         Expect.equal
                             (within 10.0 "Artifact.parse" (fun () -> Artifact.parse (Artifact.render idl)))
                             (Ok(Artifact.canonicalise idl))
@@ -936,6 +1148,65 @@ let tests =
                              |> List.length)
                             n
                             "and each refused in classes")
+
+                    testCase
+                        (what
+                         + ": five thousand declarations, each holding a default, are each judged, and the artifact loads")
+                        (fun _ ->
+                            // `D1<T> { x: D2<T>; v: T = "" } … D5000<T> { v: T = "" }` held at `D1<str>`: each
+                            // declaration has ONE instantiation, so the count, which is of one declaration's
+                            // own, is reached by none, however many declarations there are.
+                            let n = 5000
+
+                            let chain (m: int) =
+                                let d =
+                                    [ for i in 1..m ->
+                                          declared
+                                              asUnion
+                                              (sprintf "D%d" i)
+                                              [ "T" ]
+                                              [ if i < m then
+                                                    f "x" (refer asUnion (sprintf "D%d" (i + 1)) [ TVar "T" ]) Optional
+                                                f "v" (TVar "T") (OmitDefault(VStr "")) ] ]
+
+                                vocabulary
+                                    [ kind "K" [ f "g" (refer asUnion "D1" [ TStr ]) Optional ] ]
+                                    (List.collect fst d)
+                                    (List.collect snd d)
+
+                            let idl = chain n
+                            let text = Artifact.render idl
+
+                            // The fastest of three runs, each after the code has run once.
+                            let fastest (work: unit -> 'a) : 'a * float =
+                                work () |> ignore
+
+                                [ for _ in 1..3 ->
+                                      let watch = Diagnostics.Stopwatch.StartNew()
+                                      let answer = work ()
+                                      answer, watch.Elapsed.TotalSeconds ]
+                                |> List.minBy snd
+
+                            let faults, checking =
+                                within 120.0 "Declare.errors" (fun () -> fastest (fun () -> Declare.errors idl))
+
+                            Expect.isEmpty faults "no fault: each default fits the one instantiation it has"
+
+                            let read, loading =
+                                within 120.0 "Artifact.parse" (fun () -> fastest (fun () -> Artifact.parse text))
+
+                            Expect.equal read (Ok(Artifact.canonicalise idl)) "the artifact reads back"
+
+                            // Under a second each, built for release; a Debug build is held to ten.
+                            let bound =
+#if DEBUG
+                                10.0
+#else
+                                1.0
+#endif
+
+                            Expect.isLessThan checking bound (sprintf "Declare.errors took %.3f s" checking)
+                            Expect.isLessThan loading bound (sprintf "Artifact.parse took %.3f s" loading))
 
                 testCase
                     "a generic union applied at a tuple of its parameter is stated at the tuple's components"
