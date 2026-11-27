@@ -47,13 +47,13 @@
   documents the decoder refused. A consumer applies the holder at an argument that is no object, or tags the case.
   Where the instantiations are infinitely many each rule judges them in classes and names the first it refuses at.
   Each judges an instantiation without printing it, so how large one is decides nothing; a refusal names the
-  instantiation to its first 256 nodes, `...` standing for the rest. A walk that reads more than 4096 instantiations
-  is taken again for each declaration it judges on its own, entering only it and the declarations that can reach it,
-  and past that count says so, once, at that declaration's first member it holds, naming it: `…: the omit-at-default
-  value was not checked at every instantiation, because the vocabulary reaches more than 4096 instantiations of
-  record '<D>' and the generic declarations that reach it` (`the transparent case` likewise). A declaration no
-  document can hold a value of, and one held only where the literal fits and no case meets an object, load as before,
-  whatever the rest of the vocabulary reaches and however large its instantiations are. SIXTH, sentences a consumer may have
+  instantiation to its first 256 nodes, `...` standing for the rest. The one count is of ONE declaration's own
+  instantiations (in classes, its own classes judged): past 16384, each member the rule asks of it is refused,
+  `more than 16384 instantiations of record '<D>' reach record '<D>', field '<f>'; its default cannot be checked at
+  each` (`the transparent case it holds cannot be checked at each` likewise), and no other declaration's
+  instantiations count against it. A declaration no document can hold a value of, and one held at no more than 16384
+  of its own instantiations, only where the literal fits and no case meets an object, load as before, whatever the
+  rest of the vocabulary reaches and however large its instantiations are. SIXTH, sentences a consumer may have
   matched. A type variable where no parameter is declared is refused as `type variable '<T>' names a type parameter,
   and a kind declares none` (an op, the node envelope, a contract's method), where it said `is not a parameter of the
   union declaring it`; a type variable in a record's field that is not the record's parameter is refused as `is not
