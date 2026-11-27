@@ -114,20 +114,20 @@ module internal Instantiations =
     let sizeLimit = 65536
 
     /// How many types the declaration check finds at ONE type parameter of a generic declaration
-    /// before it says it cannot judge a member that reads that parameter at each instantiation. It
-    /// counts that parameter's own types and no other's, so no member's verdict depends on how many
-    /// types another parameter takes; a parameter past it takes more types than any vocabulary
-    /// written by hand or built for this library's tests gives one (the most any of those gives one
-    /// is 4096), and each member reading it is refused, never admitted unjudged. More types at a
-    /// parameter than this is more instantiations of its declaration than this.
+    /// before it stops finding each and judges a member that reads that parameter in classes
+    /// instead. It counts that parameter's own types and no other's, so no member's verdict depends
+    /// on how many types another parameter takes. Where the classes at the depth a member is decided
+    /// at are more than this too, the member is refused, never admitted unjudged. More types (or
+    /// classes) at a parameter than this is more instantiations of its declaration than this.
     [<Literal>]
     let parameterLimit = 16384
 
-    /// How many instantiations the declaration check reads, across every walk of one check, before
-    /// it says it cannot judge the members it has not judged yet. A safety net: the walks read at
-    /// most one instantiation per type new at a parameter (and the references it enters), which
-    /// [[parameterLimit]] bounds, and every vocabulary built for this library's tests reads far
-    /// fewer than this; past it each member not yet judged is refused, never admitted unjudged.
+    /// How many instantiations the declaration check reads in the walks that find each one, across
+    /// one check, and again how many in the walks in classes. A safety net: the walks read at most
+    /// one instantiation per type new at a parameter (and the references it enters), which
+    /// [[parameterLimit]] bounds. Where the first walk stops at it, a member whose declaration it
+    /// had read whole is judged, and the rest in classes; where the walks in classes stop at it, a
+    /// member whose declaration they had not read whole is refused, never admitted unjudged.
     [<Literal>]
     let stepLimit = 1048576
 
@@ -1022,8 +1022,9 @@ module internal Instantiations =
         sprintf "%s '%s'" family name
 
     /// What the declaration check says of a member that reads a parameter of its declaration given
-    /// more than [[parameterLimit]] types: the declaration, the member, the number. It is true of
-    /// the instantiations, since each type at the parameter is another instantiation.
+    /// more than [[parameterLimit]] classes at the depth the walk in classes reached: the
+    /// declaration, the member, the number. It is true of the instantiations, since each class at
+    /// the parameter is carried by another instantiation.
     let tooManyToJudge (declaration: string) (memberName: string) (what: string) : string =
         sprintf
             "more than %d instantiations of %s reach %s; %s cannot be checked at each"
@@ -1032,14 +1033,15 @@ module internal Instantiations =
             memberName
             what
 
-    /// What the declaration check says of a member it had not judged when its walks had read
-    /// [[stepLimit]] instantiations: the declaration, the member, the number.
+    /// What the declaration check says of a member whose declaration the walks in classes had not
+    /// read whole when they had read [[stepLimit]] instantiations, an instantiation left unread
+    /// leading to it: the member, the number, the declaration.
     let tooLongToJudge (declaration: string) (memberName: string) (what: string) : string =
         sprintf
-            "the declaration check reads more than %d instantiations before it reaches every instantiation of %s that reaches %s; %s cannot be checked at each"
+            "%s: the declaration check reads its budget of %d instantiations in classes and stops before it has read every one that leads to %s; %s cannot be checked at each"
+            memberName
             stepLimit
             (spelledKey declaration)
-            memberName
             what
 
     /// What an entry that prints every instantiation says of a vocabulary whose instantiations
@@ -1094,11 +1096,13 @@ module internal Instantiations =
     type Outcome =
         /// It fits every instantiation the walk reached.
         | Admitted
-        /// It does not fit the first instantiation named, for the reason given, nor `more` others found.
-        | Refused of instantiation: IdlType * why: string * more: int
-        /// A parameter it reads takes more than [[parameterLimit]] types.
+        /// It does not fit the first instantiation named, for the reason given, nor `more` others:
+        /// every other it does not fit where `every` (each instantiation was found), else those
+        /// found, a lower bound.
+        | Refused of instantiation: IdlType * why: string * more: int * every: bool
+        /// A parameter it reads takes more than [[parameterLimit]] types (in classes, classes).
         | TooMany
-        /// The walks read [[stepLimit]] instantiations before it was judged.
+        /// The walk read [[stepLimit]] instantiations with one unread that leads to its declaration.
         | TooLong
         /// Its classes were cut too short to answer: judged again a level deeper.
         | Deeper
@@ -1148,11 +1152,13 @@ module internal Instantiations =
     /// undecided is split a level deeper where every instantiation was found (`exact`); in classes
     /// only one of each class at the walk's depth was, so the member is walked for again. A
     /// refusal decides: it names an instantiation the vocabulary reaches, and in classes a group
-    /// left undecided beside it is not counted among those that fail.
+    /// left undecided beside it is not counted among those that fail. `every` says the
+    /// instantiations found are every one reached, so the count of those it fails is exact.
     let private judgedOver
         (analysis: Analysis<IdlType>)
         (m: Judged)
         (exact: bool)
+        (every: bool)
         (depth: int)
         (found: IdlType array list)
         : Outcome =
@@ -1200,7 +1206,16 @@ module internal Instantiations =
                 | Verdict.Fits
                 | Verdict.Undecided -> cutWhy
 
-            Outcome.Refused(applies (m.Declaration, List.ofArray args), why, failing.Count - 1)
+            Outcome.Refused(applies (m.Declaration, List.ofArray args), why, failing.Count - 1, exact && every)
+
+    /// How many instantiations the walks of one declaration check have read, each kind against
+    /// [[stepLimit]]: those that find each instantiation (`Each`), and those in classes.
+    type Steps =
+        { Each: int ref
+          InClasses: int ref }
+
+        /// None read yet.
+        static member None() = { Each = ref 0; InClasses = ref 0 }
 
     /// One walk for the members `live`, every argument read at `cut`; what became of each, in order.
     let private walk
@@ -1310,18 +1325,44 @@ module internal Instantiations =
 
                     offer (successors analysis instantiation)
 
+        // Where the budget stopped the walk, the declarations an instantiation left unread leads to:
+        // those it did not read whole. Every other was read whole, so its members are judged.
+        let unfinished =
+            if exhausted then
+                entering analysis (stack |> Seq.map fst |> Seq.distinct)
+            else
+                Set.empty
+
+        // Whether the instantiations found of `d` are every one reached: each of its positions is
+        // read, and the types found there multiply to as many as were found, so each combination
+        // was. (A position past the count is read no more: it fed only members past it.)
+        let everyFound (d: string) =
+            match positions.TryGetValue d with
+            | true, at when at.Length = (parameters analysis d).Length ->
+                let count = int64 found[d].Count
+
+                let product =
+                    (1L, at)
+                    ||> Array.fold (fun acc i ->
+                        match types.TryGetValue((d, i)) with
+                        | true, seen -> min (acc * int64 seen.Count) (count + 1L)
+                        | false, _ -> 0L)
+
+                product = count
+            | _ -> false
+
         live
         |> List.map (fun m ->
             if pastCount m then
                 Outcome.TooMany
-            elif exhausted then
+            elif unfinished.Contains m.Declaration then
                 Outcome.TooLong
             else
-                judgedOver analysis m exact depth (List.ofSeq found[m.Declaration]))
+                judgedOver analysis m exact (everyFound m.Declaration) depth (List.ofSeq found[m.Declaration]))
 
     /// What becomes of each of `members` at the instantiations a document can hold a value of,
     /// reached from `roots` through the members the analysis's walk follows; `steps` counts the
-    /// instantiations read, against [[stepLimit]], across every call that shares it.
+    /// instantiations read, each kind of walk against [[stepLimit]], across every call sharing it.
     ///
     /// A member's answer at an instantiation reads only the arguments at the parameters its type
     /// names ([[Judged.Reads]]), and depends only on the TYPES each of those parameters takes, never
@@ -1351,16 +1392,22 @@ module internal Instantiations =
     /// a depth, and each group is judged once, at its arguments cut there. An answer that reads
     /// nothing the cut left unbound is the answer at every instantiation of the group; one that does
     /// splits the group a level deeper (in classes, walks again). A member is refused once, naming
-    /// the first instantiation found that it does not fit and how many more of those found it does
-    /// not fit either.
+    /// the first instantiation found that it does not fit and how many more it does not fit: every
+    /// other, where the instantiations found are every one reached (each position of the
+    /// declaration is read, and the types found there multiply to the instantiations found), else
+    /// how many more of those found, a lower bound, as in classes, where a class stands for many.
     ///
-    /// Two counts bound it, and past each a member is refused, never admitted unjudged: a parameter
-    /// that takes more than [[parameterLimit]] types, for each member reading it or a position an
-    /// argument at it is placed at (a position an argument is placed at takes at least as many types
-    /// as the one it is placed from, [[downstream]], so no type is lost to a member that is judged);
-    /// and [[stepLimit]] instantiations read, a safety net, for each member not judged by then. Every
-    /// position read feeds one a member reads, so a position past the count puts a member past it,
-    /// and what fed only members past it is read no more.
+    /// Two counts bound the walk that finds each instantiation, and past each a member is judged in
+    /// classes instead: a parameter that takes more than [[parameterLimit]] types, for each member
+    /// reading it or a position an argument at it is placed at (a position an argument is placed at
+    /// takes at least as many types as the one it is placed from, [[downstream]], so no type is lost
+    /// to a member that is judged); and [[stepLimit]] instantiations read, a safety net, for each
+    /// member whose declaration an instantiation left unread leads to (one read whole is judged).
+    /// Every position read feeds one a member reads, so a position past the count puts a member past
+    /// it, and what fed only members past it is read no more. In classes the same two counts refuse,
+    /// never admitting a member unjudged: more than [[parameterLimit]] classes at a position at the
+    /// depth reached, and [[stepLimit]] instantiations read by the walks in classes with one unread
+    /// that leads to the member's declaration.
     ///
     /// The walk is depth-first: it follows each reference it enters before the next, so a parameter
     /// at the end of a long chain is given its types as the chain is entered.
@@ -1373,12 +1420,12 @@ module internal Instantiations =
     /// however large its arguments have grown; a member's literal is rendered once per group per
     /// depth. The classes walk is taken again only for the members its cut left undecided, which a
     /// literal's depth bounds. A vocabulary of `n` declarations each instantiated once costs
-    /// O(s + n).
+    /// O(s + n). Each kind of walk reads at most [[stepLimit]] instantiations a check.
     let judgeAtParameters
         (analysis: Analysis<IdlType>)
         (roots: IdlType list)
         (holdsVariable: IdlType -> bool)
-        (steps: int ref)
+        (steps: Steps)
         (members: Judged list)
         : Outcome list =
         let unbounded = unbounded analysis roots
@@ -1390,7 +1437,15 @@ module internal Instantiations =
                 []
             else
                 let outcomes =
-                    walk analysis roots holdsVariable steps (List.map snd live) exact k (if exact then id else cutAt k)
+                    walk
+                        analysis
+                        roots
+                        holdsVariable
+                        (if exact then steps.Each else steps.InClasses)
+                        (List.map snd live)
+                        exact
+                        k
+                        (if exact then id else cutAt k)
 
                 let answered, deeper =
                     List.zip live outcomes
@@ -1410,5 +1465,23 @@ module internal Instantiations =
             |> List.indexed
             |> List.partition (fun (_, m) -> not (unbounded.Contains m.Declaration))
 
-        let outcomes = verdicts finite true 1 @ verdicts infinite false 1 |> Map.ofList
+        // A member the walk that finds each instantiation could not judge, past one of its counts,
+        // is judged in classes with those whose instantiations are infinitely many.
+        let judged, again =
+            verdicts finite true 1
+            |> List.partition (fun (_, o) ->
+                match o with
+                | Outcome.TooMany
+                | Outcome.TooLong -> false
+                | Outcome.Admitted
+                | Outcome.Refused _
+                | Outcome.Deeper -> true)
+
+        let byIndex = Array.ofList members
+
+        let outcomes =
+            judged
+            @ verdicts (infinite @ (again |> List.map (fun (i, _) -> i, byIndex[i]))) false 1
+            |> Map.ofList
+
         members |> List.mapi (fun i _ -> outcomes[i])

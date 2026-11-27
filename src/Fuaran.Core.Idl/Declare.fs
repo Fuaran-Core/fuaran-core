@@ -1227,8 +1227,8 @@ module Declare =
             lazy (Instantiations.analyse (Instantiations.ofIdl Instantiations.wire idl))
 
         // How many instantiations the walks of this check have read, both rules' and every depth's
-        // together, against [[Instantiations.stepLimit]].
-        let stepsRead = ref 0
+        // together, each kind of walk against [[Instantiations.stepLimit]].
+        let stepsRead = Instantiations.Steps.None()
 
         /// Phase 732 — the walk the two rules below share ([[Instantiations.judgeAtParameters]]),
         /// and each member's fault from what became of it.
@@ -1239,13 +1239,16 @@ module Declare =
         /// applied. An instantiation named only as an argument no member holds (`Phantom<Opt<int>>`,
         /// where `Phantom<T>` holds nothing at `T`) is not one: no document holds a value of it.
         /// What the walks share is found once per check (`wireAnalysis`), and both rules and every
-        /// depth count against one step budget (`stepsRead`).
+        /// depth count against one step budget for each kind of walk (`stepsRead`).
         ///
         /// A member is refused in ONE fault: the first instantiation found that it does not fit,
-        /// and how many more of those found it does not fit (`… and at 4095 more`). A member that
-        /// reads a parameter given more than [[Instantiations.parameterLimit]] types, or that was not
-        /// judged when the whole check had read [[Instantiations.stepLimit]] instantiations, is
-        /// refused in a sentence of its own, never admitted unjudged.
+        /// and how many more it does not fit, every other where each instantiation was found
+        /// (`… and at 4095 more`), else those found, a lower bound (`… and at least 3 more`). A
+        /// member the walk that finds each instantiation cannot judge, past one of its counts, is
+        /// judged in classes; one the walks in classes cannot judge either, past
+        /// [[Instantiations.parameterLimit]] classes at a parameter it reads or once they have
+        /// read [[Instantiations.stepLimit]] instantiations short of its declaration, is refused in
+        /// a sentence of its own, never admitted unjudged.
         let overInstantiations (what: string) (asked: Asked list) : VocabularyFault list =
             let wire = Instantiations.wire.Members
 
@@ -1279,10 +1282,12 @@ module Declare =
                 match outcome with
                 | Instantiations.Outcome.Admitted
                 | Instantiations.Outcome.Deeper -> None
-                | Instantiations.Outcome.Refused(instantiation, why, more) ->
+                | Instantiations.Outcome.Refused(instantiation, why, more, every) ->
                     let spelled =
                         Instantiations.spellAbbreviated instantiation
-                        + (if more > 0 then sprintf " and at %d more" more else "")
+                        + (if more = 0 then ""
+                           elif every then sprintf " and at %d more" more
+                           else sprintf " and at least %d more" more)
 
                     Some
                         { At = a.At

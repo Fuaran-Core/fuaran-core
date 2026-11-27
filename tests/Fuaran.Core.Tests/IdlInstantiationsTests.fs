@@ -501,7 +501,7 @@ let tests =
                         "and counts every other instantiation of D13")
 
                 testCase
-                    "the declaration check counts the types ONE parameter takes, and refuses only past them"
+                    "the declaration check counts the types ONE parameter takes, and judges in classes past them"
                     (fun _ ->
                         let limit = 16384
 
@@ -514,6 +514,18 @@ let tests =
                                 limit
                                 name
                                 name
+
+                        // Past the count a member is judged in classes: refused at the instantiation
+                        // that carried the first class, and the other class at the outermost form
+                        // (`list<…>` beside `map<…>`) counted as found.
+                        let inClasses (name: string) (x: string) =
+                            x.StartsWith(
+                                sprintf
+                                    "union '%s' case 'Mk', field 'v': the omit-at-default value does not fit the field's type at the instantiation %s<"
+                                    name
+                                    name
+                            )
+                            && x.Contains " and at least 1 more ("
 
                         // `Uk<T> { a: U(k+1)<list<T>>; b: U(k+1)<map<T>> }`, the last holding `v: T = ""`
                         // and `more`: the last has 2^(n-1) instantiations, each its own.
@@ -532,18 +544,18 @@ let tests =
                                  @ beside)
                                 []
 
-                        // 2^39 types at U40's parameter: refused at once, in the one sentence, for the
-                        // count of the types it takes, which a position the parameter is placed at is
-                        // given at least as many of: past it at U16, so at every position after it.
+                        // 2^39 types at U40's parameter: past the count of the types it takes, which a
+                        // position the parameter is placed at is given at least as many of (past it at
+                        // U16, so at every position after it), and judged in classes at once.
                         Expect.equal
                             (within 10.0 "Declare.errors" (fun () -> Declare.errors (doubling 40 [] [] []))
-                             |> List.map _.Detail)
-                            [ refusal "U40" ]
-                            "past the count: refused, naming the declaration, the member and the number"
+                             |> List.map (fun x -> inClasses "U40" x.Detail))
+                            [ true ]
+                            "past the count: judged in classes, and refused at the two classes found"
 
                         // A neighbour past the count decides nothing for a declaration it does not
                         // reach: `W<T> { v: T = "" }`, reached once at str beside U40, is judged and
-                        // admitted; U40 alone is refused.
+                        // admitted; U40 alone is refused, in classes.
                         Expect.equal
                             (within 10.0 "Declare.errors" (fun () ->
                                 Declare.errors (
@@ -553,15 +565,15 @@ let tests =
                                         [ mk "W" [ "T" ] [ f "v" (TVar "T") (OmitDefault(VStr "")) ] ]
                                         [ f "w" (TUnion("W", [ TStr ])) Optional ]
                                 ))
-                             |> List.map _.Detail)
-                            [ refusal "U40" ]
+                             |> List.map (fun x -> inClasses "U40" x.Detail))
+                            [ true ]
                             "the neighbour admitted, U40 refused"
 
                         // A declaration reached only through a member refused for the count, at a
                         // parameter that member does not read, is still judged at each of its
                         // instantiations, the walk reading on for it: `Wk<T, S> { a: W(k+1)<list<T>, S>; b: W(k+1)<map<T>, list<S>> }`,
                         // the last holding `v: T = ""` and `e: E<S>`, with `E<T> { v: T = "" }`. W16's `T`
-                        // takes 2^15 types and its `v` is refused; E has sixteen, `E<str>` and `E<list^j<str>>`
+                        // takes 2^15 types and its `v` is refused, in classes; E has sixteen, `E<str>` and `E<list^j<str>>`
                         // for j from 1 to 15, the last of them reached only at the last of W16's.
                         let downstream =
                             vocabulary
@@ -600,9 +612,9 @@ let tests =
                         Expect.equal
                             (answer
                              |> List.filter (fun x -> not (x.Detail.StartsWith "union 'E'"))
-                             |> List.map _.Detail)
-                            [ refusal "W16" ]
-                            "W16 refused for the count"
+                             |> List.map (fun x -> inClasses "W16" x.Detail))
+                            [ true ]
+                            "W16 past the count, refused in classes"
 
                         // Instantiations that differ only where nothing judged reads them are one step:
                         // U40 holding no default but `d: E<str>` is walked at once, and E admitted.
@@ -629,7 +641,7 @@ let tests =
                         // other: `Xk<T, S> { a: X(k+1)<list<T>, S>; b: X(k+1)<map<T>, S> }`, the
                         // eightieth holding `d: D<T>` and `e: E<S>`, each of D and E holding
                         // `v: T = ""`. No reference writes both parameters, and D, past the count, is
-                        // still refused at once; E, at its one instantiation `E<str>`, is admitted, and the
+                        // refused in classes at once; E, at its one instantiation `E<str>`, is admitted, and the
                         // walk reads no more of the doubled parameter once D is refused, which feeds only D.
                         let lossy =
                             vocabulary
@@ -656,9 +668,9 @@ let tests =
 
                         Expect.equal
                             (within 10.0 "Declare.errors" (fun () -> Declare.errors lossy)
-                             |> List.map _.Detail)
-                            [ refusal "D" ]
-                            "D refused at once, E admitted"
+                             |> List.map (fun x -> inClasses "D" x.Detail))
+                            [ true ]
+                            "D refused in classes at once, E admitted"
 
                         // In classes the count is of the classes one parameter takes, at one depth, and
                         // only a parameter a member reads is read: `D<T, S> { a: D<T, list<S>>; b: D<T,
@@ -690,7 +702,7 @@ let tests =
                         // records, a string inside), `Box` and `Bag` each holding `item: W`, held at
                         // `D<Box^14<str>>`: the two records agree on the literal at every level, so no
                         // class is answered above depth fifteen, and at depth fourteen `T` has 2^15 - 1
-                        // classes: refused for the count.
+                        // classes: refused for the count, the one thing the classes walk cannot decide.
                         let rec boxes (k: int) (t: IdlType) =
                             if k = 0 then t else TRecord("Box", [ boxes (k - 1) t ])
 
@@ -1458,8 +1470,8 @@ let tests =
                         | [ only ] ->
                             Expect.stringContains
                                 only
-                                "does not fit the field's type at the instantiation G<list<str>> and at 3 more ("
-                                "refused at the first instantiation reached that the literal does not fit, counting one of each other class at depth one it does not fit"
+                                "does not fit the field's type at the instantiation G<list<str>> and at least 3 more ("
+                                "refused at the first instantiation reached that the literal does not fit, counting one of each other class at depth one it does not fit, a lower bound"
                         | other -> failtestf "one fault expected: %A" other
 
                         // A literal that fits every instantiation the vocabulary reaches, though not
@@ -2031,9 +2043,6 @@ let private branching (n: int) (literal: IdlValue) : Idl =
                              [ f "v" (TVar "T") (OmitDefault literal) ]) ] ]
         []
 
-let private pastCount (declaration: string) (memberName: string) (what: string) : string =
-    sprintf "more than 16384 instantiations of %s reach %s; %s cannot be checked at each" declaration memberName what
-
 [<Tests>]
 let perParameterTests =
     testList
@@ -2056,13 +2065,12 @@ let perParameterTests =
                   (Ok(Artifact.canonicalise twelve))
                   "its artifact reads back"
 
-              // Past the count at `H`'s parameter (2^21 and 2^41 types): refused in the one sentence.
-              for n in [ 20; 40 ] do
-                  Expect.equal
-                      (within 10.0 (sprintf "Declare.errors at %d" n) (fun () -> Declare.errors (carried n defaulted))
-                       |> List.map _.Detail)
-                      [ pastCount "union 'H'" "union 'H' case 'Mk', field 'v'" "its default" ]
-                      (sprintf "n = %d: refused for the count" n)
+              // Past the count at `H`'s parameter (2^17, 2^21 and 2^41 types): judged in classes, where
+              // `[]` is decided at the outermost form of each, and admitted.
+              for n in [ 16; 20; 40 ] do
+                  Expect.isEmpty
+                      (within 10.0 (sprintf "Declare.errors at %d" n) (fun () -> Declare.errors (carried n defaulted)))
+                      (sprintf "n = %d: past the count, judged in classes and admitted" n)
 
               // The transparent rule reads the same walk.
               let transparentAt (n: int) =
@@ -2081,11 +2089,9 @@ let perParameterTests =
                   (within 10.0 "Declare.errors, the transparent rule" (fun () -> Declare.errors (transparentAt 10)))
                   "a list is never an object: admitted"
 
-              Expect.equal
-                  (within 10.0 "Declare.errors, the transparent rule" (fun () -> Declare.errors (transparentAt 20))
-                   |> List.map _.Detail)
-                  [ pastCount "union 'H'" "union 'H' case 'Mk', field 'u'" "the transparent case it holds" ]
-                  "past the count: refused")
+              Expect.isEmpty
+                  (within 10.0 "Declare.errors, the transparent rule" (fun () -> Declare.errors (transparentAt 20)))
+                  "past the count: judged in classes, and admitted")
 
           testCase "a literal is refused in one fault, judged once per class of instantiations" (fun _ ->
               // `""` fits no list: refused at each of `U13`'s 4096 and `U15`'s 16384 instantiations,
@@ -2153,17 +2159,30 @@ let perParameterTests =
                   "at the instantiation U3<list<list<str>>> and at 1 more ("
                   "the first it does not fit, and the one other"
 
-              // Past the count: the one sentence, and no fault besides.
-              Expect.equal
-                  (within 10.0 "Declare.errors at 16" (fun () -> Declare.errors (branching 16 (VStr "")))
-                   |> List.map _.Detail)
-                  [ pastCount "union 'U16'" "union 'U16' case 'Mk', field 'v'" "its default" ]
-                  "n = 16: refused for the count")
+              // Past the count (`U16` takes 32768 types): judged in classes. Every one is a list, one
+              // class at the outermost form, so `[]` is admitted and `""` refused in one fault naming
+              // the instantiation that carried the class, and claiming no count it has not found.
+              Expect.isEmpty
+                  (within 10.0 "Declare.errors at 16, []" (fun () -> Declare.errors (branching 16 (VList []))))
+                  "n = 16, []: judged in classes and admitted"
+
+              let sixteen =
+                  within 10.0 "Declare.errors at 16" (fun () -> Declare.errors (branching 16 (VStr "")))
+                  |> List.map _.Detail
+
+              Expect.equal sixteen.Length 1 "n = 16: one fault"
+
+              Expect.stringStarts
+                  sixteen.Head
+                  "union 'U16' case 'Mk', field 'v': the omit-at-default value does not fit the field's type at the instantiation U16<list<"
+                  "n = 16: refused, naming the member and an instantiation reached"
+
+              Expect.isFalse (sixteen.Head.Contains " and at ") "n = 16: one class found, so no count claimed")
 
           testCase "the count is of the types one parameter takes, and of no other parameter's" (fun _ ->
               // `Vk<T, S>` doubles `S` (at `list<S>` and `list<tuple<S, int>>`) and passes `T` on;
-              // `V15` holds `v: S = []` and `w: T = ""`. `S` takes 2^14 types at `V15`, each a list,
-              // and `T` takes one: every one is judged and fits.
+              // `V15` holds `v: S = ""` and `w: T = ""`. `S` takes 2^14 types at `V15`, each a list,
+              // and `T` takes one: every one is judged, `v` fits none and `w` fits each.
               let edge (extra: bool) =
                   vocabulary
                       [ kind
@@ -2190,28 +2209,44 @@ let perParameterTests =
                                                  ))
                                                  Optional ]
                                        else
-                                           [ f "v" (TVar "S") (OmitDefault(VList []))
+                                           [ f "v" (TVar "S") (OmitDefault(VStr ""))
                                              f "w" (TVar "T") (OmitDefault(VStr "")) ]) ] ]
                       []
 
-              Expect.isEmpty
-                  (within 20.0 "Declare.errors" (fun () -> Declare.errors (edge false)))
-                  "exactly the count at S: each of its 16384 types judged, and each fits"
+              // Exactly the count at `S`: each of its 16384 types judged, `v` refused at each, counted
+              // exactly, and `w` admitted.
+              let at =
+                  within 20.0 "Declare.errors" (fun () -> Declare.errors (edge false))
+                  |> List.map _.Detail
 
-              // One more type at `S` is one past the count: `v`, which reads `S`, is refused; `w`,
-              // which reads only `T`, is judged and admitted.
               Expect.equal
-                  (within 20.0 "Declare.errors" (fun () -> Declare.errors (edge true))
-                   |> List.map _.Detail)
-                  [ pastCount "union 'V15'" "union 'V15' case 'Mk', field 'v'" "its default" ]
-                  "one past it: the member reading S refused, the member reading T admitted")
+                  (at
+                   |> List.map (fun x ->
+                       x.StartsWith "union 'V15' case 'Mk', field 'v': ", x.Contains " and at 16383 more ("))
+                  [ true, true ]
+                  "exactly the count at S: v refused at every one of the 16384, w admitted"
+
+              // One more type at `S` is one past the count: `v`, which reads `S`, is judged in
+              // classes (two at the outermost form, `list<…>` and `list<bool>`), refused at each and
+              // counted only as found; `w`, which reads only `T`, is judged at each and admitted.
+              let past =
+                  within 20.0 "Declare.errors" (fun () -> Declare.errors (edge true))
+                  |> List.map _.Detail
+
+              Expect.equal
+                  (past
+                   |> List.map (fun x ->
+                       x.StartsWith "union 'V15' case 'Mk', field 'v': ", x.Contains " and at least 1 more ("))
+                  [ true, true ]
+                  "one past it: v judged in classes and refused, counted as found; w admitted")
 
 
           testCase "a position an argument past the count is placed at is past it too" (fun _ ->
               // `U1..U15` double `T` (2^14 types at `U15`), `U15` names `C1` at the two wrappings
-              // (2^15 at `C1`, past the count) and `C1<T>` copies `T` to `C2<T> { v: T = [] }`. The
+              // (2^15 at `C1`, past the count) and `C1<T>` copies `T` to `C2<T> { v: T = "" }`. The
               // walk stops reading types at `C1` at the count, so it finds no more than the count at
-              // `C2`; `C2` is given every one of `C1`'s, so it is past the count too, and refused.
+              // `C2`; `C2` is given every one of `C1`'s, so it is past the count too, and judged in
+              // classes: refused at the one class found, never counted as if every type were found.
               let idl =
                   vocabulary
                       [ kind "K" [ f "g" (TUnion("U1", [ TStr ])) Optional ] ]
@@ -2226,18 +2261,23 @@ let perParameterTests =
                                          f "a" (TUnion(next, [ TList(TVar "T") ])) Optional
                                          f "b" (TUnion(next, [ TList(TTuple [ TVar "T"; TInt ]) ])) Optional ] ] ]
                        @ [ union "C1" [ "T" ] [ case "Mk" [ f "c" (TUnion("C2", [ TVar "T" ])) Optional ] ]
-                           union "C2" [ "T" ] [ case "Mk" [ f "v" (TVar "T") (OmitDefault(VList [])) ] ] ])
+                           union "C2" [ "T" ] [ case "Mk" [ f "v" (TVar "T") (OmitDefault(VStr "")) ] ] ])
                       []
 
               Expect.equal
-                  (within 20.0 "Declare.errors" (fun () -> Declare.errors idl) |> List.map _.Detail)
-                  [ pastCount "union 'C2'" "union 'C2' case 'Mk', field 'v'" "its default" ]
-                  "refused for the count, as the declaration it is copied from would be")
+                  (within 20.0 "Declare.errors" (fun () -> Declare.errors idl)
+                   |> List.map (fun x ->
+                       x.Detail.StartsWith
+                           "union 'C2' case 'Mk', field 'v': the omit-at-default value does not fit the field's type at the instantiation C2<list<",
+                       x.Detail.Contains " and at "))
+                  [ true, false ]
+                  "judged in classes, as the declaration it is copied from is")
 
           testCase "in classes a refusal decides beside a class the cut leaves open" (fun _ ->
               // `G<T> { l: G<list<T>>; m: G<map<T>>; v: T = [[]] }` held at `G<str>`: at depth one
               // the classes are `str`, `list<str>`, `map<str>`, `list<…>` and `map<…>`, and the literal
-              // fails four, the cut leaving `list<…>` open: refused there, counting the three.
+              // fails four, the cut leaving `list<…>` open: refused there, counting the three as found,
+              // a lower bound of the infinitely many.
               let idl =
                   vocabulary
                       [ kind "K" [ f "g" (TUnion("G", [ TStr ])) Optional ] ]
@@ -2253,7 +2293,7 @@ let perParameterTests =
 
               Expect.equal
                   (within 10.0 "Declare.errors" (fun () -> Declare.errors idl)
-                   |> List.map (fun x -> x.Detail.Contains "at the instantiation G<str> and at 3 more ("))
+                   |> List.map (fun x -> x.Detail.Contains "at the instantiation G<str> and at least 3 more ("))
                   [ true ]
                   "one fault, at depth one")
 
@@ -2273,52 +2313,187 @@ let perParameterTests =
                   (fun x -> x.Detail.Contains "at the instantiation Opt<int> (unsubstituted type variable '')")
                   "refused at its instantiation, in the encoder's words")
 
-          testCase "the whole check reads at most the step budget, and says so past it" (fun _ ->
-              // `U1..U14<T>` double `T` as above, so `U14` is reached at 8192 types and `C1` at 16384;
-              // `C1..C18<T>` each copy it to the next twice, so a walk reads each of those types again
-              // at each, and `C18` holds `v: T = []` (the default rule) and `u: T1<T>`, `T1`'s case
-              // `V` transparent at its parameter (the other rule). Each rule's walk reads about
-              // 620,000 instantiations: the first is judged, admitted, and the second meets the
-              // budget, which the two share.
-              let copies = 18
+          testCase "a count is exact only where every instantiation was found, and a lower bound elsewhere" (fun _ ->
+              // `H<A, B>` held at each of the nine pairs of `int`, `bool` and `str`. `v: A = ""` reads
+              // only `A`: the walk keeps one instantiation for each type `A` takes, so of the six it
+              // does not fit (`A` an `int` or a `bool`) it finds two, and says so as a lower bound.
+              let pairs =
+                  [ for a in [ TInt; TBool; TStr ] do
+                        for b in [ TInt; TBool; TStr ] -> a, b ]
+
+              let held (at: (IdlType * IdlType) list) (members: IdlField list) =
+                  vocabulary
+                      [ kind
+                            "K"
+                            [ for i, (a, b) in List.indexed at -> f (sprintf "h%d" i) (TRecord("H", [ a; b ])) Optional ] ]
+                      []
+                      [ record "H" [ "A"; "B" ] members ]
+
+              let refusal (idl: Idl) =
+                  within 10.0 "Declare.errors" (fun () -> Declare.errors idl) |> List.map _.Detail
+
+              let fault (more: string) =
+                  sprintf
+                      "record 'H', field 'v': the omit-at-default value does not fit the field's type at the instantiation H<int, int> and at %s more (authored value does not match IDL type TInt)"
+                      more
+
+              Expect.equal
+                  (refusal (held pairs [ f "v" (TVar "A") (OmitDefault(VStr "")); f "w" (TVar "B") Optional ]))
+                  [ fault "least 1" ]
+                  "six of nine fail: two found, a lower bound"
+
+              // `v: tuple<A, B> = ["", ""]` reads both and fits only `H<str, str>`: the walk keeps
+              // the five that bring a type new at `A` or at `B`, each of which it fails.
+              let both =
+                  [ f "v" (TTuple [ TVar "A"; TVar "B" ]) (OmitDefault(VList [ VStr ""; VStr "" ])) ]
+
+              Expect.equal
+                  (refusal (held pairs both))
+                  [ fault "least 4" ]
+                  "eight of nine fail: five found, a lower bound"
+
+              // Where the types found at each parameter multiply to the instantiations found, every
+              // instantiation was found, and the count is exact, for two parameters as for one (the
+              // chains of thirteen and fifteen above count 4095 and 16383 more at one parameter).
+              Expect.equal
+                  (refusal (held [ TInt, TInt; TInt, TBool ] both))
+                  [ fault "1" ]
+                  "one type at A, two at B, two found: every one, counted exactly")
+
+          testCase
+              "the walk that reads each instantiation stops at the step budget, exactly; what it read whole is judged, the rest in classes"
+              (fun _ ->
+                  // Chain `j` is `Cj_1..Cj_14<T>`, each naming the next at `list<T>` and at
+                  // `list<tuple<T, int>>`, the last holding `v: T = ""`, held at `Cj_1<list<int>>`: a
+                  // walk reads 2^14 - 1 instantiations a chain, and `Cj_14`'s 8192 types are all lists.
+                  // Sixty-four chains read 1048512, so `pad` more references to an instantiation read
+                  // already bring the walk to the budget: at sixty-four exactly, and at sixty-five one
+                  // past it, the last reference unread.
+                  let chains = 64
+
+                  let parallel (pad: int) (beside: IdlField list) (records: IdlRecord list) (unions: IdlUnion list) =
+                      let u j k t = TUnion(sprintf "C%d_%d" j k, [ t ])
+
+                      { vocabulary
+                            [ kind
+                                  "K"
+                                  [ for j in 1..chains -> f (sprintf "g%d" j) (u j 1 (TList TInt)) Optional
+                                    for p in 1..pad -> f (sprintf "p%d" p) (u chains 1 (TList TInt)) Optional
+                                    yield! beside ] ]
+                            ([ for j in 1..chains do
+                                   for k in 1..14 ->
+                                       union
+                                           (sprintf "C%d_%d" j k)
+                                           [ "T" ]
+                                           [ case
+                                                 "Mk"
+                                                 (if k < 14 then
+                                                      [ f "a" (u j (k + 1) (TList(TVar "T"))) Optional
+                                                        f "b" (u j (k + 1) (TList(TTuple [ TVar "T"; TInt ]))) Optional ]
+                                                  else
+                                                      [ f "v" (TVar "T") (OmitDefault(VStr "")) ]) ] ]
+                             @ unions)
+                            records with
+                          Harden =
+                              { HardenPolicy.Undeclared with
+                                  TransparentUnions = [ "T1", "V" ] } }
+
+                  let chain (j: int) (x: string) =
+                      x.StartsWith(sprintf "union 'C%d_14' case 'Mk', field 'v': " j)
+
+                  let counted (x: string) = x.Contains " and at 8191 more ("
+
+                  // At the budget exactly, every chain was read whole: each is judged at its 8192
+                  // instantiations and counted exactly. Beside them, `Hold<T> { u: T1<T> }` held at
+                  // `Hold<Box<int>>` and `Hold<Box<str>>`, `T1`'s case `V` transparent at its
+                  // parameter: the other rule, which shares the budget, has none left, so it judges
+                  // `Hold.u` in classes, where it is refused at both and counts the other as found.
+                  let atBudget =
+                      within 60.0 "Declare.errors at the budget" (fun () ->
+                          Declare.errors (
+                              parallel
+                                  chains
+                                  [ f "h1" (TRecord("Hold", [ TRecord("Box", [ TInt ]) ])) Optional
+                                    f "h2" (TRecord("Hold", [ TRecord("Box", [ TStr ]) ])) Optional ]
+                                  [ record "Box" [ "W" ] [ f "item" (TVar "W") Required ]
+                                    record "Hold" [ "T" ] [ f "u" (TUnion("T1", [ TVar "T" ])) Required ] ]
+                                  [ union
+                                        "T1"
+                                        [ "X" ]
+                                        [ case "V" [ f "v" (TVar "X") Required ]; case "Tag" [ f "n" TInt Required ] ] ]
+                          ))
+                      |> List.map _.Detail
+
+                  Expect.equal
+                      [ for j in 1..chains -> atBudget |> List.filter (chain j) |> List.map counted ]
+                      (List.replicate chains [ true ])
+                      "at the budget exactly: each chain read whole, judged and counted exactly"
+
+                  Expect.equal
+                      (atBudget |> List.filter (fun x -> x.StartsWith "record 'Hold'"))
+                      [ "record 'Hold', field 'u': at the instantiation Hold<Box<int>> and at least 1 more, instantiates union 'T1' so that its transparent case's field 'v' can encode to an object — a bare object is indistinguishable from a tagged case" ]
+                      "the other rule finds the budget spent, and judges in classes"
+
+                  // One past it: the walk stops with the last reference unread, which leads to the
+                  // last chain only. Each other chain was read whole and is judged as before; the
+                  // last is judged in classes, one class at the outermost form, so no count.
+                  let past =
+                      within 60.0 "Declare.errors one past the budget" (fun () ->
+                          Declare.errors (parallel (chains + 1) [] [] []))
+                      |> List.map _.Detail
+
+                  Expect.equal
+                      [ for j in 1..chains ->
+                            past
+                            |> List.filter (chain j)
+                            |> List.map (fun x -> counted x, x.Contains " and at ") ]
+                      (List.replicate (chains - 1) [ true, true ] @ [ [ false, false ] ])
+                      "one past the budget: every chain read whole judged as before, the last in classes"
+
+                  Expect.isFalse
+                      (past |> List.exists (fun x -> x.Contains "budget"))
+                      "and none is refused for the budget: the walk in classes decides each")
+
+          testCase "the walks in classes read at most the step budget, and say so past it" (fun _ ->
+              // `U1..U16<T>` each name the next at `tuple<T, json>` and at `tuple<T, list<json>>`, held
+              // at `U1<str>`: `U16`'s parameter takes 2^15 types, past the count, so `C1..C40<T>`, each
+              // copying it to the next twice, are judged in classes. `C40` holds `v: T = L`, `L` the
+              // pair `[L', []]` nested fifteen deep around `""`, which fits every type `T` takes there
+              // and is decided only at a cut that reaches its innermost string. The classes at depth
+              // `k` are 2^k at each declaration, so the walks in classes read the budget before they
+              // reach it: refused, naming the declaration they did not finish.
+              let literal =
+                  (VStr "", [ 1..15 ]) ||> List.fold (fun inner _ -> VList [ inner; VList [] ])
 
               let idl =
-                  { vocabulary
-                        [ kind "K" [ f "g" (TUnion("U1", [ TStr ])) Optional ] ]
-                        ([ for k in 1..14 ->
+                  vocabulary
+                      [ kind "K" [ f "g" (TUnion("U1", [ TStr ])) Optional ] ]
+                      ([ for k in 1..16 ->
+                             union
+                                 (sprintf "U%d" k)
+                                 [ "T" ]
+                                 [ case
+                                       "Mk"
+                                       [ let next = if k < 16 then sprintf "U%d" (k + 1) else "C1"
+
+                                         f "a" (TUnion(next, [ TTuple [ TVar "T"; TJson ] ])) Optional
+                                         f "b" (TUnion(next, [ TTuple [ TVar "T"; TList TJson ] ])) Optional ] ] ]
+                       @ [ for k in 1..40 ->
                                union
-                                   (sprintf "U%d" k)
+                                   (sprintf "C%d" k)
                                    [ "T" ]
                                    [ case
                                          "Mk"
-                                         [ let next = if k < 14 then sprintf "U%d" (k + 1) else "C1"
-
-                                           f "a" (TUnion(next, [ TList(TVar "T") ])) Optional
-                                           f "b" (TUnion(next, [ TList(TTuple [ TVar "T"; TInt ]) ])) Optional ] ] ]
-                         @ [ for k in 1..copies ->
-                                 union
-                                     (sprintf "C%d" k)
-                                     [ "T" ]
-                                     [ case
-                                           "Mk"
-                                           (if k < copies then
-                                                [ f "a" (TUnion(sprintf "C%d" (k + 1), [ TVar "T" ])) Optional
-                                                  f "b" (TUnion(sprintf "C%d" (k + 1), [ TVar "T" ])) Optional ]
-                                            else
-                                                [ f "v" (TVar "T") (OmitDefault(VList []))
-                                                  f "u" (TUnion("T1", [ TVar "T" ])) Optional ]) ] ]
-                         @ [ union
-                                 "T1"
-                                 [ "X" ]
-                                 [ case "V" [ f "v" (TVar "X") Required ]; case "Tag" [ f "n" TInt Required ] ] ])
-                        [] with
-                      Harden =
-                          { HardenPolicy.Undeclared with
-                              TransparentUnions = [ "T1", "V" ] } }
+                                         (if k < 40 then
+                                              [ f "a" (TUnion(sprintf "C%d" (k + 1), [ TVar "T" ])) Optional
+                                                f "b" (TUnion(sprintf "C%d" (k + 1), [ TVar "T" ])) Optional ]
+                                          else
+                                              [ f "v" (TVar "T") (OmitDefault literal) ]) ] ])
+                      []
 
               Expect.equal
                   (within 60.0 "Declare.errors" (fun () -> Declare.errors idl) |> List.map _.Detail)
-                  [ "the declaration check reads more than 1048576 instantiations before it reaches every instantiation of union 'C18' that reaches union 'C18' case 'Mk', field 'u'; the transparent case it holds cannot be checked at each" ]
+                  [ "union 'C40' case 'Mk', field 'v': the declaration check reads its budget of 1048576 instantiations in classes and stops before it has read every one that leads to union 'C40'; its default cannot be checked at each" ]
                   "past the budget: refused in its own sentence") ]
 
 // ---------------------------------------------------------------------------
