@@ -1426,13 +1426,6 @@ module Declare =
                 |> List.map _.Name
                 |> Set.ofList
 
-            // Whether `applied` is answered by an argument cut short: its transparent case's field is
-            // typed at what the cut left unbound.
-            let atHole (applied: UnionForm) : bool =
-                match applied.Binding, transparentField applied with
-                | Some binding, Some field -> TypeParams.substitute binding field.Type = TVar ""
-                | _ -> false
-
             let atParameter (declaration: string) (fields: IdlField list) (place: int -> PathSegment list * string) =
                 [ for j, f in List.indexed fields do
                       let candidates =
@@ -1470,39 +1463,23 @@ module Declare =
                                           |> List.collect (Instantiations.positionsNamed analysis declaration)
                                           |> List.distinct
                                           |> List.sort
+                                        // Read off each argument's outermost form, which every cut
+                                        // the walk makes keeps: never undecided.
                                         Judge =
-                                          fun cut binding ->
-                                              let answers =
-                                                  [ for r in references do
-                                                        match WireForm.ofType idl (TypeParams.substitute binding r) with
-                                                        | WireForm.Union u ->
-                                                            match objectAtReference u with
-                                                            | Some field ->
-                                                                Instantiations.Verdict.Fails(
-                                                                    sprintf
-                                                                        "union '%s' so that its transparent case's field '%s'"
-                                                                        u.Name
-                                                                        field.Name
-                                                                )
-                                                            | None when cut && atHole u ->
-                                                                Instantiations.Verdict.Undecided
-                                                            | None -> Instantiations.Verdict.Fits
-                                                        | _ -> Instantiations.Verdict.Fits ]
-
-                                              // The first reference made an object answers; one read
-                                              // at a cut short argument leaves the rest open.
-                                              answers
-                                              |> List.tryFind (fun a ->
-                                                  match a with
-                                                  | Instantiations.Verdict.Fails _ -> true
-                                                  | Instantiations.Verdict.Fits
-                                                  | Instantiations.Verdict.Undecided -> false)
-                                              |> Option.defaultValue (
-                                                  if List.contains Instantiations.Verdict.Undecided answers then
-                                                      Instantiations.Verdict.Undecided
-                                                  else
-                                                      Instantiations.Verdict.Fits
-                                              ) }
+                                          fun _ binding ->
+                                              references
+                                              |> List.tryPick (fun r ->
+                                                  match WireForm.ofType idl (TypeParams.substitute binding r) with
+                                                  | WireForm.Union u ->
+                                                      objectAtReference u
+                                                      |> Option.map (fun field ->
+                                                          sprintf
+                                                              "union '%s' so that its transparent case's field '%s'"
+                                                              u.Name
+                                                              field.Name)
+                                                  | _ -> None)
+                                              |> Option.map Instantiations.Verdict.Fails
+                                              |> Option.defaultValue Instantiations.Verdict.Fits }
                                     Refusal =
                                       fun instantiation why ->
                                           sprintf
