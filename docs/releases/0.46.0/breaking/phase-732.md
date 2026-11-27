@@ -45,25 +45,32 @@
   instantiates union '<U>' so that its transparent case's field '<v>' can encode to an object — a bare object is
   indistinguishable from a tagged case`. Inside a generic union holder this loaded at `0.45.0`, and the encoder wrote
   documents the decoder refused. A consumer applies the holder at an argument that is no object, or tags the case.
-  Each rule refuses a member once, naming the first instantiation it refuses at and how many more of those the check
-  found it refuses at (`… at the instantiation <R><int> and at 3 more (…)`; with none more the sentence is as above),
-  and where the instantiations are infinitely many it judges them in classes. Each judges an instantiation without
-  printing it, so how large one is decides nothing; a refusal names the instantiation to its first 256 nodes, `...`
+  Each rule refuses a member once, naming the first instantiation it refuses at and how many more it refuses at: every
+  other, where the check found each instantiation of the declaration (`… at the instantiation <R><int> and at 3 more
+  (…)`), and otherwise how many more it found, a lower bound (`… and at least 3 more (…)`); with none more found the
+  sentence is as above. Where the instantiations are infinitely many it judges them in classes. Each judges an
+  instantiation without printing it, so how large one is decides nothing; a refusal names the instantiation to its
+  first 256 nodes, `...`
   standing for the rest. Rule (b) asks only a reference written where a value of the member holds it: in `Pair<T1<T>,
-  Q>`, where `Pair` holds nothing at its first parameter, `T1<T>` is asked nothing. Two counts bound the check. One is
-  of the types ONE type parameter takes (in classes, its classes at one depth): past 16384, each member reading that
-  parameter, or a parameter its arguments are placed at, is refused, `more than 16384 instantiations of record '<D>'
-  reach record '<D>', field '<f>'; its default cannot be checked at each` (`the transparent case it holds cannot be
-  checked at each` likewise), and no other parameter's types count against it. The other is of the instantiations the
-  whole check reads: past 1048576, each member not yet judged is refused, `the declaration check reads more than
-  1048576 instantiations before it reaches every instantiation of record '<D>' that reaches record '<D>', field '<f>';
-  its default cannot be checked at each`. A declaration no document can hold a value of, and one each of whose
-  members reads parameters taking no more than 16384 types, only where the literal fits, no case meets an object and
-  the check reads no more than 1048576 instantiations, load as before, whatever the rest of the vocabulary reaches and
-  however large its instantiations are. SIXTH, sentences a consumer may have
-  matched. The FIFTH's two rules report one fault per member, naming one instantiation and counting the rest (`and at
-  <n> more`), where they reported one per instantiation, and rule (b) reports none at a member that holds no value of the
-  union it writes; a consumer that counted those faults reads the count. A type variable where no parameter is declared is refused as `type variable '<T>' names a type parameter,
+  Q>`, where `Pair` holds nothing at its first parameter, `T1<T>` is asked nothing. Two counts bound the walk that
+  finds each instantiation, and past either a member is judged in classes instead, never refused for the count alone.
+  One is of the types ONE type parameter takes: past 16384 at a parameter a member reads, or at a parameter its
+  arguments are placed at, and no other parameter's types count against it. The other is of the instantiations those
+  walks read in the whole check: past 1048576, each member whose declaration the walk had read whole is judged as
+  before, and the rest in classes. The walks in classes are bounded the same way, and only there is a member refused
+  unjudged: past 16384 classes at a parameter it reads, at the depth it is decided at, `more than 16384 instantiations
+  of record '<D>' reach record '<D>', field '<f>'; its default cannot be checked at each` (`the transparent case it
+  holds cannot be checked at each` likewise), and past 1048576 instantiations read in classes with one unread that
+  leads to its declaration, `record '<D>', field '<f>': the declaration check reads its budget of 1048576
+  instantiations in classes and stops before it has read every one that leads to record '<D>'; its default cannot be
+  checked at each`. A declaration no document can hold a value of, and one each of whose members fits its literal,
+  meets no object and is decided in classes under both counts wherever the walk that finds each instantiation passes
+  one, load as before, whatever the rest of the vocabulary reaches and however large its instantiations are. SIXTH,
+  sentences a consumer may have matched. The FIFTH's two rules report one fault per member, naming one instantiation
+  and counting the rest (`and at <n> more` where every instantiation was found, `and at least <n> more` where only
+  some were, and nothing where no other was found), where they reported one per instantiation, and rule (b) reports
+  none at a member that holds no value of the union it writes; a consumer that counted those faults reads the count. A
+  type variable where no parameter is declared is refused as `type variable '<T>' names a type parameter,
   and a kind declares none` (an op, the node envelope, a contract's method), where it said `is not a parameter of the
   union declaring it`; a type variable in a record's field that is not the record's parameter is refused as `is not
   a parameter of the record declaring it`, where it said `of the union declaring it`; the sampler's fault for a type
