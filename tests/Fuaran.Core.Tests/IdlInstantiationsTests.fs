@@ -1268,9 +1268,6 @@ let tests =
                                     (List.collect fst d)
                                     (List.collect snd d)
 
-                            let idl = chain n
-                            let text = Artifact.render idl
-
                             // The fastest of three runs, each after the code has run once.
                             let fastest (work: unit -> 'a) : 'a * float =
                                 work () |> ignore
@@ -1281,26 +1278,56 @@ let tests =
                                       answer, watch.Elapsed.TotalSeconds ]
                                 |> List.minBy snd
 
-                            let faults, checking =
-                                within 120.0 "Declare.errors" (fun () -> fastest (fun () -> Declare.errors idl))
+                            // Judges and loads `m` declarations: the faults, the artifact read back, and
+                            // the time each took.
+                            let measure (m: int) =
+                                let idl = chain m
+                                let text = Artifact.render idl
+
+                                let faults, checking =
+                                    within 120.0 "Declare.errors" (fun () -> fastest (fun () -> Declare.errors idl))
+
+                                let read, loading =
+                                    within 120.0 "Artifact.parse" (fun () -> fastest (fun () -> Artifact.parse text))
+
+                                idl, faults, read, checking, loading
+
+                            let _, _, _, smallChecking, smallLoading = measure 1000
+                            let idl, faults, read, checking, loading = measure n
 
                             Expect.isEmpty faults "no fault: each default fits the one instantiation it has"
-
-                            let read, loading =
-                                within 120.0 "Artifact.parse" (fun () -> fastest (fun () -> Artifact.parse text))
-
                             Expect.equal read (Ok(Artifact.canonicalise idl)) "the artifact reads back"
 
-                            // Under a second each, built for release; a Debug build is held to ten.
-                            let bound =
+                            // A fixed bound measures the machine, not the code. What is held is the growth:
+                            // five times the declarations should take about five times as long (a
+                            // quadratic check about twenty-five), and a backstop ceiling still refuses an
+                            // exponential one outright.
+                            let ceiling =
 #if DEBUG
-                                10.0
+                                60.0
 #else
-                                1.0
+                                10.0
 #endif
 
-                            Expect.isLessThan checking bound (sprintf "Declare.errors took %.3f s" checking)
-                            Expect.isLessThan loading bound (sprintf "Artifact.parse took %.3f s" loading))
+                            let floor' = 0.001
+
+                            let grown (what: string) (small: float) (large: float) =
+                                let ratio = large / max small floor'
+
+                                let message =
+                                    sprintf
+                                        "%s took %.3f s at 1000 and %.3f s at %d: a ratio of %.1f"
+                                        what
+                                        small
+                                        large
+                                        n
+                                        ratio
+
+                                Expect.isLessThan ratio 12.0 message
+                                Expect.isLessThan large ceiling message
+
+                            grown "Declare.errors" smallChecking checking
+                            grown "Artifact.parse" smallLoading loading)
 
                 testCase
                     "a generic union applied at a tuple of its parameter is stated at the tuple's components"
