@@ -910,16 +910,14 @@ module internal TypeScriptCodec =
         // rather than left to each host's own reading of an absent key.
         |> Result.map (fun _ -> tsLiteralValue idl t d)
 
-    /// Phase 524 — the TypeScript printer of a member READ back out
-    /// ([[MemberTraversal.decMember]]): a sentinel slot decodes to `null`, a host-only member to
-    /// `undefined`, an omit-at-default one to [[tsDefaultLit]]'s literal.
     /// Phase 723 (DECISIONS.md D190, D288) — the reading of a member declaring an alias or a presence
     /// condition ([[Decl.memberReading]], the one reading the F# decoders print too), over the object
     /// `fs`: the KEY the member is read under and the OBJECT it is read from. The key is the spelling the
     /// object carries ([[tsCanonicalFormHelpers]]' `dSpelt`), so a refusal inside the member is located as
     /// written, and an absent member's is its canonical spelling. The condition is tested over the raw
     /// object; where it fails the member is read from an empty object, so it decodes as its absence,
-    /// unread. `None` for a member declaring neither, read under its one name from `fs`.
+    /// unread, and the key it would have been read under is never used: a conditional member is never
+    /// required ([[Declare.errors]]), so its absence is located nowhere.
     let tsMemberRead (idl: Idl) (fields: IdlField list) (f: IdlField) : (string * string) option =
         let names (spellings: string list) =
             "[" + (spellings |> List.map SourceLit.tsString |> String.concat ", ") + "]"
@@ -931,7 +929,12 @@ module internal TypeScriptCodec =
 
         Decl.memberReading idl fields f
         |> Option.map (fun r ->
-            let spelt = "dSpelt(" + names r.Spellings + ", fs)"
+            // A member with no alias is read under its one spelling.
+            let key =
+                if List.isEmpty f.Aliases then
+                    SourceLit.tsString f.Name
+                else
+                    "dSpelt(" + names r.Spellings + ", fs)"
 
             let test =
                 match r.Presence with
@@ -951,15 +954,12 @@ module internal TypeScriptCodec =
                 | PresenceReading.SelfNonEmpty -> Some("!dEmpty(" + names r.Spellings + ", fs)")
 
             match test with
-            | None -> spelt, "fs"
-            | Some t ->
-                // A member with no alias is read under its one spelling whether or not it holds.
-                (if List.isEmpty f.Aliases then
-                     SourceLit.tsString f.Name
-                 else
-                     "(" + t + " ? " + spelt + " : " + SourceLit.tsString f.Name + ")"),
-                "(" + t + " ? fs : {})")
+            | None -> key, "fs"
+            | Some t -> key, "(" + t + " ? fs : {})")
 
+    /// Phase 524 — the TypeScript printer of a member READ back out
+    /// ([[MemberTraversal.decMember]]): a sentinel slot decodes to `null`, a host-only member to
+    /// `undefined`, an omit-at-default one to [[tsDefaultLit]]'s literal.
     let tsMemberDecPrinter (idl: Idl) (disc: string) : MemberDecPrinter =
         { Slot = tsDecPrinter
           // Phase 723 — a member declaring an alias or a presence condition is read as

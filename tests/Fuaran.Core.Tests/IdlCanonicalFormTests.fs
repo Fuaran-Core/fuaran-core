@@ -634,11 +634,22 @@ let tests =
               let js (s: string) =
                   System.Text.Json.JsonSerializer.Serialize s
 
+              // Bytes alone cannot tell a member decoded as `[]` from one decoded as absent, since the
+              // encoder writes neither: each document read is also held to the interpreter's VALUE, by
+              // a key-sorted rendering that drops an absent (`undefined`) member.
+              let wanted =
+                  documents
+                  |> List.map (fun d ->
+                      match Decode.decode hosts d with
+                      | Ok v -> literal v
+                      | Error _ -> "null")
+
               let harness =
                   ts
-                  + "\n\nfor (const s of ["
-                  + String.concat ", " (List.map js documents)
-                  + "]) { const r = decodeNode(s); console.log(r.ok ? encodeNode(r.value) : JSON.stringify([r.error.code, r.error.path])); }\n"
+                  + "\n\nconst __canon = (x) => JSON.stringify(x, (_, v) => v !== null && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.entries(v).filter(([, y]) => y !== undefined).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : v);\n"
+                  + "for (const [s, want] of ["
+                  + String.concat ", " (List.map2 (fun d w -> "[" + js d + ", " + w + "]") documents wanted)
+                  + "]) { const r = decodeNode(s); console.log(r.ok ? encodeNode(r.value) + (__canon(r.value) === __canon(want) ? '' : ' VALUE ' + __canon(r.value)) : JSON.stringify([r.error.code, r.error.path])); }\n"
                   + "for (const v of ["
                   + String.concat ", " (List.map literal values)
                   + "]) console.log(encodeNode(v));\n"
