@@ -661,6 +661,40 @@ let tests =
                             (within 10.0 "Declare.errors" (fun () -> Declare.errors upstream))
                             "E admitted at its one instantiation, at once"
 
+                        // Two declarations judged, each fed one parameter of a chain that doubles the
+                        // other: `Xk<T, S> { a: X(k+1)<list<T>, S>; b: X(k+1)<map<T>, S> }`, the
+                        // fortieth holding `d: D<T>` and `e: E<S>`, each of D and E holding
+                        // `v: T = ""`. No reference writes both parameters, and D, past the count, is
+                        // still refused at once; E, at its one instantiation `E<str>`, is admitted.
+                        let lossy =
+                            vocabulary
+                                [ kind "K" [ f "g" (TUnion("X1", [ TStr; TStr ])) Optional ] ]
+                                ([ for k in 1..40 ->
+                                       mk
+                                           (sprintf "X%d" k)
+                                           [ "T"; "S" ]
+                                           (if k < 40 then
+                                                [ f
+                                                      "a"
+                                                      (TUnion(sprintf "X%d" (k + 1), [ TList(TVar "T"); TVar "S" ]))
+                                                      Optional
+                                                  f
+                                                      "b"
+                                                      (TUnion(sprintf "X%d" (k + 1), [ TMap(TVar "T"); TVar "S" ]))
+                                                      Optional ]
+                                            else
+                                                [ f "d" (TUnion("D", [ TVar "T" ])) Optional
+                                                  f "e" (TUnion("E", [ TVar "S" ])) Optional ]) ]
+                                 @ [ mk "D" [ "T" ] [ f "v" (TVar "T") (OmitDefault(VStr "")) ]
+                                     mk "E" [ "T" ] [ f "v" (TVar "T") (OmitDefault(VStr "")) ] ])
+                                []
+
+                        Expect.equal
+                            (within 10.0 "Declare.errors" (fun () -> Declare.errors lossy)
+                             |> List.map _.Detail)
+                            [ refusal "D" ]
+                            "D refused at once, E admitted"
+
                         // In classes the count is of the declaration's own classes judged, across the
                         // depths: `D<T, S> { a: D<T, list<S>>; b: D<T, map<S>>; v: T = [[…[]…]] }` (fourteen
                         // lists deep) held at `D<list^14<str>, str>` fits every instantiation, and is decided

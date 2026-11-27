@@ -1235,14 +1235,18 @@ module Declare =
         /// [[Instantiations.declarationLimit]] of its own instantiations reached is judged no
         /// further, and each member the rule asks of it is refused in a sentence naming the
         /// declaration, the member and the number (`tooMany`). Nothing else is counted against it,
-        /// so no verdict depends on how many instantiations another declaration has. Where every
-        /// instantiation is judged, the count is read from the declaration's own instantiations
-        /// judged, and from those read of any declaration that reaches it through references each
-        /// writing every parameter it is read at, which it has at least as many of
-        /// ([[Instantiations.atLeastAsMany]]); in classes, from its own classes judged, across the
-        /// depths. A declaration refused is judged no further, and the walk reads the others on: it
-        /// still enters the refused one wherever that reaches another, at the positions that one is
-        /// read at, so the instantiations of every other are all reached.
+        /// so no verdict depends on how many instantiations another declaration has. In classes it
+        /// counts the declaration's own classes judged, across the depths. A declaration refused is
+        /// judged no further, and the walk reads the others on: it still enters the refused one
+        /// wherever that reaches another, at the positions that one is read at, so the
+        /// instantiations of every other are all reached. Where every instantiation is judged, they
+        /// are judged once the walk has read them all, so a declaration refused is judged at none.
+        ///
+        /// The walk is depth-first: it follows each reference it enters before the next, so the
+        /// instantiations of a declaration at the end of a long chain are reached as the chain is
+        /// entered, not after every instantiation of every declaration before it, and a declaration
+        /// past the count is refused within a few times the count's steps of entering it (a chain
+        /// of forty declarations each naming the next at two arguments is refused at once).
         ///
         /// Nothing is printed to be judged, so how large an instantiation is decides nothing: a type
         /// shared in memory is read once per node however large it prints, and only a refusal's text
@@ -1250,13 +1254,12 @@ module Declare =
         ///
         /// The cost, for declarations whose member types hold `s` nodes between them, `N` the count
         /// and `h` the declarations held: the analysis is linear in `s`; a walk takes one step per
-        /// instantiation it reads, each costing what the member types of its declaration cost,
-        /// and reads at most `N + 1` instantiations of each declaration it judges; the classes walk
-        /// is taken again only for the declarations its cut left undecided. Where each declaration
-        /// a walk enters writes all it is read at into a declaration judged, through references as
-        /// above (every chain the tests build), it reads at most `N + 1` instantiations of each
-        /// between two refusals, and the rules cost O(s + h N) steps; a vocabulary of `n`
-        /// declarations each instantiated once costs O(s + n).
+        /// instantiation it reads (at the positions it reads), each costing what the member types
+        /// of its declaration cost, and reads at most `N + 1` instantiations of each declaration it
+        /// judges; the classes walk is taken again only for the declarations its cut left
+        /// undecided. Each declaration is given its own `N`, so the rules cost O(s + h N) steps over
+        /// the chains the tests build, and a vocabulary of `n` declarations each instantiated once
+        /// costs O(s + n).
         let overInstantiations
             (held: string list)
             (judged:
@@ -1355,34 +1358,29 @@ module Declare =
                 let mutable relevant = Instantiations.relevant analysis live
                 let mutable deciding = live.Count
 
-                // The instantiations read of each declaration not judged here, at the relevant
-                // positions: a lower bound on those of a declaration judged that it reaches.
-                let read =
-                    System.Collections.Generic.Dictionary<string, System.Collections.Generic.HashSet<int list>>()
 
                 let seen =
                     System.Collections.Generic.HashSet<string * int list>(HashIdentity.Structural)
 
-                let queue = System.Collections.Generic.Queue<string * IdlType list>()
+                let stack = System.Collections.Generic.Stack<string * IdlType list>()
 
-                let refuse (found: Set<string>) =
-                    refused.UnionWith(Set.intersect found live)
-                    live <- Set.difference live found
+                let refuse (d: string) =
+                    refused.Add d |> ignore
+                    live <- live.Remove d
                     within <- Instantiations.reachingAny analysis (Set.toList live)
                     relevant <- Instantiations.relevant analysis live
-                    read.Clear()
                     deciding <- live |> Seq.filter (undecided.Contains >> not) |> Seq.length
 
+                // Pushed last first, so the first reference an instantiation enters is read first.
                 let offer (found: (string * IdlType list) list) =
-                    for (name, _) as instantiation in found do
+                    for (name, _) as instantiation in List.rev found do
                         if within.Contains name then
-                            queue.Enqueue instantiation
+                            stack.Push instantiation
 
-                for root in roots do
-                    offer (Instantiations.entered analysis root)
+                offer (roots |> List.collect (Instantiations.entered analysis))
 
-                while queue.Count > 0 && deciding > 0 do
-                    let name, written = queue.Dequeue()
+                while stack.Count > 0 && deciding > 0 do
+                    let name, written = stack.Pop()
 
                     if within.Contains name then
                         let args =
@@ -1397,12 +1395,7 @@ module Declare =
                                         counts[name] <- counts[name] + 1
 
                                     if counts[name] > Instantiations.declarationLimit then
-                                        refuse (
-                                            if exact then
-                                                Instantiations.atLeastAsMany analysis relevant name
-                                            else
-                                                Set.singleton name
-                                        )
+                                        refuse name
                                     elif exact then
                                         toJudge[name].Add((name, args))
                                     else
@@ -1413,20 +1406,7 @@ module Declare =
                                         else
                                             undecided.Add name |> ignore
                                             deciding <- deciding - 1
-                            elif exact && not (List.isEmpty args) then
-                                let mine =
-                                    match read.TryGetValue name with
-                                    | true, mine -> mine
-                                    | false, _ ->
-                                        let mine = System.Collections.Generic.HashSet<int list>(HashIdentity.Structural)
-                                        read[name] <- mine
-                                        mine
 
-                                if mine.Add ids && mine.Count > Instantiations.declarationLimit then
-                                    let over = Set.intersect (Instantiations.atLeastAsMany analysis relevant name) live
-
-                                    if not over.IsEmpty then
-                                        refuse over
 
                             if within.Contains name then
                                 offer (Instantiations.successors analysis (name, args))

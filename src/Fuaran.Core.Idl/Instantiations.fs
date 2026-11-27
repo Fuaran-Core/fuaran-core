@@ -571,44 +571,6 @@ module internal Instantiations =
 
         found
 
-    /// The declarations reached at least as many times as `declaration`, counting an
-    /// instantiation by its arguments at the `relevant` positions alone: it, and each one a
-    /// declaration found enters through a reference that writes every parameter at a relevant
-    /// position of that declaration into an argument at a relevant position. Such a reference is
-    /// a different instantiation, read at those positions, for each instantiation of the
-    /// declaration so read (the arguments there are read back from where each parameter is
-    /// written), and each one an instantiation reached enters is reached. A declaration counted
-    /// at every position is counted by its instantiations.
-    let atLeastAsMany
-        (analysis: Analysis<'T>)
-        (relevant: System.Collections.Generic.HashSet<string * int>)
-        (declaration: string)
-        : Set<string> =
-        let reading = analysis.Reading
-        let found = System.Collections.Generic.HashSet<string>([ declaration ])
-        let frontier = System.Collections.Generic.Queue<string>([ declaration ])
-
-        while frontier.Count > 0 do
-            let d = frontier.Dequeue()
-
-            let read =
-                reading.Declarations[d].Params
-                |> List.indexed
-                |> List.filter (fun (i, _) -> relevant.Contains(d, i))
-                |> List.map snd
-
-            if not (List.isEmpty read) then
-                for inner, args in analysis.Entered[d] do
-                    let writes (p: string) =
-                        args
-                        |> List.indexed
-                        |> List.exists (fun (j, a) -> relevant.Contains(inner, j) && mentions reading p a)
-
-                    if List.forall writes read && found.Add inner then
-                        frontier.Enqueue inner
-
-        Set.ofSeq found
-
     /// The binding an instantiation makes: each parameter of its declaration to the argument at its
     /// position. None where the reference applies another number of arguments, or names nothing.
     let binding (analysis: Analysis<'T>) (declaration: string, args: 'T list) : Map<string, 'T> option =
