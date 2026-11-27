@@ -761,29 +761,128 @@ let tests =
                             (Ok(Artifact.canonicalise branching))
                             "and its artifact reads back")
 
-                    testCase (what + ": a default at the chain's end is refused, and past the size, said") (fun _ ->
-                        let zero = f "v" (TVar "T") (OmitDefault(VInt 0))
+                    testCase
+                        (what + ": a default at the chain's end is refused at any size, its text bounded")
+                        (fun _ ->
+                            let zero = f "v" (TVar "T") (OmitDefault(VInt 0))
 
-                        match
-                            within 20.0 "Declare.errors" (fun () -> Declare.errors (doubling 12 zero [] ([], [])))
-                            |> List.map _.Detail
-                        with
-                        | [ only ] ->
-                            Expect.stringContains
-                                only
-                                "does not fit the field's type at the instantiation D12<tuple<tuple<"
-                                "refused at the instantiation, where it is small enough to print"
-                        | other -> failtestf "one fault expected: %A" other
+                            // `D26<T>` is reached at one instantiation of 2^26 nodes: judged without being
+                            // printed, and refused in a sentence that names the declaration, the member and
+                            // the instantiation to its first nodes.
+                            for n in [ 12; 26 ] do
+                                match
+                                    within 20.0 "Declare.errors" (fun () ->
+                                        Declare.errors (doubling n zero [] ([], [])))
+                                    |> List.map _.Detail
+                                with
+                                | [ only ] ->
+                                    Expect.stringStarts
+                                        only
+                                        (sprintf
+                                            "%s 'D%d'%s, field 'v': the omit-at-default value does not fit the field's type at the instantiation D%d<tuple<tuple<"
+                                            what
+                                            n
+                                            (if asUnion then " case 'Mk'" else "")
+                                            n)
+                                        "refused at the instantiation, by declaration and member"
+
+                                    Expect.stringContains only "..." "the instantiation abbreviated"
+                                    Expect.isLessThan only.Length 8192 "the text bounded"
+                                | other -> failtestf "one fault expected: %A" other)
+
+                    testCase (what + ": a default that fits every instantiation is admitted at any size") (fun _ ->
+                        // `Dk<T> { x: D(k+1)<tuple<T, T>>; o: Opt<list<T>> }`, k = 1 … 30, held at
+                        // `D1<int>`, and `Opt<T> { v: T = [] }`: `Opt` is reached only at lists, the last
+                        // holding 2^30 nodes, and the literal fits each.
+                        let n = 30
+                        let at (i: int) (t: IdlType) = refer asUnion (sprintf "D%d" i) [ t ]
+
+                        let chain =
+                            [ for i in 1..n ->
+                                  declared
+                                      asUnion
+                                      (sprintf "D%d" i)
+                                      [ "T" ]
+                                      [ if i < n then
+                                            f "x" (at (i + 1) (TTuple [ TVar "T"; TVar "T" ])) Optional
+                                        f "o" (refer asUnion "Opt" [ TList(TVar "T") ]) Optional ] ]
+
+                        let opt =
+                            declared asUnion "Opt" [ "T" ] [ f "v" (TVar "T") (OmitDefault(VList [])) ]
+
+                        let idl =
+                            vocabulary
+                                [ kind "K" [ f "g" (at 1 TInt) Optional ] ]
+                                (List.collect fst chain @ fst opt)
+                                (List.collect snd chain @ snd opt)
+
+                        Expect.isEmpty (within 20.0 "Declare.errors" (fun () -> Declare.errors idl)) "admitted"
 
                         Expect.equal
-                            (within 20.0 "Declare.errors" (fun () -> Declare.errors (doubling 26 zero [] ([], [])))
-                             |> List.map _.Detail)
-                            [ sprintf
-                                  "%s 'D26'%s, field 'v': the omit-at-default value was not checked at every instantiation, because the vocabulary reaches more than 65536 nodes across the instantiations of %s 'D26'"
-                                  what
-                                  (if asUnion then " case 'Mk'" else "")
-                                  what ]
-                            "past the size: the member, the declaration, and what was measured")
+                            (within 20.0 "Artifact.parse" (fun () -> Artifact.parse (Artifact.render idl)))
+                            (Ok(Artifact.canonicalise idl))
+                            "the artifact reads back")
+
+                    testCase (what + ": a thousand declarations, each holding a default, are checked at once") (fun _ ->
+                        // `D1<T> { x: D2<T>; v: T = "" } … D1000<T> { v: T = "" }`, held at `D1<str>`:
+                        // what the walks share is found once, and the declarations' instantiations are
+                        // read in one enumeration for them all. A walk per declaration took a minute.
+                        let n = 1000
+
+                        let chain (grows: bool) =
+                            [ for i in 1..n ->
+                                  declared
+                                      asUnion
+                                      (sprintf "D%d" i)
+                                      [ "T" ]
+                                      [ if i < n then
+                                            f "x" (refer asUnion (sprintf "D%d" (i + 1)) [ TVar "T" ]) Optional
+                                        if grows && i = 1 then
+                                            f "l" (refer asUnion "D1" [ TList(TVar "T") ]) Optional
+                                        f "v" (TVar "T") (OmitDefault(if grows then VList [] else VStr "")) ] ]
+
+                        let held (grows: bool) (at: IdlType) =
+                            let declarations = chain grows
+
+                            vocabulary
+                                [ kind "K" [ f "g" (refer asUnion "D1" [ at ]) Optional ] ]
+                                (List.collect fst declarations)
+                                (List.collect snd declarations)
+
+                        let idl = held false TStr
+                        Expect.isEmpty (within 10.0 "Declare.errors" (fun () -> Declare.errors idl)) "admitted"
+
+                        Expect.equal
+                            (within 10.0 "Artifact.parse" (fun () -> Artifact.parse (Artifact.render idl)))
+                            (Ok(Artifact.canonicalise idl))
+                            "the artifact reads back"
+
+                        // Held at `D1<int>`, each declaration's own member is refused, once.
+                        let refused =
+                            within 10.0 "Declare.errors" (fun () -> Declare.errors (held false TInt))
+                            |> List.map (fun x -> x.Detail.Substring(0, x.Detail.IndexOf ':'))
+
+                        Expect.equal
+                            (List.sort refused)
+                            (List.sort
+                                [ for i in 1..n ->
+                                      if asUnion then
+                                          sprintf "union 'D%d' case 'Mk', field 'v'" i
+                                      else
+                                          sprintf "record 'D%d', field 'v'" i ])
+                            "each declaration judged, once"
+
+                        // Where the first grows (`D1<T>` also holds `D1<list<T>>`) and each default is
+                        // `[]`, every one is judged in classes, in one walk.
+                        Expect.isEmpty
+                            (within 10.0 "Declare.errors" (fun () -> Declare.errors (held true (TList TStr))))
+                            "admitted in classes"
+
+                        Expect.equal
+                            (within 10.0 "Declare.errors" (fun () -> Declare.errors (held true TInt))
+                             |> List.length)
+                            n
+                            "and each refused in classes")
 
                 testCase
                     "a generic union applied at a tuple of its parameter is stated at the tuple's components"
@@ -857,15 +956,14 @@ let tests =
                         (Error true)
                         "and refuses one node past it"
 
+                    // The declaration check prints nothing to judge, so it judges either.
                     Expect.isEmpty
                         (within 30.0 "Declare.errors" (fun () -> Declare.errors at))
                         "the declaration check judges it"
 
-                    Expect.equal
-                        (within 30.0 "Declare.errors" (fun () -> Declare.errors over)
-                         |> List.map _.Detail)
-                        [ "record 'Box', field 'v': the omit-at-default value was not checked at every instantiation, because the vocabulary reaches more than 65536 nodes across the instantiations of record 'Box'" ]
-                        "and says it did not judge one node past it")
+                    Expect.isEmpty
+                        (within 30.0 "Declare.errors" (fun () -> Declare.errors over))
+                        "and judges one node past it")
 
                 testCase
                     "a fold through a chain whose instantiations double is refused, saying what was measured"

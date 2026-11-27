@@ -194,7 +194,12 @@ module Encode =
 
             go [] pairs |> Result.bind (inCanonicalOrder "keyed map key") |> Result.map JArr
         | _, VAbsent -> Error "absent value reached the encoder (should be omitted at the field level)"
-        | _ -> Error(sprintf "authored value does not match IDL type %A" t)
+        // Phase 732 — the type is printed in full up to [[Instantiations.spelledLimit]] nodes and
+        // abbreviated past them: a type an instantiation's argument grew can hold far more nodes
+        // than its text could, and the refusal still names it.
+        | _ when Instantiations.holdsAtMost Instantiations.spelledLimit t ->
+            Error(sprintf "authored value does not match IDL type %A" t)
+        | _ -> Error(sprintf "authored value does not match IDL type %s" (Instantiations.spellAbbreviated t))
 
     /// Each value at its type, in order (Phase 639).
     and private encodeAll (idl: Idl) (typed: (IdlType * IdlValue) list) : Result<JVal list, string> =

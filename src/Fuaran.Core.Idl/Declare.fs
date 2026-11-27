@@ -773,17 +773,30 @@ module Declare =
             | VEnum w, WireForm.Enum e -> List.contains w e.WireCases
             | _ -> not (List.isEmpty (WireForm.scalarSpellings idl t v))
 
+        // Whether `t` names a type parameter. Each type object is asked once per check, so a type
+        // shared in memory (an instantiation's argument, placed at each position that names its
+        // parameter) costs a constant per node however large it prints.
+        let mentioned =
+            System.Collections.Generic.Dictionary<IdlType, bool>(HashIdentity.Reference)
+
         let rec mentionsVar (t: IdlType) =
-            match t with
-            | TVar _ -> true
-            | TList inner
-            | TMap inner
-            | TSet inner -> mentionsVar inner
-            | TUnion(_, args)
-            | TRecord(_, args)
-            | TTuple args -> args |> List.exists mentionsVar
-            | TKeyedMap(k, v) -> mentionsVar k || mentionsVar v
-            | _ -> false
+            match mentioned.TryGetValue t with
+            | true, answer -> answer
+            | false, _ ->
+                let answer =
+                    match t with
+                    | TVar _ -> true
+                    | TList inner
+                    | TMap inner
+                    | TSet inner -> mentionsVar inner
+                    | TUnion(_, args)
+                    | TRecord(_, args)
+                    | TTuple args -> args |> List.exists mentionsVar
+                    | TKeyedMap(k, v) -> mentionsVar k || mentionsVar v
+                    | _ -> false
+
+                mentioned[t] <- answer
+                answer
 
         // The transparent case's field of a union reference that instantiates it to an OBJECT: the
         // field names a type parameter, and at the reference's arguments its type can encode to
@@ -1203,20 +1216,36 @@ module Declare =
         /// applied. An instantiation named only as an argument no member holds (`Phantom<Opt<int>>`,
         /// where `Phantom<T>` holds nothing at `T`) is not one: no document holds a value of it.
         ///
-        /// Each declaration `held` names is walked for ON ITS OWN: the walk enters only it and the
-        /// declarations that reach it ([[Instantiations.reaching]]), so a part of the vocabulary that
-        /// cannot reach it, however many instantiations it has, is not read for it.
+        /// What the declarations `held` names share is found ONCE for them all: the analysis (which
+        /// argument positions a value reaches, which declarations enter which, the parameter graph's
+        /// cycles) and which declarations have finitely many instantiations
+        /// ([[Instantiations.unbounded]]). A declaration that has is judged at each of them, read
+        /// from ONE enumeration of every such declaration's instantiations: the walk that keeps only
+        /// the declarations reaching it reads the same ones. The others are judged in CLASSES, in one
+        /// walk for them all: two instantiations whose arguments agree to a depth `k` enter
+        /// references that agree to that depth (a substitution places an argument no shallower than
+        /// it stood), so a class is judged at its first member wherever the cut decides the verdict,
+        /// which `judged` says beside its faults (it is handed the cut). Where the cut does not decide
+        /// for a declaration, the depth is raised for it and the walk starts again. At any depth the
+        /// classes are finitely many, so the walk ends.
         ///
-        /// Where they are finitely many ([[Instantiations.closureWithin]]) each is judged. Where they are
-        /// not, they are judged in CLASSES: two instantiations whose arguments agree to a depth `k`
-        /// enter references that agree to that depth (a substitution places an argument no shallower
-        /// than it stood), so a class is judged at its first member wherever the cut decides the
-        /// verdict, which `judged` says beside its faults (it is handed the cut). Where the cut does
-        /// not decide, the depth is raised and the walk starts again. At any depth the classes are
-        /// finitely many, so the walk ends. More than [[Instantiations.limit]] instantiations read
-        /// for the declaration, or more than [[Instantiations.sizeLimit]] nodes across the
-        /// instantiations of it that are judged (a fault prints the one it refuses), is `unchecked`
-        /// for that declaration: said, in the sentence that names it, never guessed.
+        /// A walk that reads more than [[Instantiations.limit]] instantiations is taken again for each
+        /// declaration it was reading for, ON ITS OWN: entering only it and the declarations that
+        /// reach it ([[Instantiations.reaching]]), so a part of the vocabulary that cannot reach it,
+        /// however many instantiations it has, is not read for it. One that still reads more is
+        /// `unchecked` for that declaration: said, in the sentence that names it, never guessed.
+        ///
+        /// Nothing is printed to be judged, so how large an instantiation is decides nothing: a type
+        /// shared in memory is read once per node however large it prints, and only a refusal's text
+        /// names an instantiation, to its first [[Instantiations.spelledLimit]] nodes.
+        ///
+        /// The cost, for declarations whose member types hold `s` nodes between them, `L` the count
+        /// and `h` the declarations held: the analysis is linear in `s`; each walk enters at most `L`
+        /// instantiations of generic declarations across every depth it tries, each step costing what
+        /// the member types of the declaration it reads cost; and only a declaration whose shared
+        /// walk stopped at the count is walked again, on its own and bounded the same way. So the
+        /// rules cost O(s + L) steps where no shared walk stops at the count, and O(s + h L) at most,
+        /// whatever the arguments have grown to.
         let overInstantiations
             (held: string list)
             (judged:
@@ -1288,91 +1317,122 @@ module Declare =
                 | TTimeOfDay
                 | TDuration -> t
 
-            // One declaration's walk: `within` is it and the declarations that reach it.
-            let walk (declaration: string) : VocabularyFault list =
-                let within = Instantiations.reaching analysis declaration
-                let mine (instantiation: string * IdlType list) = fst instantiation = declaration
-                let tooLarge = Instantiations.oversizedAt declaration
+            // The classes at depth `k` of the declarations `pending`, in one walk over the
+            // declarations that reach one of them; `read` is how many instantiations of generic
+            // declarations the walks have entered so far, at every depth tried. The faults of each
+            // declaration the walks decided, and the declarations left where a walk read past the
+            // count. A walk ends early once no pending declaration is still deciding at its depth.
+            let rec classes
+                (pending: Set<string>)
+                (k: int)
+                (read: int)
+                : Map<string, VocabularyFault list> * Set<string> =
+                let within = Instantiations.reachingAny analysis (Set.toList pending)
+                let cut = cutAt k
 
-                // The classes at depth `k`, breadth first; `read` is how many instantiations of
-                // generic declarations the walk has entered so far, and `printed` the nodes of the
-                // declaration's own it has judged, at every depth it has tried.
-                let rec classes (k: int) (read: int) (printed: int64) : VocabularyFault list =
-                    let cut = cutAt k
+                let seen =
+                    System.Collections.Generic.HashSet<string * int list>(HashIdentity.Structural)
 
-                    let seen =
-                        System.Collections.Generic.HashSet<string * int list>(HashIdentity.Structural)
+                let queue = System.Collections.Generic.Queue<string * IdlType list>()
 
-                    let queue = System.Collections.Generic.Queue<string * IdlType list>()
-                    let faults = ResizeArray<VocabularyFault>()
-                    let mutable read = read
-                    let mutable printed = printed
-                    let mutable undecided = false
+                let faults = pending |> Seq.map (fun d -> d, ResizeArray<VocabularyFault>()) |> dict
 
-                    let offer (found: (string * IdlType list) list) =
-                        found |> List.filter (fst >> within.Contains) |> List.iter queue.Enqueue
+                let undecided = System.Collections.Generic.HashSet<string>()
+                let mutable read = read
 
-                    for root in roots do
-                        offer (Instantiations.entered analysis root)
+                let offer (found: (string * IdlType list) list) =
+                    found |> List.filter (fst >> within.Contains) |> List.iter queue.Enqueue
 
-                    while queue.Count > 0
-                          && not undecided
-                          && read <= Instantiations.limit
-                          && printed <= int64 Instantiations.sizeLimit do
-                        let (name, args) as instantiation = queue.Dequeue()
+                for root in roots do
+                    offer (Instantiations.entered analysis root)
 
-                        if seen.Add((name, args |> List.map (cut >> Instantiations.identity analysis))) then
-                            if not (List.isEmpty args) then
-                                read <- read + 1
+                while queue.Count > 0
+                      && undecided.Count < pending.Count
+                      && read <= Instantiations.limit do
+                    let (name, args) as instantiation = queue.Dequeue()
 
-                            let decided =
-                                if mine instantiation then
-                                    // Both are under the cap or the one just read is over it, so
-                                    // the sum is exact or past the cap either way.
-                                    let one = Instantiations.printedSize analysis [ instantiation ]
+                    if seen.Add((name, args |> List.map (cut >> Instantiations.identity analysis))) then
+                        if not (List.isEmpty args) then
+                            read <- read + 1
 
-                                    printed <-
-                                        if one > int64 Instantiations.sizeLimit then
-                                            one
-                                        else
-                                            printed + one
-
-                                    if printed > int64 Instantiations.sizeLimit then
-                                        true
-                                    else
-                                        let found, decided = judged analysis cut instantiation
-                                        faults.AddRange found
-                                        decided
-                                else
-                                    true
+                        if pending.Contains name && not (undecided.Contains name) then
+                            let found, decided = judged analysis cut instantiation
 
                             if decided then
-                                offer (Instantiations.successors analysis instantiation)
+                                faults[name].AddRange found
                             else
-                                undecided <- true
+                                undecided.Add name |> ignore
 
-                    if read > Instantiations.limit then
-                        unchecked declaration (Instantiations.exceedsReaching declaration)
-                    elif printed > int64 Instantiations.sizeLimit then
-                        unchecked declaration tooLarge
-                    elif undecided then
-                        classes (k + 1) read printed
+                        offer (Instantiations.successors analysis instantiation)
+
+                if read > Instantiations.limit then
+                    Map.empty, pending
+                else
+                    // The first instantiation reached that each member is refused at.
+                    let here =
+                        [ for d in pending do
+                              if not (undecided.Contains d) then
+                                  d, faults[d] |> List.ofSeq |> List.distinctBy _.At ]
+                        |> Map.ofList
+
+                    if undecided.Count = 0 then
+                        here, Set.empty
                     else
-                        // The first instantiation reached that each member is refused at.
-                        faults |> List.ofSeq |> List.distinctBy _.At
+                        let deeper, left = classes (Set.ofSeq undecided) (k + 1) read
+                        Map.fold (fun acc d fs -> Map.add d fs acc) here deeper, left
 
-                match Instantiations.closureWithin analysis within.Contains roots with
-                | Instantiations.Closure.Finite(all, _) ->
-                    let judgedHere = all |> List.filter mine
+            // Judged in classes: in one walk for them all, then each the walk could not finish on
+            // its own.
+            let inClasses (pending: string list) : (string * VocabularyFault list) list =
+                let decided, _ = classes (Set.ofList pending) 1 0
 
-                    if Instantiations.printedSize analysis judgedHere > int64 Instantiations.sizeLimit then
-                        unchecked declaration tooLarge
-                    else
-                        judgedHere |> List.collect (judged analysis id >> fst)
-                | Instantiations.Closure.Exceeds -> unchecked declaration (Instantiations.exceedsReaching declaration)
-                | Instantiations.Closure.Infinite _ -> classes 1 0 0L
+                [ for d in pending do
+                      match Map.tryFind d decided with
+                      | Some fs -> d, fs
+                      | None when List.length pending = 1 -> d, unchecked d (Instantiations.exceedsReaching d)
+                      | None ->
+                          match classes (Set.singleton d) 1 0 with
+                          | alone, _ when alone.ContainsKey d -> d, alone[d]
+                          | _ -> d, unchecked d (Instantiations.exceedsReaching d) ]
 
-            held |> List.collect walk
+            // Judged at each instantiation: the enumeration's own, for `d`.
+            let atEach (all: (string * IdlType list) list) (d: string) : VocabularyFault list =
+                all
+                |> List.filter (fun (name, _) -> name = d)
+                |> List.collect (judged analysis id >> fst)
+
+            // One declaration whose instantiations are finitely many, walked on its own.
+            let alone (d: string) : VocabularyFault list =
+                match Instantiations.closureWithin analysis (Instantiations.reaching analysis d).Contains roots with
+                | Instantiations.Closure.Finite(all, _) -> atEach all d
+                | Instantiations.Closure.Exceeds -> unchecked d (Instantiations.exceedsReaching d)
+                | Instantiations.Closure.Infinite _ -> inClasses [ d ] |> List.collect snd
+
+            let unbounded = Instantiations.unbounded analysis roots
+            let finite, infinite = held |> List.partition (unbounded.Contains >> not)
+
+            let atInstantiations =
+                if List.isEmpty finite then
+                    []
+                else
+                    // No declaration kept is unbounded, so the enumeration finds no growth.
+                    match Instantiations.closureWithin analysis (unbounded.Contains >> not) roots with
+                    | Instantiations.Closure.Finite(all, _) ->
+                        let byDeclaration = all |> List.groupBy fst |> dict
+
+                        finite
+                        |> List.map (fun d ->
+                            match byDeclaration.TryGetValue d with
+                            | true, mine -> d, atEach mine d
+                            | false, _ -> d, [])
+                    | Instantiations.Closure.Exceeds
+                    | Instantiations.Closure.Infinite _ -> finite |> List.map (fun d -> d, alone d)
+
+            let byDeclaration =
+                atInstantiations @ (if List.isEmpty infinite then [] else inClasses infinite)
+                |> Map.ofList
+
+            held |> List.collect (fun d -> byDeclaration[d])
 
         // The fault that says a rule did not judge every instantiation, for the first member it holds.
         let uncheckedAt
@@ -1458,7 +1518,7 @@ module Declare =
                                     sprintf
                                         "%s: the omit-at-default value does not fit the field's type at the instantiation %s (%s)"
                                         at
-                                        (Instantiations.spell (Instantiations.applies instantiation))
+                                        (Instantiations.spellAbbreviated (Instantiations.applies instantiation))
                                         m }
 
                             faults @ [ refusal ], decided
@@ -1576,12 +1636,11 @@ module Declare =
                     (binding: Map<string, IdlType>)
                     =
                     [ for path, at, declared, references in members do
-                          let entered =
-                              Instantiations.entered analysis (TypeParams.substitute binding declared)
+                          let substituted = TypeParams.substitute binding declared
 
                           for reference in references do
                               match TypeParams.substitute binding reference with
-                              | TUnion(n, args) as applied when List.contains (Instantiations.unionKey n, args) entered ->
+                              | TUnion _ as applied when Instantiations.enters analysis substituted applied ->
                                   match WireForm.ofType idl applied with
                                   | WireForm.Union u ->
                                       match objectAtReference u with
@@ -1603,7 +1662,7 @@ module Declare =
                                 sprintf
                                     "%s: at the instantiation %s, instantiates union '%s' so that its transparent case's field '%s' can encode to an object — %s"
                                     at
-                                    (Instantiations.spell (Instantiations.applies instantiation))
+                                    (Instantiations.spellAbbreviated (Instantiations.applies instantiation))
                                     union
                                     field
                                     bareObject })

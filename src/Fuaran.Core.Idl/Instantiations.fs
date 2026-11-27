@@ -169,14 +169,24 @@ module internal Instantiations =
         }
 
     /// One reading, analysed once: the argument positions a value reaches, the references each
-    /// declaration enters, and the parameter graph.
+    /// declaration enters, the parameter graph, and what every question below asks of the whole
+    /// vocabulary, each computed once however many questions are asked.
     type Analysis<'T when 'T: equality and 'T: not struct> =
         private
-            { Reading: Reading<'T>
-              Held: Set<string * int>
-              Entered: Map<string, (string * 'T list) list>
-              Edges: Map<string * int, Edge<'T> list>
-              Interner: Interner<'T> }
+            {
+                Reading: Reading<'T>
+                Held: Set<string * int>
+                Entered: Map<string, (string * 'T list) list>
+                Edges: Map<string * int, Edge<'T> list>
+                /// Each declaration, and the declarations that enter it.
+                Into: Map<string, string list>
+                /// The declarations with a parameter on a cycle of the parameter graph that holds an
+                /// expanding edge ([[expansive]]).
+                Expansive: Lazy<Set<string>>
+                Interner: Interner<'T>
+                /// The references a walk enters in a type, by the type's number ([[enters]]).
+                EnteredBy: System.Collections.Generic.Dictionary<int, System.Collections.Generic.HashSet<int>>
+            }
 
     let private applied (reading: Reading<'T>) (declaration: string) (args: 'T list) : Declaration<'T> option =
         reading.Declarations
@@ -233,40 +243,145 @@ module internal Instantiations =
           Arguments = arguments
           Split = split }
 
+    /// The nodes of a graph that lie on a cycle holding one of the edges `marked` answers, by the
+    /// graph's strongly connected components (R. Tarjan, "Depth-first search and linear graph
+    /// algorithms", 1972), in time linear in the nodes and edges. A node lies on such a cycle exactly
+    /// where its component holds a marked edge between two of its own nodes: in a strongly connected
+    /// component every node and every edge inside it lie on one closed walk. Iterative, so a long
+    /// chain of declarations does not exhaust the stack.
+    let private onMarkedCycle
+        (successors: 'N -> 'E list)
+        (target: 'E -> 'N)
+        (marked: 'E -> bool)
+        (nodes: 'N list)
+        : Set<'N> when 'N: comparison =
+        let index = System.Collections.Generic.Dictionary<'N, int>()
+        let low = System.Collections.Generic.Dictionary<'N, int>()
+        let componentOf = System.Collections.Generic.Dictionary<'N, int>()
+        let onStack = System.Collections.Generic.HashSet<'N>()
+        let stack = System.Collections.Generic.Stack<'N>()
+        let mutable next = 0
+        let mutable components = 0
+
+        for root in nodes do
+            if not (index.ContainsKey root) then
+                // Each frame: a node and the out-edges it has still to visit.
+                let frames = System.Collections.Generic.Stack<'N * 'E list>()
+
+                let enter (n: 'N) =
+                    index[n] <- next
+                    low[n] <- next
+                    next <- next + 1
+                    stack.Push n
+                    onStack.Add n |> ignore
+                    frames.Push(n, successors n)
+
+                enter root
+
+                while frames.Count > 0 do
+                    match frames.Pop() with
+                    | n, e :: rest ->
+                        frames.Push(n, rest)
+                        let m = target e
+
+                        if not (index.ContainsKey m) then
+                            enter m
+                        elif onStack.Contains m then
+                            low[n] <- min low[n] index[m]
+                    | n, [] ->
+                        if low[n] = index[n] then
+                            let mutable closing = true
+
+                            while closing do
+                                let m = stack.Pop()
+                                onStack.Remove m |> ignore
+                                componentOf[m] <- components
+                                closing <- m <> n
+
+                            components <- components + 1
+
+                        if frames.Count > 0 then
+                            let parent, _ = frames.Peek()
+                            low[parent] <- min low[parent] low[n]
+
+        let expanding =
+            [ for n in nodes do
+                  for e in successors n do
+                      if marked e && componentOf[n] = componentOf[target e] then
+                          componentOf[n] ]
+            |> Set.ofList
+
+        nodes |> List.filter (fun n -> expanding.Contains componentOf[n]) |> Set.ofList
+
     /// The analysis of one reading.
     let analyse (reading: Reading<'T>) : Analysis<'T> =
         // The argument positions a value reaches: a parameter a member holds outside every
-        // reference, or inside an argument position that is itself held. A least fixed point; with
-        // [[Reading.Arguments]] every position is entered and the set is not asked.
+        // reference, or inside an argument position that is itself held. The least set closed
+        // under that rule, found as Horn clauses are (W. Dowling and J. Gallier, "Linear-time
+        // algorithms for testing the satisfiability of propositional Horn formulae", 1984): each
+        // place a member names a parameter is one clause, "the parameter's position is held if every
+        // argument position on the way to it is", and each position is settled once, so the cost is
+        // linear in the size of the declared member types. With [[Reading.Arguments]] every position
+        // is entered and the set is not asked.
         let held =
             if reading.Arguments then
                 Set.empty
             else
-                let rec holds (held: Set<string * int>) (p: string) (t: 'T) : bool =
+                // Each parameter a type names, with the argument positions on the way to it; none
+                // inside a type the walk does not look into.
+                let rec occurrences (path: (string * int) list) (t: 'T) : (string * (string * int) list) list =
                     match reading.Shape t with
-                    | Shape.Parameter q -> q = p
-                    | Shape.Names _ -> false
-                    | Shape.Holds parts -> parts |> List.exists (holds held p)
+                    | Shape.Parameter q -> [ q, path ]
+                    | Shape.Names _ -> []
+                    | Shape.Holds parts -> parts |> List.collect (occurrences path)
                     | Shape.Reference(declaration, args) ->
                         args
                         |> List.indexed
-                        |> List.exists (fun (i, a) -> held.Contains(declaration, i) && holds held p a)
+                        |> List.collect (fun (i, a) -> occurrences ((declaration, i) :: path) a)
 
-                let step (held: Set<string * int>) =
-                    (held, reading.Declarations)
-                    ||> Map.fold (fun acc name d ->
-                        (acc, List.indexed d.Params)
-                        ||> List.fold (fun acc (i, p) ->
-                            if d.Members |> List.exists (holds held p) then
-                                acc.Add(name, i)
-                            else
-                                acc))
+                let clauses =
+                    [| for KeyValue(name, d) in reading.Declarations do
+                           let index = d.Params |> List.indexed |> List.map (fun (i, p) -> p, i) |> Map.ofList
 
-                let rec fix (held: Set<string * int>) =
-                    let next = step held
-                    if next = held then held else fix next
+                           for m in d.Members do
+                               for q, path in occurrences [] m do
+                                   match Map.tryFind q index with
+                                   | Some i -> (name, i), List.distinct path
+                                   | None -> () |]
 
-                fix Set.empty
+                let waiting = Array.map (snd >> List.length) clauses
+
+                let watching =
+                    clauses
+                    |> Array.indexed
+                    |> Array.collect (fun (c, (_, path)) -> path |> List.map (fun atom -> atom, c) |> Array.ofList)
+                    |> Array.groupBy fst
+                    |> Array.map (fun (atom, cs) -> atom, cs |> Array.map snd)
+                    |> dict
+
+                let settled = System.Collections.Generic.HashSet<string * int>()
+                let queue = System.Collections.Generic.Queue<string * int>()
+
+                let settle (atom: string * int) =
+                    if settled.Add atom then
+                        queue.Enqueue atom
+
+                clauses
+                |> Array.iteri (fun c (head, _) ->
+                    if waiting[c] = 0 then
+                        settle head)
+
+                while queue.Count > 0 do
+                    match watching.TryGetValue(queue.Dequeue()) with
+                    | true, cs ->
+                        for c in cs do
+                            waiting[c] <- waiting[c] - 1
+
+                            if waiting[c] = 0 then
+                                settle (fst clauses[c])
+                    | false, _ -> ()
+
+                Set.ofSeq settled
 
         let entered =
             reading.Declarations
@@ -290,11 +405,40 @@ module internal Instantiations =
             |> List.groupBy _.From
             |> Map.ofList
 
+        let into =
+            [ for KeyValue(name, found) in entered do
+                  for inner, _ in found do
+                      inner, name ]
+            |> List.distinct
+            |> List.groupBy fst
+            |> List.map (fun (inner, pairs) -> inner, pairs |> List.map snd)
+            |> Map.ofList
+
+        // A declaration whose parameter lies on a cycle holding an expanding edge: the graph's
+        // components, read once.
+        let expansive =
+            lazy
+                (let successors (node: string * int) =
+                    edges |> Map.tryFind node |> Option.defaultValue []
+
+                 let nodes =
+                     [ for KeyValue(from, out) in edges do
+                           from
+
+                           for e in out do
+                               e.To ]
+                     |> List.distinct
+
+                 onMarkedCycle successors _.To _.Expanding nodes |> Set.map fst)
+
         { Reading = reading
           Held = held
           Entered = entered
           Edges = edges
-          Interner = Interner reading.Split }
+          Into = into
+          Expansive = expansive
+          Interner = Interner reading.Split
+          EnteredBy = System.Collections.Generic.Dictionary() }
 
     /// The references a walk enters in `t` ([[references]]).
     let entered (analysis: Analysis<'T>) (t: 'T) : (string * 'T list) list =
@@ -312,33 +456,58 @@ module internal Instantiations =
     let printedSize (analysis: Analysis<'T>) (instantiations: (string * 'T list) list) : int64 =
         (0L, instantiations) ||> List.fold (fun acc i -> add acc (size analysis i))
 
-    /// The declarations whose instantiations can reach one of `declaration` through the members a
-    /// walk follows, `declaration` itself included: the only ones a walk for its instantiations
-    /// needs to enter, since an instantiation is reached only from a root or from an instantiation
-    /// of a declaration that enters its declaration.
-    let reaching (analysis: Analysis<'T>) (declaration: string) : Set<string> =
-        let into =
-            [ for KeyValue(name, found) in analysis.Entered do
-                  for inner, _ in found do
-                      inner, name ]
-            |> List.groupBy fst
-            |> List.map (fun (inner, pairs) -> inner, pairs |> List.map snd)
-            |> Map.ofList
+    /// Whether a walk over `t` enters the reference `r` ([[entered]]), read off the shared graph:
+    /// the references entered in each node of `t` are found once per analysis however often that
+    /// node is held, so the answer costs a constant per node of `t` as it is shared in memory.
+    let enters (analysis: Analysis<'T>) (t: 'T) (r: 'T) : bool =
+        let reading = analysis.Reading
 
-        let rec close (acc: Set<string>) (frontier: string list) =
-            match frontier with
-            | [] -> acc
-            | d :: rest ->
-                let fresh =
-                    into
-                    |> Map.tryFind d
-                    |> Option.defaultValue []
-                    |> List.filter (fun e -> not (acc.Contains e))
-                    |> List.distinct
+        let rec found (t: 'T) : System.Collections.Generic.HashSet<int> =
+            let id = analysis.Interner.Id t
 
-                close (Set.union acc (Set.ofList fresh)) (fresh @ rest)
+            match analysis.EnteredBy.TryGetValue id with
+            | true, set -> set
+            | false, _ ->
+                let set = System.Collections.Generic.HashSet<int>()
 
-        close (Set.singleton declaration) [ declaration ]
+                match reading.Shape t with
+                | Shape.Parameter _
+                | Shape.Names _ -> ()
+                | Shape.Holds parts ->
+                    for p in parts do
+                        set.UnionWith(found p)
+                | Shape.Reference(declaration, args) ->
+                    args
+                    |> List.iteri (fun i a ->
+                        if reading.Arguments || analysis.Held.Contains(declaration, i) then
+                            set.UnionWith(found a))
+
+                    if (applied reading declaration args).IsSome then
+                        set.Add id |> ignore
+
+                analysis.EnteredBy[id] <- set
+                set
+
+        (found t).Contains(analysis.Interner.Id r)
+
+    /// The declarations whose instantiations can reach one of the `declarations` through the
+    /// members a walk follows, those declarations themselves included: the only ones a walk for
+    /// their instantiations needs to enter, since an instantiation is reached only from a root or
+    /// from an instantiation of a declaration that enters its declaration. Linear in the edges of
+    /// the declarations it returns.
+    let reachingAny (analysis: Analysis<'T>) (declarations: string list) : Set<string> =
+        let found = System.Collections.Generic.HashSet<string>(declarations)
+        let frontier = System.Collections.Generic.Queue<string>(declarations)
+
+        while frontier.Count > 0 do
+            for e in analysis.Into |> Map.tryFind (frontier.Dequeue()) |> Option.defaultValue [] do
+                if found.Add e then
+                    frontier.Enqueue e
+
+        Set.ofSeq found
+
+    /// The declarations whose instantiations can reach one of `declaration`'s ([[reachingAny]]).
+    let reaching (analysis: Analysis<'T>) (declaration: string) : Set<string> = reachingAny analysis [ declaration ]
 
     /// The binding an instantiation makes: each parameter of its declaration to the argument at its
     /// position. None where the reference applies another number of arguments, or names nothing.
@@ -409,7 +578,13 @@ module internal Instantiations =
     /// cycle once reaches it at. Every expanding edge of a reached declaration is tried as the
     /// cycle's first edge, so no such cycle is missed. Only the declarations `keep` answers are
     /// asked; a cycle through one of [[reaching]]'s declarations passes only through others.
+    ///
+    /// Whether there is such a cycle is read off the parameter graph's components, found once per
+    /// analysis ([[Analysis.Expansive]]); only the declarations on one are searched for the
+    /// witness, and only where there is one.
     let growth (analysis: Analysis<'T>) (keep: string -> bool) (roots: 'T list) : Growth<'T> option =
+        let expansive = analysis.Expansive.Force()
+
         let cycle (declaration: string) : Edge<'T> list option =
             let own =
                 analysis.Reading.Declarations[declaration].Params
@@ -431,7 +606,7 @@ module internal Instantiations =
                 |> Option.filter (List.exists _.Expanding))
 
         declarationsReached analysis roots
-        |> List.filter keep
+        |> List.filter (fun d -> expansive.Contains d && keep d)
         |> List.tryPick (fun declaration ->
             cycle declaration
             |> Option.map (fun edges ->
@@ -451,6 +626,24 @@ module internal Instantiations =
                 { Declaration = declaration
                   Params = analysis.Reading.Declarations[declaration].Params
                   Reaches = reaches }))
+
+    /// The declarations whose walk [[growth]] finds infinite: each one that a reached declaration on
+    /// an expanding cycle enters, directly or through others, those declarations included. For
+    /// each other declaration `D`, the walk that keeps only [[reaching]]'s declarations for `D` is
+    /// finite, and every declaration reaching `D` is another such. Found once, in time linear in
+    /// the declarations and the references they enter.
+    let unbounded (analysis: Analysis<'T>) (roots: 'T list) : Set<string> =
+        let expansive = analysis.Expansive.Force()
+        let start = declarationsReached analysis roots |> List.filter expansive.Contains
+        let found = System.Collections.Generic.HashSet<string>(start)
+        let frontier = System.Collections.Generic.Queue<string>(start)
+
+        while frontier.Count > 0 do
+            for inner, _ in analysis.Entered[frontier.Dequeue()] do
+                if found.Add inner then
+                    frontier.Enqueue inner
+
+        Set.ofSeq found
 
     /// The instantiations a set of roots reaches.
     [<RequireQualifiedAccess>]
@@ -513,14 +706,8 @@ module internal Instantiations =
     // The reading of a vocabulary's own declarations.
     // -----------------------------------------------------------------------
 
-    /// A type as a fault spells an instantiation: the artifact's tags, a declaration by its name
-    /// and its arguments (`Opt<int>`, `Pair<str, list<bool>>`). Every case is named.
-    let rec spell (t: IdlType) : string =
-        let applied (name: string) (args: IdlType list) =
-            match args with
-            | [] -> name
-            | _ -> sprintf "%s<%s>" name (args |> List.map spell |> String.concat ", ")
-
+    /// A type spelled by its tags, each declaration and collection by `applied` over its arguments.
+    let private spelledAs (applied: string -> IdlType list -> string) (t: IdlType) : string =
         match t with
         | TStr -> "str"
         | TInt -> "int"
@@ -550,6 +737,44 @@ module internal Instantiations =
         // spellings, whatever the key.
         | TKeyedMap(k, v) -> applied "keyedMap" [ k; v ]
         | TTuple components -> applied "tuple" components
+
+    /// How many nodes of an instantiation a REFUSAL spells ([[spellAbbreviated]]): what is past them
+    /// is written `...`. It bounds the text of a fault, never whether one is found.
+    [<Literal>]
+    let spelledLimit = 256
+
+    /// `t` spelled to its first `nodes` nodes, read depth first, the rest of each list of
+    /// arguments it stops in written `...` once.
+    let private spellUpTo (nodes: int) (t: IdlType) : string =
+        let mutable left = nodes
+
+        let rec go (t: IdlType) : string =
+            left <- left - 1
+
+            let applied (name: string) (args: IdlType list) =
+                match args with
+                | [] -> name
+                | _ ->
+                    let rec parts (acc: string list) (rest: IdlType list) =
+                        match rest with
+                        | [] -> List.rev acc
+                        | _ when left <= 0 -> List.rev ("..." :: acc)
+                        | a :: tail -> parts (go a :: acc) tail
+
+                    sprintf "%s<%s>" name (parts [] args |> String.concat ", ")
+
+            spelledAs applied t
+
+        go t
+
+    /// A type as a fault spells an instantiation: the artifact's tags, a declaration by its name
+    /// and its arguments (`Opt<int>`, `Pair<str, list<bool>>`). Every case is named.
+    let spell (t: IdlType) : string = spellUpTo System.Int32.MaxValue t
+
+    /// [[spell]] to the first [[spelledLimit]] nodes: what a refusal names an instantiation by,
+    /// so that its text is bounded however large the instantiation is. An instantiation of no
+    /// more nodes is spelled in full.
+    let spellAbbreviated (t: IdlType) : string = spellUpTo spelledLimit t
 
     /// A record's key in a vocabulary's reading ([[ofIdl]]).
     let recordKey (name: string) = "record " + name
@@ -687,6 +912,21 @@ module internal Instantiations =
         | TTimeOfDay
         | TDuration -> t, []
 
+    /// Whether `t` holds at most `nodes` nodes, each type it holds counted at its full printed size
+    /// ([[split]]), read only as far as the answer needs.
+    let holdsAtMost (nodes: int) (t: IdlType) : bool =
+        let mutable left = nodes
+
+        let rec go (t: IdlType) =
+            left <- left - 1
+
+            for part in snd (split t) do
+                if left >= 0 then
+                    go part
+
+        go t
+        left >= 0
+
     /// A vocabulary's records and unions as one walk reads them. Where two declarations share a
     /// name the first is read, as [[IdlLookup]] answers it.
     let ofIdl (walk: Walk) (idl: Idl) : Reading<IdlType> =
@@ -742,11 +982,6 @@ module internal Instantiations =
             "more than %d instantiations of %s and the generic declarations that reach it"
             limit
             (spelledKey declaration)
-
-    /// What a walk for the instantiations of ONE declaration says when they hold more than
-    /// [[sizeLimit]] nodes between them.
-    let oversizedAt (declaration: string) : string =
-        sprintf "more than %d nodes across the instantiations of %s" sizeLimit (spelledKey declaration)
 
     /// What an entry that prints every instantiation says of a vocabulary whose instantiations
     /// hold more than [[sizeLimit]] nodes between them.
