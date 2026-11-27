@@ -153,8 +153,11 @@ let tests =
                   | Ok(JObj ms) ->
                       match ms |> List.tryFind (fun (k, _) -> k = "vectors") with
                       | Some(_, JArr vs) ->
+                          // A refusal vector (Phase 723) pins where a fault is located, not what a
+                          // decoder drops; the planted defect is read against the bytes the others expect.
                           vs
                           |> List.choose (function
+                              | JObj m when List.exists (fun (k, _) -> k = "refusal") m -> None
                               | JObj m when host (member' m "document") <> Ok(member' m "expected") ->
                                   Some(member' m "id")
                               | JObj _ -> None
