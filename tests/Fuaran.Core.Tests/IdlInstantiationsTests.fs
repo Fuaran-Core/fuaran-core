@@ -923,6 +923,40 @@ let tests =
                         | Ok text -> Expect.stringContains text "and u_u3__tp2_tp2_str_str_tp2_str_str " "modelled"
                         | Error e -> failtestf "refused: %s" (CodegenError.describe e))
 
+                testCase
+                    "a chain wrapping its argument in a list is stated at 360 declarations and refused at 361"
+                    (fun _ ->
+                        // `U1<T> { x: U2<list<T>> } … Un<T> { v: T }` held at `U1<str>`: the k-th
+                        // instantiation holds k + 1 nodes, n (n + 3) / 2 between them, which passes 65536
+                        // at n = 361.
+                        let chain (n: int) =
+                            vocabulary
+                                [ kind "K" [ f "g" (TUnion("U1", [ TStr ])) Optional ] ]
+                                [ for i in 1..n ->
+                                      union
+                                          (sprintf "U%d" i)
+                                          [ "T" ]
+                                          [ case
+                                                "Mk"
+                                                [ if i = n then
+                                                      f "v" (TVar "T") Optional
+                                                  else
+                                                      f
+                                                          "x"
+                                                          (TUnion(sprintf "U%d" (i + 1), [ TList(TVar "T") ]))
+                                                          Optional ] ] ]
+                                []
+
+                        Expect.isOk
+                            (within 60.0 "Gen.jsonSchema" (fun () -> described (Gen.jsonSchema (chain 360))))
+                            "stated"
+
+                        Expect.equal
+                            (within 60.0 "Gen.jsonSchema" (fun () -> described (Gen.jsonSchema (chain 361)))
+                             |> Result.mapError (fun e -> e.Contains oversized))
+                            (Error true)
+                            "refused one declaration on")
+
                 testCase "the size is counted exactly: 65536 nodes are read and 65537 are not" (fun _ ->
                     // `Box<T> { v: T = [] }` held at `Box<list<tuple<int, …, int>>>` of m components:
                     // m + 3 nodes, the one instantiation the vocabulary has.
