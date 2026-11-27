@@ -2456,12 +2456,14 @@ let perParameterTests =
 
           testCase "the walks in classes read at most the step budget, and say so past it" (fun _ ->
               // `U1..U16<T>` each name the next at `tuple<T, json>` and at `tuple<T, list<json>>`, held
-              // at `U1<str>`: `U16`'s parameter takes 2^15 types, past the count, so `C1..C40<T>`, each
-              // copying it to the next twice, are judged in classes. `C40` holds `v: T = L`, `L` the
-              // pair `[L', []]` nested fifteen deep around `""`, which fits every type `T` takes there
-              // and is decided only at a cut that reaches its innermost string. The classes at depth
-              // `k` are 2^k at each declaration, so the walks in classes read the budget before they
-              // reach it: refused, naming the declaration they did not finish.
+              // at `U1<str>`, so `U16`'s parameter takes 2^15 types. `U16` holds `v: T = L`, `L` the
+              // pair `[L', []]` nested fifteen deep around `""`, which fits every one of them and is
+              // decided only at a cut that reaches its innermost string, and two hundred references
+              // to `N { u: U1<str> }`, which declares no parameter: each instantiation of `U16` the
+              // walks enter leads to two hundred readings of `N`. The walk that finds each
+              // instantiation reads its budget first, and `v` is judged in classes; there `U16` has
+              // 2^k classes at depth `k`, so the walks in classes read their budget before they reach
+              // the depth `L` is decided at: refused, naming the declaration they did not finish.
               let literal =
                   (VStr "", [ 1..15 ]) ||> List.fold (fun inner _ -> VList [ inner; VList [] ])
 
@@ -2474,26 +2476,24 @@ let perParameterTests =
                                  [ "T" ]
                                  [ case
                                        "Mk"
-                                       [ let next = if k < 16 then sprintf "U%d" (k + 1) else "C1"
-
-                                         f "a" (TUnion(next, [ TTuple [ TVar "T"; TJson ] ])) Optional
-                                         f "b" (TUnion(next, [ TTuple [ TVar "T"; TList TJson ] ])) Optional ] ] ]
-                       @ [ for k in 1..40 ->
-                               union
-                                   (sprintf "C%d" k)
-                                   [ "T" ]
-                                   [ case
-                                         "Mk"
-                                         (if k < 40 then
-                                              [ f "a" (TUnion(sprintf "C%d" (k + 1), [ TVar "T" ])) Optional
-                                                f "b" (TUnion(sprintf "C%d" (k + 1), [ TVar "T" ])) Optional ]
-                                          else
-                                              [ f "v" (TVar "T") (OmitDefault literal) ]) ] ])
+                                       (if k < 16 then
+                                            [ f
+                                                  "a"
+                                                  (TUnion(sprintf "U%d" (k + 1), [ TTuple [ TVar "T"; TJson ] ]))
+                                                  Optional
+                                              f
+                                                  "b"
+                                                  (TUnion(sprintf "U%d" (k + 1), [ TTuple [ TVar "T"; TList TJson ] ]))
+                                                  Optional ]
+                                        else
+                                            f "v" (TVar "T") (OmitDefault literal)
+                                            :: [ for j in 1..200 -> f (sprintf "n%d" j) (TUnion("N", [])) Optional ]) ] ]
+                       @ [ union "N" [] [ case "Mk" [ f "u" (TUnion("U1", [ TStr ])) Optional ] ] ])
                       []
 
               Expect.equal
                   (within 60.0 "Declare.errors" (fun () -> Declare.errors idl) |> List.map _.Detail)
-                  [ "union 'C40' case 'Mk', field 'v': the declaration check reads its budget of 1048576 instantiations in classes and stops before it has read every one that leads to union 'C40'; its default cannot be checked at each" ]
+                  [ "union 'U16' case 'Mk', field 'v': the declaration check reads its budget of 1048576 instantiations in classes and stops before it has read every one that leads to union 'U16'; its default cannot be checked at each" ]
                   "past the budget: refused in its own sentence") ]
 
 // ---------------------------------------------------------------------------
