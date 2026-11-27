@@ -1237,9 +1237,10 @@ module Declare =
         /// declaration, the member and the number (`tooMany`). Nothing else is counted against it,
         /// so no verdict depends on how many instantiations another declaration has. In classes it
         /// counts the declaration's own classes judged, across the depths. A declaration refused is
-        /// judged no further, and the walk reads the others on: it still enters the refused one
-        /// wherever that reaches another, at the positions that one is read at, so the
-        /// instantiations of every other are all reached. Where every instantiation is judged, they
+        /// judged no further, and the walk reads the others on: it still enters the refused one,
+        /// and what reaches it, at the positions the others are read at (none, where it reaches
+        /// none of them, so each such declaration is one step), so every other's instantiations are
+        /// all reached. Where every instantiation is judged, they
         /// are judged once the walk has read them all, so a declaration refused is judged at none.
         ///
         /// The walk is depth-first: it follows each reference it enters before the next, so the
@@ -1354,10 +1355,9 @@ module Declare =
                 let undecided = System.Collections.Generic.HashSet<string>()
                 let refused = System.Collections.Generic.HashSet<string>()
                 let mutable live = pending
-                let mutable within = Instantiations.reachingAny analysis (Set.toList live)
+                let within = Instantiations.reachingAny analysis (Set.toList live)
                 let mutable relevant = Instantiations.relevant analysis live
                 let mutable deciding = live.Count
-
 
                 let seen =
                     System.Collections.Generic.HashSet<string * int list>(HashIdentity.Structural)
@@ -1367,7 +1367,6 @@ module Declare =
                 let refuse (d: string) =
                     refused.Add d |> ignore
                     live <- live.Remove d
-                    within <- Instantiations.reachingAny analysis (Set.toList live)
                     relevant <- Instantiations.relevant analysis live
                     deciding <- live |> Seq.filter (undecided.Contains >> not) |> Seq.length
 
@@ -1382,34 +1381,30 @@ module Declare =
                 while stack.Count > 0 && deciding > 0 do
                     let name, written = stack.Pop()
 
-                    if within.Contains name then
-                        let args =
-                            written |> List.mapi (fun i a -> if relevant.Contains(name, i) then a else hole)
+                    let args =
+                        written |> List.mapi (fun i a -> if relevant.Contains(name, i) then a else hole)
 
-                        let ids = args |> List.map (cut >> Instantiations.identity analysis)
+                    let ids = args |> List.map (cut >> Instantiations.identity analysis)
 
-                        if seen.Add((name, ids)) then
-                            if live.Contains name then
-                                if not (undecided.Contains name) then
-                                    if not (List.isEmpty args) then
-                                        counts[name] <- counts[name] + 1
+                    if seen.Add((name, ids)) then
+                        if live.Contains name && not (undecided.Contains name) then
+                            if not (List.isEmpty args) then
+                                counts[name] <- counts[name] + 1
 
-                                    if counts[name] > Instantiations.declarationLimit then
-                                        refuse name
-                                    elif exact then
-                                        toJudge[name].Add((name, args))
-                                    else
-                                        let found, decided = judged analysis cut (name, args)
+                            if counts[name] > Instantiations.declarationLimit then
+                                refuse name
+                            elif exact then
+                                toJudge[name].Add((name, args))
+                            else
+                                let found, decided = judged analysis cut (name, args)
 
-                                        if decided then
-                                            faults[name].AddRange found
-                                        else
-                                            undecided.Add name |> ignore
-                                            deciding <- deciding - 1
+                                if decided then
+                                    faults[name].AddRange found
+                                else
+                                    undecided.Add name |> ignore
+                                    deciding <- deciding - 1
 
-
-                            if within.Contains name then
-                                offer (Instantiations.successors analysis (name, args))
+                        offer (Instantiations.successors analysis (name, args))
 
                 let decided =
                     [ for d in live do
