@@ -963,7 +963,33 @@ let tests =
 
                     Expect.isEmpty
                         (within 30.0 "Declare.errors" (fun () -> Declare.errors over))
-                        "and judges one node past it")
+                        "and judges one node past it"
+
+                    // The classifier counts the same nodes: `Box.r` restated as the type it is held at
+                    // is the same type at 65536 nodes, and past them reads moved (the side of the
+                    // break).
+                    let grade (m: int) =
+                        let big = TList(TTuple(List.replicate m TInt))
+
+                        let revision (written: bool) =
+                            vocabulary
+                                [ kind "K" [ f "b" (TRecord("Box", [ big ])) Optional ] ]
+                                []
+                                [ record
+                                      "Box"
+                                      [ "W" ]
+                                      [ f "item" (TVar "W") (OmitDefault(VList []))
+                                        f "r" (if written then big else TVar "W") Optional ] ]
+
+                        match
+                            within 60.0 "Diff.ofValues" (fun () ->
+                                Diff.ofValues (revision false, None) (revision true, None))
+                        with
+                        | Ok verdict -> verdict.Changes |> List.map _.Severity
+                        | Error e -> failtestf "the pair did not classify: %s" e
+
+                    Expect.equal (grade 65533) [ HostSurfaceOnly ] "the classifier reads 65536 nodes"
+                    Expect.equal (grade 65534) [ BreakingWire ] "and not 65537")
 
                 testCase
                     "a fold through a chain whose instantiations double is refused, saying what was measured"

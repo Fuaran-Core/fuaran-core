@@ -160,12 +160,43 @@ module internal DiffInstances =
               s.RecordParams |> Map.tryFind name |> Option.defaultValue [],
               fields |> List.map (fun f -> f.Wire.Shape) ]
 
-    /// A type shape as its head and the shapes it holds: an object's member values and an array's
-    /// items, the rest of it (its keys, a scalar) the head.
+    /// A type shape as its head and the type shapes it holds, exactly the parts
+    /// `Instantiations.split` reads off the type the shape writes (a declaration's arguments, a
+    /// collection's items, a tuple's components, a keyed map's keys and values, a hosted slot's
+    /// declared wire form), so that a shape holds as many nodes as its type and
+    /// `Instantiations.sizeLimit` measures one quantity in every entry. The rest of the object
+    /// (its tag, a name, a format) is the head. Anything that is not a type object is read whole.
     let private splitOf (v: JVal) : JVal * JVal list =
-        match v with
-        | JObj fs -> JObj(fs |> List.map (fun (k, _) -> k, JBool false)), fs |> List.map snd
-        | JArr xs -> JArr(xs |> List.map (fun _ -> JBool false)), xs
+        let hole = JBool false
+
+        let holds (tag: string) (key: string) =
+            match tag, key with
+            | ("record" | "union"), "args"
+            | ("list" | "set" | "tuple"), "of"
+            | "map", "values"
+            | "keyedMap", ("keys" | "values")
+            | "hosted", "wire" -> true
+            | _ -> false
+
+        match v, DiffSnapshot.str "$type" v with
+        | JObj fs, Some tag ->
+            let head =
+                fs
+                |> List.map (fun (k, x) ->
+                    match x with
+                    | JArr xs when holds tag k -> k, JArr(xs |> List.map (fun _ -> hole))
+                    | _ when holds tag k -> k, hole
+                    | _ -> k, x)
+
+            let parts =
+                fs
+                |> List.collect (fun (k, x) ->
+                    match x with
+                    | JArr xs when holds tag k -> xs
+                    | _ when holds tag k -> [ x ]
+                    | _ -> [])
+
+            JObj head, parts
         | _ -> v, []
 
     /// One revision's declarations, analysed.
