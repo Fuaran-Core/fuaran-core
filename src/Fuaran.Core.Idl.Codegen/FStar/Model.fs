@@ -273,9 +273,10 @@ module internal FStarModel =
     /// declaration by its parameters, `l_` and `m_` one), so in a vocabulary whose references apply
     /// as many arguments as declared the arguments read back one way. A record named `Ranged_Int`
     /// is `r_ranged_0_int` and `Ranged<int>` is `r_ranged__int`. Two names still meet where two
-    /// declarations' names differ only in the case of their first letter (`FooBar`, `fooBar`), and
-    /// where two tuples of enums do (the tuple's spelling, below, is older and committed modules
-    /// state it); a declared type whose name meets another's is refused by name ([[modelOf]]).
+    /// declarations' names differ only in the case of their first letter (`FooBar`, `fooBar`, of
+    /// any kind), and where two tuples of enums do (the tuple's spelling, below, is older and
+    /// committed modules state it); every top-level name the modules emit passes through one table,
+    /// and one that meets another's is refused by name ([[modelOf]]).
     let rec slotName (s: Slot) : string =
         match s with
         | SStr -> "str"
@@ -989,27 +990,49 @@ module internal FStarModel =
             | [] -> Ok()
             | step :: rest -> step () |> Result.bind (fun () -> sequence rest)
 
-        // Phase 732 — the slot each declared type's name was given to, and the type it was given
-        // for. A name is a function of the slot ([[slotName]]), and two slots meet in one only
-        // where two declarations' own names spell one word (they differ only in the case of their
-        // first letter) or two tuples of enums do; such a vocabulary is refused by name, never
-        // modelled as one type.
-        let named = System.Collections.Generic.Dictionary<string, Slot * IdlType>()
+        // Phase 732 — EVERY top-level name the module emits, the thing it was given to, and what a
+        // refusal calls that thing: each declared type of every kind, each constructor, and each
+        // definition the vocabulary and proofs modules make over them ([[everyName]] lists the
+        // kinds). ONE table, so two things whose spelling meets (two declarations' names that
+        // differ only in the case of their first letter, two tuples of enums, a case tag holding
+        // `__` beside an instantiation's constructor) are refused by name, never emitted as one
+        // F* name. A name given twice to one thing (a set and a list of one element type are one
+        // slot, Phase 639) is one name.
+        let named = System.Collections.Generic.Dictionary<string, obj * string>()
 
-        let claim (key: string) (s: Slot) (t: IdlType) (record: unit -> unit) : Result<unit, CodegenError> =
-            match named.TryGetValue key with
-            | true, (other, otherType) when other <> s ->
+        let claim (kind: string) (name: string) (given: obj) (what: string) : Result<unit, CodegenError> =
+            match named.TryGetValue name with
+            | true, (other, otherWhat) when other <> given ->
                 unmodellable
-                    (sprintf
-                        "two types the model would give one name, '%s': %s and %s"
-                        key
-                        (spellType otherType)
-                        (spellType t))
+                    (sprintf "two %s the model would give one name, '%s': %s and %s" kind name otherWhat what)
                     "the vocabulary"
             | _ ->
-                named[key] <- (s, t)
-                record ()
+                named[name] <- (given, what)
                 Ok()
+
+        // A slot as a refusal names it: a declaration by its declared name and arguments.
+        let rec spelledSlot (s: Slot) : string =
+            let applied (n: string) (args: Slot list) =
+                match args with
+                | [] -> n
+                | _ -> sprintf "%s<%s>" n (args |> List.map spelledSlot |> String.concat ", ")
+
+            match s with
+            | SEnum n
+            | SText n -> n
+            | SRecord(n, args)
+            | SUnion(n, args) -> applied n args
+            | SList inner -> applied "list" [ inner ]
+            | SMap inner -> applied "map" [ SStr; inner ]
+            | STuple cs -> applied "tuple" cs
+            | SStr
+            | SInt
+            | SBool
+            | SFloat
+            | SJson
+            | SNode
+            | SSentinel _
+            | SConst _ -> slotName s
 
         // One reached declaration's members, recorded under its slot name. A node, a list or a
         // map declares no members of its own.
@@ -1033,7 +1056,9 @@ module internal FStarModel =
                         fieldVariants idl subst ("record " + n) r.Fields
                         |> Result.bind (fun found ->
                             let key = slotName s
-                            claim key s t (fun () -> recordMap[key] <- constructors key "Mk" found))
+
+                            claim "types" key (box s) (spellType t)
+                            |> Result.map (fun () -> recordMap[key] <- constructors key "Mk" found))
             | TUnion(n, args) ->
                 match CodegenLookup.tryUnion idl n with
                 | None -> unmodellable ("an undeclared union '" + n + "'") ("union " + n)
@@ -1064,7 +1089,7 @@ module internal FStarModel =
                     | Some subst, Ok s ->
                         let key = slotName s
 
-                        claim key s t ignore
+                        claim "types" key (box s) (spellType t)
                         |> Result.bind (fun () ->
                             u.Cases
                             |> List.fold
@@ -1168,14 +1193,14 @@ module internal FStarModel =
                 slots
                     []
                     (reach.FromEnvelope @ reach.FromKinds
-                     |> List.filter (fun t -> (Decl.inlineSlot idl t).IsNone))
-                // Phase 639 — a set is modelled as a list, so a set and a list of one element type
-                // are one slot, declared once.
-                |> Result.map (List.distinctBy slotName))
+                     |> List.filter (fun t -> (Decl.inlineSlot idl t).IsNone)))
 
         match translated with
         | Error e -> Error e
-        | Ok order ->
+        | Ok reached ->
+            // Phase 639 — a set is modelled as a list, so a set and a list of one element type are
+            // one slot, declared once.
+            let order = List.distinctBy slotName reached
             // Phase 293 — the shape the model cannot express is REFUSED by name, never emitted. The
             // model's objects are literals, one entry per key, read back by `find_field` — so a key
             // that would appear twice in one object is a document the model cannot round-trip. Under
@@ -1239,11 +1264,145 @@ module internal FStarModel =
                     |> Option.map (fun (label, _) ->
                         CodegenError.UnmodellableInFStar(sprintf "two constructors named '%s'" label, kv.Key)))
 
+            // Phase 732 — every other top-level name the modules emit, through the one table
+            // [[named]] (a record's or union's instantiation was claimed where it was declared):
+            //   types: an enum `e_`, a string-borne scalar `t_`, a tuple (its codecs' word), a
+            //     presence-keyed union's pick `pk_`;
+            //   constructors: `C__<type>__<label>` of each record, union, kind and enum, and a pick's
+            //     `PK__`, `PN__` and `PB__`;
+            //   definitions: each type's encoder `enc_` and decoder `dec_`; a pick's `pick_`; and
+            //     each member's `lk_<type>__<label>__<key>`.
+            // The other per-type families (`enc_items_`, `enc_entries_`, `enc_opt_`, `enc_dflt_`,
+            // `dec_items_`, `dec_entries_`, `is_`, `rt_`, `rt_items_`, `rt_entries_`) prefix a type's
+            // word as `enc_` does, and no type's word begins with one of their prefixes; the other
+            // per-member families (`sfx_`, `rd_`, `rv_`, a pick's lemma `pk_<type>__…`, and the
+            // steps `sk_` read off a suffix) prefix the same three words as `lk_` does. So each
+            // meets another exactly where a name held here does.
+            let nameFailure () =
+                let declaredTypes =
+                    named |> Seq.map (fun kv -> kv.Key, fst kv.Value, snd kv.Value) |> List.ofSeq
+
+                let owner (key: string) =
+                    match named.TryGetValue key with
+                    | true, (_, what) -> what
+                    | false, _ when key = "vkind" -> "the kinds"
+                    | false, _ -> key
+
+                let pick (union: string) = SUnion(union, [])
+
+                // The string-borne scalars and the tuples every member and every reached type holds,
+                // read before [[translated]] merged the slots that share a name.
+                let leaves =
+                    let rec held (s: Slot) : Slot list =
+                        match s with
+                        | SText _ -> [ s ]
+                        | STuple cs -> (cs |> List.collect held) @ [ s ]
+                        | SList inner
+                        | SMap inner -> held inner
+                        | SRecord(_, args)
+                        | SUnion(_, args) -> args |> List.collect held
+                        | _ -> []
+
+                    let members =
+                        Seq.append caseMap.Values recordMap.Values
+                        |> Seq.concat
+                        |> Seq.collect snd
+                        |> Seq.append envelope
+                        |> Seq.map _.Slot
+                        |> List.ofSeq
+
+                    reached @ members |> List.collect held
+
+                let types =
+                    declaredTypes
+                    @ [ for name in reach.Enums do
+                            slotName (SEnum name), box (SEnum name), sprintf "enum '%s'" name
+                        for s in leaves do
+                            slotName s, box s, spelledSlot s
+                        for k in keyedUnions do
+                            pickType k.Union, box ("pick", k.Union), sprintf "union '%s''s pick" k.Union ]
+
+                let claims =
+                    [ for name, given, what in types do
+                          yield claim "types" name given what
+
+                      for name in reach.Enums do
+                          match CodegenLookup.tryEnum idl name with
+                          | Some e ->
+                              for case in e.Cases do
+                                  yield
+                                      claim
+                                          "constructors"
+                                          (ctorName (slotName (SEnum name)) case)
+                                          (box (SEnum name, case))
+                                          (sprintf "enum '%s' case '%s'" name case)
+                          | None -> ()
+
+                      for kv in Seq.append caseMap recordMap do
+                          for label, ms in kv.Value do
+                              yield
+                                  claim
+                                      "constructors"
+                                      (ctorName kv.Key label)
+                                      (box (kv.Key, label))
+                                      (sprintf "%s, constructor '%s'" (owner kv.Key) label)
+
+                              for m in ms do
+                                  yield
+                                      claim
+                                          "definitions"
+                                          (sprintf "lk_%s__%s__%s" kv.Key label (snake m.Name))
+                                          (box (kv.Key, label, m.Name))
+                                          (sprintf "%s, constructor '%s', member '%s'" (owner kv.Key) label m.Name)
+
+                      for k in keyedUnions do
+                          let u = slotName (pick k.Union)
+
+                          for case, _, _ in k.Cases do
+                              yield
+                                  claim
+                                      "constructors"
+                                      (sprintf "PK__%s__%s" u case)
+                                      (box (k.Union, case))
+                                      (sprintf "union '%s''s pick of case '%s'" k.Union case)
+
+                          yield
+                              claim
+                                  "constructors"
+                                  ("PN__" + u)
+                                  (box ("none", k.Union))
+                                  (sprintf "union '%s''s pick of none" k.Union)
+
+                          yield
+                              claim
+                                  "constructors"
+                                  ("PB__" + u)
+                                  (box ("both", k.Union))
+                                  (sprintf "union '%s''s pick of two" k.Union)
+
+                          yield
+                              claim
+                                  "definitions"
+                                  (pickFunction k.Union)
+                                  (box ("pick", k.Union))
+                                  (sprintf "union '%s''s pick" k.Union)
+
+                      for name, given, what in types do
+                          yield claim "definitions" ("enc_" + name) given (what + "'s encoder")
+                          yield claim "definitions" ("dec_" + name) given (what + "'s decoder") ]
+
+                claims
+                |> List.tryPick (fun r ->
+                    match r with
+                    | Error e -> Some e
+                    | Ok() -> None)
+
             let shapeFailure =
                 collisions "node envelope" nodeKeys envelope
                 |> Option.orElseWith kindFailure
                 |> Option.orElseWith unionFailure
                 |> Option.orElseWith labelFailure
+                |> Option.orElseWith nameFailure
 
             match shapeFailure with
             | Some e -> Error e

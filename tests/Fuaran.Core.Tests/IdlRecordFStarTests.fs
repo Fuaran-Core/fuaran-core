@@ -289,6 +289,180 @@ let model =
                   "two types the model would give one name, 'r_box__tp2_e_foo_e_bar_int': Box<tuple<FooEBar, int>> and Box<tuple<Foo, BarInt>>"
                   "refused, naming both")
 
+          testCase
+              "every top-level name the target emits passes through one table: a pair of each kind that meets is refused by name, the rest are named apart"
+              (fun _ ->
+                  let enumsOf (names: (string * string list) list) : IdlEnum list =
+                      names
+                      |> List.map (fun (n, cases) ->
+                          { Name = n
+                            Cases = cases
+                            Wires = []
+                            CaseAnnotations = []
+                            Aliases = []
+                            Annotations = Annotations.Empty })
+
+                  let refusedAs (label: string) (idl: Idl) (parts: string list) =
+                      let why =
+                          match (FStarTarget.partition idl |> List.find (fun v -> v.Tag = "K")).Refusal with
+                          | Some why -> why
+                          | None -> failtestf "%s: the F* target models K" label
+
+                      for part in parts do
+                          Expect.stringContains why part (label + ": refused by name")
+
+                  // Types. An enum, a union and a generic record whose names differ only in the case of
+                  // their first letter; a tuple of enums at a kind's own member; a presence-keyed union's
+                  // pick.
+                  refusedAs
+                      "two enums"
+                      { vocabulary [ kind "K" [ f "a" (TEnum "Dir") Required; f "b" (TEnum "dir") Required ] ] [] [] with
+                          Enums = enumsOf [ "Dir", [ "n" ]; "dir", [ "s" ] ] }
+                      [ "two types the model would give one name, 'e_dir': enum 'Dir' and enum 'dir'" ]
+
+                  refusedAs
+                      "two unions"
+                      (vocabulary
+                          [ kind "K" [ f "a" (TUnion("Uu", [])) Required; f "b" (TUnion("uu", [])) Required ] ]
+                          [ union "Uu" [] [ case "A" [ f "n" TInt Required ] ]
+                            union "uu" [] [ case "B" [ f "s" TStr Required ] ] ]
+                          [])
+                      [ "two types the model would give one name, 'u_uu': Uu and uu" ]
+
+                  refusedAs
+                      "two generic records"
+                      (vocabulary
+                          [ kind
+                                "K"
+                                [ f "a" (TRecord("Box", [ TInt ])) Required
+                                  f "b" (TRecord("box", [ TInt ])) Required ] ]
+                          []
+                          [ record "Box" [ "T" ] [ f "v" (TVar "T") Required ]
+                            record "box" [ "T" ] [ f "w" (TVar "T") Required ] ])
+                      [ "two types the model would give one name, 'r_box__int': Box<int> and box<int>" ]
+
+                  refusedAs
+                      "two tuples of enums"
+                      { vocabulary
+                            [ kind
+                                  "K"
+                                  [ f "a" (TTuple [ TEnum "FooEBar"; TInt ]) Required
+                                    f "b" (TTuple [ TEnum "Foo"; TEnum "BarInt" ]) Required ] ]
+                            []
+                            [] with
+                          Enums = enumsOf [ "FooEBar", [ "a" ]; "Foo", [ "a" ]; "BarInt", [ "a" ] ] }
+                      [ "two types the model would give one name, 'tp2_e_foo_e_bar_int': tuple<FooEBar, int> and tuple<Foo, BarInt>" ]
+
+                  let picks =
+                      let row = LayoutIdl.layout.Unions |> List.find (fun u -> u.Name = "RowIdentity")
+
+                      // Each laid out on its own object: the kind's, and a record's.
+                      { LayoutIdl.layout with
+                          Kinds =
+                              [ kind
+                                    "K"
+                                    [ f "a" (TUnion("RowIdentity", [])) Required
+                                      f "h" (TRecord("H", [])) Required ] ]
+                          Unions = LayoutIdl.layout.Unions @ [ { row with Name = "rowIdentity" } ]
+                          Records =
+                              LayoutIdl.layout.Records
+                              @ [ record "H" [] [ f "b" (TUnion("rowIdentity", [])) Required ] ] }
+
+                  refusedAs
+                      "two presence-keyed unions"
+                      picks
+                      [ "two types the model would give one name, 'pk_u_row_identity': union 'RowIdentity''s pick and union 'rowIdentity''s pick" ]
+
+                  // Constructors. `Gu<int>`'s case `X` beside a union `gu` whose case is tagged `int__X`.
+                  refusedAs
+                      "two constructors"
+                      (vocabulary
+                          [ kind "K" [ f "a" (TUnion("Gu", [ TInt ])) Required; f "b" (TUnion("gu", [])) Required ] ]
+                          [ union "Gu" [ "T" ] [ case "X" [ f "v" (TVar "T") Required ] ]
+                            union "gu" [] [ case "int__X" [ f "w" TStr Required ] ] ]
+                          [])
+                      [ "two constructors the model would give one name, 'C__u_gu__int__X'"
+                        "Gu<int>, constructor 'X'"
+                        "gu, constructor 'int__X'" ]
+
+                  // Definitions. Each member's lookup lemma: a case `L` holding `a__b` beside a case `L__a`
+                  // holding `b`.
+                  refusedAs
+                      "two members' definitions"
+                      (vocabulary
+                          [ kind "K" [ f "t" (TUnion("T", [])) Required ] ]
+                          [ union "T" [] [ case "L" [ f "a__b" TInt Required ]; case "L__a" [ f "b" TInt Required ] ] ]
+                          [])
+                      [ "two definitions the model would give one name, 'lk_u_t__L__a__b'"
+                        "T, constructor 'L', member 'a__b'"
+                        "T, constructor 'L__a', member 'b'" ]
+
+                  // Named apart: an enum's constructors (its word holds no `__`), the string-borne scalars,
+                  // and every definition the two modules state over a vocabulary of each kind.
+                  let apart =
+                      { vocabulary
+                            [ kind
+                                  "K"
+                                  [ f "a" (TEnum "A") Required
+                                    f "b" (TEnum "A_b") Required
+                                    f "c" TTimeOfDay Required
+                                    f "d" TDuration Required
+                                    f "e" (TRecord("Items", [ TInt ])) Required
+                                    f "g" (TList(TRecord("Items", [ TInt ]))) Required ] ]
+                            []
+                            [ record "Items" [ "T" ] [ f "v" (TVar "T") Required ] ] with
+                          Enums = enumsOf [ "A", [ "b__c" ]; "A_b", [ "c" ] ] }
+
+                  let topLevel (text: string) =
+                      text.Split('\n')
+                      |> Array.choose (fun l ->
+                          let word (s: string) =
+                              s.Split([| ' '; ':'; '(' |], System.StringSplitOptions.RemoveEmptyEntries)
+                              |> Array.tryHead
+
+                          if l.StartsWith "let rec " then
+                              word (l.Substring 8)
+                          elif l.StartsWith "let " then
+                              word (l.Substring 4)
+                          elif l.StartsWith "type " then
+                              word (l.Substring 5)
+                          elif l.StartsWith "and " then
+                              word (l.Substring 4)
+                          elif l.StartsWith "val " then
+                              word (l.Substring 4)
+                          elif l.StartsWith "  | " && not (l.Contains "->") then
+                              word (l.Substring 4)
+                          else
+                              None)
+                      |> List.ofArray
+
+                  for label, idl in
+                      [ "the named-apart vocabulary", apart
+                        "the parameterised-record vocabulary", ParameterisedRecordsIdl.idl
+                        "the layout vocabulary", LayoutIdl.layout ] do
+                      let tags = tagsOf idl
+                      let model = emitted (FStarTarget.vocabularyModule "M" idl tags)
+                      let proofs = emitted (FStarTarget.proofsModule "P" "M" idl tags)
+
+                      for text in [ model; proofs ] do
+                          let names = topLevel text
+                          Expect.isNonEmpty names (label + ": definitions read")
+
+                          Expect.equal
+                              (names |> List.countBy id |> List.filter (fun (_, n) -> n > 1))
+                              []
+                              (label + ": no top-level name twice")
+
+                  let text = modelOf apart
+
+                  for name in
+                      [ "C__e_a__b__c"
+                        "C__e_a_0b__c"
+                        "t_time_of_day"
+                        "t_duration"
+                        "C__r_items__int__Mk" ] do
+                      Expect.stringContains text name (name + " is stated"))
+
           testCase "an inline parameterised record's members are its holder's, at the holder's argument" (fun _ ->
               let text = modelOf ParameterisedRecordsIdl.idl
 
