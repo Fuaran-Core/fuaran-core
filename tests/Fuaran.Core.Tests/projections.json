@@ -128,6 +128,11 @@
       "heldBy": "IdlRefusalHostTests"
     },
     {
+      "path": "tests/Fuaran.Core.Tests/CanonicalFormGenerated.fs",
+      "render": "generated",
+      "heldBy": "IdlRefusalHostTests"
+    },
+    {
       "path": "tests/Fuaran.Core.Tests/DeriveGenerated.fs",
       "render": "generated",
       "switch": "FUARAN_REGEN",
