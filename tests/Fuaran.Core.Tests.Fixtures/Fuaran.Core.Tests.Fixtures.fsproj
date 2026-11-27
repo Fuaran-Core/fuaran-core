@@ -42,8 +42,6 @@
     <Compile Include="ContractsCorpus.fs" />
     <Compile Include="LayoutIdl.fs" />
     <Compile Include="ParameterisedRecordsIdl.fs" />
-    <Compile Include="CertificationVectors.fs" />
-    <Compile Include="FStarModels.fs" />
     <Compile Include="GeneratedModules.fs" />
     <Compile Include="VectorOracle.fs" />
     <Compile Include="VectorOracle.Capability.fs" />
@@ -57,6 +55,8 @@
     <Compile Include="ApplyVectorExport.fs" />
     <Compile Include="PropagationVectorExport.fs" />
     <Compile Include="CanonicalFormVectorExport.fs" />
+    <Compile Include="CertificationVectors.fs" />
+    <Compile Include="FStarModels.fs" />
     <Compile Include="LawVectorExport.fs" />
     <Compile Include="RefusalCorpus.fs" />
     <Compile Include="DecodeRejectCorpus.fs" />

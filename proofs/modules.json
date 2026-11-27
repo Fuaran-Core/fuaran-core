@@ -605,6 +605,54 @@
       "note": "Phase 732 - the generated ROUND TRIP over `ParameterisedFlatVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type) and `dec_node_total`, by the walk and the lemma shapes of `DocVocabularyProofs`, the certified vocabulary on the same wire configuration. SEEDED from the phase's `check.ps1 -Runs 3` leg: 38s, 27s, 32s."
     },
     {
+      "module": "CanonicalFormVocabulary",
+      "kind": "generated",
+      "opens": [ "WireDecode" ],
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
+      "budgetSeconds": 20,
+      "measuredSeconds": 7,
+      "fastestSeconds": 7,
+      "fastestPhase": "fuaran-core#723",
+      "phase": "fuaran-core#723",
+      "note": "Phase 723 - the GENERATED model of the CANONICAL-FORM LAW SET's vocabulary (`tests/Fuaran.Core.Tests.Fixtures/CanonicalFormVectorExport.fs`, the fixture `conformance/laws/canonical-form-laws.json` carries): a member's aliases on a kind, a record and a union case, an enum case's aliases, a presence test and two equality tests over a sibling omitted at its default, and an empty-map and an empty-JSON default, on the default wire shape. The model's TYPE is the canonical form (D290): a constructor binder is refined so that a member whose condition fails is absent, and the decoder reads a member under its canonical spelling then each alias, and a conditional member only when its sibling's decoded value satisfies the condition. SEEDED from one cold check of this module at the leg's own flags (`--z3rlimit 40 --quake 3 --report_assumes error`, the modules it opens already checked), on the dev machine with no other prover running: 7s, so the budget is 20s by the seeding rule; the phase's `check.ps1 -Runs 3` leg is the first multi-run measurement, recorded in the phase's envelope."
+    },
+    {
+      "module": "CanonicalFormVocabularyProofs",
+      "kind": "generated",
+      "opens": [ "WireDecode", "CanonicalFormVocabulary" ],
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
+      "budgetSeconds": 30,
+      "measuredSeconds": 12,
+      "fastestSeconds": 12,
+      "fastestPhase": "fuaran-core#723",
+      "phase": "fuaran-core#723",
+      "note": "Phase 723 - the generated ROUND TRIP over `CanonicalFormVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type, so for every canonical value, a member under a failed condition being absent from the type) and `dec_node_total`, by the walk and the lemma shapes of `VocabularyProofs`; a suffixed constructor's aliased member adds one lookup per alias stating it absent from the encoded object, cited where the member is absent. SEEDED from one cold check of this module at the leg's own flags (`--z3rlimit 40 --quake 3 --report_assumes error`, the modules it opens already checked), on the dev machine with no other prover running: 12s, so the budget is 30s by the seeding rule; the phase's `check.ps1 -Runs 3` leg is the first multi-run measurement, recorded in the phase's envelope."
+    },
+    {
+      "module": "CanonicalFormHostsVocabulary",
+      "kind": "generated",
+      "opens": [ "WireDecode" ],
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
+      "budgetSeconds": 20,
+      "measuredSeconds": 7,
+      "fastestSeconds": 7,
+      "fastestPhase": "fuaran-core#723",
+      "phase": "fuaran-core#723",
+      "note": "Phase 723 - the GENERATED model of the CANONICAL-FORM HOSTS vocabulary (`tests/Fuaran.Core.Tests.Fixtures/CanonicalFormHostsIdl.fs`, `proved`): every alias position and all four presence conditions, one over an aliased sibling, one on a member omitted at its default, under the flat node envelope with a `kind` discriminator in declared order. SEEDED from one cold check of this module at the leg's own flags (`--z3rlimit 40 --quake 3 --report_assumes error`, the modules it opens already checked), on the dev machine with no other prover running: 7s, so the budget is 20s by the seeding rule; the phase's `check.ps1 -Runs 3` leg is the first multi-run measurement, recorded in the phase's envelope."
+    },
+    {
+      "module": "CanonicalFormHostsVocabularyProofs",
+      "kind": "generated",
+      "opens": [ "WireDecode", "CanonicalFormHostsVocabulary" ],
+      "packages": [ "Fuaran.Core.Idl.Codegen" ],
+      "budgetSeconds": 40,
+      "measuredSeconds": 18,
+      "fastestSeconds": 18,
+      "fastestPhase": "fuaran-core#723",
+      "phase": "fuaran-core#723",
+      "note": "Phase 723 - the generated ROUND TRIP over `CanonicalFormHostsVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type) and `dec_node_total`, by the walk and the lemma shapes of `CanonicalFormVocabularyProofs` on the flat wire configuration. SEEDED from one cold check of this module at the leg's own flags (`--z3rlimit 40 --quake 3 --report_assumes error`, the modules it opens already checked), on the dev machine with no other prover running: 18s, so the budget is 40s by the seeding rule; the phase's `check.ps1 -Runs 3` leg is the first multi-run measurement, recorded in the phase's envelope."
+    },
+    {
       "module": "Relation",
       "kind": "extracted",
       "opens": [ "Twin", "ListAlgebra" ],
@@ -691,14 +739,14 @@
     {
       "module": "VocabularyVectors",
       "kind": "generated",
-      "opens": [ "WireDecode", "Vocabulary", "DocVocabulary", "ScoreVocabulary", "LayoutVocabulary", "LayoutHoldersVocabulary", "ParameterisedVocabulary", "ParameterisedFlatVocabulary" ],
+      "opens": [ "WireDecode", "Vocabulary", "DocVocabulary", "ScoreVocabulary", "LayoutVocabulary", "LayoutHoldersVocabulary", "ParameterisedVocabulary", "ParameterisedFlatVocabulary", "CanonicalFormVocabulary", "CanonicalFormHostsVocabulary" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
-      "budgetSeconds": 20,
-      "measuredSeconds": 3,
+      "budgetSeconds": 80,
+      "measuredSeconds": 38,
       "fastestSeconds": 0.99,
       "fastestPhase": "fuaran-core#504",
       "phase": "fuaran-core#303",
-      "note": "Phase 303 — the reference interpreter's vectors as NORMALISER facts over the three generated vocabulary models: for each vector the three-way differential draws (twelve per model, the drawn and the adversarial ones, hostile map keys sorted first), `assert_norm` that the model's `enc_node`, applied to the model value of what the interpreter DECODES the bytes to, normalises to the `jval` the bytes PARSE to. Emitted by `FStarTarget.vectorsModule` from the fixtures library (`render fstar`); held to a fresh generation by `IdlThreeHostTests`. Opens Vocabulary, DocVocabulary and ScoreVocabulary, which the leg checks first in their own clocks; checked, not extracted. SEEDED from the phase's `check.ps1 -Runs 1 -Since HEAD` cone run (seven modules in, the three models before it): 3s. A first `-Modules` leg measured 34s three times, and those are NOT this module's cost — under the selector the models it opens were re-verified inside its clock, the case `Normalize`'s note names — so they are not seeds. By `seeding`'s rule the budget is the 20s minimum; by `floorSeeding`'s the floor is 0, the fastest genuine cold run being under 5s. The facts are discharged by the normaliser, so the cost grows with the vectors' size, not with Z3. Phase 722 adds DECODE facts over the two inline-declaration models (`l_decode_agree`, `h_decode_agree`: `dec_node` evaluated on documents the interpreter reads and on documents it refuses), emitted by `FStarTarget.vectorsModuleWith`; the module opens those two models as well, which the leg checks first in their own clocks. Phase 732 adds DECODE facts over the two parameterised-record models (`p_decode_agree`, `pf_decode_agree`), and the module opens those two models too."
+      "note": "Phase 303 — the reference interpreter's vectors as NORMALISER facts over the three generated vocabulary models: for each vector the three-way differential draws (twelve per model, the drawn and the adversarial ones, hostile map keys sorted first), `assert_norm` that the model's `enc_node`, applied to the model value of what the interpreter DECODES the bytes to, normalises to the `jval` the bytes PARSE to. Emitted by `FStarTarget.vectorsModule` from the fixtures library (`render fstar`); held to a fresh generation by `IdlThreeHostTests`. Opens Vocabulary, DocVocabulary and ScoreVocabulary, which the leg checks first in their own clocks; checked, not extracted. SEEDED from the phase's `check.ps1 -Runs 1 -Since HEAD` cone run (seven modules in, the three models before it): 3s. A first `-Modules` leg measured 34s three times, and those are NOT this module's cost — under the selector the models it opens were re-verified inside its clock, the case `Normalize`'s note names — so they are not seeds. By `seeding`'s rule the budget is the 20s minimum; by `floorSeeding`'s the floor is 0, the fastest genuine cold run being under 5s. The facts are discharged by the normaliser, so the cost grows with the vectors' size, not with Z3. Phase 722 adds DECODE facts over the two inline-declaration models (`l_decode_agree`, `h_decode_agree`: `dec_node` evaluated on documents the interpreter reads and on documents it refuses), emitted by `FStarTarget.vectorsModuleWith`; the module opens those two models as well, which the leg checks first in their own clocks. Phase 732 adds DECODE facts over the two parameterised-record models (`p_decode_agree`, `pf_decode_agree`), and the module opens those two models too. RE-SEEDED BY PHASE 723, which adds ENCODE and DECODE facts over the two canonical-form models (`c_vectors_agree`, `ch_vectors_agree`, `c_decode_agree`, `ch_decode_agree`: the law set's twenty-two documents and seven refusals, and nine documents and nine refusals over the vocabulary declaring every shape, each written with aliases, both spellings or a member under a failed condition), and opens those two models: one cold check at the leg's flags, the opened models already checked, measured 38s (41s on an earlier draft of the same facts), so the budget is 80s by the seeding rule. The growth is the normaliser evaluating `dec_node` on aliased documents, whose nested alias lookups it unfolds."
     },
     {
       "module": "PropagationOps",

@@ -136,9 +136,13 @@ module internal FStarProofs =
     /// for an optional member (`None?` / `Some?`), `Some lit` for an omit-at-default member
     /// (equality with the literal the encoder tests).
     type private Conditional =
-        { Binder: string
-          Name: string
-          Default: string option }
+        {
+            Binder: string
+            Name: string
+            Default: string option
+            /// Phase 723 — the member's aliases: where it is absent, each is absent too.
+            Aliases: string list
+        }
 
     let private conditionals (ms: Member list) : Conditional list =
         ms
@@ -150,7 +154,8 @@ module internal FStarProofs =
                 Some
                     { Binder = sprintf "f%d" i
                       Name = m.Name
-                      Default = d })
+                      Default = d
+                      Aliases = m.Aliases })
 
     /// The boolean a lookup lemma's `requires` carries for one member.
     let private condition (c: Conditional) (present: bool) =
@@ -167,18 +172,29 @@ module internal FStarProofs =
         | Some _, true -> c.Name + " not at its default"
         | Some _, false -> c.Name + " at its default"
 
+    /// Phase 723 — the lookup lemma stating that an alias of the member whose lookups are `lk` is
+    /// absent from the encoded object: the encoder writes only the canonical spelling.
+    let private aliasLookupName (lk: string) (alias: string) = lk + "__as_" + snake alias
+
     /// The two-way citation that discharges one conditional member's lookup — an optional member
     /// by `match`, an omit-at-default one by the encoder's own equality test. One line of text per
     /// conditional member, where Phase 168 nested them into a 2^k tree.
+    ///
+    /// Phase 723 — a member read under aliases is absent from the encoded object under each of them
+    /// too ([[aliasLookupName]]), and the absent arm cites those lookups after its own.
     let private citeConditional (lk: string) (c: Conditional) : string =
+        let absent =
+            match c.Aliases with
+            | [] -> sprintf "%s__absent #num #flt x" lk
+            | aliases ->
+                (sprintf "%s__absent #num #flt x" lk
+                 :: (aliases |> List.map (fun a -> sprintf "%s #num #flt x" (aliasLookupName lk a))))
+                |> String.concat "; "
+                |> sprintf "(%s)"
+
         match c.Default with
-        | None ->
-            sprintf
-                "(match %s with | None -> %s__absent #num #flt x | Some _ -> %s__present #num #flt x);"
-                c.Binder
-                lk
-                lk
-        | Some d -> sprintf "(if %s = %s then %s__absent #num #flt x else %s__present #num #flt x);" c.Binder d lk lk
+        | None -> sprintf "(match %s with | None -> %s | Some _ -> %s__present #num #flt x);" c.Binder absent lk
+        | Some d -> sprintf "(if %s = %s then %s else %s__present #num #flt x);" c.Binder d absent lk
 
     /// The fuel one constructor's lookup lemmas need. `find_field` walks the object's entries one
     /// unfolding at a time and the default two do not reach past the second key, so the figure is
@@ -410,7 +426,8 @@ module internal FStarProofs =
                                 let cond =
                                     { Binder = b
                                       Name = m.Name
-                                      Default = d }
+                                      Default = d
+                                      Aliases = m.Aliases }
 
                                 let present =
                                     match d with
@@ -433,7 +450,17 @@ module internal FStarProofs =
                                     (sprintf "Error? (get_prop %s (enc_%s #num #flt x))" (lit m.Name) typeName)
                                     (skipsTo t m.Name
                                      @ [ step links[t] "none" None ]
-                                     @ (links |> List.skip (t + 1) |> List.map (fun l -> step l "skip" (Some m.Name)))))
+                                     @ (links |> List.skip (t + 1) |> List.map (fun l -> step l "skip" (Some m.Name))))
+
+                                // Phase 723 — each alias is absent wherever the encoded object is
+                                // looked in: the encoder writes the canonical spelling alone.
+                                for alias in m.Aliases do
+                                    emit
+                                        (aliasLookupName lk alias)
+                                        (sprintf "%s read as '%s', a spelling the encoder never writes" m.Name alias)
+                                        (if multi then Some(sprintf "%s? x" c.CtorName) else None)
+                                        (sprintf "Error? (get_prop %s (enc_%s #num #flt x))" (lit alias) typeName)
+                                        (links |> List.map (fun l -> step l "skip" (Some alias))))
 
                 // Phase 224 — one VALUE lemma per hoisted member's reader: the reader applied to the
                 // encoded object is `Ok` the member, proved by revealing the reader once, here, and
@@ -452,7 +479,8 @@ module internal FStarProofs =
                                 (lookupName typeName c.Label m)
                                 { Binder = b
                                   Name = m.Name
-                                  Default = d })
+                                  Default = d
+                                  Aliases = m.Aliases })
                                 .TrimEnd
                                 ';'
 
@@ -657,7 +685,8 @@ module internal FStarProofs =
                                             lk
                                             { Binder = bind m
                                               Name = m.Name
-                                              Default = d })
+                                              Default = d
+                                              Aliases = m.Aliases })
                                 ))
 
                 line (indent 2 (direct c))

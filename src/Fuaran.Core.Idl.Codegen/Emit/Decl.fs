@@ -822,19 +822,15 @@ module internal Decl =
         fieldOwners idl
         |> List.exists (fun (_, fields) -> fields |> List.exists (fun f -> widerType f.Type))
 
-    /// Each alias or presence condition the vocabulary declares, as a phrase naming it — `[]` for a
-    /// vocabulary that declares none. The F\* model refuses each by name (D190.4).
-    let canonicalFormDeclarations (idl: Idl) : string list =
-        [ for owner, fields in fieldOwners idl do
-              for f in fields do
-                  if not (List.isEmpty f.Aliases) then
-                      yield sprintf "the aliases of field '%s' of %s" f.Name owner
-
-                  if f.Presence.IsSome then
-                      yield sprintf "the presence condition of field '%s' of %s" f.Name owner
-          for e in idl.Enums do
-              if e.Aliases |> List.exists (fun (_, a) -> not (List.isEmpty a)) then
-                  yield sprintf "the case aliases of enum '%s'" e.Name ]
+    /// Whether the vocabulary declares a member's alias, an enum case's alias or a presence condition
+    /// anywhere; a TypeScript module whose vocabulary declares none carries none of the helpers (D289.3).
+    let declaresAliasOrCondition (idl: Idl) : bool =
+        (fieldOwners idl
+         |> List.exists (fun (_, fields) ->
+             fields
+             |> List.exists (fun f -> not (List.isEmpty f.Aliases) || f.Presence.IsSome)))
+        || (idl.Enums
+            |> List.exists (fun e -> e.Aliases |> List.exists (fun (_, a) -> not (List.isEmpty a))))
 
     /// A member's spellings ([[WireForm.spellings]]); `NoInlining`, since it reads an internal of
     /// another assembly (D129).

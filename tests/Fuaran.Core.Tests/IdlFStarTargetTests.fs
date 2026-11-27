@@ -1448,9 +1448,11 @@ let idlFStarTargetTests =
               // which is why Core's own proof leg stayed green over a defect every such consumer met.
               // The two parameterised-record vocabularies reach the LIST wrapper (`Tagged<T>.items`,
               // omitted at the empty list, at a string and at a union), so the committed models carry
-              // the Phase 256 shape under the prover. No certification vocabulary reaches the map,
-              // record or union wrapper in a suffixed constructor: those three are held by the
-              // assertions above alone.
+              // the Phase 256 shape under the prover. Since Phase 723 the canonical-form law set's
+              // vocabulary reaches the list wrapper (`Select.options`) and the MAP wrapper
+              // (`Notify.args`), both omitted at their empty defaults. No certification vocabulary
+              // reaches the record or union wrapper in a suffixed constructor: those two are held by
+              // the assertions above alone.
               for g in generated do
                   match FStarTarget.vocabularyModule g.Module g.Idl (selection g.Idl) with
                   | Error e -> failtestf "%s: the target refused it: %s" g.Module (CodegenError.describe e)
@@ -1462,11 +1464,20 @@ let idlFStarTargetTests =
                                     @"(?m)^and (enc_dflt_(?:l|m|r|u)_[a-z0-9_]+) \(#num #flt: eqtype\) (.*) =\n(.*)$"
                                 ) -> m.Groups[1].Value, m.Groups[2].Value, m.Groups[3].Value ]
 
-                      if g.Module.StartsWith("Parameterised", System.StringComparison.Ordinal) then
+                      let reached =
+                          if g.Module.StartsWith("Parameterised", System.StringComparison.Ordinal) then
+                              Some [ "enc_dflt_l_str"; "enc_dflt_l_u_tree" ]
+                          elif g.Module = "CanonicalFormVocabulary" then
+                              Some [ "enc_dflt_l_str"; "enc_dflt_m_str" ]
+                          else
+                              None
+
+                      match reached with
+                      | Some names ->
                           Expect.equal
                               (wrappers |> List.map (fun (name, _, _) -> name) |> List.sort)
-                              [ "enc_dflt_l_str"; "enc_dflt_l_u_tree" ]
-                              (sprintf "%s reaches the defaulted list wrapper, at both arguments" g.Module)
+                              names
+                              (sprintf "%s reaches the defaulted wrappers it holds a member at" g.Module)
 
                           for name, head, body in wrappers do
                               Expect.stringContains
@@ -1478,7 +1489,7 @@ let idlFStarTargetTests =
                                   body
                                   "  if v = d then None else Some e"
                                   (sprintf "%s: `%s` only chooses between the encoding and absence" g.Module name)
-                      else
+                      | None ->
                           Expect.isEmpty
                               wrappers
                               (sprintf

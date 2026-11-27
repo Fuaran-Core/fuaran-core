@@ -1246,7 +1246,7 @@ module internal TypeScriptCodec =
 
     /// Phase 723 (DECISIONS.md D190, D256, D288) — the decode helpers [[tsMemberRead]] and
     /// [[tsEnumDecoder]] call, emitted only into a module whose vocabulary declares an alias or a presence
-    /// condition ([[Decl.canonicalFormDeclarations]]), so every other module is byte-for-byte what it was.
+    /// condition ([[Decl.declaresAliasOrCondition]]), so every other module is byte-for-byte what it was.
     /// They are the JS face of `WireForm.memberAt` and `WireForm.holdsOnWire`: the canonical spelling
     /// first, then each alias; a sibling compared by its wire value, where a whole number the reader met
     /// as a float token is not an int (`dFloatAt`), as the F# reader reads it; and an explicit EMPTY array
@@ -1631,7 +1631,7 @@ const plain = (pairs) =>
           [ kindDispatch ]
           Ok(tsDecodePrelude disc)
           :: (if decl.HostedFormat then [ Ok tsFormatHelper ] else [])
-          @ (if List.isEmpty (Decl.canonicalFormDeclarations idl) then
+          @ (if not (Decl.declaresAliasOrCondition idl) then
                  []
              else
                  [ Ok tsCanonicalFormHelpers ])

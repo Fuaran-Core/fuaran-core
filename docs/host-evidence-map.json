@@ -190,6 +190,11 @@
     {"id":"parameterised-flat-vocabulary-generated-model","level":"proved","model":"ParameterisedFlatVocabulary","families":[],"oracle":[]},
     {"id":"parameterised-flat-vocabulary-round-trip","level":"proved","model":"ParameterisedFlatVocabularyProofs","families":[],"oracle":[]},
     {"id":"parameterised-vocabulary-decode-vectors","level":"proved","model":"VocabularyVectors","families":[],"oracle":[]},
+    {"id":"canonical-form-vocabulary-generated-model","level":"proved","model":"CanonicalFormVocabulary","families":[],"oracle":[]},
+    {"id":"canonical-form-vocabulary-round-trip","level":"proved","model":"CanonicalFormVocabularyProofs","families":[],"oracle":[]},
+    {"id":"canonical-form-hosts-vocabulary-generated-model","level":"proved","model":"CanonicalFormHostsVocabulary","families":[],"oracle":[]},
+    {"id":"canonical-form-hosts-vocabulary-round-trip","level":"proved","model":"CanonicalFormHostsVocabularyProofs","families":[],"oracle":[]},
+    {"id":"canonical-form-vocabulary-decode-vectors","level":"proved","model":"VocabularyVectors","families":[],"oracle":[]},
     {"id":"evolution-classify-sound","level":"proved","model":"WireVersioning","families":[],"oracle":[]},
     {"id":"evolution-additive-monotone","level":"proved","model":"WireVersioning","families":[],"oracle":[]},
     {"id":"evolution-preserve-exact","level":"proved","model":"WireVersioning","families":[],"oracle":[]},
@@ -451,6 +456,10 @@
   ],
   "worklist": [
     {"model":"Arbitrate","rows":["arbitration-accepted-pairwise-independent","arbitration-merged-order-free","arbitration-accepted-maximal","arbitration-deterministic","arbitration-id-uniqueness-is-needed","arbitration-maximal-is-not-maximum"]},
+    {"model":"CanonicalFormHostsVocabulary","rows":["canonical-form-hosts-vocabulary-generated-model"]},
+    {"model":"CanonicalFormHostsVocabularyProofs","rows":["canonical-form-hosts-vocabulary-round-trip"]},
+    {"model":"CanonicalFormVocabulary","rows":["canonical-form-vocabulary-generated-model"]},
+    {"model":"CanonicalFormVocabularyProofs","rows":["canonical-form-vocabulary-round-trip"]},
     {"model":"ColumnRefinement","rows":["column-refinement-to-cells-of-cells","column-refinement-of-cells-to-cells","column-refinement-validate-agrees","column-refinement-encode-agrees","column-refinement-ladder-transfers","column-refinement-validity-two-cases"]},
     {"model":"ContractVocabulary","rows":["contract-vocabulary-generated-model"]},
     {"model":"ContractVocabularyProofs","rows":["contract-vocabulary-round-trip"]},
@@ -482,7 +491,7 @@
     {"model":"Utf8","rows":["utf8-injective-on-well-formed","utf8-guard-refuses-exactly-ill-formed","utf8-replacement-not-injective"]},
     {"model":"Vocabulary","rows":["vocabulary-generated-model"]},
     {"model":"VocabularyProofs","rows":["vocabulary-round-trip"]},
-    {"model":"VocabularyVectors","rows":["layout-vocabulary-decode-vectors","parameterised-vocabulary-decode-vectors","vocabulary-vectors-agree"]},
+    {"model":"VocabularyVectors","rows":["layout-vocabulary-decode-vectors","parameterised-vocabulary-decode-vectors","canonical-form-vocabulary-decode-vectors","vocabulary-vectors-agree"]},
     {"model":"WireVersioning","rows":["evolution-classify-sound","evolution-additive-monotone","evolution-preserve-exact","evolution-unknown-transport-only","evolution-bump-refuses-at-the-edge","evolution-field-additive-monotone"]}
   ],
   "referenceOnly": [

@@ -14,7 +14,7 @@ For every row of the claims ladder ([`proofs.json`](../proofs.json)), the eviden
 
 ## Summary
 
-445 rows: 260 offered, 1 a host's own proof, 184 uncovered (proved 112, tested 31, assumed 39, policy 2).
+450 rows: 260 offered, 1 a host's own proof, 189 uncovered (proved 117, tested 31, assumed 39, policy 2).
 
 ## Offers, by model
 
@@ -60,6 +60,14 @@ A row carrying `repo` records a proof a host made of its own code against a mode
 Grouped by model. Each group is a candidate vector family or oracle function.
 
 - `Arbitrate` (6): `arbitration-accepted-pairwise-independent`, `arbitration-merged-order-free`, `arbitration-accepted-maximal`, `arbitration-deterministic`, `arbitration-id-uniqueness-is-needed`, `arbitration-maximal-is-not-maximum`
+
+- `CanonicalFormHostsVocabulary` (1): `canonical-form-hosts-vocabulary-generated-model`
+
+- `CanonicalFormHostsVocabularyProofs` (1): `canonical-form-hosts-vocabulary-round-trip`
+
+- `CanonicalFormVocabulary` (1): `canonical-form-vocabulary-generated-model`
+
+- `CanonicalFormVocabularyProofs` (1): `canonical-form-vocabulary-round-trip`
 
 - `ColumnRefinement` (6): `column-refinement-to-cells-of-cells`, `column-refinement-of-cells-to-cells`, `column-refinement-validate-agrees`, `column-refinement-encode-agrees`, `column-refinement-ladder-transfers`, `column-refinement-validity-two-cases`
 
@@ -123,7 +131,7 @@ Grouped by model. Each group is a candidate vector family or oracle function.
 
 - `VocabularyProofs` (1): `vocabulary-round-trip`
 
-- `VocabularyVectors` (3): `layout-vocabulary-decode-vectors`, `parameterised-vocabulary-decode-vectors`, `vocabulary-vectors-agree`
+- `VocabularyVectors` (4): `layout-vocabulary-decode-vectors`, `parameterised-vocabulary-decode-vectors`, `canonical-form-vocabulary-decode-vectors`, `vocabulary-vectors-agree`
 
 - `WireVersioning` (6): `evolution-classify-sound`, `evolution-additive-monotone`, `evolution-preserve-exact`, `evolution-unknown-transport-only`, `evolution-bump-refuses-at-the-edge`, `evolution-field-additive-monotone`
 

@@ -72,6 +72,19 @@ module internal FStarModel =
         /// the decoder compares what it reads and refuses another value, as the reading does.
         | SConst of wire: string
 
+    /// Phase 723 (DECISIONS.md D190.2, D256) — a member's presence condition as the model states it,
+    /// classified by [[Decl.memberReading]]: the sibling a condition reads, by its member name, and for
+    /// an equality test the F* term of the sibling's MODEL value when it holds the declared scalar.
+    /// The model tests the sibling's DECODED value, which is the raw object's test whenever the
+    /// sibling decodes (and the document is refused at the sibling when it does not).
+    [<RequireQualifiedAccess>]
+    type Condition =
+        | SiblingPresent of sibling: string
+        | SiblingAbsent of sibling: string
+        | SiblingEquals of sibling: string * term: string
+        /// The member itself is anything but `Some []`.
+        | SelfNonEmpty
+
     /// A member of the model: one declared field with its resolved slot. A host-only field
     /// has no wire projection and never becomes a member — the model is of the WIRE.
     type Member =
@@ -91,6 +104,11 @@ module internal FStarModel =
             /// holder's own in the model, and an authored value of the holder still carries them
             /// one level down, under this field ([[authoredFor]]). `None` for the holder's own member.
             Held: string option
+            /// Phase 723 (D190.1) — the spellings the decoder reads the member under after its
+            /// canonical name, in declared order. The encoder never writes one.
+            Aliases: string list
+            /// Phase 723 — the condition the member is present under; `None` for an unconditional one.
+            Condition: Condition option
         }
 
     /// The authored field list the member `m` of a holder is looked up in: the holder's own, or,
@@ -646,11 +664,20 @@ module internal FStarModel =
                 | Error e -> Error e
                 | Ok p -> go (p :: acc) t
 
-        go [] sorted
-        |> Result.map (fun parts ->
-            match parts with
-            | [] -> ctor
-            | _ -> "(" + ctor + " " + String.concat " " parts + ")")
+        // Phase 723 — a constructor declaring a presence condition is refined by it, and a literal of
+        // it would have to be shown canonical where it is written; no certified vocabulary declares
+        // one, so it is refused rather than emitted unchecked (D286.8).
+        match ms |> List.tryFind _.Condition.IsSome with
+        | Some m ->
+            unmodellable
+                (sprintf "a declared default of a record or case whose member '%s' declares a presence condition" m.Name)
+                where
+        | None ->
+            go [] sorted
+            |> Result.map (fun parts ->
+                match parts with
+                | [] -> ctor
+                | _ -> "(" + ctor + " " + String.concat " " parts + ")")
 
     /// One declared field list as the model's members: each wire field's type closed under the
     /// instantiation `subst` and translated ([[slotOf]]), with its presence; host-only fields
@@ -662,12 +689,51 @@ module internal FStarModel =
     /// holder's instantiation and its own presence. The model therefore states the holder's object
     /// exactly as a vocabulary declaring those members flat would, and the holder's round trip is
     /// the theorem over them; the record has no declaration of its own.
+    ///
+    /// Phase 723 (DECISIONS.md D190, D256) — each member's aliases and presence condition, read from
+    /// [[Decl.memberReading]] over `scope`, the whole field list of the owner (a sibling is looked up
+    /// there when `fs` is one field of it). A member of an inline declaration declares neither: the
+    /// declaration check refuses one ([[Decl.layoutFault]]), which the target asks first.
     and private fieldMembers
         (idl: Idl)
         (subst: Map<string, IdlType>)
         (where: string)
+        (scope: IdlField list)
         (fs: IdlField list)
         : Result<Member list, CodegenError> =
+        let condition (at: string) (f: IdlField) (reading: MemberReading) : Result<Condition option, CodegenError> =
+            let sibling (spellings: string list) = List.head spellings
+
+            match reading.Presence, f.Presence with
+            | PresenceReading.Unconditional, _ -> Ok None
+            | PresenceReading.SiblingPresent s, _ -> Ok(Some(Condition.SiblingPresent(sibling s)))
+            | PresenceReading.SiblingAbsent s, _ -> Ok(Some(Condition.SiblingAbsent(sibling s)))
+            | PresenceReading.SelfNonEmpty, _ -> Ok(Some Condition.SelfNonEmpty)
+            | PresenceReading.SiblingEquals(s, _, _), Some(WhenEquals(_, v)) ->
+                let name = sibling s
+
+                match scope |> List.tryFind (fun g -> g.Name = name) with
+                | Some g ->
+                    match TypeParams.substitute subst g.Type with
+                    | TInt
+                    | TFloat ->
+                        unmodellable
+                            (sprintf
+                                "the presence condition of field '%s', which compares the number its sibling '%s' holds with %A: the opaque numeric model cannot spell it"
+                                f.Name
+                                name
+                                v)
+                            at
+                    | gt ->
+                        defaultLit idl at gt v
+                        |> Result.map (fun term ->
+                            let held = if g.Opt = Optional then "(Some " + term + ")" else term
+                            Some(Condition.SiblingEquals(name, held)))
+                | None ->
+                    unmodellable (sprintf "the presence condition of field '%s' over an undeclared sibling" f.Name) at
+            | PresenceReading.SiblingEquals _, _ ->
+                unmodellable (sprintf "the presence condition of field '%s'" f.Name) at
+
         let rec go acc rest =
             match rest with
             | [] -> Ok(List.rev acc)
@@ -679,7 +745,7 @@ module internal FStarModel =
                 ->
                 match Decl.inlineSlot idl f.Type with
                 | Some(InlineSlot.Record r) ->
-                    match fieldMembers idl subst (where + "." + f.Name) r.Fields with
+                    match fieldMembers idl subst (where + "." + f.Name) r.Fields r.Fields with
                     | Error e -> Error e
                     | Ok laid -> go ((laid |> List.map (fun m -> { m with Held = Some f.Name }) |> List.rev) @ acc) t
                 | _ -> go acc t
@@ -694,21 +760,29 @@ module internal FStarModel =
                     | Required
                     | HostOnly -> Ok None
 
-                match slotOf at ft with
-                | Error e -> Error e
-                | Ok slot ->
-                    match presence with
-                    | Error e -> Error e
-                    | Ok p ->
-                        go
-                            ({ Name = f.Name
-                               Type = ft
-                               Slot = slot
-                               Presence = p
-                               Opt = f.Opt
-                               Held = None }
-                             :: acc)
-                            t
+                let reading = Decl.memberReading idl scope f
+
+                let declared =
+                    match reading with
+                    | None -> Ok([], None)
+                    | Some r -> condition at f r |> Result.map (fun c -> List.tail r.Spellings, c)
+
+                match slotOf at ft, presence, declared with
+                | Error e, _, _
+                | _, Error e, _
+                | _, _, Error e -> Error e
+                | Ok slot, Ok p, Ok(aliases, c) ->
+                    go
+                        ({ Name = f.Name
+                           Type = ft
+                           Slot = slot
+                           Presence = p
+                           Opt = f.Opt
+                           Held = None
+                           Aliases = aliases
+                           Condition = c }
+                         :: acc)
+                        t
 
         go [] fs
 
@@ -752,7 +826,9 @@ module internal FStarModel =
                           Slot = SConst term
                           Presence = None
                           Opt = Required
-                          Held = None }
+                          Held = None
+                          Aliases = []
+                          Condition = None }
                 | None ->
                     unmodellable
                         (sprintf
@@ -772,7 +848,7 @@ module internal FStarModel =
                         (sprintf "a presence-keyed union '%s' naming no key for its case '%s'" u.Name case.Tag)
                         at
                 | Some rule ->
-                    fieldMembers idl subst (at + "." + case.Tag) case.Fields
+                    fieldMembers idl subst (at + "." + case.Tag) case.Fields case.Fields
                     |> Result.bind (fun own ->
                         Decl.synthesisedJson idl u rule
                         |> Result.bind (List.map (synthesisedMember case) >> sequenceR)
@@ -807,7 +883,7 @@ module internal FStarModel =
                              Decl.inlineSlot idl f.Type)
                     with
                     | Some(InlineSlot.Keyed(u, keyed)) -> alternatives f u keyed
-                    | _ -> fieldMembers idl subst where [ f ] |> Result.map (fun ms -> [ [], ms ])
+                    | _ -> fieldMembers idl subst where fs [ f ] |> Result.map (fun ms -> [ [], ms ])
 
                 match here with
                 | Error e -> Error e
@@ -817,7 +893,43 @@ module internal FStarModel =
                               for picks', ms' in alts -> picks @ picks', ms @ ms' ]
                         t
 
-        go [ [], [] ] fs
+        // Phase 723 — the shapes no certified vocabulary holds are refused by name (D286.8): a member
+        // declaring an alias or a condition beside a presence-keyed union, whose reading the keys
+        // present decide, and a condition over a sibling the model does not hold as a member.
+        let admitted (picks: Pick list, ms: Member list) =
+            let declares (m: Member) =
+                not m.Aliases.IsEmpty || m.Condition.IsSome
+
+            let own (name: string) =
+                ms |> List.exists (fun m -> m.Name = name && m.Held.IsNone)
+
+            let siblingOf (m: Member) =
+                match m.Condition with
+                | Some(Condition.SiblingPresent s)
+                | Some(Condition.SiblingAbsent s)
+                | Some(Condition.SiblingEquals(s, _)) -> Some s
+                | Some Condition.SelfNonEmpty
+                | None -> None
+
+            match
+                ms |> List.tryFind declares, ms |> List.tryFind (fun m -> siblingOf m |> Option.exists (own >> not))
+            with
+            | Some m, _ when not picks.IsEmpty ->
+                unmodellable
+                    (sprintf
+                        "the aliases or presence condition of member '%s' beside a presence-keyed union, whose case the keys present pick"
+                        m.Name)
+                    where
+            | _, Some m ->
+                unmodellable
+                    (sprintf
+                        "the presence condition of member '%s' over '%s', which the model does not hold as a member of its own"
+                        m.Name
+                        (siblingOf m |> Option.defaultValue ""))
+                    where
+            | _ -> Ok(picks, ms)
+
+        go [ [], [] ] fs |> Result.bind (List.map admitted >> sequenceR)
 
     /// The constructor of [[fieldVariants]] an authored value of the holder is a value of: the one
     /// whose picks are the cases the value carries at its presence-keyed fields.
@@ -1137,8 +1249,18 @@ module internal FStarModel =
             | _ -> Ok()
 
         let envelope () =
-            fieldMembers idl Map.empty "node envelope" idl.NodeFields
-            |> Result.map (fun ms -> envelopeMembers <- ms)
+            fieldMembers idl Map.empty "node envelope" idl.NodeFields idl.NodeFields
+            |> Result.bind (fun ms ->
+                // Phase 723 — the node's own decoder reads the envelope; no certified vocabulary
+                // declares an alias or a condition there, so one is refused by name (D286.8).
+                match ms |> List.tryFind (fun m -> not m.Aliases.IsEmpty || m.Condition.IsSome) with
+                | Some m ->
+                    unmodellable
+                        (sprintf "the aliases or presence condition of the node envelope's member '%s'" m.Name)
+                        "node envelope"
+                | None ->
+                    envelopeMembers <- ms
+                    Ok())
 
         // Phase 722 — an inline declaration is modelled as the declaration check leaves it: where it
         // stands, one key per case that is a required member of that case and of no other, and what
@@ -1214,16 +1336,27 @@ module internal FStarModel =
             let envelope = envelopeMembers
             let kinds = caseMap["vkind"]
 
+            // Phase 723 — an alias is a key the decoder reads, so one the object carries already would
+            // be read in the member's place: it is held to the same rule as the member's own name.
             let collisions (where: string) (reserved: (string * string) list) (ms: Member list) =
                 ms
                 |> List.tryPick (fun m ->
-                    reserved
-                    |> List.tryFind (fun (key, _) -> key = m.Name)
-                    |> Option.map (fun (_, holder) ->
-                        CodegenError.UnmodellableInFStar(
-                            sprintf "a member '%s' whose key the %s already carries" m.Name holder,
-                            where
-                        )))
+                    m.Name :: m.Aliases
+                    |> List.tryPick (fun spelling ->
+                        reserved
+                        |> List.tryFind (fun (key, _) -> key = spelling)
+                        |> Option.map (fun (_, holder) ->
+                            CodegenError.UnmodellableInFStar(
+                                (if spelling = m.Name then
+                                     sprintf "a member '%s' whose key the %s already carries" m.Name holder
+                                 else
+                                     sprintf
+                                         "a member '%s' whose alias '%s' the %s already carries"
+                                         m.Name
+                                         spelling
+                                         holder),
+                                where
+                            ))))
 
             let nodeKeys =
                 match idl.Wire.NodeEnvelope with
@@ -1445,16 +1578,13 @@ module internal FStarModel =
                       DeclaredWire = everyMember |> Seq.exists (fun m -> declaredWire m.Type) }
 
 
-    /// [[modelOf]] behind the Phase 539 refusal: the model's decoder reads each member under its one
-    /// name and has no presence condition, so a vocabulary declaring either (or an enum alias) is
-    /// refused by name rather than modelled as if it declared neither. And behind the one question
-    /// every backend asks of a record reference (Phase 732, [[Decl.referencesAppliedIdl]]): a reference
-    /// no binding can be made for has no instantiation to model, and is refused in the other
-    /// backends' sentence.
+    /// [[modelOf]] behind the one question every backend asks of a record reference (Phase 732,
+    /// [[Decl.referencesAppliedIdl]]): a reference no binding can be made for has no instantiation to
+    /// model, and is refused in the other backends' sentence. Since Phase 723 (D290) a member's
+    /// aliases, an enum case's aliases and the four presence conditions are modelled, and the shapes
+    /// the model does not carry are refused where they are met, by name.
     let model (idl: Idl) (kindTags: string list) : Result<Model, CodegenError> =
-        match Decl.canonicalFormDeclarations idl with
-        | what :: _ -> unmodellable (what + " (a Phase 539 canonical-form declaration)") "the vocabulary"
-        | [] -> Decl.referencesAppliedIdl idl |> Result.bind (fun () -> modelOf idl kindTags)
+        Decl.referencesAppliedIdl idl |> Result.bind (fun () -> modelOf idl kindTags)
 
     // -----------------------------------------------------------------------
     // 6. The expressibility partition — which of a vocabulary's kinds the target can

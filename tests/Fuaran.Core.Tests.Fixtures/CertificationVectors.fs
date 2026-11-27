@@ -358,11 +358,45 @@ let decodeVectors () : DecodeVectors list =
             Prefix = "PF"
             Idl = ParameterisedRecordsIdl.derivedFlat
             Wires = ParameterisedRecordsIdl.flatModelDocuments () }
-        Refused = ParameterisedRecordsIdl.flatRefused |> List.map snd } ]
+        Refused = ParameterisedRecordsIdl.flatRefused |> List.map snd }
+      // Phase 723 — the canonical-form law set's documents, as the law file carries them (aliased,
+      // non-canonical, a member under a failed condition), and the documents it refuses; and the
+      // documents over the vocabulary declaring every shape.
+      { Read =
+          { Model = "CanonicalFormVocabulary"
+            Prefix = "C"
+            Idl = CanonicalFormVectorExport.idl
+            Wires =
+              CanonicalFormVectorExport.inputs
+              |> List.map (fun (_, _, body) -> CanonicalFormVectorExport.document body) }
+        Refused =
+          CanonicalFormVectorExport.refusalInputs
+          |> List.map (fun (_, _, body) -> CanonicalFormVectorExport.document body) }
+      { Read =
+          { Model = "CanonicalFormHostsVocabulary"
+            Prefix = "CH"
+            Idl = CanonicalFormHostsIdl.proved
+            Wires = CanonicalFormHostsIdl.provedDocuments }
+        Refused = CanonicalFormHostsIdl.provedRefused |> List.map snd } ]
+
+/// Phase 723 — the canonical-form models' ENCODE facts: for each document the decode facts read, the
+/// model's encoder on what the interpreter decodes it to is the canonical bytes the interpreter writes.
+let canonicalFormModels () : VectorModel list =
+    [ for model, prefix, idl, documents in
+          [ "CanonicalFormVocabulary",
+            "C",
+            CanonicalFormVectorExport.idl,
+            CanonicalFormVectorExport.inputs
+            |> List.map (fun (_, _, body) -> CanonicalFormVectorExport.document body)
+            "CanonicalFormHostsVocabulary", "CH", CanonicalFormHostsIdl.proved, CanonicalFormHostsIdl.provedDocuments ] ->
+          { Model = model
+            Prefix = prefix
+            Idl = idl
+            Wires = documents |> List.map (interpreterWrote idl) |> List.distinct } ]
 
 /// The facts module the generator writes for the certification set.
 let vectorsText () : Result<string, CodegenError> =
-    FStarTarget.vectorsModuleWith vectorsModuleName (vectorModels ()) (decodeVectors ())
+    FStarTarget.vectorsModuleWith vectorsModuleName (vectorModels () @ canonicalFormModels ()) (decodeVectors ())
 
 let vectorsFile () =
     Snapshots.repoFile ("proofs/" + vectorsModuleName + ".fst")

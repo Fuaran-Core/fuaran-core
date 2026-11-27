@@ -162,7 +162,37 @@ let generated: Generated list =
               @ remedyLines
             Proves =
               [ "F* BACKEND over PARAMETERISED RECORDS on the declared non-default wire shape: one"
-                "model type per instantiation, and the round trip a theorem about each." ] } } ]
+                "model type per instantiation, and the round trip a theorem about each." ] } }
+      // Phase 723 — the canonical-form declarations: without these two entries no committed proof
+      // would meet a member's aliases, an enum case's aliases or a presence condition, and the
+      // generator emits a proof script for each. The first is the canonical-form law set's own
+      // vocabulary, on the default wire shape; the second declares every shape, on the flat one.
+      { Module = "CanonicalFormVocabulary"
+        Idl = CanonicalFormVectorExport.idl
+        Provenance =
+          { Origin =
+              [ "the CANONICAL-FORM LAW SET's vocabulary — `tests/Fuaran.Core.Tests.Fixtures/CanonicalFormVectorExport.fs`,"
+                "the fixture `conformance/laws/canonical-form-laws.json` carries: a member's aliases on a"
+                "kind, a record and a union case, an enum case's aliases, presence and equality conditions,"
+                "and an empty-map and an empty-JSON default (fuaran-core Phase 723)." ]
+              @ remedyLines
+            Proves =
+              [ "F* BACKEND over the CANONICAL-FORM declarations: the model's type is the canonical form,"
+                "a member whose condition fails being absent from it, and the round trip is a theorem"
+                "about every value of it. That decoding an aliased or non-canonical document normalises"
+                "it as the interpreter does is held by the decode vectors, not by a theorem." ] } }
+      { Module = "CanonicalFormHostsVocabulary"
+        Idl = CanonicalFormHostsIdl.proved
+        Provenance =
+          { Origin =
+              [ "the CANONICAL-FORM HOSTS vocabulary — `tests/Fuaran.Core.Tests.Fixtures/CanonicalFormHostsIdl.fs`"
+                "(`proved`): every alias position and all four presence conditions, one over an aliased"
+                "sibling and one on a member omitted at its default, under the flat node envelope in"
+                "declared order (fuaran-core Phase 723)." ]
+              @ remedyLines
+            Proves =
+              [ "F* BACKEND over every CANONICAL-FORM shape on the declared non-default wire shape: the"
+                "model's type is the canonical form, and the round trip a theorem about each value." ] } } ]
 
 let modelPath (g: Generated) =
     Path.Combine(repoRoot, "proofs", g.Module + ".fst")

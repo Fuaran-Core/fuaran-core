@@ -59,8 +59,64 @@ module internal FStarVocabulary =
     let private binders (ms: Member list) =
         ms |> List.mapi (fun i _ -> sprintf "f%d" i)
 
+    /// Phase 723 — the sibling a member's presence condition reads, if it reads one.
+    let conditionSibling (m: Member) : string option =
+        match m.Condition with
+        | Some(Condition.SiblingPresent s)
+        | Some(Condition.SiblingAbsent s)
+        | Some(Condition.SiblingEquals(s, _)) -> Some s
+        | Some Condition.SelfNonEmpty
+        | None -> None
+
+    /// Phase 723 — whether a sibling `s` (an F* expression of its model value) satisfies `m`'s condition.
+    let conditionHolds (m: Member) (s: string) : string =
+        match m.Condition with
+        | Some(Condition.SiblingPresent _) -> "Some? " + s
+        | Some(Condition.SiblingAbsent _) -> "None? " + s
+        | Some(Condition.SiblingEquals(_, term)) -> sprintf "%s = %s" s term
+        | Some Condition.SelfNonEmpty
+        | None -> "true"
+
+    /// Phase 723 — the model value of a conditional member when it is absent: `None`, or its default.
+    let absentValue (m: Member) : string =
+        match m.Presence with
+        | Some None -> "None"
+        | Some(Some d) -> d
+        | None -> invalidArg "m" "a member declaring a presence condition is optional or omitted at a default"
+
+    /// Phase 723 (DECISIONS.md D290) — the refinement each binder of a constructor carries: a member
+    /// whose condition fails is ABSENT, so the model's type is the canonical form and holds no value the
+    /// encoder could not tell from another. A sibling condition refines the LATER of the two binders,
+    /// which is the one that can name the other; `WhenNonEmpty` refines the member itself.
+    let private refinements (ms: Member list) : Map<string, string list> =
+        let binder (m: Member) = binderName m.Name
+
+        let absent (m: Member) =
+            match m.Presence with
+            | Some None -> "None? " + binder m
+            | _ -> sprintf "%s = %s" (binder m) (absentValue m)
+
+        let position (name: string) =
+            ms |> List.findIndex (fun g -> g.Name = name)
+
+        ms
+        |> List.choose (fun m ->
+            match m.Condition, conditionSibling m with
+            | Some Condition.SelfNonEmpty, _ ->
+                Some(m.Name, sprintf "(match %s with | Some [] -> false | _ -> true)" (binder m))
+            | Some _, Some s ->
+                let sibling = ms[position s]
+                let later = if position s > position m.Name then s else m.Name
+                Some(later, sprintf "(%s || %s)" (conditionHolds m (binder sibling)) (absent m))
+            | _ -> None)
+        |> List.groupBy fst
+        |> List.map (fun (k, cs) -> k, cs |> List.map snd)
+        |> Map.ofList
+
     /// The declaration of one constructor's argument list.
     let private ctorArgs (ms: Member list) (result: string) =
+        let refined = refinements ms
+
         let args =
             ms
             |> List.map (fun m ->
@@ -69,7 +125,9 @@ module internal FStarVocabulary =
                     | Some None -> "option (" + slotType m.Slot + ")"
                     | _ -> slotType m.Slot
 
-                sprintf "%s:(%s)" (binderName m.Name) t)
+                match refined.TryFind m.Name with
+                | Some cs -> sprintf "%s:(%s){%s}" (binderName m.Name) t (String.concat " && " cs)
+                | None -> sprintf "%s:(%s)" (binderName m.Name) t)
 
         match args with
         | [] -> result
@@ -352,32 +410,39 @@ module internal FStarVocabulary =
                     (slotName m.Slot)
                     (k "w")
 
+        // Phase 723 (D190.1) — the member under its canonical spelling, then each alias in declared
+        // order; when none is present the canonical spelling's refusal is the one answered.
+        let found =
+            match m.Aliases with
+            | [] -> sprintf "get_prop %s %s" name el
+            | aliases ->
+                let rec spelt (rest: string list) =
+                    match rest with
+                    | [] -> "Error e"
+                    | a :: t ->
+                        sprintf "(match get_prop %s %s with | Ok v -> Ok v | Error _ -> %s)" (lit a) el (spelt t)
+
+                sprintf "(match get_prop %s %s with | Ok v -> Ok v | Error e -> %s)" name el (spelt aliases)
+
         let outcomeTy, body =
             match m.Presence with
             | None ->
                 ty,
-                sprintf
-                    "(match get_prop %s %s with | Error e -> Error e | Ok v -> %s)"
-                    name
-                    el
-                    (readInto "v" (fun w -> "Ok " + w))
+                sprintf "(match %s with | Error e -> Error e | Ok v -> %s)" found (readInto "v" (fun w -> "Ok " + w))
             | Some None ->
                 "option (" + ty + ")",
                 sprintf
-                    "(match get_prop %s %s with | Error _ -> Ok None | Ok v -> %s)"
-                    name
-                    el
+                    "(match %s with | Error _ -> Ok None | Ok v -> %s)"
+                    found
                     (readInto "v" (fun w -> "Ok (Some " + w + ")"))
             | Some(Some d) ->
                 ty,
-                sprintf
-                    "(match get_prop %s %s with | Error _ -> Ok %s | Ok v -> %s)"
-                    name
-                    el
-                    d
-                    (readInto "v" (fun w -> "Ok " + w))
+                sprintf "(match %s with | Error _ -> Ok %s | Ok v -> %s)" found d (readInto "v" (fun w -> "Ok " + w))
 
-        outcomeTy, body
+        // Phase 723 (D256.3) — an explicit empty array is a non-canonical spelling of absence.
+        match m.Condition with
+        | Some Condition.SelfNonEmpty -> outcomeTy, sprintf "(match %s with | Ok (Some []) -> Ok None | r -> r)" body
+        | _ -> outcomeTy, body
 
     /// The decoder of one member off the object bound to `el`, as a `let`-bound outcome.
     let private decMember (el: string) (i: int) (m: Member) =
@@ -386,12 +451,39 @@ module internal FStarVocabulary =
 
     /// Phase 224 — one member of the constructor `label` of `typeName` (its members `ms`): read
     /// through its opaque reader when it is hoisted (8a''), else written inline as before.
+    ///
+    /// Phase 723 (D190.2) — a member whose condition reads a sibling is read only when the sibling's
+    /// decoded value satisfies it, and is absent, unread, otherwise.
     let private decMemberOf (typeName: string) (label: string) (ms: Member list) (el: string) (i: int) (m: Member) =
-        if hoisted ms m then
-            let outcomeTy, _ = decRead el m
-            sprintf "let o%d : outcome (%s) = %s #num #flt %s in" i outcomeTy (readerName typeName label m) el
-        else
-            decMember el i m
+        let outcomeTy, inlined = decRead el m
+
+        let read =
+            if hoisted ms m then
+                sprintf "%s #num #flt %s" (readerName typeName label m) el
+            else
+                inlined
+
+        match conditionSibling m with
+        | Some s ->
+            sprintf
+                "let o%d : outcome (%s) = (match o%d with | Error e -> Error e | Ok sv -> if %s then %s else Ok (%s)) in"
+                i
+                outcomeTy
+                (ms |> List.findIndex (fun g -> g.Name = s))
+                (conditionHolds m "sv")
+                read
+                (absentValue m)
+        | None when hoisted ms m -> sprintf "let o%d : outcome (%s) = %s in" i outcomeTy read
+        | None -> decMember el i m
+
+    /// Every member's `let` of one constructor's decoder: a member whose condition reads a sibling
+    /// after every other, so the sibling's outcome is bound first (the conditions do not chain).
+    let private decMemberLines (typeName: string) (label: string) (ms: Member list) (el: string) =
+        let indexed = ms |> List.mapi (fun i m -> i, m)
+        let reads (_, m) = (conditionSibling m).IsSome
+
+        (indexed |> List.filter (reads >> not)) @ (indexed |> List.filter reads)
+        |> List.map (fun (i, m) -> decMemberOf typeName label ms el i m)
 
     /// Combine the `let`-bound member outcomes into the constructor application.
     /// `lead` are the binders that precede the members in the application (`i` for the node's id).
@@ -613,6 +705,11 @@ module internal FStarVocabulary =
 
                     for case, wire in cases do
                         line (sprintf "    if s = %s then Ok %s else" (lit wire) (ctorName tn case))
+
+                    // Phase 723 (D190.1) — a case's aliases decode to it; the encoder writes its wire string.
+                    for case, _ in cases do
+                        for alias in e.AliasesOf case do
+                            line (sprintf "    if s = %s then Ok %s else" (lit alias) (ctorName tn case))
 
                     line (sprintf "    Error (%s ^ s)" (lit (sprintf "unknown %s: " name)))
                     line ""
@@ -1221,8 +1318,8 @@ module internal FStarVocabulary =
                         (lit "kind")
                 )
 
-                envArgs
-                |> List.iteri (fun i m -> line (indent 1 (decMemberOf "node" "Node" envArgs "el" i m)))
+                decMemberLines "node" "Node" envArgs "el"
+                |> List.iter (fun l -> line (indent 1 l))
 
                 line (
                     sprintf
@@ -1245,8 +1342,7 @@ module internal FStarVocabulary =
                 for tag, ms in c.Kinds do
                     line (sprintf "    if tag = %s%s then" (lit (wireTag c "vkind" tag)) (guard "vkind" tag))
 
-                    ms
-                    |> List.iteri (fun i m -> line (indent 3 (decMemberOf "vkind" tag ms "el" i m)))
+                    decMemberLines "vkind" tag ms "el" |> List.iter (fun l -> line (indent 3 l))
 
                     line (indent 3 (decCombine ms (ctorName "vkind" tag)))
                     line "    else"
@@ -1264,8 +1360,7 @@ module internal FStarVocabulary =
                     let ms = flatNodeMembers c kindMs
                     line (sprintf "    if tag = %s%s then" (lit (wireTag c "vkind" tag)) (guard "vkind" tag))
 
-                    ms
-                    |> List.iteri (fun i m -> line (indent 3 (decMemberOf "node" tag ms "el" i m)))
+                    decMemberLines "node" tag ms "el" |> List.iter (fun l -> line (indent 3 l))
 
                     line (
                         indent
@@ -1298,14 +1393,14 @@ module internal FStarVocabulary =
 
                     match c.Records[n] with
                     | [ label, ms ] when (picksOf c n label).IsEmpty ->
-                        ms |> List.iteri (fun i m -> line (indent 1 (decMemberOf n label ms "el" i m)))
+                        decMemberLines n label ms "el" |> List.iter (fun l -> line (indent 1 l))
                         line (indent 1 (decCombine ms (ctorName n label)))
                     | ctors ->
                         // Phase 722 — a record has no tag, so its constructors are told apart by
                         // the readings alone.
                         for label, ms in ctors do
                             line (sprintf "  if %s then" (readings n label |> String.concat " && "))
-                            ms |> List.iteri (fun i m -> line (indent 2 (decMemberOf n label ms "el" i m)))
+                            decMemberLines n label ms "el" |> List.iter (fun l -> line (indent 2 l))
                             line (indent 2 (decCombine ms (ctorName n label)))
                             line "  else"
 
@@ -1362,7 +1457,7 @@ module internal FStarVocabulary =
                         | _ ->
                             line (sprintf "    if tag = %s%s then" (lit (wireTag c n tag)) (guard n tag))
 
-                            ms |> List.iteri (fun i m -> line (indent 3 (decMemberOf n tag ms "el" i m)))
+                            decMemberLines n tag ms "el" |> List.iter (fun l -> line (indent 3 l))
 
                             line (indent 3 (decCombine ms (ctorName n tag)))
                             line "    else"

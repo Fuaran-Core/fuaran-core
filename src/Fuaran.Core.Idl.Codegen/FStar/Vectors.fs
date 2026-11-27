@@ -211,19 +211,28 @@ module internal FStarVectors =
     /// whether the canonical layout wrote it as `2` or `2.5`, and every object keeps the key
     /// order the bytes carry.
     let rec private wireTerm (idl: Idl) (m: Model) (where: string) (s: Slot) (j: JVal) : Result<string, CodegenError> =
-        let objectOf (lookup: string -> Slot option) (fs: (string * JVal) list) =
+        // Phase 723 — a lookup answers a key's slot and whether its member declares a presence
+        // condition: a document may hold anything under a condition that fails, since the decoder
+        // drops it unread (D190.2), so a value that does not fit the slot is carried verbatim there.
+        let objectOf (lookup: string -> (Slot * bool) option) (fs: (string * JVal) list) =
             fs
             |> List.map (fun (k, v) ->
                 match lookup k with
                 | None -> unmodellable ("the undeclared member '" + k + "' in the interpreter's bytes") where
-                | Some slot -> pairTerm (strLit where k) (wireTerm idl m where slot v))
+                | Some(slot, conditional) ->
+                    match wireTerm idl m where slot v with
+                    | Error _ when conditional -> pairTerm (strLit where k) (jsonTerm where v)
+                    | term -> pairTerm (strLit where k) term)
             |> sequenceR
             |> Result.map (fun ts -> "(JObj [" + String.concat "; " ts + "])")
 
         let disc = idl.Wire.Discriminator
 
+        // Phase 723 — a document may carry a member under one of its aliases.
         let memberSlot (ms: Member list) (k: string) =
-            ms |> List.tryFind (fun m -> m.Name = k) |> Option.map _.Slot
+            ms
+            |> List.tryFind (fun m -> m.Name = k || List.contains k m.Aliases)
+            |> Option.map (fun m -> m.Slot, m.Condition.IsSome)
 
         let tagOf (fs: (string * JVal) list) =
             match fs |> List.tryFind (fun (k, _) -> k = disc) with
@@ -261,7 +270,7 @@ module internal FStarVectors =
             |> List.map (wireTerm idl m where inner)
             |> sequenceR
             |> Result.map (fun ts -> "(JArr [" + String.concat "; " ts + "])")
-        | SMap inner, JObj fs -> objectOf (fun _ -> Some inner) fs
+        | SMap inner, JObj fs -> objectOf (fun _ -> Some(inner, false)) fs
         | SRecord(n, _), JObj fs ->
             match
                 m.Records.TryFind(slotName s)
@@ -278,7 +287,7 @@ module internal FStarVectors =
                     |> Option.bind (fun ctors -> ctorFor m (slotName s) ctors tag (wirePick fs))
                 with
                 | None -> unmodellable (sprintf "the case %s.%s" n tag) where
-                | Some(_, ms) -> objectOf (fun k -> if k = disc then Some SStr else memberSlot ms k) fs
+                | Some(_, ms) -> objectOf (fun k -> if k = disc then Some(SStr, false) else memberSlot ms k) fs
             | _ -> unmodellable ("the union " + n) where
         | SNode, JObj fs ->
             let ems = m.Envelope
@@ -291,7 +300,7 @@ module internal FStarVectors =
                     objectOf
                         (fun k ->
                             if k = disc || k = "id" then
-                                Some SStr
+                                Some(SStr, false)
                             else
                                 memberSlot (kms @ ems) k)
                         fs)
@@ -302,7 +311,7 @@ module internal FStarVectors =
                         tagOf kfs
                         |> Result.bind (kindMembers kfs)
                         |> Result.bind (fun kms ->
-                            objectOf (fun k -> if k = disc then Some SStr else memberSlot kms k) kfs)
+                            objectOf (fun k -> if k = disc then Some(SStr, false) else memberSlot kms k) kfs)
                     | _ -> unmodellable "a node whose kind is not an object" where
 
                 fs
@@ -313,7 +322,7 @@ module internal FStarVectors =
                     | _ ->
                         match memberSlot ems k with
                         | None -> unmodellable ("the undeclared envelope member '" + k + "'") where
-                        | Some slot -> pairTerm (strLit where k) (wireTerm idl m where slot v))
+                        | Some(slot, _) -> pairTerm (strLit where k) (wireTerm idl m where slot v))
                 |> sequenceR
                 |> Result.map (fun ts -> "(JObj [" + String.concat "; " ts + "])")
         | _ -> unmodellable (sprintf "interpreter bytes that do not fit their slot: %A" j) where

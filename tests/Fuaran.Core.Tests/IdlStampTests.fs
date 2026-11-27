@@ -280,9 +280,9 @@ let tests =
 
               Expect.equal p.Target "F* vectors" "the vectors target"
               // The three models of the encode facts, and the models the decode facts are over: the
-              // two inline-declaration models (Phase 722) and the two parameterised-record models
-              // (Phase 732).
-              Expect.equal (List.length p.Vocabularies) 7 "one vocabulary line per model it holds facts over"
+              // two inline-declaration models (Phase 722), the two parameterised-record models
+              // (Phase 732) and the two canonical-form models, which carry encode facts too (Phase 723).
+              Expect.equal (List.length p.Vocabularies) 9 "one vocabulary line per model it holds facts over"
 
           testCase "the scaffold's provenance header is the same grammar, keyed by its source wire"
           <| fun _ ->

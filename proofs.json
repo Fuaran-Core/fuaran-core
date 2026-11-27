@@ -3208,6 +3208,81 @@
       }
     },
     {
+      "id": "canonical-form-vocabulary-generated-model",
+      "level": "proved",
+      "statement": "The GENERATED model of the CANONICAL-FORM declarations - `proofs/CanonicalFormVocabulary.fst`: the canonical-form law set's vocabulary (`tests/Fuaran.Core.Tests.Fixtures/CanonicalFormVectorExport.fs`, the fixture `conformance/laws/canonical-form-laws.json` carries), emitted by `FStarTarget.vocabularyModuleFrom`. The model's TYPE is the canonical form (D290): each constructor binder a presence condition reads is refined so that a member whose condition fails is absent (`None`, or its declared default), the refinement standing on the later of the member and its sibling, and a `WhenNonEmpty` member is never `Some []`. Its decoder reads a member under its canonical spelling, then each alias in declared order, answering the canonical spelling's refusal when none is present; decodes an enum case's alias to the case; reads a member whose condition reads a sibling only when the sibling's DECODED value satisfies it, and is absent unread otherwise; and every decoder discharges the refinement where it builds a value. The encoder writes the canonical spelling alone. All four kinds are modelled. Proved with no assume and no admit under --report_assumes error, and held to a fresh generation by the Proofs.Vocabulary family.",
+      "boundary": "A model of the WIRE, on the default wire shape. The shapes the model does not carry are refused by name, never emitted (D290.4): an equality condition over a number, an alias or a condition on the node envelope or beside a presence-keyed union, an alias an object already carries as a fixed key, and a declared default of a record or case declaring a condition. CHECKED but not EXTRACTED, for the reason `check.ps1`'s `$proofOnly` note gives; the claim is within the model.",
+      "phase": "fuaran-core#723",
+      "evidence": {
+        "theorem": "dec_node",
+        "model": "proofs/CanonicalFormVocabulary.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.vocabularyModuleFrom"
+        ]
+      }
+    },
+    {
+      "id": "canonical-form-vocabulary-round-trip",
+      "level": "proved",
+      "statement": "The ROUND TRIP over `CanonicalFormVocabulary`, GENERATED and COMMITTED: `rt_node` in `proofs/CanonicalFormVocabularyProofs.fst` proves `dec_node (enc_node x) == Ok x` for every value of every modelled type - so for every CANONICAL value, a member under a failed condition being absent from the type, the object the encoder writes is read back as the same value. For a document `d` the model reads, `dec_node d == Ok x` gives `dec_node (enc_node x) == Ok x`: decoding then encoding is canonical and a fixed point. By the mutual induction and the lemma shapes of the `vocabulary-round-trip` row; a suffixed constructor's aliased member adds one lookup per alias stating it absent from the encoded object, cited where the member is absent.",
+      "boundary": "Over this vocabulary only, and of what the encoder writes. That decoding an aliased or non-canonical document gives the value the interpreter reads it to - the canonical spelling winning, an alias read in declared order, a member under a failed condition dropped unread - is NOT a theorem: the `canonical-form-vocabulary-decode-vectors` row evaluates it on concrete documents. A round trip in the model: it says nothing of any host's codec. NOT claimed: the `wf` characterisation, for the reason the `doc-vocabulary-round-trip` row gives.",
+      "phase": "fuaran-core#723",
+      "evidence": {
+        "theorem": "rt_node",
+        "model": "proofs/CanonicalFormVocabularyProofs.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.proofsModuleFrom"
+        ]
+      }
+    },
+    {
+      "id": "canonical-form-hosts-vocabulary-generated-model",
+      "level": "proved",
+      "statement": "The GENERATED model of every CANONICAL-FORM shape on the declared non-default wire shape - `proofs/CanonicalFormHostsVocabulary.fst`: the canonical-form hosts vocabulary (`tests/Fuaran.Core.Tests.Fixtures/CanonicalFormHostsIdl.fs`, `proved`): aliases on a kind's required, optional and omitted-at-default members, a record's and a union case's, an enum case's aliases, and all four presence conditions, one an equality over an aliased sibling, one on a member omitted at its default, under the flat node envelope with a `kind` discriminator in declared order, so the conditional members share the node's own object with `id`. Stated as the `canonical-form-vocabulary-generated-model` row states. All three kinds are modelled. Proved with no assume and no admit under --report_assumes error, and held to a fresh generation by the Proofs.Vocabulary family.",
+      "boundary": "The boundary of the `canonical-form-vocabulary-generated-model` row, on this wire shape. The row exists because the generator emits a proof script for each of these forms, and a generator must not emit a script no prover has checked. It departs from the hosts fixture in three declarations, each named in the fixture: an equality over an int sibling is refused by name, so `unit` reads a bool sibling here.",
+      "phase": "fuaran-core#723",
+      "evidence": {
+        "theorem": "dec_node",
+        "model": "proofs/CanonicalFormHostsVocabulary.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.vocabularyModuleFrom"
+        ]
+      }
+    },
+    {
+      "id": "canonical-form-hosts-vocabulary-round-trip",
+      "level": "proved",
+      "statement": "The ROUND TRIP over `CanonicalFormHostsVocabulary`, GENERATED and COMMITTED: `rt_node` in `proofs/CanonicalFormHostsVocabularyProofs.fst` proves `dec_node (enc_node x) == Ok x` for every value of every modelled type, as the `canonical-form-vocabulary-round-trip` row states it, on the flat wire shape.",
+      "boundary": "The boundary of the `canonical-form-vocabulary-round-trip` row, over this vocabulary.",
+      "phase": "fuaran-core#723",
+      "evidence": {
+        "theorem": "rt_node",
+        "model": "proofs/CanonicalFormHostsVocabularyProofs.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.proofsModuleFrom"
+        ]
+      }
+    },
+    {
+      "id": "canonical-form-vocabulary-decode-vectors",
+      "level": "proved",
+      "statement": "The canonical-form models READ what the reference interpreter reads, and refuse what it refuses, on the documents given, and WRITE what it writes: `c_decode_agree` and `ch_decode_agree` in `proofs/VocabularyVectors.fst`, emitted by `FStarTarget.vectorsModuleWith` from the fixtures library, are normaliser facts over `CanonicalFormVocabulary.dec_node` and `CanonicalFormHostsVocabulary.dec_node` of the two forms the `layout-vocabulary-decode-vectors` row states, and `c_vectors_agree` and `ch_vectors_agree` facts over their `enc_node` of the form the `vocabulary-vectors-agree` row states. The documents are AS AUTHORED, not as the interpreter writes them: every document of the canonical-form law set (twenty-two read: each alias, the canonical spelling winning, an enum case's aliases, each condition holding and failing, a member of the wrong kind under a failed condition read as absent, the empty-map and empty-JSON defaults; seven refused: a defect under an alias at each kind of position, both spellings present with the canonical one of the wrong kind, a required member missing under every spelling), and nine read and nine refused over the vocabulary declaring every shape. The encode facts hold the model's encoder on what the interpreter decodes each read document to against the canonical bytes the interpreter writes.",
+      "boundary": "A fact is about its document, in the model. NOT a theorem that the model's decoder is the interpreter's on every document: beyond these documents nothing here ties the two. A refused document is carried verbatim, and a fact states THAT the model refuses it, not the refusal's code or path (D288's paths are the hosts' conformance vectors). A member of the wrong kind under a failed condition is carried verbatim, as the document holds it.",
+      "phase": "fuaran-core#723",
+      "evidence": {
+        "theorem": "c_decode_agree",
+        "model": "proofs/VocabularyVectors.fst",
+        "prover": "proofs/fstar-pin.json",
+        "operations": [
+          "Idl.FStarTarget.vectorsModuleWith"
+        ]
+      }
+    },
+    {
       "id": "evolution-classify-sound",
       "level": "proved",
       "statement": "WIRE_FORMAT section 15.4's classifier is SOUND, and the three theorems beside it stand on that. `proofs/WireVersioning.fst` models `Versioning.classify` / `bump` / `negotiate` clause for clause and proves `classify_sound`: `classify` answers `Additive` ONLY when every tag of the before-vocabulary survives into the after-vocabulary. The function computes a LIST — a difference — where the table talks about a SUBSET, and the two are the same statement only through an induction, which is the module's whole substance; `classify_additive_is_sub` packages the quantified form. `rename_is_breaking` is the row section 15.4 calls out by name, because a rename LOOKS additive from the new vocabulary's side: a tag present before and absent after forces `Breaking` whatever else the change added, and nothing about the addition enters the proof. `breaking_bump_is_foreign` and `additive_bump_is_behind` carry the verdict through to the consequence a reader acts on — a breaking verdict mints a new major and the old consumer is `Foreign` and refuses; an additive verdict keeps the major and that consumer is `Behind` and tolerates. Section 15.4's FIELD rows are proved beside them, at the composition that decides them: `classify_field_add` models `Diff.classifyFieldAdd` clause for clause, `evolution_of` models `Diff.evolution`'s partition of each row's subject by severity, and `optional_field_addition_bumps_the_minor` carries the result through `bump` and `negotiate` — an added optional field introduces a subject, the verdict is a NON-EMPTY `Additive`, the minor moves and an old consumer is `Behind`. `required_field_addition_is_foreign_not_behind` states the required row: a required field added retires its subject, moves the major and leaves an old consumer `Foreign` — a minor would rest on the premise that every old document still decodes, which `field_additive_monotone` refutes — and `host_only_field_addition_moves_no_profile` states the one that genuinely moves nothing, which is what makes the other two a measurement rather than a constant. `tag_delta_is_blind_to_field_additions` keeps the other half: the kind-tag delta alone cannot decide any of them. Proved with no assume and no admit under --report_assumes error.",

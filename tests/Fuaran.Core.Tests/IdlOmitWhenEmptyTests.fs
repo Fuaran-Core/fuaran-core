@@ -292,7 +292,7 @@ let tests =
               refusedAtPresence (withTags (fun f -> { f with Type = TStr }))
               refusedAtPresence (withTags (fun f -> { f with Type = TMap TStr }))
 
-          testCase "declaring it on an existing member is breaking on the wire; the F* model refuses it by name"
+          testCase "declaring it on an existing member is breaking on the wire; the F* model carries it"
           <| fun _ ->
               let severities (before: Idl) (after: Idl) =
                   match Diff.parse (Artifact.render before) None, Diff.parse (Artifact.render after) None with
@@ -306,6 +306,9 @@ let tests =
 
               Expect.isNonEmpty (severities plain idl) "the change is reported"
 
+              // Phase 723 (D290) — the model's type holds no `Some []`, and its decoder reads one as `None`.
               match FStarTarget.vocabularyModule "M" idl kinds with
-              | Error e -> Expect.stringContains (CodegenError.describe e) "canonical-form" "named as one"
-              | Ok _ -> failtest "the F* model admitted the declaration" ]
+              | Error e -> failtestf "the F* model refused the declaration: %s" (CodegenError.describe e)
+              | Ok model ->
+                  Expect.stringContains model "(match tags with | Some [] -> false | _ -> true)" "the type refines it"
+                  Expect.stringContains model "| Ok (Some []) -> Ok None | r -> r)" "the decoder normalises it" ]

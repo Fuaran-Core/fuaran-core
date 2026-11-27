@@ -8,8 +8,8 @@ module Fuaran.Core.Tests.IdlCanonicalFormTests
 //  exports), the generated F# codec's (compiled and run, which must equal it), the
 //  sampler's, the validator's refusals, the artifact's round trip, the stability
 //  classifier's verdicts, the generated TypeScript codec's (run under node, which
-//  must equal it too, Phase 723), and the F* model, which refuses a declaration
-//  by name.
+//  must equal it too, Phase 723), and the F* model, which carries them (Phase
+//  723, D290) and refuses by name each shape it does not.
 // ============================================================================
 
 open Expecto
@@ -665,11 +665,128 @@ let tests =
                       (interpreter @ written)
                       "the TypeScript host answers and writes as the interpreter does"
 
-          testCase "the F* model refuses the declarations by name"
+          // Phase 723 (DECISIONS.md D290) — the F* model carries the declarations. What it proves is the
+          // proof leg's (`proofs/CanonicalFormVocabularyProofs.fst`); what is held here is that the model
+          // is emitted for every kind, reads each spelling and condition, and refuses BY NAME each shape
+          // no certified vocabulary holds.
+          testCase "the F* model carries every declaration of the law set's vocabulary"
           <| fun _ ->
-              match FStarTarget.vocabularyModule "M" idl kinds with
-              | Error e -> Expect.stringContains (CodegenError.describe e) "canonical-form" "named as one"
-              | Ok _ -> failtest "the F* model admitted a canonical-form declaration"
+              let verdicts = FStarTarget.partition idl
+              Expect.equal (verdicts |> List.map _.Tag) kinds "every kind is partitioned"
+
+              for v in verdicts do
+                  Expect.isNone v.Refusal (v.Tag + " is modelled")
+
+              let model =
+                  FStarTarget.vocabularyModule "M" idl kinds
+                  |> Result.defaultWith (CodegenError.describe >> failtest)
+
+              for wanted, what in
+                  [ "(match get_prop \"options\" el with | Ok v -> Ok v | Error e -> (match get_prop \"source\" el with | Ok v -> Ok v | Error _ -> (match get_prop \"suggestions\" el with | Ok v -> Ok v | Error _ -> Error e)))",
+                    "a member is read under its canonical spelling, then each alias in declared order"
+                    "if s = \"Danger\" then Ok C__e_tone__Critical else", "an enum case's alias decodes to the case"
+                    "template:(option (string)){(None? template || None? cols)}",
+                    "a member whose condition fails is absent from the model's type (refining the sibling after it)"
+                    "value:(option (string)){(multiple = false || None? value)}",
+                    "an equality over a sibling omitted at its default refines the member after it"
+                    "(match o0 with | Error e -> Error e | Ok sv -> if sv = false then",
+                    "a member is read only when its sibling's decoded value satisfies its condition" ] do
+                  Expect.stringContains model wanted what
+
+          testCase "the F* model refuses by name each shape it does not carry"
+          <| fun _ ->
+              let refusalOf (v: Idl) (tag: string) =
+                  FStarTarget.partition v
+                  |> List.tryFind (fun k -> k.Tag = tag)
+                  |> Option.bind _.Refusal
+                  |> Option.defaultValue "(modelled)"
+
+              let plain (name: string) (t: IdlType) (opt: Optionality) : IdlField =
+                  { Name = name
+                    Type = t
+                    Opt = opt
+                    Aliases = []
+                    Keyed = false
+                    Presence = None
+                    Annotations = Annotations.Empty }
+
+              let aliased (names: string list) (f: IdlField) = { f with Aliases = names }
+
+              let kindField (tag: string) (name: string) (change: IdlField -> IdlField) (v: Idl) =
+                  { v with
+                      Kinds =
+                          v.Kinds
+                          |> List.map (fun k ->
+                              if k.Tag = tag then
+                                  { k with
+                                      Fields = k.Fields |> List.map (fun f -> if f.Name = name then change f else f) }
+                              else
+                                  k) }
+
+              let recordField (record: string) (name: string) (change: IdlField -> IdlField) (v: Idl) =
+                  { v with
+                      Records =
+                          v.Records
+                          |> List.map (fun r ->
+                              if r.Name = record then
+                                  { r with
+                                      Fields = r.Fields |> List.map (fun f -> if f.Name = name then change f else f) }
+                              else
+                                  r) }
+
+              // A record whose member is conditional, held at a declared default.
+              let spot =
+                  { idl with
+                      Records =
+                          idl.Records
+                          @ [ { Name = "Spot"
+                                Params = []
+                                Fields =
+                                  [ plain "s" TStr Optional
+                                    { plain "t" TStr Optional with
+                                        Presence = Some(WhenPresent "s") } ]
+                                Annotations = Annotations.Empty
+                                Inline = false } ]
+                      Kinds =
+                          idl.Kinds
+                          |> List.map (fun k ->
+                              if k.Tag = "Place" then
+                                  { k with
+                                      Fields =
+                                          k.Fields @ [ plain "spot" (TRecord("Spot", [])) (OmitDefault(VRecord [])) ] }
+                              else
+                                  k) }
+
+              let envelope =
+                  { idl with
+                      NodeFields = [ aliased [ "isHidden" ] (plain "hidden" TBool Optional) ] }
+
+              for v, tag, phrase in
+                  [ CanonicalFormHostsIdl.idl,
+                    "Gate",
+                    "which compares the number its sibling 'count' holds with VInt 1: the opaque numeric model cannot spell it"
+                    recordField "Paging" "pageSize" (aliased [ "size" ]) LayoutIdl.layout,
+                    "Grid",
+                    "a member of an inline declaration takes no alias and no presence condition"
+                    kindField "Grid" "caption" (aliased [ "title" ]) LayoutIdl.layout,
+                    "Grid",
+                    "of member 'caption' beside a presence-keyed union, whose case the keys present pick"
+                    envelope, "Grid", "the node envelope's member 'hidden'"
+                    kindField "Gate" "count" (aliased [ "id" ]) CanonicalFormHostsIdl.proved,
+                    "Gate",
+                    "a member 'count' whose alias 'id' the node object already carries"
+                    spot,
+                    "Place",
+                    "a declared default of a record or case whose member 't' declares a presence condition" ] do
+                  Expect.stringContains (refusalOf v tag) phrase (tag + " is refused by name")
+
+              Expect.equal
+                  (refusalOf CanonicalFormHostsIdl.idl "Place")
+                  "(modelled)"
+                  "a kind meeting no such shape is modelled"
+
+              for k in FStarTarget.partition CanonicalFormHostsIdl.proved do
+                  Expect.isNone k.Refusal (k.Tag + " of the certified vocabulary is modelled")
 
           testCase "the validator refuses an ill-formed declaration at its path, by name"
           <| fun _ ->

@@ -102,3 +102,79 @@ let idl: Idl =
 /// The generated module's name and its committed path.
 let moduleName = "Fuaran.Core.Tests.CanonicalFormGenerated"
 let generatedFile = "tests/Fuaran.Core.Tests/CanonicalFormGenerated.fs"
+
+/// Phase 723 (DECISIONS.md D290) — the vocabulary the F\* backend is certified over for these shapes
+/// (`proofs/CanonicalFormHostsVocabulary.fst`): the declarations above, under the flat node envelope
+/// with a `kind` discriminator and members in declared order, so a kind's aliased and conditional
+/// members share the node's own object with `id`. Three departures, each for the model: `unit` is
+/// present while `open` is `true` rather than while `count` is `1`, since the model's numbers are
+/// opaque and an equality with an int is refused by name; `mode`, a member omitted at its default,
+/// is present only while `count` is, so a condition on a member absent at a default is proved too;
+/// and `Label` reads its one required member under an alias, a constructor with no conditional
+/// member, whose encoder is one literal in the wire's key order.
+let proved: Idl =
+    let gate (fields: IdlField list) =
+        fields
+        |> List.map (fun f ->
+            if f.Name = "unit" then
+                { f with
+                    Presence = Some(WhenEquals("open", VBool true)) }
+            else
+                f)
+
+    { idl with
+        Kinds =
+            (idl.Kinds
+             |> List.map (fun k ->
+                 if k.Tag = "Gate" then
+                     { k with
+                         Fields =
+                             gate k.Fields
+                             @ [ { field "mode" TStr (OmitDefault(VStr "auto")) with
+                                     Presence = Some(WhenPresent "count") } ] }
+                 else
+                     k))
+            @ [ kind
+                    "Label"
+                    [ { field "name" TStr Required with
+                          Aliases = [ "caption" ] } ] ]
+        Wire =
+            { Discriminator = "kind"
+              NodeEnvelope = NodeEnvelopeShape.FlatKind
+              KeyOrder = KeyOrder.Declared } }
+
+/// Documents over [[proved]] the interpreter READS, as authored: each spells members and enum values
+/// under their aliases, holds both spellings of one member, or holds a member whose condition fails.
+let provedDocuments: string list =
+    [ // every alias, each condition holding: `isOpen` is `open`, `measure` is `unit`, `labels` is
+      // `tags`, `severity` is `level` and `Danger` is `Critical`; `backup` is dropped while `open` is present.
+      """{"kind":"Gate","id":"g","isOpen":true,"measure":"cm","note":"n","backup":"b","labels":["x"],"severity":"Danger","alert":"a"}"""
+      // both spellings present: the canonical one is read, so `unit` is dropped and `tags` is `["a"]`.
+      """{"kind":"Gate","id":"g","open":false,"isOpen":true,"unit":"cm","measure":"mm","tags":["a"],"labels":["b"]}"""
+      // each condition failing, over a member of the wrong kind: each is dropped unread.
+      """{"kind":"Gate","id":"g","fallback":"f","note":7,"unit":5,"alert":3,"mode":9}"""
+      // an explicit empty array, under the alias, is the member's absence.
+      """{"kind":"Gate","id":"g","labels":[],"count":2,"mode":"manual","severity":"Positive"}"""
+      // the member omitted at its default, written at it.
+      """{"kind":"Gate","id":"g","count":2,"mode":"auto","level":"Critical","alert":"x"}"""
+      // a record's member and a union case's members under aliases.
+      """{"kind":"Place","id":"p","position":{"left":1,"y":2},"mark":{"kind":"Pin","text":"a","where":{"x":1,"left":9,"y":2}}}"""
+      """{"kind":"Place","id":"p","at":{"x":3,"y":4},"mark":{"kind":"Dot"}}"""
+      // a required member under its alias, and under both spellings.
+      """{"kind":"Label","id":"l","caption":"c"}"""
+      """{"kind":"Label","id":"l","caption":"c","name":"n"}""" ]
+
+/// Documents over [[proved]] the interpreter REFUSES, each with what it shows.
+let provedRefused: (string * string) list =
+    [ "a member read under its alias, of the wrong kind", """{"kind":"Gate","id":"g","isOpen":"yes"}"""
+      "both spellings present, the canonical one of the wrong kind",
+      """{"kind":"Gate","id":"g","open":5,"isOpen":true}"""
+      "a list under its alias that is not an array, which is not dropped", """{"kind":"Gate","id":"g","labels":"x"}"""
+      "a member whose condition holds, of the wrong kind", """{"kind":"Gate","id":"g","isOpen":true,"note":7}"""
+      "an enum value that is no case's wire string or alias", """{"kind":"Gate","id":"g","severity":"Loud"}"""
+      "a record's required member missing under every spelling", """{"kind":"Place","id":"p","position":{"y":2}}"""
+      "a union case's required member missing under every spelling",
+      """{"kind":"Place","id":"p","mark":{"kind":"Pin"}}"""
+      "a required member missing under every spelling", """{"kind":"Label","id":"l"}"""
+      "a required member's canonical spelling of the wrong kind beside its alias",
+      """{"kind":"Label","id":"l","caption":"c","name":3}""" ]
