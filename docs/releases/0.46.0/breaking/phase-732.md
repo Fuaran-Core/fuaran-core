@@ -59,7 +59,10 @@
   union declaring it`; a type variable in a record's field that is not the record's parameter is refused as `is not
   a parameter of the record declaring it`, where it said `of the union declaring it`; the sampler's fault for a type
   variable no instantiation binds reads `it is not bound by an enclosing union or record instantiation`, where it
-  said `union instantiation`; and the JSON schema's `a generic union whose instantiation walk did not close after
+  said `union instantiation`; the encoder's sentence for an authored value its type does not match, `authored value
+  does not match IDL type …`, spells a type of more than 256 nodes as a refusal spells an instantiation, its first 256
+  nodes with `...` for the rest (`list<list<...>>`), where it printed the type's F# form in full, as it still does at
+  256 nodes or fewer; and the JSON schema's `a generic union whose instantiation walk did not close after
   1000 expansions` is gone, its refusals being the two sentences of the SEVENTH. SEVENTH, a declaration whose
   recursion grows its type argument (`Grow<T>` holding `Grow<T list>`), along one member or several. At `0.45.0` none
   of `FStarTarget.partition`, `FStarTarget.vocabularyModule`, `Gen.fsharpTypes`, `fsharpModule`, `typescriptModule`,
