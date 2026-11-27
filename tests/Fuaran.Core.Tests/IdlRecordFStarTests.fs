@@ -397,6 +397,17 @@ let model =
                         "T, constructor 'L', member 'a__b'"
                         "T, constructor 'L__a', member 'b'" ]
 
+                  // Two members that meet only once snake-cased: `fooBar` and `foo_bar` hold no `__`.
+                  refusedAs
+                      "two members meeting by snake case"
+                      (vocabulary
+                          [ kind "K" [ f "a" (TRecord("Rec", [])) Required ] ]
+                          []
+                          [ record "Rec" [] [ f "fooBar" TInt Required; f "foo_bar" TStr Required ] ])
+                      [ "two definitions the model would give one name, 'lk_r_rec__Mk__foo_bar'"
+                        "Rec, constructor 'Mk', member 'fooBar'"
+                        "Rec, constructor 'Mk', member 'foo_bar'" ]
+
                   // Named apart: an enum's constructors (its word holds no `__`), the string-borne scalars,
                   // and every definition the two modules state over a vocabulary of each kind.
                   let apart =
@@ -436,8 +447,24 @@ let model =
                               None)
                       |> List.ofArray
 
+                  // A set and a list of one element type, and a keyed map and a list of pairs of its key
+                  // and value: one type on the wire each, so each pair shares one slot of the model.
+                  let sameOnTheWire =
+                      vocabulary
+                          [ kind
+                                "K"
+                                [ f "a" (TList(TTuple [ TInt; TStr ])) Required
+                                  f "b" (TKeyedMap(TInt, TStr)) Required
+                                  f "c" (TSet TStr) Required
+                                  f "d" (TList TStr) Required
+                                  f "e" (TRecord("Box", [ TSet TStr ])) Required
+                                  f "g" (TRecord("Box", [ TList TStr ])) Required ] ]
+                          []
+                          [ record "Box" [ "T" ] [ f "item" (TVar "T") Required ] ]
+
                   for label, idl in
                       [ "the named-apart vocabulary", apart
+                        "a set beside a list of one element type", sameOnTheWire
                         "the parameterised-record vocabulary", ParameterisedRecordsIdl.idl
                         "the layout vocabulary", LayoutIdl.layout ] do
                       let tags = tagsOf idl
