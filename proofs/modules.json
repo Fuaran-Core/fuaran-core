@@ -597,8 +597,8 @@
       "kind": "generated",
       "opens": [ "WireDecode", "ParameterisedFlatVocabulary" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
-      "budgetSeconds": 20,
-      "measuredSeconds": 3,
+      "budgetSeconds": 80,
+      "measuredSeconds": 38,
       "fastestSeconds": 27,
       "fastestPhase": "fuaran-core#732",
       "phase": "fuaran-core#732",
@@ -634,23 +634,23 @@
       "opens": [ "WireDecode" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
       "budgetSeconds": 20,
-      "measuredSeconds": 3,
-      "fastestSeconds": 3,
+      "measuredSeconds": 6,
+      "fastestSeconds": 6,
       "fastestPhase": "fuaran-core#723",
       "phase": "fuaran-core#723",
-      "note": "Phase 723 - the GENERATED model of the CANONICAL-FORM HOSTS vocabulary (`tests/Fuaran.Core.Tests.Fixtures/CanonicalFormHostsIdl.fs`, `proved`): every alias position and all four presence conditions, one over an aliased sibling, one on a member omitted at its default, under the flat node envelope with a `kind` discriminator in declared order. SEEDED from the phase's `check.ps1 -Runs 3` leg, every run an ordinary pass (contention x0.43, x0.42, x0.42 over forty-seven untouched modules): 3s, 3s, 3s, so the budget is 20s by the seeding rule; its fastest cold check was 3s."
+      "note": "Phase 723 - the GENERATED model of the CANONICAL-FORM HOSTS vocabulary (`tests/Fuaran.Core.Tests.Fixtures/CanonicalFormHostsIdl.fs`, `proved`): every alias position and all four presence conditions, one over an aliased sibling, one on a member omitted at its default, an aliased and a conditional member beside a presence-keyed union and on the node envelope, and a record held at a declared default that writes its conditional member (D291), under the flat node envelope with a `kind` discriminator in declared order. SEEDED from the phase's `check.ps1 -Runs 3` leg after D291 widened the vocabulary, every run an ordinary pass (contention x0.39, x0.39, x0.39 over forty-four untouched modules): 6s, 6s, 6s, so the budget is 20s by the seeding rule; its fastest cold check was 6s. Before D291 the same leg measured 3s."
     },
     {
       "module": "CanonicalFormHostsVocabularyProofs",
       "kind": "generated",
       "opens": [ "WireDecode", "CanonicalFormHostsVocabulary" ],
       "packages": [ "Fuaran.Core.Idl.Codegen" ],
-      "budgetSeconds": 30,
-      "measuredSeconds": 13,
-      "fastestSeconds": 13,
+      "budgetSeconds": 70,
+      "measuredSeconds": 32,
+      "fastestSeconds": 32,
       "fastestPhase": "fuaran-core#723",
       "phase": "fuaran-core#723",
-      "note": "Phase 723 - the generated ROUND TRIP over `CanonicalFormHostsVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type) and `dec_node_total`, by the walk and the lemma shapes of `CanonicalFormVocabularyProofs` on the flat wire configuration. SEEDED from the phase's `check.ps1 -Runs 3` leg, every run an ordinary pass (contention x0.43, x0.42, x0.42 over forty-seven untouched modules): 13s, 13s, 13s, so the budget is 30s by the seeding rule; its fastest cold check was 13s."
+      "note": "Phase 723 - the generated ROUND TRIP over `CanonicalFormHostsVocabulary` (`dec_node (enc_node x) == Ok x` for every value of every modelled type) and `dec_node_total`, by the walk and the lemma shapes of `CanonicalFormVocabularyProofs` on the flat wire configuration. RE-SEEDED from the phase's `check.ps1 -Runs 3` leg after D291 widened the vocabulary (each kind's constructors gained the node envelope's members, and `Link` one constructor per case of its presence-keyed union), every run an ordinary pass (contention x0.39, x0.39, x0.39 over forty-four untouched modules): 32s, 32s, 32s against the 30s budget the first seeding gave (13s, 13s, 13s), so the budget is 70s by the seeding rule; its fastest cold check was 32s."
     },
     {
       "module": "Relation",
