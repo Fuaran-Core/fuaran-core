@@ -1,8 +1,8 @@
 - **A decode error's path names the document as written, and every backend applies a member's aliases, an enum
   case's aliases and the four presence conditions** (Phase 723, `Fuaran.Core.Idl` and `Fuaran.Core.Idl.Codegen`,
-  DECISIONS.md D288, D289, D290 and D291, amending D190.1, D190.4 and D256.5) — class **breaking**: a
-  decode error's `Path` moves for a refusal under an alias, and the generated F# module of a vocabulary declaring
-  an alias or a condition is emitted differently. FIRST, what breaks. A refusal inside a member the document writes
+  DECISIONS.md D288, D289, D290, D291 and D292, amending D190.1, D190.2, D190.4 and D256.5) — class **breaking**: a
+  decode error's `Path` moves for a refusal under an alias, the generated F# module of a vocabulary declaring
+  an alias or a condition is emitted differently, and two declarations `0.45.0` admitted are refused. FIRST, what breaks. A refusal inside a member the document writes
   under an ALIAS is located at the alias, where it was located at the member's canonical spelling, which the
   document does not carry: `{"source":"not a list"}` for an `options` member read under `source` is `WrongKind` at
   `[kind, source]`, where it was at `[kind, options]`, and an item under the alias `suggestions` is at
@@ -23,12 +23,27 @@
   they refused by name (`UnsupportedConstruct`), reading and writing it as the interpreter does, a refusal under
   an alias located as written; one declaring `WhenNonEmpty` alone regenerates differently and reads alike. The
   F\* target models such a vocabulary, which it refused whole: `FStarTarget.partition` refuses only the kinds
-  meeting a shape the model's type cannot state (an equality over a number, an alias an object already carries as
-  a fixed key, a declared default holding a member whose condition fails, a condition over a sibling that is no
-  member of the constructor), each by name, and a vocabulary declaring an alias or a condition beside a
+  meeting a shape the model's type cannot state (an equality over a number, a declared default holding a member
+  at its own default in another spelling, a condition over a sibling that is no member of the constructor), each
+  by name, and a vocabulary declaring an alias or a condition beside a
   presence-keyed union, on the node envelope or in a record's declared default where its condition holds is
   modelled. Over the UI reference vocabulary with a member alias, an enum case's alias and a presence condition
   declared at once, the TypeScript module is generated and the F\* refused set is the baseline's two kinds,
   `Stepper` and `Tabs`, each for its int default. No public type, member or signature moves: the API baselines
   of both packages are unchanged. The shared corpus's copy of `laws/canonical-form-laws.json`, which gains seven
   refusal vectors carrying `refusal`, `code` and `path`, reads stale until it is copied there.
+  FOURTH, two declarations no document of which reads canonically, which `Declare.errors` and so
+  `Artifact.ofJson` admitted at `0.45.0`, are refused at the declaration, in every backend at once. An alias spelt
+  as a key its object already carries from the node envelope: under the flat envelope a kind member's alias spelt
+  as the node id or as a spelling of an envelope member, and an envelope member's alias spelt as the node id, the
+  discriminator or a key a kind lays beside it; under the nested envelope an envelope member's alias spelt `id`
+  or `kind`. It is refused at the alias, `kind 'Gate', field 'count': the alias 'id' is a key its object already
+  carries (the node id), so a document holding that key would read it as this member` (the discriminator and a
+  key a presence-keyed case lays were refused before, as a key on its object twice). And a declared default
+  holding, at any depth, a member whose presence condition fails over the object holding it and which is not at
+  its absence: `kind 'Place', field 'spot': the omit-at-default value is not canonical: it holds member 't' of
+  record 'Spot', which is meaningful only while 's' is present, and there it is not, so the encoder drops it`;
+  an authoring default reads `the value is not canonical`, and one at a type parameter `is not canonical at the
+  instantiation <i> and at least <n> more`. A consumer whose vocabulary declares either renames the alias, or
+  writes the default as the value its bytes read back to (the member left out). No fixture vocabulary, committed
+  artifact or the UI reference vocabulary declares either.

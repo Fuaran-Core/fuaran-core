@@ -339,9 +339,10 @@ module Declare =
         // `admits`: whether this owner may hold an inline declaration; `within`: whether the owner IS
         // an inline declaration's member list (its members take no alias and no condition).
         // `reserved`: the keys the owner's object carries before any field, each with what carries
-        // it. `shared`: the keys of an object the owner's members are MERGED into (the flat node
-        // envelope's id and fields), which a member an inline declaration lays may not respell; a
-        // field of the owner's own spelled as one is [[wireShapeErrors]]' fault, as it always was.
+        // it. `shared`: the keys of an object the owner's members are MERGED into (the node id, the
+        // kind body, the discriminator, and the members of the node envelope and of a kind beside
+        // it), which neither a member an inline declaration lays nor an alias may respell; a field
+        // of the owner's own NAMED as one is [[wireShapeErrors]]' fault, as it always was.
         let ownerErrors
             (owner: string)
             (at: PathSegment list)
@@ -441,7 +442,26 @@ module Declare =
                   if laid then
                       match shared |> List.tryFind (fun (m, _) -> m = n) with
                       | Some(_, first) -> twice n first bearer
-                      | None -> () ]
+                      | None -> ()
+
+              // Phase 723 — an alias is a key the reader reads its member under ([[WireForm.memberAt]]),
+              // so one spelt as a key the object carries from elsewhere is read in the member's place:
+              // a document holding that key reads as the member, and one leaving the member out reads
+              // the other key's value as it. No document of such a vocabulary reads canonically.
+              for j, f in List.indexed fields do
+                  if f.Opt <> HostOnly then
+                      for a, alias in List.indexed f.Aliases do
+                          match shared |> List.tryFind (fun (m, _) -> m = alias) with
+                          | Some(_, first) ->
+                              fault
+                                  (fieldAt j @ [ key "aliases"; item a ])
+                                  (sprintf
+                                      "%s, field '%s': the alias '%s' is a key its object already carries (%s), so a document holding that key would read it as this member"
+                                      owner
+                                      f.Name
+                                      alias
+                                      first)
+                          | None -> () ]
 
         let disc = [ idl.Wire.Discriminator, "the discriminator" ]
 
@@ -484,7 +504,19 @@ module Declare =
                       []
                       r.Fields
 
-          yield! ownerErrors "the node envelope" [ key "nodeFields" ] envelopeField false false [] [] idl.NodeFields
+          // The node envelope's members share the node object with the node id and, under the
+          // nested envelope, the kind body; under the flat one with the discriminator and every
+          // kind's members, each as the reader reads it.
+          let beside =
+              match idl.Wire.NodeEnvelope with
+              | NodeEnvelopeShape.NestedKind -> [ "id", "the node id"; "kind", "the kind body" ]
+              | NodeEnvelopeShape.FlatKind ->
+                  ("id", "the node id") :: disc
+                  @ [ for k in idl.Kinds do
+                          for n, bearer, _ in members k.Fields do
+                              n, sprintf "%s of kind '%s'" bearer k.Tag ]
+
+          yield! ownerErrors "the node envelope" [ key "nodeFields" ] envelopeField false false [] beside idl.NodeFields
 
           for i, u in List.indexed idl.Unions do
               let at = [ key "unions"; item i ]
@@ -804,6 +836,103 @@ module Declare =
             match v, WireForm.ofType idl t with
             | VEnum w, WireForm.Enum e -> List.contains w e.WireCases
             | _ -> not (List.isEmpty (WireForm.scalarSpellings idl t v))
+
+        // Phase 723 — a declared value is canonical only where no object in it holds a member whose
+        // presence condition fails over that object (D190.2): the encoder drops such a member, so the
+        // value its bytes read back to is another. A member at its absence (left out, or an
+        // `OmitDefault` member at its own default in its value space) is dropped by nothing. Answers
+        // the first such member, what holds it and its condition, outermost first.
+        let rec dropped (t: IdlType) (v: IdlValue) : (IdlField * string * PresenceCondition) option =
+            let within (holder: string) (fields: IdlField list) (authored: (string * IdlValue) list) =
+                let held (f: IdlField) =
+                    authored
+                    |> List.tryPick (fun (n, x) -> if n = f.Name && x <> VAbsent then Some x else None)
+
+                let atAbsence (f: IdlField) (x: IdlValue) =
+                    match f.Opt with
+                    | OmitDefault d ->
+                        x = d
+                        || (match Encode.renderValue idl f.Type x, Encode.renderValue idl f.Type d with
+                            | Ok a, Ok b -> a = b
+                            | _ -> false)
+                    | _ -> false
+
+                fields
+                |> List.tryPick (fun f ->
+                    match held f, f.Presence with
+                    | Some x, Some c when
+                        f.Opt <> HostOnly
+                        && not (WireForm.holdsAuthored fields f.Name c authored)
+                        && not (atAbsence f x)
+                        ->
+                        Some(f, holder, c)
+                    | _ -> None)
+                |> Option.orElseWith (fun () ->
+                    fields |> List.tryPick (fun f -> held f |> Option.bind (dropped f.Type)))
+
+            let kindNamed (tag: string) (authored: (string * IdlValue) list) =
+                IdlLookup.tryKind idl tag
+                |> Option.bind (fun k -> within (sprintf "kind '%s'" k.Tag) k.Fields authored)
+
+            match WireForm.ofType idl t, v with
+            | WireForm.Record r, VRecord authored ->
+                r.Binding
+                |> Option.bind (fun b ->
+                    within (sprintf "record '%s'" r.Name) (WireForm.recordFields b r.Decl) authored)
+            | WireForm.Union u, VUnion(tag, authored) ->
+                match u.Binding, u.Decl.CaseByWireTag tag with
+                | Some b, Some c ->
+                    within (sprintf "union '%s' case '%s'" u.Name c.Tag) (WireForm.caseFields b c) authored
+                | _ -> None
+            | WireForm.Kind, VUnion(tag, authored)
+            | WireForm.Node, VNode(_, tag, authored) -> kindNamed tag authored
+            | WireForm.Node, VNodeEnv(_, envelope, tag, authored) ->
+                within "the node envelope" idl.NodeFields envelope
+                |> Option.orElseWith (fun () -> kindNamed tag authored)
+            | WireForm.Op, VUnion(tag, authored) ->
+                idl.Ops
+                |> List.tryFind (fun o -> o.Tag = tag)
+                |> Option.bind (fun o -> within (sprintf "op '%s'" o.Tag) o.Fields authored)
+            | (WireForm.List item | WireForm.Set item), VList xs -> xs |> List.tryPick (dropped item)
+            | WireForm.Map value, VMap entries -> entries |> List.tryPick (snd >> dropped value)
+            | WireForm.Tuple components, VList xs when List.length xs = List.length components ->
+                List.zip components xs |> List.tryPick (fun (c, x) -> dropped c x)
+            | WireForm.KeyedMap(k, value), VList pairs ->
+                pairs
+                |> List.tryPick (function
+                    | VList [ a; b ] -> dropped k a |> Option.orElseWith (fun () -> dropped value b)
+                    | _ -> None)
+            | _ -> None
+
+        // What [[dropped]] answers, in the sentence's words.
+        let droppedText (f: IdlField, holder: string, c: PresenceCondition) =
+            let scalar (v: IdlValue) =
+                match v with
+                | VStr s
+                | VEnum s -> sprintf "\"%s\"" s
+                | VInt i -> string i
+                | VBool b -> if b then "true" else "false"
+                | other -> sprintf "%A" other
+
+            let meaningful =
+                match c with
+                | WhenPresent s -> sprintf "'%s' is present" s
+                | WhenAbsent s -> sprintf "'%s' is absent" s
+                | WhenEquals(s, v) -> sprintf "'%s' holds %s" s (scalar v)
+                | WhenNonEmpty -> "it holds a non-empty list"
+
+            sprintf
+                "it holds member '%s' of %s, which is meaningful only while %s, and there it is not, so the encoder drops it"
+                f.Name
+                holder
+                meaningful
+
+        // The refusal of a declared value [[dropped]] answers a member of.
+        let notCanonical (at: string) (what: string) found =
+            sprintf "%s: %s is not canonical: %s" at what (droppedText found)
+
+        // At an instantiation, the same answer as the verdict's reason, told from an encoder's refusal.
+        let notCanonicalWhy = "not canonical: "
 
         // Whether `t` names a type parameter. Each type object is asked once per check, so a type
         // shared in memory (an instantiation's argument, placed at each position that names its
@@ -1175,11 +1304,27 @@ module Declare =
                               other)
                   | OmitDefault d, t when not (mentionsVar t) ->
                       match Encode.renderValue idl t d with
-                      | Ok _ -> ()
+                      | Ok _ ->
+                          match dropped t d with
+                          | Some found ->
+                              fault
+                                  (path @ [ key "optionality"; key "default" ])
+                                  (notCanonical at "the omit-at-default value" found)
+                          | None -> ()
                       | Error m ->
                           fault
                               (path @ [ key "optionality"; key "default" ])
                               (sprintf "%s: the omit-at-default value does not fit the field's type (%s)" at m)
+                  // A default at a type naming a parameter that the encoder writes without binding it:
+                  // what it holds of its own is judged here, and the rest at each instantiation
+                  // ([[instantiatedDefaultErrors]], asked only where the encoder needs the binding).
+                  | OmitDefault d, t when Result.isOk (Encode.renderValue idl t d) ->
+                      match dropped t d with
+                      | Some found ->
+                          fault
+                              (path @ [ key "optionality"; key "default" ])
+                              (notCanonical at "the omit-at-default value" found)
+                      | None -> ()
                   | _ -> () ]
 
         /// Phase 494 — a declared keyed position ([[IdlField.Keyed]]) is admitted only where the derived
@@ -1346,18 +1491,33 @@ module Declare =
                                     Reads = Instantiations.positionsNamed (wireAnalysis.Force()) declaration f.Type
                                     Judge =
                                       fun cut binding ->
-                                          match Encode.renderValue idl (TypeParams.substitute binding f.Type) d with
-                                          | Ok _ -> Instantiations.Verdict.Fits
+                                          let at = TypeParams.substitute binding f.Type
+
+                                          match Encode.renderValue idl at d with
+                                          // Phase 723 — and is canonical there ([[dropped]]): which
+                                          // member holds a condition can be the instantiation's to say.
+                                          | Ok _ ->
+                                              match dropped at d with
+                                              | Some found ->
+                                                  Instantiations.Verdict.Fails(notCanonicalWhy + droppedText found)
+                                              | None -> Instantiations.Verdict.Fits
                                           | Error m when cut && m = Encode.unsubstituted "" ->
                                               Instantiations.Verdict.Undecided
                                           | Error m -> Instantiations.Verdict.Fails m }
                                 Refusal =
                                   fun instantiation why ->
-                                      sprintf
-                                          "%s: the omit-at-default value does not fit the field's type at the instantiation %s (%s)"
-                                          name
-                                          instantiation
-                                          why }
+                                      if why.StartsWith(notCanonicalWhy, System.StringComparison.Ordinal) then
+                                          sprintf
+                                              "%s: the omit-at-default value is not canonical at the instantiation %s: %s"
+                                              name
+                                              instantiation
+                                              (why.Substring notCanonicalWhy.Length)
+                                      else
+                                          sprintf
+                                              "%s: the omit-at-default value does not fit the field's type at the instantiation %s (%s)"
+                                              name
+                                              instantiation
+                                              why }
                       | _ -> () ]
 
             // Each declaration holding such a member, by its key in the reading.
@@ -1738,7 +1898,10 @@ module Declare =
               | Some f when mentionsVar f.Type -> ()
               | Some f ->
                   match Encode.renderValue idl f.Type d.Value with
-                  | Ok _ -> ()
+                  | Ok _ ->
+                      match dropped f.Type d.Value with
+                      | Some found -> fault [ key "defaults"; item i; key "value" ] (notCanonical at "the value" found)
+                      | None -> ()
                   | Error m ->
                       fault
                           [ key "defaults"; item i; key "value" ]

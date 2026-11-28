@@ -865,9 +865,6 @@ let tests =
                     recordField "Paging" "pageSize" (aliased [ "size" ]) LayoutIdl.layout,
                     "Grid",
                     "a member of an inline declaration takes no alias and no presence condition"
-                    kindField "Gate" "count" (aliased [ "id" ]) CanonicalFormHostsIdl.proved,
-                    "Gate",
-                    "a member 'count' whose alias 'id' the node object already carries"
                     spot (VRecord [ "t", VStr "b" ]),
                     "Place",
                     "a declared default holding member 't' where its presence condition fails, a value the model's type does not hold"
@@ -885,6 +882,23 @@ let tests =
                     "the presence condition of member 'template' over 'host', which the model does not hold as a member of its own" ] do
                   Expect.stringContains (refusalOf v tag) phrase (tag + " is refused by name")
 
+              // The four default rows above are the declaration check's refusals too; the model's own rule
+              // is still reached by a vocabulary the check admits: a member at its own default under
+              // another spelling (a JSON object in another key order, one value under the sorted order).
+              let reordered =
+                  spotOf
+                      [ plain "s" TStr Optional
+                        { plain "t" TJson (OmitDefault(VJson(JObj [ "a", JStr "x"; "b", JStr "y" ]))) with
+                            Presence = Some(WhenPresent "s") } ]
+                      (VRecord [ "t", VJson(JObj [ "b", JStr "y"; "a", JStr "x" ]) ])
+
+              Expect.isEmpty (faults reordered) "the declaration check admits a member at its default, reordered"
+
+              Expect.stringContains
+                  (refusalOf reordered "Place")
+                  "a declared default holding member 't' where its presence condition fails, a value the model's type does not hold"
+                  "the model refuses the literal it cannot type"
+
               Expect.equal
                   (refusalOf CanonicalFormHostsIdl.idl "Place")
                   "(modelled)"
@@ -892,6 +906,354 @@ let tests =
 
               for k in FStarTarget.partition CanonicalFormHostsIdl.proved do
                   Expect.isNone k.Refusal (k.Tag + " of the certified vocabulary is modelled")
+
+          // Phase 723 — a vocabulary no document of which reads canonically is refused at its declaration.
+          // An alias is a key the reader reads its member under, so one spelt as a key the object carries
+          // already (the node id, the discriminator, the kind body, a member of the node envelope or of a
+          // kind beside it) is read in the member's place; and a declared default holding a member whose
+          // condition fails over it is no canonical value, since the encoder drops that member.
+          testCase
+              "the declaration check refuses an alias its object already carries and a default that is not canonical"
+          <| fun _ ->
+              let proved = CanonicalFormHostsIdl.proved
+
+              let plain (name: string) (t: IdlType) (opt: Optionality) : IdlField =
+                  { Name = name
+                    Type = t
+                    Opt = opt
+                    Aliases = []
+                    Keyed = false
+                    Presence = None
+                    Annotations = Annotations.Empty }
+
+              let kindField (tag: string) (name: string) (change: IdlField -> IdlField) (v: Idl) =
+                  { v with
+                      Kinds =
+                          v.Kinds
+                          |> List.map (fun k ->
+                              if k.Tag = tag then
+                                  { k with
+                                      Fields = k.Fields |> List.map (fun f -> if f.Name = name then change f else f) }
+                              else
+                                  k) }
+
+              let envelopeField (name: string) (change: IdlField -> IdlField) (v: Idl) =
+                  { v with
+                      NodeFields = v.NodeFields |> List.map (fun f -> if f.Name = name then change f else f) }
+
+              let aliased (names: string list) (f: IdlField) = { f with Aliases = names }
+
+              let refusedAs (what: string) (phrase: string) (v: Idl) =
+                  let fs = faults v
+
+                  Expect.isTrue
+                      (fs |> List.exists (fun f -> f.Contains phrase))
+                      (sprintf "%s: expected a fault containing %A, got %A" what phrase fs)
+
+              Expect.isEmpty (faults proved) "the certified vocabulary is admitted"
+              Expect.isEmpty (faults idl) "the law set's vocabulary is admitted"
+
+              // The nested envelope: the node object carries `id` and `kind` beside the envelope's members.
+              let nested =
+                  { idl with
+                      NodeFields = [ plain "hidden" TBool Optional ] }
+
+              Expect.isEmpty (faults nested) "the nested envelope with a member is admitted"
+
+              for v, phrase, what in
+                  [ kindField "Gate" "count" (aliased [ "id" ]) proved,
+                    "kind 'Gate', field 'count': the alias 'id' is a key its object already carries (the node id)",
+                    "a kind's alias spelt as the node id under the flat envelope"
+                    kindField "Gate" "count" (aliased [ "hidden" ]) proved,
+                    "kind 'Gate', field 'count': the alias 'hidden' is a key its object already carries (the node-envelope field 'hidden')",
+                    "a kind's alias spelt as a member of the flat envelope"
+                    kindField "Gate" "count" (aliased [ "isHidden" ]) proved,
+                    "kind 'Gate', field 'count': the alias 'isHidden' is a key its object already carries (the node-envelope field 'hidden')",
+                    "a kind's alias spelt as an alias of a member of the flat envelope"
+                    envelopeField "hidden" (aliased [ "count" ]) proved,
+                    "the node envelope, field 'hidden': the alias 'count' is a key its object already carries (field 'count' of kind 'Gate')",
+                    "an envelope member's alias spelt as a kind's member beside it"
+                    envelopeField "hidden" (aliased [ "url" ]) proved,
+                    "the node envelope, field 'hidden': the alias 'url' is a key its object already carries (field 'source' (presence-keyed union 'Source') of kind 'Link')",
+                    "an envelope member's alias spelt as a key a kind's presence-keyed union lays beside it"
+                    envelopeField "hidden" (aliased [ "id" ]) proved,
+                    "the node envelope, field 'hidden': the alias 'id' is a key its object already carries (the node id)",
+                    "an envelope member's alias spelt as the node id under the flat envelope"
+                    envelopeField "tip" (aliased [ "kind" ]) proved,
+                    "the node envelope, field 'tip': the alias 'kind' is a key its object already carries (the discriminator)",
+                    "an envelope member's alias spelt as the discriminator under the flat envelope"
+                    envelopeField "hidden" (aliased [ "kind" ]) nested,
+                    "the node envelope, field 'hidden': the alias 'kind' is a key its object already carries (the kind body)",
+                    "an envelope member's alias spelt as the kind body under the nested envelope"
+                    envelopeField "hidden" (aliased [ "id" ]) nested,
+                    "the node envelope, field 'hidden': the alias 'id' is a key its object already carries (the node id)",
+                    "an envelope member's alias spelt as the node id under the nested envelope"
+                    // Refused before Phase 723 too: the discriminator, and a key a presence-keyed case lays.
+                    kindField "Gate" "count" (aliased [ "kind" ]) proved,
+                    "the member 'kind' is on its object twice",
+                    "a kind's alias spelt as the discriminator"
+                    kindField "Grid" "caption" (aliased [ "rowKey" ]) LayoutIdl.layout,
+                    "the member 'rowKey' is on its object twice",
+                    "an alias spelt as a key a presence-keyed case lays" ] do
+                  refusedAs what phrase v
+
+              // A host-only member is never on the wire, so no spelling of it is read.
+              let callback =
+                  { plain
+                        "onTap"
+                        (TFn
+                            { FSharp = "unit -> unit"
+                              TypeScript = "() => void"
+                              Placeholder = "ignore" })
+                        HostOnly with
+                      Aliases = [ "id" ] }
+
+              Expect.isEmpty
+                  (faults
+                      { proved with
+                          Kinds =
+                              proved.Kinds
+                              |> List.map (fun k ->
+                                  if k.Tag = "Gate" then
+                                      { k with
+                                          Fields = k.Fields @ [ callback ] }
+                                  else
+                                      k) })
+                  "a host-only member's alias spelt as the node id is admitted"
+
+              // A kind's alias under the NESTED envelope shares no object with the node id.
+              Expect.isEmpty
+                  (faults (kindField "Select" "options" (aliased [ "id" ]) nested))
+                  "a kind's alias spelt `id` under the nested envelope is admitted"
+
+              // `Spot.t` is meaningful only while `s` is present (the certified vocabulary's record).
+              let spotDefault (d: IdlValue) =
+                  kindField "Place" "spot" (fun f -> { f with Opt = OmitDefault d }) proved
+
+              let notCanonical = "the omit-at-default value is not canonical"
+
+              refusedWith
+                  "kind 'Place', field 'spot': the omit-at-default value is not canonical: it holds member 't' of record 'Spot', which is meaningful only while 's' is present, and there it is not, so the encoder drops it"
+                  (spotDefault (VRecord [ "t", VStr "b" ]))
+
+              Expect.isEmpty (faults (spotDefault (VRecord []))) "a default holding the member absent is admitted"
+
+              Expect.isEmpty
+                  (faults (spotDefault (VRecord [ "t", VAbsent ])))
+                  "a default writing the member as absent is admitted"
+
+              Expect.isEmpty
+                  (faults (spotDefault (VRecord [ "s", VStr "a"; "t", VStr "b" ])))
+                  "a default holding the member where its condition holds is admitted"
+
+              // Each condition kind, a default held in a list and a union case's default.
+              let spotOf (fields: IdlField list) (t: IdlType) (d: IdlValue) =
+                  { proved with
+                      Records =
+                          proved.Records
+                          |> List.map (fun r -> if r.Name = "Spot" then { r with Fields = fields } else r)
+                      Kinds =
+                          proved.Kinds
+                          |> List.map (fun k ->
+                              if k.Tag = "Place" then
+                                  { k with
+                                      Fields =
+                                          k.Fields
+                                          |> List.map (fun f ->
+                                              if f.Name = "spot" then
+                                                  { f with Type = t; Opt = OmitDefault d }
+                                              else
+                                                  f) }
+                              else
+                                  k) }
+
+              let spot = TRecord("Spot", [])
+
+              let conditional (c: PresenceCondition) (f: IdlField) = { f with Presence = Some c }
+
+              for v, phrase, what in
+                  [ spotOf
+                        [ plain "s" TStr Optional
+                          conditional (WhenAbsent "s") (plain "t" TStr Optional) ]
+                        spot
+                        (VRecord [ "s", VStr "a"; "t", VStr "b" ]),
+                    "which is meaningful only while 's' is absent",
+                    "WhenAbsent"
+                    spotOf
+                        [ plain "s" TStr (OmitDefault(VStr "z"))
+                          conditional (WhenEquals("s", VStr "a")) (plain "t" TStr Optional) ]
+                        spot
+                        (VRecord [ "t", VStr "b" ]),
+                    "which is meaningful only while 's' holds \"a\"",
+                    "WhenEquals, the sibling at its own default"
+                    spotOf
+                        [ conditional WhenNonEmpty (plain "t" (TList TStr) Optional) ]
+                        spot
+                        (VRecord [ "t", VList [] ]),
+                    "which is meaningful only while it holds a non-empty list",
+                    "WhenNonEmpty, the member an empty list"
+                    spotOf
+                        [ plain "s" TStr Optional
+                          conditional (WhenPresent "s") (plain "t" TStr Optional) ]
+                        (TList spot)
+                        (VList [ VRecord [ "s", VStr "a"; "t", VStr "b" ]; VRecord [ "t", VStr "b" ] ]),
+                    "it holds member 't' of record 'Spot'",
+                    "a record held in a list default"
+                    { proved with
+                        Unions =
+                            proved.Unions
+                            |> List.map (fun u ->
+                                if u.Name = "Mark" then
+                                    { u with
+                                        Cases =
+                                            u.Cases
+                                            |> List.map (fun c ->
+                                                if c.Tag = "Pin" then
+                                                    { c with
+                                                        Fields =
+                                                            c.Fields
+                                                            @ [ plain "note" TStr Optional
+                                                                conditional
+                                                                    (WhenPresent "note")
+                                                                    (plain "hint" TStr Optional) ] }
+                                                else
+                                                    c) }
+                                else
+                                    u) }
+                    |> kindField "Place" "spot" (fun f ->
+                        { f with
+                            Type = TUnion("Mark", [])
+                            Opt = OmitDefault(VUnion("Pin", [ "label", VStr "x"; "hint", VStr "y" ])) }),
+                    "it holds member 'hint' of union 'Mark' case 'Pin'",
+                    "a union case's default" ] do
+                  refusedAs what notCanonical v
+                  refusedAs what phrase v
+
+              // Every position a declared value holds an object at: a map's value, a set's element, a
+              // tuple's component, a keyed map's value, a bare kind, an op, a node and its envelope. The
+              // Gate kind's `note` is meaningful only while `open` is present; the op `Mv`'s `to` only
+              // while `from` is.
+              let mv: IdlKind =
+                  { Tag = "Mv"
+                    Category = "op"
+                    Fields =
+                      [ plain "from" TStr Optional
+                        conditional (WhenPresent "from") (plain "to" TStr Optional) ]
+                    Annotations = Annotations.Empty }
+
+              let at (t: IdlType) (d: IdlValue) =
+                  { proved with Ops = [ mv ] }
+                  |> kindField "Place" "spot" (fun f -> { f with Type = t; Opt = OmitDefault d })
+
+              let gate = [ "note", VStr "n" ]
+              let held = VRecord [ "t", VStr "b" ]
+
+              for t, d, phrase in
+                  [ TMap spot, VMap [ "k", held ], "member 't' of record 'Spot'"
+                    TSet spot, VList [ held ], "member 't' of record 'Spot'"
+                    TTuple [ TStr; spot ], VList [ VStr "a"; held ], "member 't' of record 'Spot'"
+                    TKeyedMap(TStr, spot), VList [ VList [ VStr "k"; held ] ], "member 't' of record 'Spot'"
+                    TKind, VUnion("Gate", gate), "member 'note' of kind 'Gate'"
+                    TOp, VUnion("Mv", [ "to", VStr "b" ]), "member 'to' of op 'Mv'"
+                    TNode, VNode("n", "Gate", gate), "member 'note' of kind 'Gate'"
+                    TNode, VNodeEnv("n", [ "tip", VStr "x" ], "Gate", []), "member 'tip' of the node envelope"
+                    TNode, VNodeEnv("n", [ "hidden", VBool true ], "Gate", gate), "member 'note' of kind 'Gate'" ] do
+                  refusedAs
+                      (sprintf "a default at %A" t)
+                      ("the omit-at-default value is not canonical: it holds " + phrase)
+                      (at t d)
+
+              Expect.isEmpty
+                  (faults (at TNode (VNode("n", "Gate", [ "open", VBool true; "note", VStr "n" ]))))
+                  "a node default whose member's condition holds is admitted"
+
+              // At its own default IN ITS VALUE SPACE: an int written at a float slot is the float.
+              Expect.isEmpty
+                  (faults (
+                      spotOf
+                          [ plain "s" TStr Optional
+                            conditional (WhenPresent "s") (plain "t" TFloat (OmitDefault(VFloat 2.0))) ]
+                          spot
+                          (VRecord [ "t", VInt 2 ])
+                  ))
+                  "a conditional member at its own default under another spelling is admitted"
+
+              // A conditional member at its own default where its condition fails is its absence.
+              Expect.isEmpty
+                  (faults (
+                      spotOf
+                          [ plain "s" TStr Optional
+                            conditional (WhenPresent "s") (plain "t" TStr (OmitDefault(VStr "z"))) ]
+                          spot
+                          (VRecord [ "t", VStr "z" ])
+                  ))
+                  "a conditional member written at its own default is admitted"
+
+              // A default at a type parameter is judged at each instantiation, and one at a type naming
+              // a parameter for what it holds of its own.
+              let withPlace (field: IdlField) (records: IdlRecord list) =
+                  { proved with
+                      Records = proved.Records @ records
+                      Kinds =
+                          proved.Kinds
+                          |> List.map (fun k ->
+                              if k.Tag = "Place" then
+                                  { k with Fields = k.Fields @ [ field ] }
+                              else
+                                  k) }
+
+              let generic (name: string) (fields: IdlField list) =
+                  { Name = name
+                    Params = [ "T" ]
+                    Fields = fields
+                    Annotations = Annotations.Empty
+                    Inline = false }
+
+              let bad = VRecord [ "t", VStr "b" ]
+
+              let paramDefault =
+                  (withPlace
+                      (plain "box" (TRecord("Box", [ spot ])) Optional)
+                      [ generic "Box" [ plain "v" (TVar "T") (OmitDefault bad) ] ])
+
+              refusedWith
+                  "record 'Box', field 'v': the omit-at-default value is not canonical at the instantiation Box<Spot>"
+                  paramDefault
+
+              refusedWith
+                  "it holds member 't' of record 'Spot', which is meaningful only while 's' is present"
+                  paramDefault
+
+              Expect.isEmpty
+                  (faults (
+                      withPlace
+                          (plain "box" (TRecord("Box", [ spot ])) Optional)
+                          [ generic "Box" [ plain "v" (TVar "T") (OmitDefault(VRecord [])) ] ]
+                  ))
+                  "a default at a type parameter holding the member absent is admitted"
+
+              let duo =
+                  generic
+                      "Duo"
+                      [ plain "s" TStr Optional
+                        conditional (WhenPresent "s") (plain "t" TStr Optional)
+                        plain "u" (TVar "T") Optional ]
+
+              refusedWith
+                  "record 'Box', field 'd': the omit-at-default value is not canonical: it holds member 't' of record 'Duo'"
+                  (withPlace
+                      (plain "box" (TRecord("Box", [ TStr ])) Optional)
+                      [ duo
+                        generic "Box" [ plain "d" (TRecord("Duo", [ TVar "T" ])) (OmitDefault bad) ] ])
+
+              // An authoring default (the vocabulary's `defaults`) is held to the same rule.
+              refusedWith
+                  "default for 'Place.spot': the value is not canonical: it holds member 't' of record 'Spot'"
+                  { proved with
+                      Defaults =
+                          [ { Kind = "Place"
+                              Field = "spot"
+                              Value = VRecord [ "t", VStr "b" ] } ] }
 
           testCase "the validator refuses an ill-formed declaration at its path, by name"
           <| fun _ ->

@@ -668,7 +668,10 @@ module internal FStarModel =
         // of it is a value of the model's type only where each refinement holds of the terms written:
         // a member whose condition fails is at its absent value. A default holding one is no value the
         // type holds, so it is refused by name. The terms are compared as written; two spellings of one
-        // value compare unequal, which refuses the literal, never admits one the prover would not.
+        // value compare unequal, which refuses the literal, never admits one the prover would not. The
+        // declaration check refuses a default whose member is not at its absence in its value space
+        // (`Declare.errors`), so what still reaches this is such a member at its own default under
+        // another spelling: a JSON default written in another key order under the sorted key order.
         let refused (parts: string list) =
             let termOf =
                 List.zip sorted parts
@@ -1349,27 +1352,18 @@ module internal FStarModel =
             let envelope = envelopeMembers
             let kinds = caseMap["vkind"]
 
-            // Phase 723 — an alias is a key the decoder reads, so one the object carries already would
-            // be read in the member's place: it is held to the same rule as the member's own name.
+            // Phase 723 — an alias spelt as such a key is the declaration check's refusal
+            // (`Declare.layoutErrors`), so no vocabulary it admits reaches the target with one.
             let collisions (where: string) (reserved: (string * string) list) (ms: Member list) =
                 ms
                 |> List.tryPick (fun m ->
-                    m.Name :: m.Aliases
-                    |> List.tryPick (fun spelling ->
-                        reserved
-                        |> List.tryFind (fun (key, _) -> key = spelling)
-                        |> Option.map (fun (_, holder) ->
-                            CodegenError.UnmodellableInFStar(
-                                (if spelling = m.Name then
-                                     sprintf "a member '%s' whose key the %s already carries" m.Name holder
-                                 else
-                                     sprintf
-                                         "a member '%s' whose alias '%s' the %s already carries"
-                                         m.Name
-                                         spelling
-                                         holder),
-                                where
-                            ))))
+                    reserved
+                    |> List.tryFind (fun (key, _) -> key = m.Name)
+                    |> Option.map (fun (_, holder) ->
+                        CodegenError.UnmodellableInFStar(
+                            sprintf "a member '%s' whose key the %s already carries" m.Name holder,
+                            where
+                        )))
 
             let nodeKeys =
                 match idl.Wire.NodeEnvelope with
