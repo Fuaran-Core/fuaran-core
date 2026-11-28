@@ -797,6 +797,17 @@ let tests =
                         { plain "t" TStr Optional with
                             Presence = Some(WhenEquals("s", VStr "a")) } ]
 
+              let spotAbsent =
+                  spotOf
+                      [ plain "s" TStr Optional
+                        { plain "t" TStr Optional with
+                            Presence = Some(WhenAbsent "s") } ]
+
+              let spotNonEmpty =
+                  spotOf
+                      [ { plain "t" (TList TStr) Optional with
+                            Presence = Some WhenNonEmpty } ]
+
               let envelope =
                   { idl with
                       NodeFields =
@@ -836,7 +847,13 @@ let tests =
                     "a default of a record declaring a condition, writing its member where the condition holds"
                     spotEquals (VRecord [ "s", VStr "a"; "t", VStr "b" ]),
                     "Place",
-                    "a default writing a member under an equality its sibling, omitted at another default, satisfies" ] do
+                    "a default writing a member under an equality its sibling, omitted at another default, satisfies"
+                    spotAbsent (VRecord [ "t", VStr "b" ]),
+                    "Place",
+                    "a default writing a member while its sibling is absent"
+                    spotNonEmpty (VRecord []),
+                    "Place",
+                    "a default of a record declaring WhenNonEmpty, its member absent (a list literal is empty or absent)" ] do
                   Expect.equal (refusalOf v tag) "(modelled)" (sprintf "%s: %s is modelled" tag what)
 
               // REFUSED, each by the sentence naming what the model cannot state.
@@ -855,6 +872,12 @@ let tests =
                     "Place",
                     "a declared default holding member 't' where its presence condition fails, a value the model's type does not hold"
                     spotEquals (VRecord [ "t", VStr "b" ]),
+                    "Place",
+                    "a declared default holding member 't' where its presence condition fails, a value the model's type does not hold"
+                    spotAbsent (VRecord [ "s", VStr "a"; "t", VStr "b" ]),
+                    "Place",
+                    "a declared default holding member 't' where its presence condition fails, a value the model's type does not hold"
+                    spotNonEmpty (VRecord [ "t", VList [] ]),
                     "Place",
                     "a declared default holding member 't' where its presence condition fails, a value the model's type does not hold"
                     hostOnlySibling,
