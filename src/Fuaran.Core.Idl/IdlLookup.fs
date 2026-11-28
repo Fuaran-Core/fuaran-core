@@ -1,7 +1,6 @@
 namespace Fuaran.Core.Idl
 
 open System.Collections.Generic
-open System.Runtime.CompilerServices
 open Fuaran.Core
 
 /// The declaration lookups (Phase 388): a vocabulary's enum, union or record by its name, and a
@@ -10,32 +9,37 @@ open Fuaran.Core
 /// `InternalsVisibleTo`), each used to declare or inline its own.
 ///
 /// Phase 732 — a lookup reads the first few declarations in order and, past them, an index of the
-/// list built once and kept while the list lives, so a check that looks up each of `n` declarations
-/// costs O(n), never the O(n²) of reading the list from its head at each.
+/// list, so a check that looks up each of `n` declarations costs O(n), never the O(n²) of reading
+/// the list from its head at each. The index is built once for a list and kept until a lookup asks
+/// about a different list. Every part of it compiles under Fable as well as on .NET.
 module internal IdlLookup =
 
     /// How many declarations a lookup reads in order before it reads the index.
     [<Literal>]
     let private scanned = 8
 
-    /// Each name of `items` and the FIRST item under it, in declaration order.
-    let private indexOf (key: 'T -> string) (items: 'T list) : Dictionary<string, 'T> =
-        let index = Dictionary<string, 'T>(System.StringComparer.Ordinal)
+    /// A declaration list and its index: each name of the list and the FIRST item under it.
+    type private Indexed<'T> =
+        { Items: 'T list
+          Index: Dictionary<string, 'T> }
+
+    /// Each name of `items` and the FIRST item under it, in declaration order. String keys compare
+    /// ordinally on both runtimes.
+    let private indexOf (key: 'T -> string) (items: 'T list) : Indexed<'T> =
+        let index = Dictionary<string, 'T>()
 
         for item in items do
             match key item with
             | null -> ()
-            | k -> index.TryAdd(k, item) |> ignore
+            | k when index.ContainsKey k -> ()
+            | k -> index[k] <- item
 
-        index
+        { Items = items; Index = index }
 
-    /// The first of `items` whose key is `wanted`.
-    let private first
-        (indexes: ConditionalWeakTable<'T list, Dictionary<string, 'T>>)
-        (key: 'T -> string)
-        (items: 'T list)
-        (wanted: string)
-        : 'T option =
+    /// The first of `items` whose key is `wanted`. `last` holds the index of the list asked about
+    /// last; it is replaced whole, never changed in place, so a lookup on another thread reads
+    /// either index, each one right for its own list.
+    let private first (last: Indexed<'T> option ref) (key: 'T -> string) (items: 'T list) (wanted: string) : 'T option =
         let rec read (left: int) (rest: 'T list) =
             match rest with
             | [] -> None
@@ -44,25 +48,24 @@ module internal IdlLookup =
             | _ ->
                 // None of the first ones is `wanted`, so the first under it in the whole list is
                 // the first under it in the index.
-                match
-                    indexes.GetValue(items, ConditionalWeakTable.CreateValueCallback(indexOf key)).TryGetValue wanted
-                with
+                let indexed =
+                    match last.Value with
+                    | Some indexed when LanguagePrimitives.PhysicalEquality indexed.Items items -> indexed
+                    | _ ->
+                        let indexed = indexOf key items
+                        last.Value <- Some indexed
+                        indexed
+
+                match indexed.Index.TryGetValue wanted with
                 | true, item -> Some item
                 | false, _ -> None
 
         read scanned items
 
-    let private enums =
-        ConditionalWeakTable<IdlEnum list, Dictionary<string, IdlEnum>>()
-
-    let private unions =
-        ConditionalWeakTable<IdlUnion list, Dictionary<string, IdlUnion>>()
-
-    let private kinds =
-        ConditionalWeakTable<IdlKind list, Dictionary<string, IdlKind>>()
-
-    let private records =
-        ConditionalWeakTable<IdlRecord list, Dictionary<string, IdlRecord>>()
+    let private enums: Indexed<IdlEnum> option ref = ref None
+    let private unions: Indexed<IdlUnion> option ref = ref None
+    let private kinds: Indexed<IdlKind> option ref = ref None
+    let private records: Indexed<IdlRecord> option ref = ref None
 
     /// The enum declared as `name`.
     let tryEnum (idl: Idl) (name: string) : IdlEnum option = first enums _.Name idl.Enums name
