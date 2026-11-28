@@ -283,7 +283,10 @@ module Declare =
     /// Members an inline declaration contributes take no alias and no presence condition, and no
     /// member of the holding object may be spelled twice: not as a sibling member or the
     /// discriminator, and, for a kind in the flat node envelope, not as the node id or an envelope
-    /// field, which are keys of the same object. The fault names both. A presence-keyed union names
+    /// field, which are keys of the same object. The fault names both. No alias is spelt as a key the
+    /// node envelope lays on its object (Phase 723, DECISIONS.md D292): the node id, the nested
+    /// envelope's `kind`, and in the flat envelope the discriminator and the members of the envelope
+    /// and of a kind beside each other. A presence-keyed union names
     /// one rule per case, in case order, whose key is a `Required` wire member of that case and no
     /// other case's key; a synthesised member is another case's member at a value of its type, and a
     /// case whose key is synthesised synthesises nothing (the reading would chain). Such a union takes

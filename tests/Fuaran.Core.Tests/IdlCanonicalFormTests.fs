@@ -1142,17 +1142,27 @@ let tests =
                     Annotations = Annotations.Empty }
 
               let at (t: IdlType) (d: IdlValue) =
-                  { proved with Ops = [ mv ] }
+                  { proved with
+                      Ops = [ mv ]
+                      Records =
+                          proved.Records
+                          @ [ { Name = "Wrap"
+                                Params = []
+                                Fields = [ plain "w" spot Optional ]
+                                Annotations = Annotations.Empty
+                                Inline = false } ] }
                   |> kindField "Place" "spot" (fun f -> { f with Type = t; Opt = OmitDefault d })
 
               let gate = [ "note", VStr "n" ]
               let held = VRecord [ "t", VStr "b" ]
 
               for t, d, phrase in
-                  [ TMap spot, VMap [ "k", held ], "member 't' of record 'Spot'"
+                  [ TRecord("Wrap", []), VRecord [ "w", held ], "member 't' of record 'Spot'"
+                    TMap spot, VMap [ "k", held ], "member 't' of record 'Spot'"
                     TSet spot, VList [ held ], "member 't' of record 'Spot'"
                     TTuple [ TStr; spot ], VList [ VStr "a"; held ], "member 't' of record 'Spot'"
                     TKeyedMap(TStr, spot), VList [ VList [ VStr "k"; held ] ], "member 't' of record 'Spot'"
+                    TKeyedMap(spot, TStr), VList [ VList [ held; VStr "v" ] ], "member 't' of record 'Spot'"
                     TKind, VUnion("Gate", gate), "member 'note' of kind 'Gate'"
                     TOp, VUnion("Mv", [ "to", VStr "b" ]), "member 'to' of op 'Mv'"
                     TNode, VNode("n", "Gate", gate), "member 'note' of kind 'Gate'"
