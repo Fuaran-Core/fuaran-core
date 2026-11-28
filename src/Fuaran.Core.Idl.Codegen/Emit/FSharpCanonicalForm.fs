@@ -54,26 +54,26 @@ module internal FSharpCanonicalForm =
         let names (spellings: string list) =
             "[ " + (spellings |> List.map SourceLit.fsString |> String.concat "; ") + " ]"
 
-        let pick (spellings: string list) =
-            sprintf "dPick %s __o" (names spellings)
+        let found (spellings: string list) =
+            sprintf "dFound %s __o" (names spellings)
 
         Decl.memberReading idl fields f
         |> Option.map (fun r ->
             let holds =
                 match r.Presence with
                 | PresenceReading.Unconditional -> "(fun _ -> true)"
-                | PresenceReading.SiblingPresent s -> sprintf "(fun __o -> Option.isSome (%s))" (pick s)
-                | PresenceReading.SiblingAbsent s -> sprintf "(fun __o -> Option.isNone (%s))" (pick s)
+                | PresenceReading.SiblingPresent s -> sprintf "(fun __o -> Option.isSome (%s))" (found s)
+                | PresenceReading.SiblingAbsent s -> sprintf "(fun __o -> Option.isNone (%s))" (found s)
                 | PresenceReading.SiblingEquals(s, values, absent) ->
                     sprintf
-                        "(fun __o -> match %s with | Some __v -> List.contains __v [ %s ] | None -> %s)"
-                        (pick s)
+                        "(fun __o -> match %s with | Some(_, __v) -> List.contains __v [ %s ] | None -> %s)"
+                        (found s)
                         (values |> List.map FSharpDefaults.fsJValLit |> String.concat "; ")
                         (if absent then "true" else "false")
                 // Phase 660 — the member itself: an explicit EMPTY array is its absence, and anything
                 // else (a member of the wrong kind included) reaches its decoder.
                 | PresenceReading.SelfNonEmpty ->
-                    sprintf "(fun __o -> match %s with | Some(JArr []) -> false | _ -> true)" (pick r.Spellings)
+                    sprintf "(fun __o -> match %s with | Some(_, JArr []) -> false | _ -> true)" (found r.Spellings)
 
             sprintf "(dSpelt %s %s __fs)" (names r.Spellings) holds,
             sprintf "(dMember %s %s __fs)" (names r.Spellings) holds)
@@ -85,23 +85,21 @@ module internal FSharpCanonicalForm =
 
     /// Whether any field list of the vocabulary declares an alias or a presence condition.
     let declaresCanonicalFormAnywhere (idl: Idl) : bool =
-        Decl.fieldOwners idl |> List.exists (snd >> declaresCanonicalForm)
+        Decl.fieldLists idl |> List.exists declaresCanonicalForm
 
     /// The decode helpers [[memberRead]] calls (Phase 539), emitted only when the vocabulary declares
     /// an alias or a presence condition, so every other module is byte-for-byte what it was.
     let canonicalFormHelpers =
         """// Phase 539 — a member's canonical reading. `dFound` finds a member under its spellings, the
-// canonical one first, then each alias, and `dPick` is its value. Phase 723 — `dSpelt` is the key the
-// member is read under: the spelling the object carries when its presence condition holds over the
-// object, so a refusal inside it is located as written, and otherwise the canonical one, at which an
-// absent member is missing. `dMember` keeps the member under that key and drops it when the condition
-// fails, so it reaches the presence rules below exactly as the canonical form has it. Every other
-// spelling is removed.
+// canonical one first, then each alias, with the spelling it is found under; a presence test reads
+// it too. Phase 723 — `dSpelt` is the key the member is read under: the spelling the object carries
+// when its presence condition holds over the object, so a refusal inside it is located as written,
+// and otherwise the canonical one, at which an absent member is missing. `dMember` keeps the member
+// under that key and drops it when the condition fails, so it reaches the presence rules below
+// exactly as the canonical form has it. Every other spelling is removed. None of these is named as
+// a presence-keyed union's helpers are (`dPick`, `dSynth`), so one module may take both sets.
 let private dFound (names: string list) (fs: (string * JVal) list) : (string * JVal) option =
     names |> List.tryPick (fun n -> fs |> List.tryPick (fun (k, v) -> if k = n then Some(k, v) else None))
-
-let private dPick (names: string list) (fs: (string * JVal) list) : JVal option =
-    dFound names fs |> Option.map snd
 
 let private dSpelt (names: string list) (holds: (string * JVal) list -> bool) (fs: (string * JVal) list) : string =
     match dFound names fs with

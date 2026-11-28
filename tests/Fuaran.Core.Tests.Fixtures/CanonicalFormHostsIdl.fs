@@ -33,7 +33,9 @@ let private kind (tag: string) (fields: IdlField list) : IdlKind =
 /// absent; `tags` (read under `labels`) only when it holds an item; and `alert` only while `level`
 /// (read under `severity`) is `Critical`, which `Danger` spells too. `Place` holds a `Point` record
 /// read under `position` whose `x` is read under `left`, and a `Mark` union whose `Pin` case reads
-/// `label` under `text` and `at` under `where`.
+/// `label` under `text` and `at` under `where`. `Link` holds `title` (read under `heading`) and
+/// `hint` (only while `title` is present) beside `source`, a presence-keyed union whose case the
+/// keys present pick (`url` or `ref`), so its generated module takes both sets of decode helpers.
 let idl: Idl =
     { Kinds =
         [ kind
@@ -60,7 +62,14 @@ let idl: Idl =
               "Place"
               [ { field "at" (TRecord("Point", [])) Optional with
                     Aliases = [ "position" ] }
-                field "mark" (TUnion("Mark", [])) Optional ] ]
+                field "mark" (TUnion("Mark", [])) Optional ]
+          kind
+              "Link"
+              [ { field "title" TStr Optional with
+                    Aliases = [ "heading" ] }
+                { field "hint" TStr Optional with
+                    Presence = Some(WhenPresent "title") }
+                field "source" (TUnion("Source", [])) Optional ] ]
       Unions =
         [ { Name = "Mark"
             Params = []
@@ -79,7 +88,28 @@ let idl: Idl =
                   Hosted = None } ]
             Annotations = Annotations.Empty
             TagRule = UnionTagRule.CaseName
-            Discrimination = UnionDiscrimination.Tagged } ]
+            Discrimination = UnionDiscrimination.Tagged }
+          { Name = "Source"
+            Params = []
+            Cases =
+              [ { Tag = "ByUrl"
+                  Fields = [ field "url" TStr Required ]
+                  Annotations = Annotations.Empty
+                  Hosted = None }
+                { Tag = "ByRef"
+                  Fields = [ field "ref" TStr Required ]
+                  Annotations = Annotations.Empty
+                  Hosted = None } ]
+            Annotations = Annotations.Empty
+            TagRule = UnionTagRule.CaseName
+            Discrimination =
+              UnionDiscrimination.ByPresence
+                  [ { Case = "ByUrl"
+                      Key = "url"
+                      Synthesised = [] }
+                    { Case = "ByRef"
+                      Key = "ref"
+                      Synthesised = [] } ] } ]
       Enums =
         [ { Declare.enumOf "Tone" [ "Default"; "Success"; "Critical" ] with
               Aliases = [ "Success", [ "Positive" ]; "Critical", [ "Danger" ] ] } ]
@@ -106,12 +136,14 @@ let generatedFile = "tests/Fuaran.Core.Tests/CanonicalFormGenerated.fs"
 /// Phase 723 (DECISIONS.md D290) — the vocabulary the F\* backend is certified over for these shapes
 /// (`proofs/CanonicalFormHostsVocabulary.fst`): the declarations above, under the flat node envelope
 /// with a `kind` discriminator and members in declared order, so a kind's aliased and conditional
-/// members share the node's own object with `id`. Three departures, each for the model: `unit` is
+/// members share the node's own object with `id`. Five departures, each for the model: `unit` is
 /// present while `open` is `true` rather than while `count` is `1`, since the model's numbers are
 /// opaque and an equality with an int is refused by name; `mode`, a member omitted at its default,
 /// is present only while `count` is, so a condition on a member absent at a default is proved too;
-/// and `Label` reads its one required member under an alias, a constructor with no conditional
-/// member, whose encoder is one literal in the wire's key order.
+/// `Label` reads its one required member under an alias; the node envelope declares
+/// `hidden` (read under `isHidden`) and `tip` (only while `hidden` is present), members of every
+/// kind's object; and `Place` holds `spot`, a `Spot` record omitted at a declared default that
+/// writes its conditional member `t` where its condition holds (D291).
 let proved: Idl =
     let gate (fields: IdlField list) =
         fields
@@ -126,18 +158,41 @@ let proved: Idl =
         Kinds =
             (idl.Kinds
              |> List.map (fun k ->
-                 if k.Tag = "Gate" then
+                 match k.Tag with
+                 | "Gate" ->
                      { k with
                          Fields =
                              gate k.Fields
                              @ [ { field "mode" TStr (OmitDefault(VStr "auto")) with
                                      Presence = Some(WhenPresent "count") } ] }
-                 else
-                     k))
+                 | "Place" ->
+                     { k with
+                         Fields =
+                             k.Fields
+                             @ [ field
+                                     "spot"
+                                     (TRecord("Spot", []))
+                                     (OmitDefault(VRecord [ "s", VStr "a"; "t", VStr "b" ])) ] }
+                 | _ -> k))
             @ [ kind
                     "Label"
                     [ { field "name" TStr Required with
                           Aliases = [ "caption" ] } ] ]
+        Records =
+            idl.Records
+            @ [ { Name = "Spot"
+                  Params = []
+                  Fields =
+                    [ field "s" TStr Optional
+                      { field "t" TStr Optional with
+                          Presence = Some(WhenPresent "s") } ]
+                  Annotations = Annotations.Empty
+                  Inline = false } ]
+        NodeFields =
+            [ { field "hidden" TBool Optional with
+                  Aliases = [ "isHidden" ] }
+              { field "tip" TStr Optional with
+                  Presence = Some(WhenPresent "hidden") } ]
         Wire =
             { Discriminator = "kind"
               NodeEnvelope = NodeEnvelopeShape.FlatKind
@@ -162,7 +217,16 @@ let provedDocuments: string list =
       """{"kind":"Place","id":"p","at":{"x":3,"y":4},"mark":{"kind":"Dot"}}"""
       // a required member under its alias, and under both spellings.
       """{"kind":"Label","id":"l","caption":"c"}"""
-      """{"kind":"Label","id":"l","caption":"c","name":"n"}""" ]
+      """{"kind":"Label","id":"l","caption":"c","name":"n"}"""
+      // beside a presence-keyed union: `heading` is `title`, and the keys present pick the case.
+      """{"kind":"Link","id":"k","heading":"h","hint":"x","url":"u"}"""
+      """{"kind":"Link","id":"k","hint":"x","ref":"r"}"""
+      // the node envelope's members: `isHidden` is `hidden`, and `tip` is read while it is present.
+      """{"kind":"Label","id":"l","name":"n","isHidden":true,"tip":"t"}"""
+      """{"kind":"Label","id":"l","name":"n","tip":"t"}"""
+      // a record at its declared default, and beside it, with its condition failing.
+      """{"kind":"Place","id":"p","spot":{"s":"a","t":"b"}}"""
+      """{"kind":"Place","id":"p","spot":{"t":"b"}}""" ]
 
 /// Documents over [[proved]] the interpreter REFUSES, each with what it shows.
 let provedRefused: (string * string) list =
@@ -177,4 +241,10 @@ let provedRefused: (string * string) list =
       """{"kind":"Place","id":"p","mark":{"kind":"Pin"}}"""
       "a required member missing under every spelling", """{"kind":"Label","id":"l"}"""
       "a required member's canonical spelling of the wrong kind beside its alias",
-      """{"kind":"Label","id":"l","caption":"c","name":3}""" ]
+      """{"kind":"Label","id":"l","caption":"c","name":3}"""
+      "beside a presence-keyed union, a member under its alias of the wrong kind",
+      """{"kind":"Link","id":"k","heading":5,"url":"u"}"""
+      "beside a member under its alias, both of a presence-keyed union's keys",
+      """{"kind":"Link","id":"k","heading":"h","url":"u","ref":"r"}"""
+      "a node envelope's member under its alias, of the wrong kind",
+      """{"kind":"Label","id":"l","name":"n","isHidden":"yes"}""" ]

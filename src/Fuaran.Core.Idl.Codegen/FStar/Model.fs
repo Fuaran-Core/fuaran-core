@@ -664,20 +664,52 @@ module internal FStarModel =
                 | Error e -> Error e
                 | Ok p -> go (p :: acc) t
 
-        // Phase 723 — a constructor declaring a presence condition is refined by it, and a literal of
-        // it would have to be shown canonical where it is written; no certified vocabulary declares
-        // one, so it is refused rather than emitted unchecked (D286.8).
-        match ms |> List.tryFind _.Condition.IsSome with
-        | Some m ->
-            unmodellable
-                (sprintf "a declared default of a record or case whose member '%s' declares a presence condition" m.Name)
-                where
-        | None ->
-            go [] sorted
-            |> Result.map (fun parts ->
-                match parts with
-                | [] -> ctor
-                | _ -> "(" + ctor + " " + String.concat " " parts + ")")
+        // Phase 723 (D291) — a constructor declaring a presence condition is refined by it, so a literal
+        // of it is a value of the model's type only where each refinement holds of the terms written:
+        // a member whose condition fails is at its absent value. A default holding one is no value the
+        // type holds, so it is refused by name. The terms are compared as written; two spellings of one
+        // value compare unequal, which refuses the literal, never admits one the prover would not.
+        let refused (parts: string list) =
+            let termOf =
+                List.zip sorted parts
+                |> List.map (fun (m: Member, p) -> m.Name, p)
+                |> Map.ofList
+
+            let bare (t: string) =
+                if t.StartsWith "(" && t.EndsWith ")" then
+                    t.Substring(1, t.Length - 2)
+                else
+                    t
+
+            let absent (m: Member) =
+                match m.Presence with
+                | Some(Some d) -> bare termOf[m.Name] = bare d
+                | _ -> termOf[m.Name] = "None"
+
+            let holds (m: Member) =
+                match m.Condition with
+                | Some(Condition.SiblingPresent s) -> termOf[s] <> "None"
+                | Some(Condition.SiblingAbsent s) -> termOf[s] = "None"
+                | Some(Condition.SiblingEquals(s, term)) -> bare termOf[s] = bare term
+                | Some Condition.SelfNonEmpty -> termOf[m.Name] <> "(Some [])"
+                | None -> true
+
+            sorted |> List.tryFind (fun m -> not (holds m || absent m))
+
+        go [] sorted
+        |> Result.bind (fun parts ->
+            match refused parts with
+            | Some m ->
+                unmodellable
+                    (sprintf
+                        "a declared default holding member '%s' where its presence condition fails, a value the model's type does not hold"
+                        m.Name)
+                    where
+            | None -> Ok parts)
+        |> Result.map (fun parts ->
+            match parts with
+            | [] -> ctor
+            | _ -> "(" + ctor + " " + String.concat " " parts + ")")
 
     /// One declared field list as the model's members: each wire field's type closed under the
     /// instantiation `subst` and translated ([[slotOf]]), with its presence; host-only fields
@@ -893,13 +925,12 @@ module internal FStarModel =
                               for picks', ms' in alts -> picks @ picks', ms @ ms' ]
                         t
 
-        // Phase 723 — the shapes no certified vocabulary holds are refused by name (D286.8): a member
-        // declaring an alias or a condition beside a presence-keyed union, whose reading the keys
-        // present decide, and a condition over a sibling the model does not hold as a member.
+        // Phase 723 — a condition over a sibling the constructor does not hold as a member of its own
+        // has no refinement to state, so it is refused by name. A member declaring an alias or a
+        // condition beside a presence-keyed union is modelled as on any object (D291): the declaration
+        // check refuses a spelling of it that is a key a case lays, and a condition naming the union,
+        // so the case the keys present pick and the member's reading never read one key.
         let admitted (picks: Pick list, ms: Member list) =
-            let declares (m: Member) =
-                not m.Aliases.IsEmpty || m.Condition.IsSome
-
             let own (name: string) =
                 ms |> List.exists (fun m -> m.Name = name && m.Held.IsNone)
 
@@ -911,23 +942,15 @@ module internal FStarModel =
                 | Some Condition.SelfNonEmpty
                 | None -> None
 
-            match
-                ms |> List.tryFind declares, ms |> List.tryFind (fun m -> siblingOf m |> Option.exists (own >> not))
-            with
-            | Some m, _ when not picks.IsEmpty ->
-                unmodellable
-                    (sprintf
-                        "the aliases or presence condition of member '%s' beside a presence-keyed union, whose case the keys present pick"
-                        m.Name)
-                    where
-            | _, Some m ->
+            match ms |> List.tryFind (fun m -> siblingOf m |> Option.exists (own >> not)) with
+            | Some m ->
                 unmodellable
                     (sprintf
                         "the presence condition of member '%s' over '%s', which the model does not hold as a member of its own"
                         m.Name
                         (siblingOf m |> Option.defaultValue ""))
                     where
-            | _ -> Ok(picks, ms)
+            | None -> Ok(picks, ms)
 
         go [ [], [] ] fs |> Result.bind (List.map admitted >> sequenceR)
 
@@ -1250,17 +1273,7 @@ module internal FStarModel =
 
         let envelope () =
             fieldMembers idl Map.empty "node envelope" idl.NodeFields idl.NodeFields
-            |> Result.bind (fun ms ->
-                // Phase 723 — the node's own decoder reads the envelope; no certified vocabulary
-                // declares an alias or a condition there, so one is refused by name (D286.8).
-                match ms |> List.tryFind (fun m -> not m.Aliases.IsEmpty || m.Condition.IsSome) with
-                | Some m ->
-                    unmodellable
-                        (sprintf "the aliases or presence condition of the node envelope's member '%s'" m.Name)
-                        "node envelope"
-                | None ->
-                    envelopeMembers <- ms
-                    Ok())
+            |> Result.map (fun ms -> envelopeMembers <- ms)
 
         // Phase 722 — an inline declaration is modelled as the declaration check leaves it: where it
         // stands, one key per case that is a required member of that case and of no other, and what
@@ -1580,9 +1593,9 @@ module internal FStarModel =
 
     /// [[modelOf]] behind the one question every backend asks of a record reference (Phase 732,
     /// [[Decl.referencesAppliedIdl]]): a reference no binding can be made for has no instantiation to
-    /// model, and is refused in the other backends' sentence. Since Phase 723 (D290) a member's
-    /// aliases, an enum case's aliases and the four presence conditions are modelled, and the shapes
-    /// the model does not carry are refused where they are met, by name.
+    /// model, and is refused in the other backends' sentence. Since Phase 723 (D290, D291) a member's
+    /// aliases, an enum case's aliases and the four presence conditions are modelled, and the few
+    /// shapes the model's type cannot state are refused where they are met, by name.
     let model (idl: Idl) (kindTags: string list) : Result<Model, CodegenError> =
         Decl.referencesAppliedIdl idl |> Result.bind (fun () -> modelOf idl kindTags)
 

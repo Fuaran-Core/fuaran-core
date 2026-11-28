@@ -782,22 +782,23 @@ module internal Decl =
               Unread = None }
 
     // -----------------------------------------------------------------------
-    // Phase 539 — the canonical-form declarations (DECISIONS.md D190), named for a backend that
-    // does not apply them and must refuse them by name rather than ignore them.
+    // Phase 539 — the canonical-form declarations (DECISIONS.md D190): whether a vocabulary declares
+    // them, so a module whose vocabulary declares none takes none of the helpers that apply them.
     // -----------------------------------------------------------------------
 
-    /// Every field list of the vocabulary with the owner it belongs to, as a refusal names it.
-    let fieldOwners (idl: Idl) : (string * IdlField list) list =
+    /// Every field list of the vocabulary: each kind's, op's, union case's and record's, and the node
+    /// envelope's.
+    let fieldLists (idl: Idl) : IdlField list list =
         [ for k in idl.Kinds do
-              yield "kind '" + k.Tag + "'", k.Fields
+              yield k.Fields
           for o in idl.Ops do
-              yield "op '" + o.Tag + "'", o.Fields
+              yield o.Fields
           for u in idl.Unions do
               for c in u.Cases do
-                  yield "union case '" + u.Name + "." + c.Tag + "'", c.Fields
+                  yield c.Fields
           for r in idl.Records do
-              yield "record '" + r.Name + "'", r.Fields
-          yield "the node envelope", idl.NodeFields ]
+              yield r.Fields
+          yield idl.NodeFields ]
 
     /// Whether any declared type in the vocabulary is of the wider data universe.
     let rec private widerType (t: IdlType) : bool =
@@ -819,16 +820,13 @@ module internal Decl =
 
     /// Whether the vocabulary declares a type of the wider data universe anywhere.
     let reachesWider (idl: Idl) : bool =
-        fieldOwners idl
-        |> List.exists (fun (_, fields) -> fields |> List.exists (fun f -> widerType f.Type))
+        fieldLists idl |> List.exists (List.exists (fun f -> widerType f.Type))
 
     /// Whether the vocabulary declares a member's alias, an enum case's alias or a presence condition
     /// anywhere; a TypeScript module whose vocabulary declares none carries none of the helpers (D289.3).
     let declaresAliasOrCondition (idl: Idl) : bool =
-        (fieldOwners idl
-         |> List.exists (fun (_, fields) ->
-             fields
-             |> List.exists (fun f -> not (List.isEmpty f.Aliases) || f.Presence.IsSome)))
+        (fieldLists idl
+         |> List.exists (List.exists (fun f -> not (List.isEmpty f.Aliases) || f.Presence.IsSome)))
         || (idl.Enums
             |> List.exists (fun e -> e.Aliases |> List.exists (fun (_, a) -> not (List.isEmpty a))))
 

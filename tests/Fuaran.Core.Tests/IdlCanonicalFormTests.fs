@@ -550,13 +550,18 @@ let tests =
           // Phase 723 — the four presence conditions and the aliases they read, one document per rule,
           // through the interpreter, the compiled F# host and the TypeScript host: each answers the
           // interpreter's bytes or its refusal at the path as written. And the TypeScript encoder omits a
-          // member exactly where the interpreter's does, under each condition.
+          // member exactly where the interpreter's does, under each condition. The same holds for an
+          // aliased and a conditional member beside a presence-keyed union, whose generated F# module
+          // takes both sets of decode helpers (it once declared `dPick` twice and did not compile).
           testCase "every presence condition reads and writes alike on the three hosts, over aliased siblings"
           <| fun _ ->
               let hosts = CanonicalFormHostsIdl.idl
 
               let gate (body: string) =
                   """{"id":"n","kind":{"$type":"Gate",""" + body + "}}"
+
+              let link (body: string) =
+                  """{"id":"n","kind":{"$type":"Link",""" + body + "}}"
 
               let documents =
                   [ // `unit` only while `count` is the int 1: a float token is not, so `unit` is dropped
@@ -579,7 +584,15 @@ let tests =
                     gate "\"severity\":\"Danger\",\"alert\":3"
                     gate "\"severity\":\"Positive\",\"alert\":3"
                     gate "\"alert\":3"
-                    gate "\"severity\":\"Grave\"" ]
+                    gate "\"severity\":\"Grave\""
+                    // Beside a presence-keyed union, whose case the keys present pick: `title` (spelt
+                    // `heading`) and `hint` (only while `title` is present) are read as on any object.
+                    link "\"heading\":\"h\",\"hint\":\"x\",\"url\":\"u\""
+                    link "\"heading\":5,\"url\":\"u\""
+                    link "\"hint\":\"x\",\"ref\":\"r\""
+                    link "\"title\":\"t\",\"heading\":\"h\",\"ref\":5"
+                    link "\"heading\":\"h\",\"url\":\"u\",\"ref\":\"r\""
+                    link "\"heading\":\"h\"" ]
 
               let answer (r: Result<string, DecodeError>) =
                   match r with
@@ -608,6 +621,15 @@ let tests =
               Expect.isTrue (interpreter |> List.exists (fun l -> l.Contains "\"measure\"]")) "a refusal at an alias"
               Expect.isTrue (interpreter |> List.exists (fun l -> l.StartsWith "{")) "a document read"
 
+              Expect.isTrue
+                  (interpreter |> List.exists (fun l -> l.Contains "\"heading\"]"))
+                  "a refusal at an alias beside a presence-keyed union"
+
+              Expect.isTrue
+                  (interpreter
+                   |> List.exists (fun l -> l.Contains "\"url\":\"u\"" && l.Contains "\"title\":\"h\""))
+                  "a document read under an alias beside a presence-keyed union's case"
+
               let gateValue (members: (string * IdlValue) list) = node "Gate" members
 
               let values =
@@ -619,7 +641,13 @@ let tests =
                     gateValue [ "tags", VList [ VStr "t" ] ]
                     gateValue [ "level", VEnum "Critical"; "alert", VStr "a" ]
                     gateValue [ "level", VEnum "Success"; "alert", VStr "a" ]
-                    gateValue [ "alert", VStr "a" ] ]
+                    gateValue [ "alert", VStr "a" ]
+                    node
+                        "Link"
+                        [ "title", VStr "t"
+                          "hint", VStr "h"
+                          "source", VUnion("ByUrl", [ "url", VStr "u" ]) ]
+                    node "Link" [ "hint", VStr "h"; "source", VUnion("ByRef", [ "ref", VStr "r" ]) ] ]
 
               let ts =
                   match Gen.typescriptModule hosts (hosts.Kinds |> List.map _.Tag) with
@@ -693,7 +721,9 @@ let tests =
                     "a member is read only when its sibling's decoded value satisfies its condition" ] do
                   Expect.stringContains model wanted what
 
-          testCase "the F* model refuses by name each shape it does not carry"
+          // Phase 723 (DECISIONS.md D291) — a refusal is the exception: each shape the model once
+          // refused and now carries is pinned as modelled, and each refusal that remains by its sentence.
+          testCase "the F* model carries each shape it can state and refuses the rest by name"
           <| fun _ ->
               let refusalOf (v: Idl) (tag: string) =
                   FStarTarget.partition v
@@ -734,17 +764,14 @@ let tests =
                               else
                                   r) }
 
-              // A record whose member is conditional, held at a declared default.
-              let spot =
+              // A record whose member `t` is conditional on `s`, held at the declared default `d`.
+              let spotOf (fields: IdlField list) (d: IdlValue) =
                   { idl with
                       Records =
                           idl.Records
                           @ [ { Name = "Spot"
                                 Params = []
-                                Fields =
-                                  [ plain "s" TStr Optional
-                                    { plain "t" TStr Optional with
-                                        Presence = Some(WhenPresent "s") } ]
+                                Fields = fields
                                 Annotations = Annotations.Empty
                                 Inline = false } ]
                       Kinds =
@@ -752,14 +779,67 @@ let tests =
                           |> List.map (fun k ->
                               if k.Tag = "Place" then
                                   { k with
-                                      Fields =
-                                          k.Fields @ [ plain "spot" (TRecord("Spot", [])) (OmitDefault(VRecord [])) ] }
+                                      Fields = k.Fields @ [ plain "spot" (TRecord("Spot", [])) (OmitDefault d) ] }
                               else
                                   k) }
 
+              let spot =
+                  spotOf
+                      [ plain "s" TStr Optional
+                        { plain "t" TStr Optional with
+                            Presence = Some(WhenPresent "s") } ]
+
+              // `t` only while `s`, omitted at its default `z`, is `a`: the literal writes `s` as the
+              // member's term and the condition's term bare, so the two are compared unwrapped.
+              let spotEquals =
+                  spotOf
+                      [ plain "s" TStr (OmitDefault(VStr "z"))
+                        { plain "t" TStr Optional with
+                            Presence = Some(WhenEquals("s", VStr "a")) } ]
+
               let envelope =
                   { idl with
-                      NodeFields = [ aliased [ "isHidden" ] (plain "hidden" TBool Optional) ] }
+                      NodeFields =
+                          [ aliased [ "isHidden" ] (plain "hidden" TBool Optional)
+                            { plain "tip" TStr Optional with
+                                Presence = Some(WhenPresent "hidden") } ] }
+
+              // A condition over a sibling that is no member of the model's, which the declaration
+              // check refuses; the target is handed a vocabulary that was not checked.
+              let hostOnlySibling =
+                  kindField
+                      "Grid"
+                      "template"
+                      (fun f ->
+                          { f with
+                              Presence = Some(WhenPresent "host") })
+                      { idl with
+                          Kinds =
+                              idl.Kinds
+                              |> List.map (fun k ->
+                                  if k.Tag = "Grid" then
+                                      { k with
+                                          Fields = k.Fields @ [ plain "host" TStr HostOnly ] }
+                                  else
+                                      k) }
+
+              // ACCEPTED (D291): the shapes the model once refused and now carries.
+              for v, tag, what in
+                  [ kindField "Grid" "caption" (aliased [ "title" ]) LayoutIdl.layout,
+                    "Grid",
+                    "an alias beside a presence-keyed union"
+                    CanonicalFormHostsIdl.idl, "Link", "an alias and a condition beside a presence-keyed union"
+                    envelope, "Grid", "an alias and a condition on the node envelope's members"
+                    spot (VRecord []), "Place", "a default of a record declaring a condition, its member absent"
+                    spot (VRecord [ "s", VStr "a"; "t", VStr "b" ]),
+                    "Place",
+                    "a default of a record declaring a condition, writing its member where the condition holds"
+                    spotEquals (VRecord [ "s", VStr "a"; "t", VStr "b" ]),
+                    "Place",
+                    "a default writing a member under an equality its sibling, omitted at another default, satisfies" ] do
+                  Expect.equal (refusalOf v tag) "(modelled)" (sprintf "%s: %s is modelled" tag what)
+
+              // REFUSED, each by the sentence naming what the model cannot state.
 
               for v, tag, phrase in
                   [ CanonicalFormHostsIdl.idl,
@@ -768,16 +848,18 @@ let tests =
                     recordField "Paging" "pageSize" (aliased [ "size" ]) LayoutIdl.layout,
                     "Grid",
                     "a member of an inline declaration takes no alias and no presence condition"
-                    kindField "Grid" "caption" (aliased [ "title" ]) LayoutIdl.layout,
-                    "Grid",
-                    "of member 'caption' beside a presence-keyed union, whose case the keys present pick"
-                    envelope, "Grid", "the node envelope's member 'hidden'"
                     kindField "Gate" "count" (aliased [ "id" ]) CanonicalFormHostsIdl.proved,
                     "Gate",
                     "a member 'count' whose alias 'id' the node object already carries"
-                    spot,
+                    spot (VRecord [ "t", VStr "b" ]),
                     "Place",
-                    "a declared default of a record or case whose member 't' declares a presence condition" ] do
+                    "a declared default holding member 't' where its presence condition fails, a value the model's type does not hold"
+                    spotEquals (VRecord [ "t", VStr "b" ]),
+                    "Place",
+                    "a declared default holding member 't' where its presence condition fails, a value the model's type does not hold"
+                    hostOnlySibling,
+                    "Grid",
+                    "the presence condition of member 'template' over 'host', which the model does not hold as a member of its own" ] do
                   Expect.stringContains (refusalOf v tag) phrase (tag + " is refused by name")
 
               Expect.equal

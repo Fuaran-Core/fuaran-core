@@ -4,12 +4,12 @@
    vocabulary: sha256:48d2a518690b3f650a2a80e6fed48a571996ff40df48a630fd3a0f35f44927dc
    vocabulary: sha256:bac3a017bb023ec8dbc71cf0b971e374bf14a4c42911dca757d839d54296b931
    vocabulary: sha256:7e0b26c6a862455a79b16b7c105843885546529c5c7ced16c2da83f50c826508
-   vocabulary: sha256:040d792554352a2982c8eb2065cf5751c0b8fbf77e6c7a3682a66ed95f511aaa
+   vocabulary: sha256:a0d5731e1bffadb1feef24e6a1d5c696d292bc675302fd9b03b759f3add8c233
    vocabulary: sha256:bb16a7799ad1395b528bdc2713c76f93b0761fcfb9d8e3e43ce5b2d42896194c
    vocabulary: sha256:f79a9d5698e83ca274feef4986b1d8dd9ae8cc02ce3f25eb04a33a6e2465e611
    vocabulary: sha256:46bcb7bf3fca5c05b6e11d1c3ce328cfe55db565588574416e16be96a5a1d288
    vocabulary: sha256:c91497ea3c022bc9abfbf096b819ae1278612c4b9565a1ce81a27094e603aa1f
-   emission: sha256:2067b47437111c48993fa0aa2f1ec65a9f56c623aa5cbc4f580bf19c679fef38
+   emission: sha256:a7b91db88cd0a07f48bc6fa516d6e6a542090af2288323a23fac6f6373490571
 *)
 (*
    VocabularyVectors — the interpreter's vectors over the generated models (Phase 303).
@@ -401,58 +401,88 @@ let c_vectors_agree : unit =
   assert_norm (C.enc_node c_v12 == c_e12)
 
 let ch_v0 : CH.node int string =
-  (CH.C__node__Gate "g" (Some "cm") None (Some true) (Some "n") None (Some ["x"]) (CH.C__e_tone__Critical) (Some "a") ("auto"))
+  (CH.C__node__Gate "g" (Some "cm") None (Some true) (Some "n") None (Some ["x"]) (CH.C__e_tone__Critical) (Some "a") ("auto") None None)
 
 let ch_e0 : jval int string =
   (JObj [("kind", (JStr "Gate")); ("id", (JStr "g")); ("unit", (JStr "cm")); ("open", (JBool true)); ("note", (JStr "n")); ("tags", (JArr [(JStr "x")])); ("level", (JStr "Critical")); ("alert", (JStr "a"))])
 
 let ch_v1 : CH.node int string =
-  (CH.C__node__Gate "g" None None (Some false) None None (Some ["a"]) (CH.C__e_tone__Default) None ("auto"))
+  (CH.C__node__Gate "g" None None (Some false) None None (Some ["a"]) (CH.C__e_tone__Default) None ("auto") None None)
 
 let ch_e1 : jval int string =
   (JObj [("kind", (JStr "Gate")); ("id", (JStr "g")); ("open", (JBool false)); ("tags", (JArr [(JStr "a")]))])
 
 let ch_v2 : CH.node int string =
-  (CH.C__node__Gate "g" None None None None (Some "f") None (CH.C__e_tone__Default) None ("auto"))
+  (CH.C__node__Gate "g" None None None None (Some "f") None (CH.C__e_tone__Default) None ("auto") None None)
 
 let ch_e2 : jval int string =
   (JObj [("kind", (JStr "Gate")); ("id", (JStr "g")); ("fallback", (JStr "f"))])
 
 let ch_v3 : CH.node int string =
-  (CH.C__node__Gate "g" None (Some 2) None None None None (CH.C__e_tone__Success) None ("manual"))
+  (CH.C__node__Gate "g" None (Some 2) None None None None (CH.C__e_tone__Success) None ("manual") None None)
 
 let ch_e3 : jval int string =
   (JObj [("kind", (JStr "Gate")); ("id", (JStr "g")); ("count", (JInt 2)); ("level", (JStr "Success")); ("mode", (JStr "manual"))])
 
 let ch_v4 : CH.node int string =
-  (CH.C__node__Gate "g" None (Some 2) None None None None (CH.C__e_tone__Critical) (Some "x") ("auto"))
+  (CH.C__node__Gate "g" None (Some 2) None None None None (CH.C__e_tone__Critical) (Some "x") ("auto") None None)
 
 let ch_e4 : jval int string =
   (JObj [("kind", (JStr "Gate")); ("id", (JStr "g")); ("count", (JInt 2)); ("level", (JStr "Critical")); ("alert", (JStr "x"))])
 
 let ch_v5 : CH.node int string =
-  (CH.C__node__Place "p" (Some (CH.C__r_point__Mk (1) (2))) (Some (CH.C__u_mark__Pin ("a") (Some (CH.C__r_point__Mk (1) (2))))))
+  (CH.C__node__Place "p" (Some (CH.C__r_point__Mk (1) (2))) (Some (CH.C__u_mark__Pin ("a") (Some (CH.C__r_point__Mk (1) (2))))) ((CH.C__r_spot__Mk (Some "a") (Some "b"))) None None)
 
 let ch_e5 : jval int string =
   (JObj [("kind", (JStr "Place")); ("id", (JStr "p")); ("at", (JObj [("x", (JInt 1)); ("y", (JInt 2))])); ("mark", (JObj [("kind", (JStr "Pin")); ("label", (JStr "a")); ("at", (JObj [("x", (JInt 1)); ("y", (JInt 2))]))]))])
 
 let ch_v6 : CH.node int string =
-  (CH.C__node__Place "p" (Some (CH.C__r_point__Mk (3) (4))) (Some CH.C__u_mark__Dot))
+  (CH.C__node__Place "p" (Some (CH.C__r_point__Mk (3) (4))) (Some CH.C__u_mark__Dot) ((CH.C__r_spot__Mk (Some "a") (Some "b"))) None None)
 
 let ch_e6 : jval int string =
   (JObj [("kind", (JStr "Place")); ("id", (JStr "p")); ("at", (JObj [("x", (JInt 3)); ("y", (JInt 4))])); ("mark", (JObj [("kind", (JStr "Dot"))]))])
 
 let ch_v7 : CH.node int string =
-  (CH.C__node__Label "l" ("c"))
+  (CH.C__node__Label "l" ("c") None None)
 
 let ch_e7 : jval int string =
   (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("name", (JStr "c"))])
 
 let ch_v8 : CH.node int string =
-  (CH.C__node__Label "l" ("n"))
+  (CH.C__node__Label "l" ("n") None None)
 
 let ch_e8 : jval int string =
   (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("name", (JStr "n"))])
+
+let ch_v9 : CH.node int string =
+  (CH.C__node__Link__ByUrl "k" (Some "h") (Some "x") ("u") None None)
+
+let ch_e9 : jval int string =
+  (JObj [("kind", (JStr "Link")); ("id", (JStr "k")); ("title", (JStr "h")); ("hint", (JStr "x")); ("url", (JStr "u"))])
+
+let ch_v10 : CH.node int string =
+  (CH.C__node__Link__ByRef "k" None None ("r") None None)
+
+let ch_e10 : jval int string =
+  (JObj [("kind", (JStr "Link")); ("id", (JStr "k")); ("ref", (JStr "r"))])
+
+let ch_v11 : CH.node int string =
+  (CH.C__node__Label "l" ("n") (Some true) (Some "t"))
+
+let ch_e11 : jval int string =
+  (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("name", (JStr "n")); ("hidden", (JBool true)); ("tip", (JStr "t"))])
+
+let ch_v12 : CH.node int string =
+  (CH.C__node__Place "p" None None ((CH.C__r_spot__Mk (Some "a") (Some "b"))) None None)
+
+let ch_e12 : jval int string =
+  (JObj [("kind", (JStr "Place")); ("id", (JStr "p"))])
+
+let ch_v13 : CH.node int string =
+  (CH.C__node__Place "p" None None ((CH.C__r_spot__Mk None None)) None None)
+
+let ch_e13 : jval int string =
+  (JObj [("kind", (JStr "Place")); ("id", (JStr "p")); ("spot", (JObj []))])
 
 let ch_vectors_agree : unit =
   assert_norm (CH.enc_node ch_v0 == ch_e0);
@@ -463,7 +493,12 @@ let ch_vectors_agree : unit =
   assert_norm (CH.enc_node ch_v5 == ch_e5);
   assert_norm (CH.enc_node ch_v6 == ch_e6);
   assert_norm (CH.enc_node ch_v7 == ch_e7);
-  assert_norm (CH.enc_node ch_v8 == ch_e8)
+  assert_norm (CH.enc_node ch_v8 == ch_e8);
+  assert_norm (CH.enc_node ch_v9 == ch_e9);
+  assert_norm (CH.enc_node ch_v10 == ch_e10);
+  assert_norm (CH.enc_node ch_v11 == ch_e11);
+  assert_norm (CH.enc_node ch_v12 == ch_e12);
+  assert_norm (CH.enc_node ch_v13 == ch_e13)
 
 let l_dv0 : L.node int string =
   (L.C__node__Node "g1" (L.C__vkind__Grid__NoRowIdentity__Source None (["a"]) None None ((L.C__u_feed__State ("rows")))))
@@ -1017,58 +1052,94 @@ let c_decode_agree : unit =
   assert_norm (Error? (C.dec_node c_dr6))
 
 let ch_dv0 : CH.node int string =
-  (CH.C__node__Gate "g" (Some "cm") None (Some true) (Some "n") None (Some ["x"]) (CH.C__e_tone__Critical) (Some "a") ("auto"))
+  (CH.C__node__Gate "g" (Some "cm") None (Some true) (Some "n") None (Some ["x"]) (CH.C__e_tone__Critical) (Some "a") ("auto") None None)
 
 let ch_de0 : jval int string =
   (JObj [("kind", (JStr "Gate")); ("id", (JStr "g")); ("isOpen", (JBool true)); ("measure", (JStr "cm")); ("note", (JStr "n")); ("backup", (JStr "b")); ("labels", (JArr [(JStr "x")])); ("severity", (JStr "Danger")); ("alert", (JStr "a"))])
 
 let ch_dv1 : CH.node int string =
-  (CH.C__node__Gate "g" None None (Some false) None None (Some ["a"]) (CH.C__e_tone__Default) None ("auto"))
+  (CH.C__node__Gate "g" None None (Some false) None None (Some ["a"]) (CH.C__e_tone__Default) None ("auto") None None)
 
 let ch_de1 : jval int string =
   (JObj [("kind", (JStr "Gate")); ("id", (JStr "g")); ("open", (JBool false)); ("isOpen", (JBool true)); ("unit", (JStr "cm")); ("measure", (JStr "mm")); ("tags", (JArr [(JStr "a")])); ("labels", (JArr [(JStr "b")]))])
 
 let ch_dv2 : CH.node int string =
-  (CH.C__node__Gate "g" None None None None (Some "f") None (CH.C__e_tone__Default) None ("auto"))
+  (CH.C__node__Gate "g" None None None None (Some "f") None (CH.C__e_tone__Default) None ("auto") None None)
 
 let ch_de2 : jval int string =
   (JObj [("kind", (JStr "Gate")); ("id", (JStr "g")); ("fallback", (JStr "f")); ("note", (JInt 7)); ("unit", (JInt 5)); ("alert", (JInt 3)); ("mode", (JInt 9))])
 
 let ch_dv3 : CH.node int string =
-  (CH.C__node__Gate "g" None (Some 2) None None None None (CH.C__e_tone__Success) None ("manual"))
+  (CH.C__node__Gate "g" None (Some 2) None None None None (CH.C__e_tone__Success) None ("manual") None None)
 
 let ch_de3 : jval int string =
   (JObj [("kind", (JStr "Gate")); ("id", (JStr "g")); ("labels", (JArr [])); ("count", (JInt 2)); ("mode", (JStr "manual")); ("severity", (JStr "Positive"))])
 
 let ch_dv4 : CH.node int string =
-  (CH.C__node__Gate "g" None (Some 2) None None None None (CH.C__e_tone__Critical) (Some "x") ("auto"))
+  (CH.C__node__Gate "g" None (Some 2) None None None None (CH.C__e_tone__Critical) (Some "x") ("auto") None None)
 
 let ch_de4 : jval int string =
   (JObj [("kind", (JStr "Gate")); ("id", (JStr "g")); ("count", (JInt 2)); ("mode", (JStr "auto")); ("level", (JStr "Critical")); ("alert", (JStr "x"))])
 
 let ch_dv5 : CH.node int string =
-  (CH.C__node__Place "p" (Some (CH.C__r_point__Mk (1) (2))) (Some (CH.C__u_mark__Pin ("a") (Some (CH.C__r_point__Mk (1) (2))))))
+  (CH.C__node__Place "p" (Some (CH.C__r_point__Mk (1) (2))) (Some (CH.C__u_mark__Pin ("a") (Some (CH.C__r_point__Mk (1) (2))))) ((CH.C__r_spot__Mk (Some "a") (Some "b"))) None None)
 
 let ch_de5 : jval int string =
   (JObj [("kind", (JStr "Place")); ("id", (JStr "p")); ("position", (JObj [("left", (JInt 1)); ("y", (JInt 2))])); ("mark", (JObj [("kind", (JStr "Pin")); ("text", (JStr "a")); ("where", (JObj [("x", (JInt 1)); ("left", (JInt 9)); ("y", (JInt 2))]))]))])
 
 let ch_dv6 : CH.node int string =
-  (CH.C__node__Place "p" (Some (CH.C__r_point__Mk (3) (4))) (Some CH.C__u_mark__Dot))
+  (CH.C__node__Place "p" (Some (CH.C__r_point__Mk (3) (4))) (Some CH.C__u_mark__Dot) ((CH.C__r_spot__Mk (Some "a") (Some "b"))) None None)
 
 let ch_de6 : jval int string =
   (JObj [("kind", (JStr "Place")); ("id", (JStr "p")); ("at", (JObj [("x", (JInt 3)); ("y", (JInt 4))])); ("mark", (JObj [("kind", (JStr "Dot"))]))])
 
 let ch_dv7 : CH.node int string =
-  (CH.C__node__Label "l" ("c"))
+  (CH.C__node__Label "l" ("c") None None)
 
 let ch_de7 : jval int string =
   (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("caption", (JStr "c"))])
 
 let ch_dv8 : CH.node int string =
-  (CH.C__node__Label "l" ("n"))
+  (CH.C__node__Label "l" ("n") None None)
 
 let ch_de8 : jval int string =
   (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("caption", (JStr "c")); ("name", (JStr "n"))])
+
+let ch_dv9 : CH.node int string =
+  (CH.C__node__Link__ByUrl "k" (Some "h") (Some "x") ("u") None None)
+
+let ch_de9 : jval int string =
+  (JObj [("kind", (JStr "Link")); ("id", (JStr "k")); ("heading", (JStr "h")); ("hint", (JStr "x")); ("url", (JStr "u"))])
+
+let ch_dv10 : CH.node int string =
+  (CH.C__node__Link__ByRef "k" None None ("r") None None)
+
+let ch_de10 : jval int string =
+  (JObj [("kind", (JStr "Link")); ("id", (JStr "k")); ("hint", (JStr "x")); ("ref", (JStr "r"))])
+
+let ch_dv11 : CH.node int string =
+  (CH.C__node__Label "l" ("n") (Some true) (Some "t"))
+
+let ch_de11 : jval int string =
+  (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("name", (JStr "n")); ("isHidden", (JBool true)); ("tip", (JStr "t"))])
+
+let ch_dv12 : CH.node int string =
+  (CH.C__node__Label "l" ("n") None None)
+
+let ch_de12 : jval int string =
+  (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("name", (JStr "n")); ("tip", (JStr "t"))])
+
+let ch_dv13 : CH.node int string =
+  (CH.C__node__Place "p" None None ((CH.C__r_spot__Mk (Some "a") (Some "b"))) None None)
+
+let ch_de13 : jval int string =
+  (JObj [("kind", (JStr "Place")); ("id", (JStr "p")); ("spot", (JObj [("s", (JStr "a")); ("t", (JStr "b"))]))])
+
+let ch_dv14 : CH.node int string =
+  (CH.C__node__Place "p" None None ((CH.C__r_spot__Mk None None)) None None)
+
+let ch_de14 : jval int string =
+  (JObj [("kind", (JStr "Place")); ("id", (JStr "p")); ("spot", (JObj [("t", (JStr "b"))]))])
 
 let ch_dr0 : jval int string =
   (JObj [("kind", (JStr "Gate")); ("id", (JStr "g")); ("isOpen", (JStr "yes"))])
@@ -1097,6 +1168,15 @@ let ch_dr7 : jval int string =
 let ch_dr8 : jval int string =
   (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("caption", (JStr "c")); ("name", (JInt 3))])
 
+let ch_dr9 : jval int string =
+  (JObj [("kind", (JStr "Link")); ("id", (JStr "k")); ("heading", (JInt 5)); ("url", (JStr "u"))])
+
+let ch_dr10 : jval int string =
+  (JObj [("kind", (JStr "Link")); ("id", (JStr "k")); ("heading", (JStr "h")); ("url", (JStr "u")); ("ref", (JStr "r"))])
+
+let ch_dr11 : jval int string =
+  (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("name", (JStr "n")); ("isHidden", (JStr "yes"))])
+
 let ch_decode_agree : unit =
   assert_norm (CH.dec_node ch_de0 == Ok ch_dv0);
   assert_norm (CH.dec_node ch_de1 == Ok ch_dv1);
@@ -1107,6 +1187,12 @@ let ch_decode_agree : unit =
   assert_norm (CH.dec_node ch_de6 == Ok ch_dv6);
   assert_norm (CH.dec_node ch_de7 == Ok ch_dv7);
   assert_norm (CH.dec_node ch_de8 == Ok ch_dv8);
+  assert_norm (CH.dec_node ch_de9 == Ok ch_dv9);
+  assert_norm (CH.dec_node ch_de10 == Ok ch_dv10);
+  assert_norm (CH.dec_node ch_de11 == Ok ch_dv11);
+  assert_norm (CH.dec_node ch_de12 == Ok ch_dv12);
+  assert_norm (CH.dec_node ch_de13 == Ok ch_dv13);
+  assert_norm (CH.dec_node ch_de14 == Ok ch_dv14);
   assert_norm (Error? (CH.dec_node ch_dr0));
   assert_norm (Error? (CH.dec_node ch_dr1));
   assert_norm (Error? (CH.dec_node ch_dr2));
@@ -1115,4 +1201,7 @@ let ch_decode_agree : unit =
   assert_norm (Error? (CH.dec_node ch_dr5));
   assert_norm (Error? (CH.dec_node ch_dr6));
   assert_norm (Error? (CH.dec_node ch_dr7));
-  assert_norm (Error? (CH.dec_node ch_dr8))
+  assert_norm (Error? (CH.dec_node ch_dr8));
+  assert_norm (Error? (CH.dec_node ch_dr9));
+  assert_norm (Error? (CH.dec_node ch_dr10));
+  assert_norm (Error? (CH.dec_node ch_dr11))

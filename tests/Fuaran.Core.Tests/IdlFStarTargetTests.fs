@@ -849,9 +849,10 @@ let idlFStarTargetTests =
 
                       Expect.isFalse (model.Contains "enc_vkind") (sprintf "%s: and no kind-object encoder" g.Module)
 
+                      // A kind holding a presence-keyed union has one constructor per choice of case.
                       for tag in selection g.Idl do
                           Expect.isTrue
-                              (Regex.IsMatch(model, sprintf @"(?m)^  \| C__node__%s : id:string -> " tag))
+                              (Regex.IsMatch(model, sprintf @"(?m)^  \| C__node__%s(__\w+)? : id:string -> " tag))
                               (sprintf "%s: the node has a constructor per kind, `%s` carrying `id`" g.Module tag)
                   else
                       Expect.stringContains
@@ -875,7 +876,14 @@ let idlFStarTargetTests =
                       |> List.filter (fun (_, _, body) ->
                           not (body.Contains "sfx_" || body.Contains "match " || body.Contains "if "))
 
-                  Expect.isNonEmpty plainArms (sprintf "%s has at least one plain encoder arm to hold" g.Module)
+                  // Phase 723 (D291) — a flat vocabulary whose node envelope declares a conditional member
+                  // has none: that member is on every kind's object. Its key order is held by the
+                  // prover instead, by the encode facts over its documents (`canonicalFormModels`).
+                  if List.isEmpty plainArms then
+                      Expect.isTrue
+                          (CertificationVectors.canonicalFormModels ()
+                           |> List.exists (fun v -> v.Model = g.Module))
+                          (sprintf "%s has at least one plain encoder arm to hold, or encode facts" g.Module)
 
                   for owner, tag, body in plainArms do
                       let modelKeys =
@@ -1469,6 +1477,8 @@ let idlFStarTargetTests =
                               Some [ "enc_dflt_l_str"; "enc_dflt_l_u_tree" ]
                           elif g.Module = "CanonicalFormVocabulary" then
                               Some [ "enc_dflt_l_str"; "enc_dflt_m_str" ]
+                          elif g.Module = "CanonicalFormHostsVocabulary" then
+                              Some [ "enc_dflt_r_spot" ]
                           else
                               None
 
