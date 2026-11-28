@@ -1268,40 +1268,44 @@ let tests =
                                     (List.collect fst d)
                                     (List.collect snd d)
 
-                            // The fastest of three runs, each after the code has run once.
-                            let fastest (work: unit -> 'a) : 'a * float =
+                            // One run after the code has run once: its answer, the bytes it allocated on
+                            // its own thread (the work runs on one, so the count is the work's, whatever
+                            // the machine) and the time it took.
+                            let run (work: unit -> 'a) : 'a * int64 * float =
                                 work () |> ignore
-
-                                [ for _ in 1..3 ->
-                                      let watch = Diagnostics.Stopwatch.StartNew()
-                                      let answer = work ()
-                                      answer, watch.Elapsed.TotalSeconds ]
-                                |> List.minBy snd
+                                let before = GC.GetAllocatedBytesForCurrentThread()
+                                let watch = Diagnostics.Stopwatch.StartNew()
+                                let answer = work ()
+                                let seconds = watch.Elapsed.TotalSeconds
+                                answer, GC.GetAllocatedBytesForCurrentThread() - before, seconds
 
                             // Judges and loads `m` declarations: the faults, the artifact read back, and
-                            // the time each took.
+                            // what each cost.
                             let measure (m: int) =
                                 let idl = chain m
                                 let text = Artifact.render idl
 
-                                let faults, checking =
-                                    within 120.0 "Declare.errors" (fun () -> fastest (fun () -> Declare.errors idl))
+                                let faults, checkingBytes, checking =
+                                    within 120.0 "Declare.errors" (fun () -> run (fun () -> Declare.errors idl))
 
-                                let read, loading =
-                                    within 120.0 "Artifact.parse" (fun () -> fastest (fun () -> Artifact.parse text))
+                                let read, loadingBytes, loading =
+                                    within 120.0 "Artifact.parse" (fun () -> run (fun () -> Artifact.parse text))
 
-                                idl, faults, read, checking, loading
+                                idl, faults, read, (checkingBytes, checking), (loadingBytes, loading)
 
-                            let _, _, _, smallChecking, smallLoading = measure 1000
+                            let small = 1000
+                            let _, _, _, smallChecking, smallLoading = measure small
                             let idl, faults, read, checking, loading = measure n
 
                             Expect.isEmpty faults "no fault: each default fits the one instantiation it has"
                             Expect.equal read (Ok(Artifact.canonicalise idl)) "the artifact reads back"
 
-                            // A fixed bound measures the machine, not the code. What is held is the growth:
-                            // five times the declarations should take about five times as long (a
-                            // quadratic check about twenty-five), and a backstop ceiling still refuses an
-                            // exponential one outright.
+                            // A clock measures the machine, not the code: what is held is the growth of
+                            // the work, as the bytes it allocates. Five times the declarations allocate
+                            // about five times as much (each duplicate-name check reading every earlier
+                            // declaration allocated about eleven times as much, and took twenty-five
+                            // times as long where memory was slow). A ceiling on the time is only a
+                            // backstop against an exponential.
                             let ceiling =
 #if DEBUG
                                 60.0
@@ -1309,22 +1313,27 @@ let tests =
                                 10.0
 #endif
 
-                            let floor' = 0.001
-
-                            let grown (what: string) (small: float) (large: float) =
-                                let ratio = large / max small floor'
+                            let grown
+                                (what: string)
+                                (smallBytes: int64, smallTime: float)
+                                (bytes: int64, time: float)
+                                =
+                                let ratio = float bytes / float (max smallBytes 1L)
 
                                 let message =
                                     sprintf
-                                        "%s took %.3f s at 1000 and %.3f s at %d: a ratio of %.1f"
+                                        "%s allocated %d bytes in %.3f s at %d declarations and %d bytes in %.3f s at %d: a ratio of %.2f"
                                         what
+                                        smallBytes
+                                        smallTime
                                         small
-                                        large
+                                        bytes
+                                        time
                                         n
                                         ratio
 
-                                Expect.isLessThan ratio 12.0 message
-                                Expect.isLessThan large ceiling message
+                                Expect.isLessThan ratio 7.0 message
+                                Expect.isLessThan time ceiling message
 
                             grown "Declare.errors" smallChecking checking
                             grown "Artifact.parse" smallLoading loading)
