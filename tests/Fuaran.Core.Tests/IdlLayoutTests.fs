@@ -699,7 +699,8 @@ let backendTests =
                       Expect.isNone (construct r) (name + " emits the layout vocabulary")
 
                   // A layout the check refuses, one of each rule this phase added: every entry refuses,
-                  // naming the check's first fault.
+                  // naming the check's first fault. The F* target asks the check WHOLE (Phase 723), so it
+                  // names the first fault of the vocabulary, not of its layout alone.
                   for label, idl in
                       [ "a case declaring another case's key", overlapping Optional
                         "a laid-out member spelled as the node id",
@@ -709,10 +710,17 @@ let backendTests =
                           | f :: _ -> f.Detail
                           | [] -> failtestf "%s: the declaration check admits it" label
 
+                      let whole = VocabularyFault.describe (Declare.errors idl).Head
+
                       for name, r in entries idl do
                           Expect.equal
                               (construct r)
-                              (Some("an inline declaration the declaration check refuses (" + fault + ")"))
+                              (Some(
+                                  if name.StartsWith "FStarTarget" then
+                                      "a vocabulary the declaration check refuses (" + whole + ")"
+                                  else
+                                      "an inline declaration the declaration check refuses (" + fault + ")"
+                              ))
                               (sprintf "%s: %s answers the check's fault" label name)
 
                   // A vocabulary whose wire reach is not walked (a declaration that reaches itself at a
@@ -786,6 +794,7 @@ let backendTests =
 
                   // A vocabulary that reaches no inline declaration is asked nothing: the flat twin with a
                   // layout fault of its own (a plain member spelled twice) is not refused in these words.
+                  // The F* target asks the check whole whatever it reaches (Phase 723), so it is.
                   let twice =
                       { LayoutIdl.flat with
                           Kinds =
@@ -799,9 +808,19 @@ let backendTests =
                   Expect.isNonEmpty (Declare.layoutErrors twice) "the check has a fault to report"
 
                   for name, r in entries twice do
-                      Expect.isFalse
-                          ((defaultArg (construct r) "").Contains "the declaration check refuses")
-                          (name + " asks nothing of a vocabulary that lays no declaration out"))
+                      if name.StartsWith "FStarTarget" then
+                          Expect.equal
+                              (construct r)
+                              (Some(
+                                  "a vocabulary the declaration check refuses ("
+                                  + VocabularyFault.describe (Declare.errors twice).Head
+                                  + ")"
+                              ))
+                              (name + " asks the check whole")
+                      else
+                          Expect.isFalse
+                              ((defaultArg (construct r) "").Contains "the declaration check refuses")
+                              (name + " asks nothing of a vocabulary that lays no declaration out"))
 
           // Phase 722 (DECISIONS.md D283, D284) — the F* target lays an inline record out on its holder
           // and models a presence-keyed union: its holder has one constructor per choice of case, told

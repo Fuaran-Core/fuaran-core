@@ -4,12 +4,12 @@
    vocabulary: sha256:48d2a518690b3f650a2a80e6fed48a571996ff40df48a630fd3a0f35f44927dc
    vocabulary: sha256:bac3a017bb023ec8dbc71cf0b971e374bf14a4c42911dca757d839d54296b931
    vocabulary: sha256:7e0b26c6a862455a79b16b7c105843885546529c5c7ced16c2da83f50c826508
-   vocabulary: sha256:a0d5731e1bffadb1feef24e6a1d5c696d292bc675302fd9b03b759f3add8c233
+   vocabulary: sha256:de39711e89a9336df0ac2d111c966f7deb1402373b5e52c113c058db2ce49aeb
    vocabulary: sha256:bb16a7799ad1395b528bdc2713c76f93b0761fcfb9d8e3e43ce5b2d42896194c
    vocabulary: sha256:f79a9d5698e83ca274feef4986b1d8dd9ae8cc02ce3f25eb04a33a6e2465e611
    vocabulary: sha256:46bcb7bf3fca5c05b6e11d1c3ce328cfe55db565588574416e16be96a5a1d288
    vocabulary: sha256:c91497ea3c022bc9abfbf096b819ae1278612c4b9565a1ce81a27094e603aa1f
-   emission: sha256:a7b91db88cd0a07f48bc6fa516d6e6a542090af2288323a23fac6f6373490571
+   emission: sha256:7609fdb626c5ba2d919c901488bee04e773fb05b8e12230b6ff1d89733a41cee
 *)
 (*
    VocabularyVectors — the interpreter's vectors over the generated models (Phase 303).
@@ -467,22 +467,46 @@ let ch_e10 : jval int string =
   (JObj [("kind", (JStr "Link")); ("id", (JStr "k")); ("ref", (JStr "r"))])
 
 let ch_v11 : CH.node int string =
-  (CH.C__node__Label "l" ("n") (Some true) (Some "t"))
+  (CH.C__node__Link__NoSource "k" (Some "t") None None None)
 
 let ch_e11 : jval int string =
-  (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("name", (JStr "n")); ("hidden", (JBool true)); ("tip", (JStr "t"))])
+  (JObj [("kind", (JStr "Link")); ("id", (JStr "k")); ("title", (JStr "t"))])
 
 let ch_v12 : CH.node int string =
-  (CH.C__node__Place "p" None None ((CH.C__r_spot__Mk (Some "a") (Some "b"))) None None)
+  (CH.C__node__Label "l" ("n") (Some true) (Some "t"))
 
 let ch_e12 : jval int string =
-  (JObj [("kind", (JStr "Place")); ("id", (JStr "p"))])
+  (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("name", (JStr "n")); ("hidden", (JBool true)); ("tip", (JStr "t"))])
 
 let ch_v13 : CH.node int string =
-  (CH.C__node__Place "p" None None ((CH.C__r_spot__Mk None None)) None None)
+  (CH.C__node__Place "p" None None ((CH.C__r_spot__Mk (Some "a") (Some "b"))) None None)
 
 let ch_e13 : jval int string =
+  (JObj [("kind", (JStr "Place")); ("id", (JStr "p"))])
+
+let ch_v14 : CH.node int string =
+  (CH.C__node__Place "p" None None ((CH.C__r_spot__Mk None None)) None None)
+
+let ch_e14 : jval int string =
   (JObj [("kind", (JStr "Place")); ("id", (JStr "p")); ("spot", (JObj []))])
+
+let ch_v15 : CH.node int string =
+  (CH.C__node__Shape "s" (Some "1") None (Some "3") (Some "x") (Some CH.C__e_tone__Critical) (Some "4") (Some (CH.C__u_pair__Two (Some "p") (Some "q"))) None None)
+
+let ch_e15 : jval int string =
+  (JObj [("kind", (JStr "Shape")); ("id", (JStr "s")); ("a", (JStr "1")); ("c", (JStr "3")); ("z", (JStr "x")); ("e", (JStr "Critical")); ("f", (JStr "4")); ("u", (JObj [("kind", (JStr "Two")); ("p", (JStr "p")); ("q", (JStr "q"))]))])
+
+let ch_v16 : CH.node int string =
+  (CH.C__node__Shape "s" None (Some "2") None None None None (Some (CH.C__u_pair__Two None None)) None None)
+
+let ch_e16 : jval int string =
+  (JObj [("kind", (JStr "Shape")); ("id", (JStr "s")); ("b", (JStr "2")); ("u", (JObj [("kind", (JStr "Two"))]))])
+
+let ch_v17 : CH.node int string =
+  (CH.C__node__Shape "s" None None None (Some "y") (Some CH.C__e_tone__Success) None (Some CH.C__u_pair__One) None None)
+
+let ch_e17 : jval int string =
+  (JObj [("kind", (JStr "Shape")); ("id", (JStr "s")); ("z", (JStr "y")); ("e", (JStr "Success")); ("u", (JObj [("kind", (JStr "One"))]))])
 
 let ch_vectors_agree : unit =
   assert_norm (CH.enc_node ch_v0 == ch_e0);
@@ -498,7 +522,11 @@ let ch_vectors_agree : unit =
   assert_norm (CH.enc_node ch_v10 == ch_e10);
   assert_norm (CH.enc_node ch_v11 == ch_e11);
   assert_norm (CH.enc_node ch_v12 == ch_e12);
-  assert_norm (CH.enc_node ch_v13 == ch_e13)
+  assert_norm (CH.enc_node ch_v13 == ch_e13);
+  assert_norm (CH.enc_node ch_v14 == ch_e14);
+  assert_norm (CH.enc_node ch_v15 == ch_e15);
+  assert_norm (CH.enc_node ch_v16 == ch_e16);
+  assert_norm (CH.enc_node ch_v17 == ch_e17)
 
 let l_dv0 : L.node int string =
   (L.C__node__Node "g1" (L.C__vkind__Grid__NoRowIdentity__Source None (["a"]) None None ((L.C__u_feed__State ("rows")))))
@@ -886,117 +914,123 @@ let c_de2 : jval int string =
   (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Select")); ("options", (JArr [(JStr "a")])); ("source", (JArr [(JStr "b")]))]))])
 
 let c_dv3 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Notify ([]) (Some "Hello") ((JObj [])) (C.C__e_tone__Default)))
+  (C.C__node__Node "n" (C.C__vkind__Select (false) (["a"]) None None))
 
 let c_de3 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("title", (JStr "Hello"))]))])
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Select")); ("suggestions", (JArr [(JStr "s")])); ("source", (JArr [(JStr "a")]))]))])
 
 let c_dv4 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Notify ([]) None ((JObj [])) (C.C__e_tone__Critical)))
+  (C.C__node__Node "n" (C.C__vkind__Notify ([]) (Some "Hello") ((JObj [])) (C.C__e_tone__Default)))
 
 let c_de4 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("tone", (JStr "Danger"))]))])
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("title", (JStr "Hello"))]))])
 
 let c_dv5 : C.node int string =
   (C.C__node__Node "n" (C.C__vkind__Notify ([]) None ((JObj [])) (C.C__e_tone__Critical)))
 
 let c_de5 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("tone", (JStr "Negative"))]))])
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("tone", (JStr "Danger"))]))])
 
 let c_dv6 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Notify ([]) None ((JObj [])) (C.C__e_tone__Success)))
+  (C.C__node__Node "n" (C.C__vkind__Notify ([]) None ((JObj [])) (C.C__e_tone__Critical)))
 
 let c_de6 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("tone", (JStr "Success"))]))])
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("tone", (JStr "Negative"))]))])
 
 let c_dv7 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Grid (Some 3) None))
+  (C.C__node__Node "n" (C.C__vkind__Notify ([]) None ((JObj [])) (C.C__e_tone__Success)))
 
 let c_de7 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Grid")); ("cols", (JInt 3))]))])
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("tone", (JStr "Success"))]))])
 
 let c_dv8 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Grid None (Some "1fr 2fr")))
+  (C.C__node__Node "n" (C.C__vkind__Grid (Some 3) None))
 
 let c_de8 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Grid")); ("cols", (JInt 3)); ("template", (JStr "1fr 2fr"))]))])
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Grid")); ("cols", (JInt 3))]))])
 
 let c_dv9 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Select (false) ([]) (Some "x") None))
-
-let c_de9 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Select")); ("value", (JStr "x")); ("values", (JArr [(JStr "y")]))]))])
-
-let c_dv10 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Select (true) ([]) None (Some ["y"])))
-
-let c_de10 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Select")); ("multiple", (JBool true)); ("value", (JStr "x")); ("values", (JArr [(JStr "y")]))]))])
-
-let c_dv11 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Select (false) ([]) (Some "x") None))
-
-let c_de11 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Select")); ("multiple", (JBool false)); ("value", (JStr "x"))]))])
-
-let c_dv12 : C.node int string =
   (C.C__node__Node "n" (C.C__vkind__Grid None (Some "1fr 2fr")))
 
-let c_de12 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Grid")); ("cols", (JStr "three")); ("template", (JStr "1fr 2fr"))]))])
+let c_de9 : jval int string =
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Grid")); ("cols", (JInt 3)); ("template", (JStr "1fr 2fr"))]))])
 
-let c_dv13 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Select (true) ([]) None (Some ["y"])))
-
-let c_de13 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Select")); ("multiple", (JBool true)); ("value", (JInt 7)); ("values", (JArr [(JStr "y")]))]))])
-
-let c_dv14 : C.node int string =
+let c_dv10 : C.node int string =
   (C.C__node__Node "n" (C.C__vkind__Select (false) ([]) (Some "x") None))
 
+let c_de10 : jval int string =
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Select")); ("value", (JStr "x")); ("values", (JArr [(JStr "y")]))]))])
+
+let c_dv11 : C.node int string =
+  (C.C__node__Node "n" (C.C__vkind__Select (true) ([]) None (Some ["y"])))
+
+let c_de11 : jval int string =
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Select")); ("multiple", (JBool true)); ("value", (JStr "x")); ("values", (JArr [(JStr "y")]))]))])
+
+let c_dv12 : C.node int string =
+  (C.C__node__Node "n" (C.C__vkind__Select (false) ([]) (Some "x") None))
+
+let c_de12 : jval int string =
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Select")); ("multiple", (JBool false)); ("value", (JStr "x"))]))])
+
+let c_dv13 : C.node int string =
+  (C.C__node__Node "n" (C.C__vkind__Grid None (Some "1fr 2fr")))
+
+let c_de13 : jval int string =
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Grid")); ("cols", (JStr "three")); ("template", (JStr "1fr 2fr"))]))])
+
+let c_dv14 : C.node int string =
+  (C.C__node__Node "n" (C.C__vkind__Select (true) ([]) None (Some ["y"])))
+
 let c_de14 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Select")); ("value", (JStr "x")); ("values", (JInt 5))]))])
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Select")); ("multiple", (JBool true)); ("value", (JInt 7)); ("values", (JArr [(JStr "y")]))]))])
 
 let c_dv15 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Notify ([]) None ((JObj [])) (C.C__e_tone__Default)))
+  (C.C__node__Node "n" (C.C__vkind__Select (false) ([]) (Some "x") None))
 
 let c_de15 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("args", (JObj []))]))])
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Select")); ("value", (JStr "x")); ("values", (JInt 5))]))])
 
 let c_dv16 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Notify ([("k", "v")]) None ((JObj [])) (C.C__e_tone__Default)))
+  (C.C__node__Node "n" (C.C__vkind__Notify ([]) None ((JObj [])) (C.C__e_tone__Default)))
 
 let c_de16 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("args", (JObj [("k", (JStr "v"))]))]))])
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("args", (JObj []))]))])
 
 let c_dv17 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Notify ([]) None ((JObj [])) (C.C__e_tone__Default)))
+  (C.C__node__Node "n" (C.C__vkind__Notify ([("k", "v")]) None ((JObj [])) (C.C__e_tone__Default)))
 
 let c_de17 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("payload", (JObj []))]))])
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("args", (JObj [("k", (JStr "v"))]))]))])
 
 let c_dv18 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Notify ([]) None ((JObj [("b", (JArr [(JBool true)])); ("a", (JStr "x"))])) (C.C__e_tone__Default)))
-
-let c_de18 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("payload", (JObj [("b", (JArr [(JBool true)])); ("a", (JStr "x"))]))]))])
-
-let c_dv19 : C.node int string =
   (C.C__node__Node "n" (C.C__vkind__Notify ([]) None ((JObj [])) (C.C__e_tone__Default)))
 
+let c_de18 : jval int string =
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("payload", (JObj []))]))])
+
+let c_dv19 : C.node int string =
+  (C.C__node__Node "n" (C.C__vkind__Notify ([]) None ((JObj [("b", (JArr [(JBool true)])); ("a", (JStr "x"))])) (C.C__e_tone__Default)))
+
 let c_de19 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("tone", (JStr "Default"))]))])
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("payload", (JObj [("b", (JArr [(JBool true)])); ("a", (JStr "x"))]))]))])
 
 let c_dv20 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Place (Some (C.C__r_point__Mk (1) (2))) None))
+  (C.C__node__Node "n" (C.C__vkind__Notify ([]) None ((JObj [])) (C.C__e_tone__Default)))
 
 let c_de20 : jval int string =
-  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Place")); ("position", (JObj [("left", (JInt 1)); ("y", (JInt 2))]))]))])
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Notify")); ("tone", (JStr "Default"))]))])
 
 let c_dv21 : C.node int string =
-  (C.C__node__Node "n" (C.C__vkind__Place None (Some (C.C__u_mark__Pin (Some (C.C__r_point__Mk (1) (2))) ("a")))))
+  (C.C__node__Node "n" (C.C__vkind__Place (Some (C.C__r_point__Mk (1) (2))) None))
 
 let c_de21 : jval int string =
+  (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Place")); ("position", (JObj [("left", (JInt 1)); ("y", (JInt 2))]))]))])
+
+let c_dv22 : C.node int string =
+  (C.C__node__Node "n" (C.C__vkind__Place None (Some (C.C__u_mark__Pin (Some (C.C__r_point__Mk (1) (2))) ("a")))))
+
+let c_de22 : jval int string =
   (JObj [("id", (JStr "n")); ("kind", (JObj [("$type", (JStr "Place")); ("mark", (JObj [("$type", (JStr "Pin")); ("text", (JStr "a")); ("where", (JObj [("x", (JInt 1)); ("left", (JInt 9)); ("y", (JInt 2))]))]))]))])
 
 let c_dr0 : jval int string =
@@ -1043,6 +1077,7 @@ let c_decode_agree : unit =
   assert_norm (C.dec_node c_de19 == Ok c_dv19);
   assert_norm (C.dec_node c_de20 == Ok c_dv20);
   assert_norm (C.dec_node c_de21 == Ok c_dv21);
+  assert_norm (C.dec_node c_de22 == Ok c_dv22);
   assert_norm (Error? (C.dec_node c_dr0));
   assert_norm (Error? (C.dec_node c_dr1));
   assert_norm (Error? (C.dec_node c_dr2));
@@ -1118,28 +1153,52 @@ let ch_de10 : jval int string =
   (JObj [("kind", (JStr "Link")); ("id", (JStr "k")); ("hint", (JStr "x")); ("ref", (JStr "r"))])
 
 let ch_dv11 : CH.node int string =
-  (CH.C__node__Label "l" ("n") (Some true) (Some "t"))
+  (CH.C__node__Link__NoSource "k" (Some "t") None None None)
 
 let ch_de11 : jval int string =
-  (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("name", (JStr "n")); ("isHidden", (JBool true)); ("tip", (JStr "t"))])
+  (JObj [("kind", (JStr "Link")); ("id", (JStr "k")); ("title", (JStr "t"))])
 
 let ch_dv12 : CH.node int string =
-  (CH.C__node__Label "l" ("n") None None)
+  (CH.C__node__Label "l" ("n") (Some true) (Some "t"))
 
 let ch_de12 : jval int string =
-  (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("name", (JStr "n")); ("tip", (JStr "t"))])
+  (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("name", (JStr "n")); ("isHidden", (JBool true)); ("tip", (JStr "t"))])
 
 let ch_dv13 : CH.node int string =
-  (CH.C__node__Place "p" None None ((CH.C__r_spot__Mk (Some "a") (Some "b"))) None None)
+  (CH.C__node__Label "l" ("n") None None)
 
 let ch_de13 : jval int string =
-  (JObj [("kind", (JStr "Place")); ("id", (JStr "p")); ("spot", (JObj [("s", (JStr "a")); ("t", (JStr "b"))]))])
+  (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("name", (JStr "n")); ("tip", (JStr "t"))])
 
 let ch_dv14 : CH.node int string =
-  (CH.C__node__Place "p" None None ((CH.C__r_spot__Mk None None)) None None)
+  (CH.C__node__Place "p" None None ((CH.C__r_spot__Mk (Some "a") (Some "b"))) None None)
 
 let ch_de14 : jval int string =
+  (JObj [("kind", (JStr "Place")); ("id", (JStr "p")); ("spot", (JObj [("s", (JStr "a")); ("t", (JStr "b"))]))])
+
+let ch_dv15 : CH.node int string =
+  (CH.C__node__Place "p" None None ((CH.C__r_spot__Mk None None)) None None)
+
+let ch_de15 : jval int string =
   (JObj [("kind", (JStr "Place")); ("id", (JStr "p")); ("spot", (JObj [("t", (JStr "b"))]))])
+
+let ch_dv16 : CH.node int string =
+  (CH.C__node__Shape "s" (Some "1") None (Some "3") (Some "x") (Some CH.C__e_tone__Critical) (Some "4") (Some (CH.C__u_pair__Two (Some "p") (Some "q"))) None None)
+
+let ch_de16 : jval int string =
+  (JObj [("kind", (JStr "Shape")); ("id", (JStr "s")); ("z", (JStr "x")); ("a", (JStr "1")); ("b", (JStr "2")); ("c", (JStr "3")); ("e", (JStr "Danger")); ("f", (JStr "4")); ("u", (JObj [("kind", (JStr "Two")); ("p", (JStr "p")); ("q", (JStr "q"))]))])
+
+let ch_dv17 : CH.node int string =
+  (CH.C__node__Shape "s" None (Some "2") None None None None (Some (CH.C__u_pair__Two None None)) None None)
+
+let ch_de17 : jval int string =
+  (JObj [("kind", (JStr "Shape")); ("id", (JStr "s")); ("a", (JStr "1")); ("b", (JStr "2")); ("c", (JStr "3")); ("f", (JStr "4")); ("u", (JObj [("kind", (JStr "Two")); ("q", (JStr "q"))]))])
+
+let ch_dv18 : CH.node int string =
+  (CH.C__node__Shape "s" None None None (Some "y") (Some CH.C__e_tone__Success) None (Some CH.C__u_pair__One) None None)
+
+let ch_de18 : jval int string =
+  (JObj [("kind", (JStr "Shape")); ("id", (JStr "s")); ("z", (JStr "y")); ("c", (JStr "3")); ("e", (JStr "Success")); ("f", (JStr "4")); ("u", (JObj [("kind", (JStr "One"))]))])
 
 let ch_dr0 : jval int string =
   (JObj [("kind", (JStr "Gate")); ("id", (JStr "g")); ("isOpen", (JStr "yes"))])
@@ -1177,6 +1236,12 @@ let ch_dr10 : jval int string =
 let ch_dr11 : jval int string =
   (JObj [("kind", (JStr "Label")); ("id", (JStr "l")); ("name", (JStr "n")); ("isHidden", (JStr "yes"))])
 
+let ch_dr12 : jval int string =
+  (JObj [("kind", (JStr "Shape")); ("id", (JStr "s")); ("z", (JStr "x")); ("c", (JInt 5))])
+
+let ch_dr13 : jval int string =
+  (JObj [("kind", (JStr "Shape")); ("id", (JStr "s")); ("u", (JObj [("kind", (JStr "Two")); ("p", (JStr "p")); ("q", (JInt 5))]))])
+
 let ch_decode_agree : unit =
   assert_norm (CH.dec_node ch_de0 == Ok ch_dv0);
   assert_norm (CH.dec_node ch_de1 == Ok ch_dv1);
@@ -1193,6 +1258,10 @@ let ch_decode_agree : unit =
   assert_norm (CH.dec_node ch_de12 == Ok ch_dv12);
   assert_norm (CH.dec_node ch_de13 == Ok ch_dv13);
   assert_norm (CH.dec_node ch_de14 == Ok ch_dv14);
+  assert_norm (CH.dec_node ch_de15 == Ok ch_dv15);
+  assert_norm (CH.dec_node ch_de16 == Ok ch_dv16);
+  assert_norm (CH.dec_node ch_de17 == Ok ch_dv17);
+  assert_norm (CH.dec_node ch_de18 == Ok ch_dv18);
   assert_norm (Error? (CH.dec_node ch_dr0));
   assert_norm (Error? (CH.dec_node ch_dr1));
   assert_norm (Error? (CH.dec_node ch_dr2));
@@ -1204,4 +1273,6 @@ let ch_decode_agree : unit =
   assert_norm (Error? (CH.dec_node ch_dr8));
   assert_norm (Error? (CH.dec_node ch_dr9));
   assert_norm (Error? (CH.dec_node ch_dr10));
-  assert_norm (Error? (CH.dec_node ch_dr11))
+  assert_norm (Error? (CH.dec_node ch_dr11));
+  assert_norm (Error? (CH.dec_node ch_dr12));
+  assert_norm (Error? (CH.dec_node ch_dr13))

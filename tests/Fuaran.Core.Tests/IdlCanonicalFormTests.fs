@@ -853,38 +853,43 @@ let tests =
                     "a default writing a member while its sibling is absent"
                     spotNonEmpty (VRecord []),
                     "Place",
-                    "a default of a record declaring WhenNonEmpty, its member absent (a list literal is empty or absent)" ] do
+                    "a default of a record declaring WhenNonEmpty, its member absent (a list literal is empty or absent)"
+                    spotOf
+                        [ plain "s" TStr Optional
+                          { plain "t" TStr (OmitDefault(VStr "z")) with
+                              Presence = Some(WhenPresent "s") } ]
+                        (VRecord [ "t", VStr "z" ]),
+                    "Place",
+                    "a default writing a conditional member at its own default, where its condition fails (its absence)" ] do
                   Expect.equal (refusalOf v tag) "(modelled)" (sprintf "%s: %s is modelled" tag what)
 
-              // REFUSED, each by the sentence naming what the model cannot state.
+              // REFUSED by the model, by the sentence naming what its type cannot state.
+              Expect.stringContains
+                  (refusalOf CanonicalFormHostsIdl.idl "Gate")
+                  "which compares the number its sibling 'count' holds with VInt 1: the opaque numeric model cannot spell it"
+                  "Gate is refused by name"
 
-              for v, tag, phrase in
-                  [ CanonicalFormHostsIdl.idl,
-                    "Gate",
-                    "which compares the number its sibling 'count' holds with VInt 1: the opaque numeric model cannot spell it"
-                    recordField "Paging" "pageSize" (aliased [ "size" ]) LayoutIdl.layout,
-                    "Grid",
-                    "a member of an inline declaration takes no alias and no presence condition"
-                    spot (VRecord [ "t", VStr "b" ]),
-                    "Place",
-                    "a declared default holding member 't' where its presence condition fails, a value the model's type does not hold"
-                    spotEquals (VRecord [ "t", VStr "b" ]),
-                    "Place",
-                    "a declared default holding member 't' where its presence condition fails, a value the model's type does not hold"
-                    spotAbsent (VRecord [ "s", VStr "a"; "t", VStr "b" ]),
-                    "Place",
-                    "a declared default holding member 't' where its presence condition fails, a value the model's type does not hold"
-                    spotNonEmpty (VRecord [ "t", VList [] ]),
-                    "Place",
-                    "a declared default holding member 't' where its presence condition fails, a value the model's type does not hold"
-                    hostOnlySibling,
-                    "Grid",
-                    "the presence condition of member 'template' over 'host', which the model does not hold as a member of its own" ] do
-                  Expect.stringContains (refusalOf v tag) phrase (tag + " is refused by name")
+              // REFUSED by the declaration check, which the target asks first (D293): its first fault.
+              for v, tag in
+                  [ recordField "Paging" "pageSize" (aliased [ "size" ]) LayoutIdl.layout, "Grid"
+                    spot (VRecord [ "t", VStr "b" ]), "Place"
+                    spotEquals (VRecord [ "t", VStr "b" ]), "Place"
+                    spotAbsent (VRecord [ "s", VStr "a"; "t", VStr "b" ]), "Place"
+                    spotNonEmpty (VRecord [ "t", VList [] ]), "Place"
+                    hostOnlySibling, "Grid" ] do
+                  match faults v with
+                  | [] -> failtestf "%s: the declaration check admits it" tag
+                  | _ ->
+                      Expect.stringContains
+                          (refusalOf v tag)
+                          ("a vocabulary the declaration check refuses ("
+                           + VocabularyFault.describe (Declare.errors v).Head
+                           + ")")
+                          (tag + " is refused in the check's words")
 
-              // The four default rows above are the declaration check's refusals too; the model's own rule
-              // is still reached by a vocabulary the check admits: a member at its own default under
-              // another spelling (a JSON object in another key order, one value under the sorted order).
+              // The model's own default rule is reached by a vocabulary the check admits: a member at its
+              // own default under another spelling (a JSON object in another key order, one value under
+              // the sorted order).
               let reordered =
                   spotOf
                       [ plain "s" TStr Optional
@@ -962,7 +967,7 @@ let tests =
 
               for v, phrase, what in
                   [ kindField "Gate" "count" (aliased [ "id" ]) proved,
-                    "kind 'Gate', field 'count': the alias 'id' is a key its object already carries (the node id)",
+                    "kind 'Gate', field 'count': the alias 'id' is a key its object already carries (the node id), so a document holding that key would read it as this member",
                     "a kind's alias spelt as the node id under the flat envelope"
                     kindField "Gate" "count" (aliased [ "hidden" ]) proved,
                     "kind 'Gate', field 'count': the alias 'hidden' is a key its object already carries (the node-envelope field 'hidden')",
@@ -990,10 +995,10 @@ let tests =
                     "an envelope member's alias spelt as the node id under the nested envelope"
                     // Refused before Phase 723 too: the discriminator, and a key a presence-keyed case lays.
                     kindField "Gate" "count" (aliased [ "kind" ]) proved,
-                    "the member 'kind' is on its object twice",
+                    "kind 'Gate': the member 'kind' is on its object twice once inline declarations are laid out: the discriminator and field 'count'",
                     "a kind's alias spelt as the discriminator"
                     kindField "Grid" "caption" (aliased [ "rowKey" ]) LayoutIdl.layout,
-                    "the member 'rowKey' is on its object twice",
+                    "kind 'Grid': the member 'rowKey' is on its object twice once inline declarations are laid out: field 'identity' (presence-keyed union 'RowIdentity') and field 'caption'",
                     "an alias spelt as a key a presence-keyed case lays" ] do
                   refusedAs what phrase v
 
@@ -1227,7 +1232,7 @@ let tests =
                       [ generic "Box" [ plain "v" (TVar "T") (OmitDefault bad) ] ])
 
               refusedWith
-                  "record 'Box', field 'v': the omit-at-default value is not canonical at the instantiation Box<Spot>"
+                  "record 'Box', field 'v': the omit-at-default value is not canonical at the instantiation Box<Spot> and at least 0 more: it holds member 't' of record 'Spot'"
                   paramDefault
 
               refusedWith
@@ -1264,6 +1269,73 @@ let tests =
                           [ { Kind = "Place"
                               Field = "spot"
                               Value = VRecord [ "t", VStr "b" ] } ] }
+
+              // And so is a value a presence-keyed case SYNTHESISES (D293): `ByUrl` lays `sp`, a member of
+              // `ByRef`, at its declared value, which the encoder writes without `t`.
+              let synthesising (value: IdlValue) =
+                  { proved with
+                      Unions =
+                          proved.Unions
+                          |> List.map (fun u ->
+                              if u.Name = "Source" then
+                                  { u with
+                                      Cases =
+                                          u.Cases
+                                          |> List.map (fun c ->
+                                              if c.Tag = "ByRef" then
+                                                  { c with
+                                                      Fields = c.Fields @ [ plain "sp" spot Optional ] }
+                                              else
+                                                  c)
+                                      Discrimination =
+                                          UnionDiscrimination.ByPresence
+                                              [ { Case = "ByUrl"
+                                                  Key = "url"
+                                                  Synthesised = [ "sp", value ] }
+                                                { Case = "ByRef"
+                                                  Key = "ref"
+                                                  Synthesised = [] } ] }
+                              else
+                                  u) }
+
+              refusedWith
+                  "union 'Source', case 'ByUrl': the synthesised value is not canonical: it holds member 't' of record 'Spot', which is meaningful only while 's' is present, and there it is not, so the encoder drops it"
+                  (synthesising (VRecord [ "t", VStr "b" ]))
+
+              Expect.isEmpty
+                  (faults (synthesising (VRecord [ "s", VStr "a"; "t", VStr "b" ])))
+                  "a synthesised value whose member's condition holds is admitted"
+
+              // A host encoder handed an unchecked vocabulary whose equality names no sibling refuses the
+              // construct, the condition, in one sentence on both hosts.
+              let noSibling =
+                  kindField
+                      "Gate"
+                      "alert"
+                      (fun f ->
+                          { f with
+                              Presence = Some(WhenEquals("nosuch", VStr "x")) })
+                      proved
+
+              for name, emitted in
+                  [ "F#", Gen.fsharpModule "M" noSibling [ "Gate" ]
+                    "TypeScript", Gen.typescriptModule noSibling [ "Gate" ] ] do
+                  match emitted with
+                  | Error(CodegenError.UnsupportedConstruct(construct, _, _)) ->
+                      Expect.equal
+                          construct
+                          "the presence condition of field 'alert', which names 'nosuch', no member of its owner"
+                          (name + " names the condition")
+                  | other -> failtestf "%s: %A" name (Result.map ignore other)
+
+              // The layout check is the one every backend asks, so the F# entry refuses it too.
+              match Gen.fsharpModule "M" (synthesising (VRecord [ "t", VStr "b" ])) [ "Link" ] with
+              | Ok _ -> failtest "the F# backend emitted a vocabulary synthesising a value that is not canonical"
+              | Error e ->
+                  Expect.stringContains
+                      (CodegenError.describe e)
+                      "the synthesised value is not canonical"
+                      "the F# backend names the fault"
 
           testCase "the validator refuses an ill-formed declaration at its path, by name"
           <| fun _ ->

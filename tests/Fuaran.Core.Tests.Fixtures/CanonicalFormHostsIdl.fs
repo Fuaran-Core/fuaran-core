@@ -136,14 +136,18 @@ let generatedFile = "tests/Fuaran.Core.Tests/CanonicalFormGenerated.fs"
 /// Phase 723 (DECISIONS.md D290) — the vocabulary the F\* backend is certified over for these shapes
 /// (`proofs/CanonicalFormHostsVocabulary.fst`): the declarations above, under the flat node envelope
 /// with a `kind` discriminator and members in declared order, so a kind's aliased and conditional
-/// members share the node's own object with `id`. Five departures, each for the model: `unit` is
+/// members share the node's own object with `id`. Six departures, each for the model: `unit` is
 /// present while `open` is `true` rather than while `count` is `1`, since the model's numbers are
 /// opaque and an equality with an int is refused by name; `mode`, a member omitted at its default,
 /// is present only while `count` is, so a condition on a member absent at a default is proved too;
 /// `Label` reads its one required member under an alias; the node envelope declares
 /// `hidden` (read under `isHidden`) and `tip` (only while `hidden` is present), members of every
-/// kind's object; and `Place` holds `spot`, a `Spot` record omitted at a declared default that
-/// writes its conditional member `t` where its condition holds (D291).
+/// kind's object; `Place` holds `spot`, a `Spot` record omitted at a declared default that
+/// writes its conditional member `t` where its condition holds (D291); and `Shape` holds the forms the
+/// model's type takes for the rest (D293): `a`, `b` and `c` each conditional on the later `z`, so `z`
+/// carries three refinements joined on one binder (a presence test, an absence test and an equality
+/// over a STRING sibling), `f` only while the OPTIONAL enum `e` is `Critical`, and `u`, a tagged union
+/// whose case `Two` holds `q` only while its own `p` is present (a condition inside a union case).
 let proved: Idl =
     let gate (fields: IdlField list) =
         fields
@@ -177,7 +181,39 @@ let proved: Idl =
             @ [ kind
                     "Label"
                     [ { field "name" TStr Required with
-                          Aliases = [ "caption" ] } ] ]
+                          Aliases = [ "caption" ] } ]
+                kind
+                    "Shape"
+                    [ { field "a" TStr Optional with
+                          Presence = Some(WhenPresent "z") }
+                      { field "b" TStr Optional with
+                          Presence = Some(WhenAbsent "z") }
+                      { field "c" TStr Optional with
+                          Presence = Some(WhenEquals("z", VStr "x")) }
+                      field "z" TStr Optional
+                      field "e" (TEnum "Tone") Optional
+                      { field "f" TStr Optional with
+                          Presence = Some(WhenEquals("e", VEnum "Critical")) }
+                      field "u" (TUnion("Pair", [])) Optional ] ]
+        Unions =
+            idl.Unions
+            @ [ { Name = "Pair"
+                  Params = []
+                  Cases =
+                    [ { Tag = "Two"
+                        Fields =
+                          [ field "p" TStr Optional
+                            { field "q" TStr Optional with
+                                Presence = Some(WhenPresent "p") } ]
+                        Annotations = Annotations.Empty
+                        Hosted = None }
+                      { Tag = "One"
+                        Fields = []
+                        Annotations = Annotations.Empty
+                        Hosted = None } ]
+                  Annotations = Annotations.Empty
+                  TagRule = UnionTagRule.CaseName
+                  Discrimination = UnionDiscrimination.Tagged } ]
         Records =
             idl.Records
             @ [ { Name = "Spot"
@@ -221,12 +257,19 @@ let provedDocuments: string list =
       // beside a presence-keyed union: `heading` is `title`, and the keys present pick the case.
       """{"kind":"Link","id":"k","heading":"h","hint":"x","url":"u"}"""
       """{"kind":"Link","id":"k","hint":"x","ref":"r"}"""
+      // and holding no case of it: the keys of neither case are present.
+      """{"kind":"Link","id":"k","title":"t"}"""
       // the node envelope's members: `isHidden` is `hidden`, and `tip` is read while it is present.
       """{"kind":"Label","id":"l","name":"n","isHidden":true,"tip":"t"}"""
       """{"kind":"Label","id":"l","name":"n","tip":"t"}"""
       // a record at its declared default, and beside it, with its condition failing.
       """{"kind":"Place","id":"p","spot":{"s":"a","t":"b"}}"""
-      """{"kind":"Place","id":"p","spot":{"t":"b"}}""" ]
+      """{"kind":"Place","id":"p","spot":{"t":"b"}}"""
+      // three conditions over one string sibling, an equality over an optional enum (under its alias),
+      // and a condition inside a union case: each holding, then each failing, then the equality failing.
+      """{"kind":"Shape","id":"s","z":"x","a":"1","b":"2","c":"3","e":"Danger","f":"4","u":{"kind":"Two","p":"p","q":"q"}}"""
+      """{"kind":"Shape","id":"s","a":"1","b":"2","c":"3","f":"4","u":{"kind":"Two","q":"q"}}"""
+      """{"kind":"Shape","id":"s","z":"y","c":"3","e":"Success","f":"4","u":{"kind":"One"}}""" ]
 
 /// Documents over [[proved]] the interpreter REFUSES, each with what it shows.
 let provedRefused: (string * string) list =
@@ -247,4 +290,8 @@ let provedRefused: (string * string) list =
       "beside a member under its alias, both of a presence-keyed union's keys",
       """{"kind":"Link","id":"k","heading":"h","url":"u","ref":"r"}"""
       "a node envelope's member under its alias, of the wrong kind",
-      """{"kind":"Label","id":"l","name":"n","isHidden":"yes"}""" ]
+      """{"kind":"Label","id":"l","name":"n","isHidden":"yes"}"""
+      "a member whose equality over a string sibling holds, of the wrong kind",
+      """{"kind":"Shape","id":"s","z":"x","c":5}"""
+      "a union case's member whose condition holds, of the wrong kind",
+      """{"kind":"Shape","id":"s","u":{"kind":"Two","p":"p","q":5}}""" ]

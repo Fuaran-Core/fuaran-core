@@ -40,7 +40,7 @@ module internal FSharpCanonicalForm =
                     match g.Opt with
                     | Optional -> sprintf "(%s) = Some(%s)" (srcOf s) l
                     | _ -> sprintf "(%s) = %s" (srcOf s) l)
-            | None -> Error(CodegenError.UnsupportedDefault(TStr, v))
+            | None -> Error(Decl.undeclaredSibling self s)
 
     /// Phase 539 — the generated reading of a member a vocabulary declares aliases or a presence
     /// condition for ([[Decl.memberReading]], the one reading every decoder prints), over the object under
@@ -78,14 +78,11 @@ module internal FSharpCanonicalForm =
             sprintf "(dSpelt %s %s __fs)" (names r.Spellings) holds,
             sprintf "(dMember %s %s __fs)" (names r.Spellings) holds)
 
-    /// Whether any member of a field list reads through [[memberRead]].
-    let declaresCanonicalForm (fields: IdlField list) : bool =
-        fields
-        |> List.exists (fun f -> not (List.isEmpty f.Aliases) || f.Presence.IsSome)
-
-    /// Whether any field list of the vocabulary declares an alias or a presence condition.
+    /// Whether any field list of the vocabulary declares an alias or a presence condition, so a member
+    /// reads through [[memberRead]] (an enum case's alias is the enum decoder's, not a member read).
     let declaresCanonicalFormAnywhere (idl: Idl) : bool =
-        Decl.fieldLists idl |> List.exists declaresCanonicalForm
+        Decl.fieldLists idl
+        |> List.exists (List.exists Decl.fieldDeclaresAliasOrCondition)
 
     /// The decode helpers [[memberRead]] calls (Phase 539), emitted only when the vocabulary declares
     /// an alias or a presence condition, so every other module is byte-for-byte what it was.

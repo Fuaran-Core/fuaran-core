@@ -188,7 +188,7 @@ Certified against the reference implementation alone, so a host passing one offe
 | `identity` | [`conformance/identity/identity.json`](../conformance/identity/identity.json) | 9 |
 | `idlContracts` | [`conformance/idl/contracts.json`](../conformance/idl/contracts.json) | 78 |
 | `idlWiderUniverse` | [`conformance/idl/wider-universe.json`](../conformance/idl/wider-universe.json) | 49 |
-| `canonicalFormLaws` | [`conformance/laws/canonical-form-laws.json`](../conformance/laws/canonical-form-laws.json) | 29 |
+| `canonicalFormLaws` | [`conformance/laws/canonical-form-laws.json`](../conformance/laws/canonical-form-laws.json) | 30 |
 | `capabilityArgumentLaws` | [`conformance/laws/capability-argument-laws.json`](../conformance/laws/capability-argument-laws.json) | 20 |
 | `premiseFloatDigits` | [`conformance/premises/float-digits.json`](../conformance/premises/float-digits.json) | 163 |
 | `premiseSha256` | [`conformance/premises/sha256.json`](../conformance/premises/sha256.json) | 17 |

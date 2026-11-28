@@ -526,8 +526,8 @@ let model =
                   // asked for: admitted where the literal is a value of the argument, refused in the
                   // admissibility rule's own words where it is not. (The F# and TypeScript backends
                   // refuse the member at every instantiation: their record is generic.) The declaration
-                  // check refuses the second vocabulary itself, at the declaration; the model's refusal
-                  // is what a caller handing it an unchecked value meets.
+                  // check refuses the second vocabulary itself, at the declaration, and the target asks
+                  // that check before it models anything (Phase 723), so it refuses in the check's words.
                   let members = [ f "v" (TVar "T") (OmitDefault(VStr "")); f "w" TStr Required ]
 
                   let asRecord (arg: IdlType) =
@@ -555,7 +555,8 @@ let model =
 
                       Expect.stringContains
                           (refusalOf (declare TInt) "K")
-                          "no default literal for an IDL value of type TInt"
+                          ("a vocabulary the declaration check refuses ("
+                           + VocabularyFault.describe (Declare.errors (declare TInt)).Head)
                           (sprintf "%s: refused at an integer, where it is not" what)
 
                   Expect.stringContains

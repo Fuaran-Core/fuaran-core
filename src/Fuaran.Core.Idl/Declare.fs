@@ -273,6 +273,95 @@ module Declare =
                                   (HostedFormat.name fmt))
                       | _ -> () ]
 
+    // Phase 723 — a declared value (a default, or a value a presence-keyed case synthesises) is
+    // canonical only where no object in it holds a member whose presence condition fails over that
+    // object (D190.2): the encoder drops such a member, so the value its bytes read back to is
+    // another. A member at its absence (left out, or an `OmitDefault` member at its own default by
+    // the encoder's own test, [[Encode.atDefault]]) is dropped by nothing. Answers the first such
+    // member, what holds it and its condition, outermost first.
+    let rec private dropped (idl: Idl) (t: IdlType) (v: IdlValue) : (IdlField * string * PresenceCondition) option =
+        let within (holder: string) (fields: IdlField list) (authored: (string * IdlValue) list) =
+            let held (f: IdlField) =
+                authored
+                |> List.tryPick (fun (n, x) -> if n = f.Name && x <> VAbsent then Some x else None)
+
+            let atAbsence (f: IdlField) (x: IdlValue) =
+                match f.Opt, Encode.valueJson idl f.Type x with
+                | OmitDefault d, Ok j -> Encode.atDefault idl f.Type d x j
+                | _ -> false
+
+            fields
+            |> List.tryPick (fun f ->
+                match held f, f.Presence with
+                | Some x, Some c when
+                    f.Opt <> HostOnly
+                    && not (WireForm.holdsAuthored fields f.Name c authored)
+                    && not (atAbsence f x)
+                    ->
+                    Some(f, holder, c)
+                | _ -> None)
+            |> Option.orElseWith (fun () ->
+                fields |> List.tryPick (fun f -> held f |> Option.bind (dropped idl f.Type)))
+
+        let kindNamed (tag: string) (authored: (string * IdlValue) list) =
+            IdlLookup.tryKind idl tag
+            |> Option.bind (fun k -> within (sprintf "kind '%s'" k.Tag) k.Fields authored)
+
+        match WireForm.ofType idl t, v with
+        | WireForm.Record r, VRecord authored ->
+            r.Binding
+            |> Option.bind (fun b -> within (sprintf "record '%s'" r.Name) (WireForm.recordFields b r.Decl) authored)
+        | WireForm.Union u, VUnion(tag, authored) ->
+            match u.Binding, u.Decl.CaseByWireTag tag with
+            | Some b, Some c -> within (sprintf "union '%s' case '%s'" u.Name c.Tag) (WireForm.caseFields b c) authored
+            | _ -> None
+        | WireForm.Kind, VUnion(tag, authored)
+        | WireForm.Node, VNode(_, tag, authored) -> kindNamed tag authored
+        | WireForm.Node, VNodeEnv(_, envelope, tag, authored) ->
+            within "the node envelope" idl.NodeFields envelope
+            |> Option.orElseWith (fun () -> kindNamed tag authored)
+        | WireForm.Op, VUnion(tag, authored) ->
+            idl.Ops
+            |> List.tryFind (fun o -> o.Tag = tag)
+            |> Option.bind (fun o -> within (sprintf "op '%s'" o.Tag) o.Fields authored)
+        | (WireForm.List item | WireForm.Set item), VList xs -> xs |> List.tryPick (dropped idl item)
+        | WireForm.Map value, VMap entries -> entries |> List.tryPick (snd >> dropped idl value)
+        | WireForm.Tuple components, VList xs when List.length xs = List.length components ->
+            List.zip components xs |> List.tryPick (fun (c, x) -> dropped idl c x)
+        | WireForm.KeyedMap(k, value), VList pairs ->
+            pairs
+            |> List.tryPick (function
+                | VList [ a; b ] -> dropped idl k a |> Option.orElseWith (fun () -> dropped idl value b)
+                | _ -> None)
+        | _ -> None
+
+    // What [[dropped]] answers, in the sentence's words.
+    let private droppedText (f: IdlField, holder: string, c: PresenceCondition) =
+        let scalar (v: IdlValue) =
+            match v with
+            | VStr s
+            | VEnum s -> sprintf "\"%s\"" s
+            | VInt i -> string i
+            | VBool b -> if b then "true" else "false"
+            | other -> sprintf "%A" other
+
+        let meaningful =
+            match c with
+            | WhenPresent s -> sprintf "'%s' is present" s
+            | WhenAbsent s -> sprintf "'%s' is absent" s
+            | WhenEquals(s, v) -> sprintf "'%s' holds %s" s (scalar v)
+            | WhenNonEmpty -> "it holds a non-empty list"
+
+        sprintf
+            "it holds member '%s' of %s, which is meaningful only while %s, and there it is not, so the encoder drops it"
+            f.Name
+            holder
+            meaningful
+
+    // The refusal of a declared value [[dropped]] answers a member of.
+    let private notCanonical (at: string) (what: string) found =
+        sprintf "%s: %s is not canonical: %s" at what (droppedText found)
+
     /// **Phase 474 (DECISIONS.md D220) — where an INLINE declaration may stand, and what it may declare.**
     /// An inline record ([[IdlRecord.Inline]]) and a presence-keyed union ([[UnionDiscrimination.ByPresence]])
     /// have no wire object of their own: their members are keys of the object holding them. So each is
@@ -288,7 +377,8 @@ module Declare =
     /// envelope's `kind`, and in the flat envelope the discriminator and the members of the envelope
     /// and of a kind beside each other. A presence-keyed union names
     /// one rule per case, in case order, whose key is a `Required` wire member of that case and no
-    /// other case's key; a synthesised member is another case's member at a value of its type, and a
+    /// other case's key; a synthesised member is another case's member at a canonical value of its type
+    /// (Phase 723, D293: none of its objects holds a member whose condition fails there), and a
     /// case whose key is synthesised synthesises nothing (the reading would chain). Such a union takes
     /// no type parameter, no tag rule, no transparent case and no case-level host codec — it has no tag.
     /// Empty list ⇒ every inline declaration is well-placed and well-formed.
@@ -660,7 +750,10 @@ module Declare =
                                           (sprintf "%s: the synthesised member '%s' is never on the wire" label name)
                                   | Some f ->
                                       match Encode.renderValue idl f.Type v with
-                                      | Ok _ -> ()
+                                      | Ok _ ->
+                                          match dropped idl f.Type v with
+                                          | Some found -> fault sp (notCanonical label "the synthesised value" found)
+                                          | None -> ()
                                       | Error m ->
                                           fault
                                               sp
@@ -839,100 +932,6 @@ module Declare =
             match v, WireForm.ofType idl t with
             | VEnum w, WireForm.Enum e -> List.contains w e.WireCases
             | _ -> not (List.isEmpty (WireForm.scalarSpellings idl t v))
-
-        // Phase 723 — a declared value is canonical only where no object in it holds a member whose
-        // presence condition fails over that object (D190.2): the encoder drops such a member, so the
-        // value its bytes read back to is another. A member at its absence (left out, or an
-        // `OmitDefault` member at its own default in its value space) is dropped by nothing. Answers
-        // the first such member, what holds it and its condition, outermost first.
-        let rec dropped (t: IdlType) (v: IdlValue) : (IdlField * string * PresenceCondition) option =
-            let within (holder: string) (fields: IdlField list) (authored: (string * IdlValue) list) =
-                let held (f: IdlField) =
-                    authored
-                    |> List.tryPick (fun (n, x) -> if n = f.Name && x <> VAbsent then Some x else None)
-
-                let atAbsence (f: IdlField) (x: IdlValue) =
-                    match f.Opt with
-                    | OmitDefault d ->
-                        x = d
-                        || (match Encode.renderValue idl f.Type x, Encode.renderValue idl f.Type d with
-                            | Ok a, Ok b -> a = b
-                            | _ -> false)
-                    | _ -> false
-
-                fields
-                |> List.tryPick (fun f ->
-                    match held f, f.Presence with
-                    | Some x, Some c when
-                        f.Opt <> HostOnly
-                        && not (WireForm.holdsAuthored fields f.Name c authored)
-                        && not (atAbsence f x)
-                        ->
-                        Some(f, holder, c)
-                    | _ -> None)
-                |> Option.orElseWith (fun () ->
-                    fields |> List.tryPick (fun f -> held f |> Option.bind (dropped f.Type)))
-
-            let kindNamed (tag: string) (authored: (string * IdlValue) list) =
-                IdlLookup.tryKind idl tag
-                |> Option.bind (fun k -> within (sprintf "kind '%s'" k.Tag) k.Fields authored)
-
-            match WireForm.ofType idl t, v with
-            | WireForm.Record r, VRecord authored ->
-                r.Binding
-                |> Option.bind (fun b ->
-                    within (sprintf "record '%s'" r.Name) (WireForm.recordFields b r.Decl) authored)
-            | WireForm.Union u, VUnion(tag, authored) ->
-                match u.Binding, u.Decl.CaseByWireTag tag with
-                | Some b, Some c ->
-                    within (sprintf "union '%s' case '%s'" u.Name c.Tag) (WireForm.caseFields b c) authored
-                | _ -> None
-            | WireForm.Kind, VUnion(tag, authored)
-            | WireForm.Node, VNode(_, tag, authored) -> kindNamed tag authored
-            | WireForm.Node, VNodeEnv(_, envelope, tag, authored) ->
-                within "the node envelope" idl.NodeFields envelope
-                |> Option.orElseWith (fun () -> kindNamed tag authored)
-            | WireForm.Op, VUnion(tag, authored) ->
-                idl.Ops
-                |> List.tryFind (fun o -> o.Tag = tag)
-                |> Option.bind (fun o -> within (sprintf "op '%s'" o.Tag) o.Fields authored)
-            | (WireForm.List item | WireForm.Set item), VList xs -> xs |> List.tryPick (dropped item)
-            | WireForm.Map value, VMap entries -> entries |> List.tryPick (snd >> dropped value)
-            | WireForm.Tuple components, VList xs when List.length xs = List.length components ->
-                List.zip components xs |> List.tryPick (fun (c, x) -> dropped c x)
-            | WireForm.KeyedMap(k, value), VList pairs ->
-                pairs
-                |> List.tryPick (function
-                    | VList [ a; b ] -> dropped k a |> Option.orElseWith (fun () -> dropped value b)
-                    | _ -> None)
-            | _ -> None
-
-        // What [[dropped]] answers, in the sentence's words.
-        let droppedText (f: IdlField, holder: string, c: PresenceCondition) =
-            let scalar (v: IdlValue) =
-                match v with
-                | VStr s
-                | VEnum s -> sprintf "\"%s\"" s
-                | VInt i -> string i
-                | VBool b -> if b then "true" else "false"
-                | other -> sprintf "%A" other
-
-            let meaningful =
-                match c with
-                | WhenPresent s -> sprintf "'%s' is present" s
-                | WhenAbsent s -> sprintf "'%s' is absent" s
-                | WhenEquals(s, v) -> sprintf "'%s' holds %s" s (scalar v)
-                | WhenNonEmpty -> "it holds a non-empty list"
-
-            sprintf
-                "it holds member '%s' of %s, which is meaningful only while %s, and there it is not, so the encoder drops it"
-                f.Name
-                holder
-                meaningful
-
-        // The refusal of a declared value [[dropped]] answers a member of.
-        let notCanonical (at: string) (what: string) found =
-            sprintf "%s: %s is not canonical: %s" at what (droppedText found)
 
         // At an instantiation, the same answer as the verdict's reason, told from an encoder's refusal.
         let notCanonicalWhy = "not canonical: "
@@ -1308,7 +1307,7 @@ module Declare =
                   | OmitDefault d, t when not (mentionsVar t) ->
                       match Encode.renderValue idl t d with
                       | Ok _ ->
-                          match dropped t d with
+                          match dropped idl t d with
                           | Some found ->
                               fault
                                   (path @ [ key "optionality"; key "default" ])
@@ -1322,7 +1321,7 @@ module Declare =
                   // what it holds of its own is judged here, and the rest at each instantiation
                   // ([[instantiatedDefaultErrors]], asked only where the encoder needs the binding).
                   | OmitDefault d, t when Result.isOk (Encode.renderValue idl t d) ->
-                      match dropped t d with
+                      match dropped idl t d with
                       | Some found ->
                           fault
                               (path @ [ key "optionality"; key "default" ])
@@ -1500,7 +1499,7 @@ module Declare =
                                           // Phase 723 — and is canonical there ([[dropped]]): which
                                           // member holds a condition can be the instantiation's to say.
                                           | Ok _ ->
-                                              match dropped at d with
+                                              match dropped idl at d with
                                               | Some found ->
                                                   Instantiations.Verdict.Fails(notCanonicalWhy + droppedText found)
                                               | None -> Instantiations.Verdict.Fits
@@ -1902,7 +1901,7 @@ module Declare =
               | Some f ->
                   match Encode.renderValue idl f.Type d.Value with
                   | Ok _ ->
-                      match dropped f.Type d.Value with
+                      match dropped idl f.Type d.Value with
                       | Some found -> fault [ key "defaults"; item i; key "value" ] (notCanonical at "the value" found)
                       | None -> ()
                   | Error m ->

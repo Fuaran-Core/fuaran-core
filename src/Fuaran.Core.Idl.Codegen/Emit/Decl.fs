@@ -822,11 +822,15 @@ module internal Decl =
     let reachesWider (idl: Idl) : bool =
         fieldLists idl |> List.exists (List.exists (fun f -> widerType f.Type))
 
+    /// Whether a field declares an alias or a presence condition: the one question every backend asks
+    /// before it reads a member other than under its one name ([[memberReading]]).
+    let fieldDeclaresAliasOrCondition (f: IdlField) : bool =
+        not (List.isEmpty f.Aliases) || f.Presence.IsSome
+
     /// Whether the vocabulary declares a member's alias, an enum case's alias or a presence condition
     /// anywhere; a TypeScript module whose vocabulary declares none carries none of the helpers (D289.3).
     let declaresAliasOrCondition (idl: Idl) : bool =
-        (fieldLists idl
-         |> List.exists (List.exists (fun f -> not (List.isEmpty f.Aliases) || f.Presence.IsSome)))
+        (fieldLists idl |> List.exists (List.exists fieldDeclaresAliasOrCondition))
         || (idl.Enums
             |> List.exists (fun e -> e.Aliases |> List.exists (fun (_, a) -> not (List.isEmpty a))))
 
@@ -870,7 +874,7 @@ module internal Decl =
                 PresenceReading.SiblingEquals(spellingsNamed s, values, absent)
             | Some WhenNonEmpty -> PresenceReading.SelfNonEmpty
 
-        if List.isEmpty f.Aliases && f.Presence.IsNone then
+        if not (fieldDeclaresAliasOrCondition f) then
             None
         else
             Some
@@ -1500,6 +1504,15 @@ module internal Decl =
             Declare.layoutErrors d.Idl |> List.tryHead
         else
             None
+
+    /// Phase 723 — the refusal of a host encoder whose presence condition names a sibling the owner
+    /// does not declare, which only a vocabulary the declaration check refuses reaches.
+    let undeclaredSibling (self: IdlField) (sibling: string) : CodegenError =
+        CodegenError.UnsupportedConstruct(
+            sprintf "the presence condition of field '%s', which names '%s', no member of its owner" self.Name sibling,
+            "a presence condition reads a sibling member of the same owner (D190.2)",
+            "correct the declaration — `Declare.errors` names every fault of the vocabulary"
+        )
 
     /// The construct a backend names when [[layoutFault]] answers a fault.
     let layoutFaultConstruct (fault: VocabularyFault) : string =

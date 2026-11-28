@@ -293,21 +293,13 @@ module Encode =
                     | (None | Some VAbsent), (Optional | OmitDefault _) -> go acc rest
                     | (None | Some VAbsent), Required -> Error(sprintf "required field '%s' is absent" f.Name)
                     // omit-at-default: a present value equal to the field's identity default
-                    // emits nothing. Equal IN THE SLOT'S VALUE SPACE (Phase 292), not as
-                    // authored terms: `VInt 2` and `VFloat 2.0` at a float slot are one value
-                    // with one encoding, and comparing the terms gave that value two — present
-                    // under one spelling, omitted under the other.
+                    // emits nothing ([[atDefault]]); comparing the terms gave one value two
+                    // encodings, present under one spelling and omitted under the other.
                     | Some v, OmitDefault d ->
                         match encodeValue idl f.Type v with
                         | Error m -> Error m
                         | Ok j ->
-                            let atDefault =
-                                v = d
-                                || (match encodeValue idl f.Type d with
-                                    | Ok jd -> sameCanonical idl j jd
-                                    | Error _ -> false)
-
-                            if atDefault then
+                            if atDefault idl f.Type d v j then
                                 go acc rest
                             else
                                 go ((f.Name, j) :: acc) rest
@@ -317,6 +309,15 @@ module Encode =
                         | Error m -> Error m
 
             go [] fields
+
+    /// The omit-at-default test: whether `v`, encoded as `j`, is the default `d` of a slot of type `t`.
+    /// Equal IN THE SLOT'S VALUE SPACE (Phase 292), not as authored terms: `VInt 2` and `VFloat 2.0` at
+    /// a float slot are one value with one encoding. The declaration check asks it too (Phase 723).
+    and internal atDefault (idl: Idl) (t: IdlType) (d: IdlValue) (v: IdlValue) (j: JVal) : bool =
+        v = d
+        || (match encodeValue idl t d with
+            | Ok jd -> sameCanonical idl j jd
+            | Error _ -> false)
 
     /// A node with no envelope as its `JVal`, laid out by the declared [[NodeEnvelopeShape]] —
     /// the tree, not the bytes: [[encode]] adds the declared key order and the refusal of an

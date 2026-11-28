@@ -72,6 +72,16 @@ let private refusalOf (t: IdlType) =
     | Ok _ -> None
     | Error e -> Some(CodegenError.describe e)
 
+/// Phase 723 — the refusal the target answers for a vocabulary the declaration check refuses: the
+/// check's first fault, in one sentence ([[FStarTarget.partition]] and every module entry alike).
+let private checkRefusal (idl: Idl) : string =
+    match Declare.errors idl with
+    | [] -> failtest "the declaration check admits the vocabulary, so the premise of this case moved"
+    | fault :: _ ->
+        sprintf
+            "the F* proof model cannot express a vocabulary the declaration check refuses (%s) (at the vocabulary)"
+            (VocabularyFault.describe fault)
+
 /// Phase 525 — a hosted slot with the given declared wire form and format (Phase 252).
 let private hostedAt (wire: IdlType option) (format: HostedFormat option) : IdlType =
     THosted
@@ -463,7 +473,9 @@ let idlFStarTargetTests =
               // `TKind` / `TOp` slots live in its OP vocabulary, which the model — a model of
               // nodes — does not walk, so those two classes are reached by the hand-written
               // cases above. Each row below names the class and what reaches it; a class the
-              // backend gains without a row here is a refusal nothing exercises.
+              // backend gains without a row here is a refusal nothing exercises. Since Phase 723 the
+              // target asks the declaration check first (D293), so a class only an ill-formed IDL
+              // reaches is refused in the check's words, naming the fault: those rows name it.
               let reached (idl: Idl) (tags: string list) =
                   match FStarTarget.vocabularyModule "M" idl tags with
                   | Ok _ -> None
@@ -498,13 +510,13 @@ let idlFStarTargetTests =
                     "which the model's string carries no predicate for",
                     (fun () -> refusalOf (hostedAt (Some TStr) (Some HostedFormat.Uuid)))
                     "an unresolved type parameter",
-                    "unresolved type parameter",
+                    "declaration check refuses ($[\"kinds\"][0][\"fields\"][0][\"type\"]: kind 'Only', field 'member': type variable 'T' names a type parameter, and a kind declares none)",
                     fun () -> reached (tinyIdl (TVar "T") Required) onlyTag
                     "an undeclared record",
-                    "undeclared record",
+                    "declaration check refuses ($[\"kinds\"][0][\"fields\"][0][\"type\"]: kind 'Only', field 'member': names record 'Missing', which the vocabulary does not declare)",
                     (fun () -> reached (tinyIdl (TRecord("Missing", [])) Required) onlyTag)
                     "an undeclared union",
-                    "undeclared union",
+                    "declaration check refuses ($[\"kinds\"][0][\"fields\"][0][\"type\"]: kind 'Only', field 'member': names union 'Missing', which the vocabulary does not declare)",
                     fun () -> reached (tinyIdl (TUnion("Missing", [])) Required) onlyTag
                     // Phase 732 — refused before the model is built, in the sentence every backend
                     // entry refuses a misapplied union or record reference in.
@@ -533,7 +545,7 @@ let idlFStarTargetTests =
                         |> fun idl -> reached idl onlyTag
                     "an undeclared kind", "undeclared kind", (fun () -> reached (tinyIdl TStr Required) [ "Absent" ])
                     "a default omitting a required member",
-                    "default omitting the required member",
+                    "declaration check refuses ($[\"kinds\"][0][\"fields\"][0][\"optionality\"][\"default\"]: kind 'Only', field 'member': the omit-at-default value does not fit the field's type (required field 'text' is absent))",
                     fun () ->
                         let idl =
                             tinyIdl (TUnion("Text", [])) (OmitDefault(VUnion("Inline", [])))
@@ -571,14 +583,7 @@ let idlFStarTargetTests =
                                         Tag = "Inline"
                                         Fields =
                                           [ { Name = "text"
-                                              Type = TStr
-                                              Opt = Required
-                                              Aliases = []
-                                              Keyed = false
-                                              Presence = None
-                                              Annotations = Annotations.Empty }
-                                            { Name = "lang"
-                                              Type = TStr
+                                              Type = TList TStr
                                               Opt = Required
                                               Aliases = []
                                               Keyed = false
@@ -595,11 +600,17 @@ let idlFStarTargetTests =
                                         TransparentUnions = [ "Text", "Inline" ] } }
                             onlyTag ]
 
-              for name, fragment, reach in classes do
-                  match reach () with
-                  | None -> failtestf "%s was NOT refused — the class is unreached, or the backend now admits it" name
-                  | Some why ->
-                      Expect.stringContains why fragment (sprintf "the refusal of %s names the construct" name)
+              let wrong =
+                  [ for name, fragment, reach in classes do
+                        match reach () with
+                        | None ->
+                            yield
+                                sprintf "%s was NOT refused — the class is unreached, or the backend now admits it" name
+                        | Some why when not (why.Contains fragment) ->
+                            yield sprintf "the refusal of %s does not name the construct (%A): %s" name fragment why
+                        | Some _ -> () ]
+
+              Expect.equal wrong [] "every class is refused, naming the construct"
 
           // ---- Phase 525: the model is of the decoder the hosts implement --------
 
@@ -637,7 +648,9 @@ let idlFStarTargetTests =
                   Expect.stringContains why "format 'date'" "the refusal names the format"
                   Expect.stringContains why "kind Only.member" "and where it was reached"
 
-          testCase "Phase 525 — a declared wire NO host can read is refused exactly as the hosts refuse it"
+          // Phase 723 — the target asks the declaration check first, which refuses the declaration
+          // itself, so the model is never asked; the F# host refuses it in its own sentence.
+          testCase "Phase 525 — a declared wire NO host can read is refused as the declaration check refuses it"
           <| fun _ ->
               let unreadable = hostedAt (Some TJson) None
 
@@ -645,7 +658,7 @@ let idlFStarTargetTests =
               | None, _ -> failtest "the model admitted a hosted wire form every host refuses"
               | Some _, Ok _ -> failtest "the F# host admitted it — the premise of this case moved"
               | Some why, Error fs ->
-                  Expect.stringContains why "declaring the wire form" "the hosts' own refusal"
+                  Expect.equal why (checkRefusal (tinyIdl unreadable Required)) "the declaration check's refusal"
                   Expect.stringContains (CodegenError.describe fs) "declaring the wire form" "the F# host's"
 
           testCase "Phase 525 — a default literal is admitted by the model exactly when the F# backend admits it"
@@ -876,14 +889,33 @@ let idlFStarTargetTests =
                       |> List.filter (fun (_, _, body) ->
                           not (body.Contains "sfx_" || body.Contains "match " || body.Contains "if "))
 
-                  // Phase 723 (D291) — a flat vocabulary whose node envelope declares a conditional member
-                  // has none: that member is on every kind's object. Its key order is held by the
-                  // prover instead, by the encode facts over its documents (`canonicalFormModels`).
+                  // Phase 723 (D291, D293) — a flat vocabulary whose node envelope declares a conditional
+                  // member has none: that member is on every kind's object. That is the one reason a model
+                  // may have none, and its key order is then held by the prover instead, by an encode fact
+                  // over each of its node constructors (`canonicalFormModels`).
                   if List.isEmpty plainArms then
                       Expect.isTrue
-                          (CertificationVectors.canonicalFormModels ()
-                           |> List.exists (fun v -> v.Model = g.Module))
-                          (sprintf "%s has at least one plain encoder arm to hold, or encode facts" g.Module)
+                          (flat && g.Idl.NodeFields |> List.exists (fun f -> f.Presence.IsSome))
+                          (sprintf
+                              "%s has no plain encoder arm only because every kind's object holds a conditional envelope member"
+                              g.Module)
+
+                      match
+                          CertificationVectors.canonicalFormModels ()
+                          |> List.tryFind (fun v -> v.Model = g.Module)
+                      with
+                      | None -> failtestf "%s has no plain encoder arm and no encode facts" g.Module
+                      | Some vm ->
+                          let facts =
+                              FStarTarget.vectorsModule "V" [ vm ]
+                              |> Result.defaultWith (CodegenError.describe >> failtest)
+
+                          for m in Regex.Matches(model, @"(?m)^  \| (C__node__\w+) :") do
+                              let ctor = m.Groups[1].Value
+
+                              Expect.isTrue
+                                  (Regex.IsMatch(facts, Regex.Escape ctor + @"\b"))
+                                  (sprintf "%s: an encode fact holds the node constructor %s" g.Module ctor)
 
                   for owner, tag, body in plainArms do
                       let modelKeys =
@@ -942,9 +974,9 @@ let idlFStarTargetTests =
           <| fun _ ->
               // The model's objects are literals read back by `find_field`, which returns the
               // FIRST entry under a key — so a member whose key the shape already carries would
-              // be a document the round trip cannot hold. `Declare.wireShapeErrors` refuses the
-              // same collisions at declaration; the target refuses them again because it is
-              // handed an `Idl` value, not a checked declaration.
+              // be a document the round trip cannot hold. `Declare.wireShapeErrors` refuses every
+              // such collision at declaration, and the target asks that check before it models
+              // anything (Phase 723), so each is refused in the check's own sentence.
               let onlyKind (fieldName: string) (shape: WireShape) (nodeFields: IdlField list) =
                   let t = tinyIdl TStr Required
                   let k = t.Kinds.Head
@@ -959,60 +991,179 @@ let idlFStarTargetTests =
               let refusal (idl: Idl) =
                   match FStarTarget.vocabularyModule "M" idl [ "Only" ] with
                   | Ok _ -> None
-                  | Error(CodegenError.UnmodellableInFStar(construct, where)) -> Some(construct, where)
+                  | Error(CodegenError.UnmodellableInFStar _ as e) -> Some(CodegenError.describe e)
                   | Error e -> failtestf "refused through a different case: %s" (CodegenError.describe e)
 
               let flat =
                   { WireShape.Default with
                       NodeEnvelope = NodeEnvelopeShape.FlatKind }
 
-              let envelope (name: string) =
-                  [ { Name = name
-                      Type = TStr
-                      Opt = Required
-                      Aliases = []
-                      Keyed = false
-                      Presence = None
-                      Annotations = Annotations.Empty } ]
+              let memberNamed (name: string) =
+                  { Name = name
+                    Type = TStr
+                    Opt = Required
+                    Aliases = []
+                    Keyed = false
+                    Presence = None
+                    Annotations = Annotations.Empty }
 
-              Expect.equal
-                  (refusal (onlyKind "id" flat []))
-                  (Some("a member 'id' whose key the node object already carries", "kind Only"))
-                  "flat: a kind member named `id` collides with the node's id"
+              // A union case's object carries the discriminator beside its members in both shapes.
+              let caseNamedDiscriminator =
+                  { tinyIdl (TUnion("U", [])) Required with
+                      Unions =
+                          [ { TagRule = Fuaran.Core.Idl.UnionTagRule.CaseName
+                              Name = "U"
+                              Params = []
+                              Cases =
+                                [ { Hosted = None
+                                    Tag = "C"
+                                    Fields = [ memberNamed WireShape.Default.Discriminator ]
+                                    Annotations = Annotations.Empty } ]
+                              Annotations = Annotations.Empty
+                              Discrimination = UnionDiscrimination.Tagged } ] }
 
-              Expect.equal
-                  (refusal (onlyKind flat.Discriminator flat []))
-                  (Some(
-                      sprintf "a member '%s' whose key the node object already carries" flat.Discriminator,
-                      "kind Only"
-                  ))
-                  "flat: a kind member named the discriminator collides with the tag"
-
-              Expect.equal
-                  (refusal (onlyKind "shared" flat (envelope "shared")))
-                  (Some("a member 'shared' whose key the node envelope already carries", "kind Only"))
-                  "flat: a kind member sharing an envelope member's key collides in the one object"
-
-              Expect.equal
-                  (refusal (onlyKind "member" WireShape.Default (envelope "kind")))
-                  (Some("a member 'kind' whose key the node object already carries", "node envelope"))
-                  "nested: an envelope member named `kind` collides with the kind object's key"
-
-              Expect.equal
-                  (refusal (onlyKind WireShape.Default.Discriminator WireShape.Default []))
-                  (Some(
-                      sprintf "a member '%s' whose key the kind object already carries" WireShape.Default.Discriminator,
-                      "kind Only"
-                  ))
-                  "nested: a kind member named the discriminator collides with the tag in the kind object"
+              for idl, what in
+                  [ onlyKind "id" flat [], "flat: a kind member named `id` collides with the node's id"
+                    onlyKind flat.Discriminator flat [],
+                    "flat: a kind member named the discriminator collides with the tag"
+                    onlyKind "shared" flat [ memberNamed "shared" ],
+                    "flat: a kind member sharing an envelope member's key collides in the one object"
+                    onlyKind "member" WireShape.Default [ memberNamed "kind" ],
+                    "nested: an envelope member named `kind` collides with the kind object's key"
+                    onlyKind "member" WireShape.Default [ memberNamed "id" ],
+                    "nested: an envelope member named `id` collides with the node's id"
+                    onlyKind "member" flat [ memberNamed "id" ],
+                    "flat: an envelope member named `id` collides with the node's id"
+                    onlyKind "member" flat [ memberNamed flat.Discriminator ],
+                    "flat: an envelope member named the discriminator collides with the tag"
+                    onlyKind WireShape.Default.Discriminator WireShape.Default [],
+                    "nested: a kind member named the discriminator collides with the tag in the kind object"
+                    caseNamedDiscriminator, "a union case member named the discriminator collides with the case's tag" ] do
+                  Expect.equal (refusal idl) (Some(checkRefusal idl)) what
 
               Expect.isNone
                   (refusal (onlyKind "id" WireShape.Default []))
                   "nested: a kind member named `id` is NOT a collision — the node's id and the kind object are different objects"
 
               Expect.isNone
-                  (refusal (onlyKind "member" flat (envelope "other")))
+                  (refusal (onlyKind "member" flat [ memberNamed "other" ]))
                   "and a flat vocabulary with distinct keys is modelled"
+
+          // Phase 723 (DECISIONS.md D293) — the target is handed an `Idl` value, not a declaration
+          // that was checked. A vocabulary the declaration check refuses has no document that reads
+          // canonically, so a model of it would state a round trip nobody has checked (or not type at
+          // all): each entry asks the check whole first and refuses naming its first fault, never
+          // emitting and never throwing. One row per shape that was modelled, or threw, before.
+          testCase "the target never models a vocabulary the declaration check refuses, and refuses it by name"
+          <| fun _ ->
+              let field (name: string) (t: IdlType) (opt: Optionality) : IdlField =
+                  { Name = name
+                    Type = t
+                    Opt = opt
+                    Aliases = []
+                    Keyed = false
+                    Presence = None
+                    Annotations = Annotations.Empty }
+
+              let vocab (fields: IdlField list) (wire: WireShape) : Idl =
+                  { tinyIdl TStr Required with
+                      Kinds =
+                          [ { Tag = "K"
+                              Category = "c"
+                              Fields = fields
+                              Annotations = Annotations.Empty } ]
+                      Wire = wire }
+
+              let flat =
+                  { WireShape.Default with
+                      NodeEnvelope = NodeEnvelopeShape.FlatKind }
+
+              let cases =
+                  [ "a condition on a Required member",
+                    vocab
+                        [ field "s" TStr Optional
+                          { field "m" TStr Required with
+                              Presence = Some(WhenPresent "s") } ]
+                        WireShape.Default
+                    "WhenPresent over a Required sibling",
+                    vocab
+                        [ field "s" TStr Required
+                          { field "m" TStr Optional with
+                              Presence = Some(WhenPresent "s") } ]
+                        WireShape.Default
+                    "WhenPresent over an OmitDefault sibling",
+                    vocab
+                        [ field "s" TStr (OmitDefault(VStr "z"))
+                          { field "m" TStr Optional with
+                              Presence = Some(WhenPresent "s") } ]
+                        WireShape.Default
+                    "WhenNonEmpty on an OmitDefault list",
+                    vocab
+                        [ { field "m" (TList TStr) (OmitDefault(VList [])) with
+                              Presence = Some WhenNonEmpty } ]
+                        WireShape.Default
+                    "chained conditions",
+                    vocab
+                        [ { field "a" TStr Optional with
+                              Presence = Some(WhenPresent "b") }
+                          { field "b" TStr Optional with
+                              Presence = Some(WhenPresent "c") }
+                          field "c" TStr Optional ]
+                        WireShape.Default
+                    "a flat-envelope kind member aliased as the node id",
+                    vocab
+                        [ { field "count" TStr Optional with
+                              Aliases = [ "id" ] } ]
+                        flat
+                    "an alias spelt as a sibling's canonical name",
+                    vocab
+                        [ { field "a" TStr Optional with
+                              Aliases = [ "b" ] }
+                          field "b" TStr Optional ]
+                        WireShape.Default ]
+
+              for what, idl in cases do
+                  let expected = checkRefusal idl
+
+                  let answer (r: Result<string, CodegenError>) =
+                      match r with
+                      | Ok _ -> "(emitted)"
+                      | Error e -> CodegenError.describe e
+
+                  Expect.equal
+                      (FStarTarget.partition idl |> List.map (fun v -> v.Tag, v.Refusal))
+                      [ "K", Some expected ]
+                      (what + ": the kind is refused in the check's words")
+
+                  Expect.equal
+                      (answer (FStarTarget.vocabularyModule "M" idl [ "K" ]))
+                      expected
+                      (what + ": no model is emitted")
+
+                  Expect.equal
+                      (answer (FStarTarget.proofsModule "MProofs" "M" idl [ "K" ]))
+                      expected
+                      (what + ": no proof script is emitted")
+
+              // Behind the check, the model's own statement of a condition's absence answers a refusal
+              // for a member that has none, never an exception.
+              match Emit.FStarModel.absentValue "kind K.m" "m" None with
+              | Error e ->
+                  Expect.equal
+                      (CodegenError.describe e)
+                      "the F* proof model cannot express the presence condition of member 'm', which is neither optional nor omitted at a default, so it has no absence (at kind K.m)"
+                      "a required member's absence is refused by name"
+              | Ok v -> failtestf "a required member was given the absence %s" v
+
+              Expect.equal
+                  (Emit.FStarModel.absentValue "w" "m" (Some None))
+                  (Ok "None")
+                  "an optional member is absent as None"
+
+              Expect.equal
+                  (Emit.FStarModel.absentValue "w" "m" (Some(Some "d")))
+                  (Ok "d")
+                  "one omitted at a default is at it"
 
           testCase
               "the refusal for a colliding key is the kind's own verdict in the partition, so the committed header would name it"

@@ -192,8 +192,12 @@ let tests =
                   for name, gen in printers do
                       unsupportedDefault (name + ", " + what) (gen v)
 
+                  // Phase 723 — the target asks the declaration check first, and refuses in its words.
                   match FStarTarget.vocabularyModule "M" v [ "Holder" ] with
-                  | Error(CodegenError.UnsupportedDefault _) -> ()
+                  | Error(CodegenError.UnmodellableInFStar(construct, _)) when
+                      construct.StartsWith "a vocabulary the declaration check refuses ("
+                      ->
+                      ()
                   | other -> failtestf "F*, %s: %A" what (Result.map ignore other)
 
           testCase "every generator that prints a default prints one at each type"

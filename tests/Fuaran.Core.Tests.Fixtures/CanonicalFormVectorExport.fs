@@ -124,6 +124,8 @@ module CanonicalFormVectorExport =
         [ "alias-first-spelling", "alias", """{"$type":"Select","source":["a"]}"""
           "alias-second-spelling", "alias", """{"$type":"Select","suggestions":["a"]}"""
           "alias-canonical-wins", "alias", """{"$type":"Select","options":["a"],"source":["b"]}"""
+          // Phase 723 — two aliases and no canonical spelling: the first alias in declared order is read.
+          "alias-declared-order", "alias", """{"$type":"Select","suggestions":["s"],"source":["a"]}"""
           "alias-field-on-optional", "alias", """{"$type":"Notify","title":"Hello"}"""
           "alias-enum-case", "alias", """{"$type":"Notify","tone":"Danger"}"""
           "alias-enum-case-second", "alias", """{"$type":"Notify","tone":"Negative"}"""

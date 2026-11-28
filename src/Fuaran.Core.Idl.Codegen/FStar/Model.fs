@@ -85,6 +85,11 @@ module internal FStarModel =
         /// The member itself is anything but `Some []`.
         | SelfNonEmpty
 
+    /// Phase 723 — a member's presence condition with the F* term of the member's model value where
+    /// the condition fails: `None` for an optional member, its default's literal for one omitted at a
+    /// default ([[absentValue]]).
+    type Conditional = { Test: Condition; Absent: string }
+
     /// A member of the model: one declared field with its resolved slot. A host-only field
     /// has no wire projection and never becomes a member — the model is of the WIRE.
     type Member =
@@ -108,7 +113,7 @@ module internal FStarModel =
             /// canonical name, in declared order. The encoder never writes one.
             Aliases: string list
             /// Phase 723 — the condition the member is present under; `None` for an unconditional one.
-            Condition: Condition option
+            Condition: Conditional option
         }
 
     /// The authored field list the member `m` of a holder is looked up in: the holder's own, or,
@@ -153,6 +158,30 @@ module internal FStarModel =
 
     let unmodellable (construct: string) (where: string) =
         Error(CodegenError.UnmodellableInFStar(construct, where))
+
+    /// Phase 723 — the model value of the member `name` where its presence condition fails, from its
+    /// presence ([[Member.Presence]]): `None` for an optional member, its default's literal for one
+    /// omitted at a default. A required member has no absence to state, so a condition on it is refused
+    /// by name (the declaration check refuses it first).
+    let absentValue (where: string) (name: string) (presence: string option option) : Result<string, CodegenError> =
+        match presence with
+        | Some None -> Ok "None"
+        | Some(Some d) -> Ok d
+        | None ->
+            unmodellable
+                (sprintf
+                    "the presence condition of member '%s', which is neither optional nor omitted at a default, so it has no absence"
+                    name)
+                where
+
+    /// Phase 723 — the sibling a member's presence condition reads, if it reads one.
+    let conditionSibling (m: Member) : string option =
+        match m.Condition |> Option.map _.Test with
+        | Some(Condition.SiblingPresent s)
+        | Some(Condition.SiblingAbsent s)
+        | Some(Condition.SiblingEquals(s, _)) -> Some s
+        | Some Condition.SelfNonEmpty
+        | None -> None
 
     /// Phase 525 — a CLOSED IDL type (every type variable already substituted, by the
     /// instantiation rule [[Decl]] applies) as the model's slot. A translation of one type
@@ -684,20 +713,17 @@ module internal FStarModel =
                 else
                     t
 
-            let absent (m: Member) =
-                match m.Presence with
-                | Some(Some d) -> bare termOf[m.Name] = bare d
-                | _ -> termOf[m.Name] = "None"
+            let holds (c: Conditional) (m: Member) =
+                match c.Test with
+                | Condition.SiblingPresent s -> termOf[s] <> "None"
+                | Condition.SiblingAbsent s -> termOf[s] = "None"
+                | Condition.SiblingEquals(s, term) -> bare termOf[s] = bare term
+                | Condition.SelfNonEmpty -> termOf[m.Name] <> "(Some [])"
 
-            let holds (m: Member) =
-                match m.Condition with
-                | Some(Condition.SiblingPresent s) -> termOf[s] <> "None"
-                | Some(Condition.SiblingAbsent s) -> termOf[s] = "None"
-                | Some(Condition.SiblingEquals(s, term)) -> bare termOf[s] = bare term
-                | Some Condition.SelfNonEmpty -> termOf[m.Name] <> "(Some [])"
-                | None -> true
-
-            sorted |> List.tryFind (fun m -> not (holds m || absent m))
+            sorted
+            |> List.tryFind (fun m ->
+                m.Condition
+                |> Option.exists (fun c -> not (holds c m || bare termOf[m.Name] = bare c.Absent)))
 
         go [] sorted
         |> Result.bind (fun parts ->
@@ -728,7 +754,7 @@ module internal FStarModel =
     /// Phase 723 (DECISIONS.md D190, D256) — each member's aliases and presence condition, read from
     /// [[Decl.memberReading]] over `scope`, the whole field list of the owner (a sibling is looked up
     /// there when `fs` is one field of it). A member of an inline declaration declares neither: the
-    /// declaration check refuses one ([[Decl.layoutFault]]), which the target asks first.
+    /// declaration check refuses one, and the target asks that check first ([[model]]).
     and private fieldMembers
         (idl: Idl)
         (subst: Map<string, IdlType>)
@@ -798,9 +824,18 @@ module internal FStarModel =
                 let reading = Decl.memberReading idl scope f
 
                 let declared =
-                    match reading with
-                    | None -> Ok([], None)
-                    | Some r -> condition at f r |> Result.map (fun c -> List.tail r.Spellings, c)
+                    match reading, presence with
+                    | None, _ -> Ok([], None)
+                    | Some r, Ok p ->
+                        condition at f r
+                        |> Result.bind (fun c ->
+                            match c with
+                            | None -> Ok None
+                            | Some test ->
+                                absentValue at f.Name p
+                                |> Result.map (fun absent -> Some { Test = test; Absent = absent }))
+                        |> Result.map (fun c -> List.tail r.Spellings, c)
+                    | Some _, Error e -> Error e
 
                 match slotOf at ft, presence, declared with
                 | Error e, _, _
@@ -834,7 +869,7 @@ module internal FStarModel =
     /// declares ANOTHER case's key as a member of its own has no model with the round trip: a value
     /// carrying that member writes both keys, the reading refuses two cases left (D220.3), and
     /// `dec (enc x) == Ok x` is false of that value. The declaration check refuses such a union, and
-    /// the target asks that check before it reaches here ([[Decl.layoutFault]]).
+    /// the target asks that check before it reaches here ([[model]]).
     and private fieldVariants
         (idl: Idl)
         (subst: Map<string, IdlType>)
@@ -876,7 +911,7 @@ module internal FStarModel =
             let ofCase (case: IdlUnionCase) : Result<Pick list * Member list, CodegenError> =
                 // A case declaring another case's key as a member of its own has no round trip (a value
                 // carrying it writes both keys). `Declare.layoutErrors` refuses it (Phase 722, D285.6),
-                // and this target asks that check before it lays a declaration out, so none arrives here.
+                // and this target asks that check before it models anything, so none arrives here.
                 match keyed |> List.tryFind (fun k -> k.Case = case.Tag) with
                 | None ->
                     unmodellable
@@ -937,21 +972,13 @@ module internal FStarModel =
             let own (name: string) =
                 ms |> List.exists (fun m -> m.Name = name && m.Held.IsNone)
 
-            let siblingOf (m: Member) =
-                match m.Condition with
-                | Some(Condition.SiblingPresent s)
-                | Some(Condition.SiblingAbsent s)
-                | Some(Condition.SiblingEquals(s, _)) -> Some s
-                | Some Condition.SelfNonEmpty
-                | None -> None
-
-            match ms |> List.tryFind (fun m -> siblingOf m |> Option.exists (own >> not)) with
+            match ms |> List.tryFind (fun m -> conditionSibling m |> Option.exists (own >> not)) with
             | Some m ->
                 unmodellable
                     (sprintf
                         "the presence condition of member '%s' over '%s', which the model does not hold as a member of its own"
                         m.Name
-                        (siblingOf m |> Option.defaultValue ""))
+                        (conditionSibling m |> Option.defaultValue ""))
                     where
             | None -> Ok(picks, ms)
 
@@ -1278,16 +1305,6 @@ module internal FStarModel =
             fieldMembers idl Map.empty "node envelope" idl.NodeFields idl.NodeFields
             |> Result.map (fun ms -> envelopeMembers <- ms)
 
-        // Phase 722 — an inline declaration is modelled as the declaration check leaves it: where it
-        // stands, one key per case that is a required member of that case and of no other, and what
-        // a case may synthesise. The target is handed an `Idl` value, not a declaration that was
-        // checked, so it asks before it lays one out: the one question every backend asks
-        // ([[Decl.layoutFault]]).
-        let layout () =
-            match Decl.layoutFault resolved with
-            | None -> Ok()
-            | Some fault -> unmodellable (Decl.layoutFaultConstruct fault) "the vocabulary"
-
         let kinds () =
             kindTags
             |> List.fold
@@ -1312,7 +1329,7 @@ module internal FStarModel =
 
         let translated =
             sequence (
-                [ finite; layout; envelope ]
+                [ finite; envelope ]
                 @ (reach.FromEnvelope |> List.map declare)
                 @ [ kinds ]
                 @ (reach.FromKinds |> List.map declare)
@@ -1339,59 +1356,12 @@ module internal FStarModel =
             // Phase 639 — a set is modelled as a list, so a set and a list of one element type are
             // one slot, declared once.
             let order = List.distinctBy slotName reached
-            // Phase 293 — the shape the model cannot express is REFUSED by name, never emitted. The
-            // model's objects are literals, one entry per key, read back by `find_field` — so a key
-            // that would appear twice in one object is a document the model cannot round-trip. Under
-            // the FLAT envelope the node object carries the discriminator, `id`, the kind's members
-            // and the envelope's; under the NESTED one the node object carries `id`, `kind` and the
-            // envelope's members, and the kind object the discriminator and the kind's. A union
-            // case's object carries the discriminator beside its members in both shapes.
-            // `Declare.wireShapeErrors` refuses most of these at declaration; the target refuses them
-            // again because it is handed an `Idl` value, not a declaration that was checked.
-            let disc = idl.Wire.Discriminator
+            // Phase 293 — the model's objects are literals, one entry per key, read back by
+            // `find_field`, so a key that would appear twice in one object is a document the model
+            // cannot round-trip. `Declare.wireShapeErrors` refuses every such key at declaration, and
+            // the target asks that check before it models anything ([[model]], Phase 723).
             let envelope = envelopeMembers
             let kinds = caseMap["vkind"]
-
-            // Phase 723 — an alias spelt as such a key is the declaration check's refusal
-            // (`Declare.layoutErrors`), so no vocabulary it admits reaches the target with one.
-            let collisions (where: string) (reserved: (string * string) list) (ms: Member list) =
-                ms
-                |> List.tryPick (fun m ->
-                    reserved
-                    |> List.tryFind (fun (key, _) -> key = m.Name)
-                    |> Option.map (fun (_, holder) ->
-                        CodegenError.UnmodellableInFStar(
-                            sprintf "a member '%s' whose key the %s already carries" m.Name holder,
-                            where
-                        )))
-
-            let nodeKeys =
-                match idl.Wire.NodeEnvelope with
-                | NodeEnvelopeShape.FlatKind -> [ disc, "node object"; "id", "node object" ]
-                | NodeEnvelopeShape.NestedKind -> [ "id", "node object"; "kind", "node object" ]
-
-            let kindFailure () =
-                kinds
-                |> List.tryPick (fun (tag, ms) ->
-                    match idl.Wire.NodeEnvelope with
-                    | NodeEnvelopeShape.FlatKind ->
-                        collisions
-                            ("kind " + tag)
-                            (nodeKeys @ (envelope |> List.map (fun m -> m.Name, "node envelope")))
-                            ms
-                    | NodeEnvelopeShape.NestedKind -> collisions ("kind " + tag) [ disc, "kind object" ] ms)
-
-            let unionFailure () =
-                caseMap
-                |> Seq.tryPick (fun kv ->
-                    if kv.Key = "vkind" then
-                        None
-                    else
-                        kv.Value
-                        |> List.tryPick (fun (tag, ms) ->
-                            match transparent.TryGetValue kv.Key with
-                            | true, t when t = tag -> None
-                            | _ -> collisions (sprintf "union %s case %s" kv.Key tag) [ disc, "case object" ] ms))
 
             // Phase 722 — a constructor's name is its label, and a holder of a presence-keyed union
             // has one per choice of case: two of one owner spelled alike would be one F* name.
@@ -1537,12 +1507,7 @@ module internal FStarModel =
                     | Error e -> Some e
                     | Ok() -> None)
 
-            let shapeFailure =
-                collisions "node envelope" nodeKeys envelope
-                |> Option.orElseWith kindFailure
-                |> Option.orElseWith unionFailure
-                |> Option.orElseWith labelFailure
-                |> Option.orElseWith nameFailure
+            let shapeFailure = labelFailure () |> Option.orElseWith nameFailure
 
             match shapeFailure with
             | Some e -> Error e
@@ -1590,8 +1555,22 @@ module internal FStarModel =
     /// model, and is refused in the other backends' sentence. Since Phase 723 (D290, D291) a member's
     /// aliases, an enum case's aliases and the four presence conditions are modelled, and the few
     /// shapes the model's type cannot state are refused where they are met, by name.
+    ///
+    /// Phase 723 (D293) — the target is handed an `Idl` value, not a declaration that was checked, and
+    /// a vocabulary the declaration check refuses has no document that reads canonically: a model of
+    /// it states a round trip nobody has checked. So the target asks the check WHOLE before it models
+    /// anything ([[Declare.errors]]), and refuses such a vocabulary naming the check's first fault.
     let model (idl: Idl) (kindTags: string list) : Result<Model, CodegenError> =
-        Decl.referencesAppliedIdl idl |> Result.bind (fun () -> modelOf idl kindTags)
+        Decl.referencesAppliedIdl idl
+        |> Result.bind (fun () ->
+            match Declare.errors idl with
+            | fault :: _ ->
+                unmodellable
+                    ("a vocabulary the declaration check refuses ("
+                     + VocabularyFault.describe fault
+                     + ")")
+                    "the vocabulary"
+            | [] -> modelOf idl kindTags)
 
     // -----------------------------------------------------------------------
     // 6. The expressibility partition — which of a vocabulary's kinds the target can

@@ -559,9 +559,15 @@ let sourceLitTests =
                     "F* vocabulary", FStarTarget.vocabularyModule "Phase292Hostile" hostile tags ]
 
               for name, result in artefacts do
-                  match result with
-                  | Ok emitted -> expectNoInjection name emitted
-                  | Error e -> failtestf "%s refused the hostile vocabulary: %A" name e
+                  match name, result with
+                  | _, Ok emitted -> expectNoInjection name emitted
+                  // Phase 723 — the F* target asks the declaration check first, which refuses the
+                  // hostile category, so no F* source is emitted at all (`fstarString` is pinned above).
+                  | "F* vocabulary", Error(CodegenError.UnmodellableInFStar(construct, _)) when
+                      construct.StartsWith "a vocabulary the declaration check refuses ("
+                      ->
+                      ()
+                  | _, Error e -> failtestf "%s refused the hostile vocabulary: %A" name e
           }
 
           test "go-red: a hostile discriminator is spliced as a literal in every backend" {

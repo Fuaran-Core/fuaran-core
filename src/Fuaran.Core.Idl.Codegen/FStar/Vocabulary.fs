@@ -59,30 +59,13 @@ module internal FStarVocabulary =
     let private binders (ms: Member list) =
         ms |> List.mapi (fun i _ -> sprintf "f%d" i)
 
-    /// Phase 723 — the sibling a member's presence condition reads, if it reads one.
-    let conditionSibling (m: Member) : string option =
-        match m.Condition with
-        | Some(Condition.SiblingPresent s)
-        | Some(Condition.SiblingAbsent s)
-        | Some(Condition.SiblingEquals(s, _)) -> Some s
-        | Some Condition.SelfNonEmpty
-        | None -> None
-
-    /// Phase 723 — whether a sibling `s` (an F* expression of its model value) satisfies `m`'s condition.
-    let conditionHolds (m: Member) (s: string) : string =
-        match m.Condition with
-        | Some(Condition.SiblingPresent _) -> "Some? " + s
-        | Some(Condition.SiblingAbsent _) -> "None? " + s
-        | Some(Condition.SiblingEquals(_, term)) -> sprintf "%s = %s" s term
-        | Some Condition.SelfNonEmpty
-        | None -> "true"
-
-    /// Phase 723 — the model value of a conditional member when it is absent: `None`, or its default.
-    let absentValue (m: Member) : string =
-        match m.Presence with
-        | Some None -> "None"
-        | Some(Some d) -> d
-        | None -> invalidArg "m" "a member declaring a presence condition is optional or omitted at a default"
+    /// Phase 723 — whether a sibling `s` (an F* expression of its model value) satisfies condition `c`.
+    let conditionHolds (c: Conditional) (s: string) : string =
+        match c.Test with
+        | Condition.SiblingPresent _ -> "Some? " + s
+        | Condition.SiblingAbsent _ -> "None? " + s
+        | Condition.SiblingEquals(_, term) -> sprintf "%s = %s" s term
+        | Condition.SelfNonEmpty -> "true"
 
     /// Phase 723 (DECISIONS.md D290) — the refinement each binder of a constructor carries: a member
     /// whose condition fails is ABSENT, so the model's type is the canonical form and holds no value the
@@ -91,10 +74,10 @@ module internal FStarVocabulary =
     let private refinements (ms: Member list) : Map<string, string list> =
         let binder (m: Member) = binderName m.Name
 
-        let absent (m: Member) =
+        let absent (m: Member) (c: Conditional) =
             match m.Presence with
             | Some None -> "None? " + binder m
-            | _ -> sprintf "%s = %s" (binder m) (absentValue m)
+            | _ -> sprintf "%s = %s" (binder m) c.Absent
 
         let position (name: string) =
             ms |> List.findIndex (fun g -> g.Name = name)
@@ -102,12 +85,12 @@ module internal FStarVocabulary =
         ms
         |> List.choose (fun m ->
             match m.Condition, conditionSibling m with
-            | Some Condition.SelfNonEmpty, _ ->
+            | Some { Test = Condition.SelfNonEmpty }, _ ->
                 Some(m.Name, sprintf "(match %s with | Some [] -> false | _ -> true)" (binder m))
-            | Some _, Some s ->
+            | Some c, Some s ->
                 let sibling = ms[position s]
                 let later = if position s > position m.Name then s else m.Name
-                Some(later, sprintf "(%s || %s)" (conditionHolds m (binder sibling)) (absent m))
+                Some(later, sprintf "(%s || %s)" (conditionHolds c (binder sibling)) (absent m c))
             | _ -> None)
         |> List.groupBy fst
         |> List.map (fun (k, cs) -> k, cs |> List.map snd)
@@ -441,7 +424,8 @@ module internal FStarVocabulary =
 
         // Phase 723 (D256.3) — an explicit empty array is a non-canonical spelling of absence.
         match m.Condition with
-        | Some Condition.SelfNonEmpty -> outcomeTy, sprintf "(match %s with | Ok (Some []) -> Ok None | r -> r)" body
+        | Some { Test = Condition.SelfNonEmpty } ->
+            outcomeTy, sprintf "(match %s with | Ok (Some []) -> Ok None | r -> r)" body
         | _ -> outcomeTy, body
 
     /// The decoder of one member off the object bound to `el`, as a `let`-bound outcome.
@@ -463,18 +447,18 @@ module internal FStarVocabulary =
             else
                 inlined
 
-        match conditionSibling m with
-        | Some s ->
+        match m.Condition, conditionSibling m with
+        | Some c, Some s ->
             sprintf
                 "let o%d : outcome (%s) = (match o%d with | Error e -> Error e | Ok sv -> if %s then %s else Ok (%s)) in"
                 i
                 outcomeTy
                 (ms |> List.findIndex (fun g -> g.Name = s))
-                (conditionHolds m "sv")
+                (conditionHolds c "sv")
                 read
-                (absentValue m)
-        | None when hoisted ms m -> sprintf "let o%d : outcome (%s) = %s in" i outcomeTy read
-        | None -> decMember el i m
+                c.Absent
+        | _ when hoisted ms m -> sprintf "let o%d : outcome (%s) = %s in" i outcomeTy read
+        | _ -> decMember el i m
 
     /// Every member's `let` of one constructor's decoder: a member whose condition reads a sibling
     /// after every other, so the sibling's outcome is bound first (the conditions do not chain).

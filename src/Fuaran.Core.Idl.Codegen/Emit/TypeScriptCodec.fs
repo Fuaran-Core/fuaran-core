@@ -553,7 +553,7 @@ module internal TypeScriptCodec =
                 | WhenEquals(s, v) ->
                     match fields |> List.tryFind (fun g -> g.Name = s) with
                     | Some g -> guarded (srcOf s + " === " + tsLiteralValue idl g.Type v)
-                    | None -> Error(CodegenError.UnsupportedDefault(TStr, v))
+                    | None -> Error(Decl.undeclaredSibling self s)
           // Phase 722 — an inline declaration's member pieces, read off the holder ([[tsMemberAt]]).
           Inline =
             fun src f ->
@@ -913,7 +913,7 @@ module internal TypeScriptCodec =
     /// Phase 723 (DECISIONS.md D190, D288) — the reading of a member declaring an alias or a presence
     /// condition ([[Decl.memberReading]], the one reading the F# decoders print too), over the object
     /// `fs`: the KEY the member is read under and the OBJECT it is read from. The key is the spelling the
-    /// object carries ([[tsCanonicalFormHelpers]]' `dSpelt`), so a refusal inside the member is located as
+    /// object carries ([[tsCanonicalFormHelpers]]' `dKey`), so a refusal inside the member is located as
     /// written, and an absent member's is its canonical spelling. The condition is tested over the raw
     /// object; where it fails the member is read from an empty object, so it decodes as its absence,
     /// unread, and the key it would have been read under is never used: a conditional member is never
@@ -934,7 +934,7 @@ module internal TypeScriptCodec =
                 if List.isEmpty f.Aliases then
                     SourceLit.tsString f.Name
                 else
-                    "dSpelt(" + names r.Spellings + ", fs)"
+                    "dKey(" + names r.Spellings + ", fs)"
 
             let test =
                 match r.Presence with
@@ -1253,13 +1253,13 @@ module internal TypeScriptCodec =
     /// alone is a non-empty member's absence, so one of the wrong kind still reaches its decoder.
     let tsCanonicalFormHelpers =
         """// Phase 723 — a member's canonical reading. `dSpelling` is the spelling an object carries a member
-// under, the canonical one first, then each alias; `dSpelt` is the key it is read under, that spelling,
+// under, the canonical one first, then each alias; `dKey` is the key it is read under, that spelling,
 // or the canonical one where none is present, at which an absent member is missing. A presence condition
 // is tested over the raw object, a sibling under its own spellings: `dHolds` compares it with the wire
 // values the condition names, and `dEmpty` finds an explicit empty array. `dAliased` reads an enum
 // case's aliases as the case's wire string.
 const dSpelling = (names, fs) => names.find((n) => hasOwn(fs, n));
-const dSpelt = (names, fs) => dSpelling(names, fs) ?? names[0];
+const dKey = (names, fs) => dSpelling(names, fs) ?? names[0];
 const dHolds = (names, fs, values, absent) => {
   const k = dSpelling(names, fs);
   if (k === undefined) return absent;
