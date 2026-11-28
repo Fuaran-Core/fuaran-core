@@ -698,13 +698,40 @@ let backendTests =
                   for name, r in entries LayoutIdl.layout do
                       Expect.isNone (construct r) (name + " emits the layout vocabulary")
 
-                  // A layout the check refuses, one of each rule this phase added: every entry refuses,
-                  // naming the check's first fault. The F* target asks the check WHOLE (Phase 723), so it
-                  // names the first fault of the vocabulary, not of its layout alone.
+                  // A layout the check refuses, one of each rule Phase 722 added and an alias spelt as a key
+                  // its object already carries (Phase 723), which is a layout fault and no inline
+                  // declaration's: every entry refuses, naming the check's first fault, as a layout the
+                  // check refuses. The F* target asks the check WHOLE (Phase 723), so it names the first
+                  // fault of the vocabulary, not of its layout alone.
+                  let aliasedId =
+                      let flat = enveloped NodeEnvelopeShape.FlatKind "pageSize" "rowKeyField"
+
+                      { flat with
+                          Kinds =
+                              flat.Kinds
+                              |> List.map (fun k ->
+                                  if k.Tag = "Grid" then
+                                      { k with
+                                          Fields =
+                                              k.Fields
+                                              |> List.map (fun f ->
+                                                  if f.Name = "caption" then
+                                                      { f with Aliases = [ "id" ] }
+                                                  else
+                                                      f) }
+                                  else
+                                      k) }
+
+                  Expect.equal
+                      (Declare.layoutErrors aliasedId |> List.map _.Detail)
+                      [ "kind 'Grid', field 'caption': the alias 'id' is a key its object already carries (the node id), so a document holding that key would read it as this member" ]
+                      "the alias is the layout's one fault"
+
                   for label, idl in
                       [ "a case declaring another case's key", overlapping Optional
                         "a laid-out member spelled as the node id",
-                        enveloped NodeEnvelopeShape.FlatKind "id" "rowKeyField" ] do
+                        enveloped NodeEnvelopeShape.FlatKind "id" "rowKeyField"
+                        "an alias spelt as the node id, beside inline declarations", aliasedId ] do
                       let fault =
                           match Declare.layoutErrors idl with
                           | f :: _ -> f.Detail
@@ -719,7 +746,7 @@ let backendTests =
                                   if name.StartsWith "FStarTarget" then
                                       "a vocabulary the declaration check refuses (" + whole + ")"
                                   else
-                                      "an inline declaration the declaration check refuses (" + fault + ")"
+                                      "a layout the declaration check refuses (" + fault + ")"
                               ))
                               (sprintf "%s: %s answers the check's fault" label name)
 
@@ -767,7 +794,7 @@ let backendTests =
                         "typescriptModule", Gen.typescriptModule growing growingTags ] do
                       Expect.equal
                           (construct r)
-                          (Some("an inline declaration the declaration check refuses (" + growingFault + ")"))
+                          (Some("a layout the declaration check refuses (" + growingFault + ")"))
                           (sprintf "a reach that was not walked: %s answers the check's fault" name)
 
                   // The codec-only module, over the vocabulary its request is declared against.

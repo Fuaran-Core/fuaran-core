@@ -1514,9 +1514,11 @@ module internal Decl =
             "correct the declaration — `Declare.errors` names every fault of the vocabulary"
         )
 
-    /// The construct a backend names when [[layoutFault]] answers a fault.
+    /// The construct a backend names when [[layoutFault]] answers a fault. The fault is the layout's,
+    /// not always an inline declaration's: an alias spelt as a key its object already carries is one
+    /// (Phase 723, DECISIONS.md D292.1).
     let layoutFaultConstruct (fault: VocabularyFault) : string =
-        "an inline declaration the declaration check refuses (" + fault.Detail + ")"
+        "a layout the declaration check refuses (" + fault.Detail + ")"
 
     /// [[layoutFault]] as the refusal of a backend that answers `UnsupportedConstruct`, or the
     /// resolution itself.

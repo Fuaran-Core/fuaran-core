@@ -41,8 +41,16 @@
   A generated TypeScript module reading a member under an alias calls `dKey` (the key the object carries the
   member under), and either host's encoder refuses an equality condition naming no sibling as
   `UnsupportedConstruct`, `the presence condition of field '<f>', which names '<s>', no member of its owner`.
+  The F#, TypeScript, schema and codec-only entries name a layout fault as `a layout the declaration check
+  refuses (<fault>)`, where Phase 722, earlier in this draft, wrote `an inline declaration the declaration check
+  refuses (<fault>)`, which an alias is not; a consumer that matched that text in a build of the draft matches
+  the new one instead. No released version carried it.
   FOURTH, three declarations no document of which reads canonically, which `Declare.errors` and so
-  `Artifact.ofJson` admitted at `0.45.0`, are refused at the declaration, in every backend at once. An alias spelt
+  `Artifact.ofJson` admitted at `0.45.0`, are refused at the declaration. The F\* target asks the check whole and
+  refuses each; the F#, TypeScript, schema and codec-only entries ask the layout question alone, which holds the
+  alias and the synthesised value, so a vocabulary handed to them without the check that declares the alias and
+  reaches no inline declaration, or declares the default, is generated, and their readers read it as the
+  interpreter does. An alias spelt
   as a key its object already carries from the node envelope: under the flat envelope a kind member's alias spelt
   as the node id or as a spelling of an envelope member, and an envelope member's alias spelt as the node id, the
   discriminator or a key a kind lays beside it; under the nested envelope an envelope member's alias spelt `id`

@@ -335,7 +335,11 @@ backend shares (D287), asks `Declare.errors` and refuses a vocabulary it refuses
 check's first fault: `the F* proof model cannot express a vocabulary the declaration check refuses (<path>:
 <fault>) (at the vocabulary)`. No model and no proof script is emitted for one, and nothing throws. The
 target no longer asks the narrower layout question itself; the F#, TypeScript, schema and codec-only entries
-still do. Measured first, over the 194 vocabularies the fixtures expose (the ten roster vocabularies among
+still do, and ask nothing more: they generate a vocabulary handed to them without the check that declares an
+alias spelt as a key its object carries and reaches no inline declaration, or a declared default that is not
+canonical, and their readers read it as the interpreter does. A layout fault they refuse is named as `a layout
+the declaration check refuses (<fault>)`, whether the fault is an inline declaration's or an alias's (it read
+`an inline declaration the declaration check refuses`, which an alias is not). Measured first, over the 194 vocabularies the fixtures expose (the ten roster vocabularies among
 them) and the UI reference vocabulary: none the target is used to model has a fault. The 55 the check refuses that the target
 would have modelled are the contract refusal fixtures (`ContractsIdl.refusalCases`,
 `ContractsCorpus.refusals`), built to be refused, which no F\* test models.
@@ -369,9 +373,10 @@ answers the spelling the object carries, or the canonical one, whatever the cond
 answers the canonical key when the condition fails; one name for two behaviours misled a reader. A host encoder
 handed an equality condition naming no sibling refuses the construct (`UnsupportedConstruct`, `the presence
 condition of field '<f>', which names '<s>', no member of its owner`) on both hosts, where it answered
-`UnsupportedDefault`. Whether a field declares an alias or a condition is one predicate
+`UnsupportedDefault`. Whether a field declares an alias or a condition is one predicate in the generator
 (`Decl.fieldDeclaresAliasOrCondition`). D292.3's "no vocabulary the check admits reaches it" now holds of every
-entry of the target.
+entry of the target. D292's "so no backend meets either" holds of a vocabulary the check admits, not of every
+backend: only the F\* target asks the check whole (D293.1).
 
 **D293.6 — the evidence.** Each behaviour above is a committed test, failing before its change, and each change
 was perturbed one change at a time with every perturbation failing a test. The proof leg checks the regenerated
@@ -381,7 +386,9 @@ modules.
 refused at its declaration. Every F\* entry answers a vocabulary the check refuses in the sentence above, so the
 refusal text of an ill-formed vocabulary moves, and a non-canonical default spelling the target answered as
 `UnsupportedDefault` it answers as `UnmodellableInFStar`. A generated TypeScript module reading a member under an
-alias calls `dKey`. It rides the `0.46.0` draft, whose class is breaking.
+alias calls `dKey`. The F#, TypeScript, schema and codec-only entries name a layout fault as `a layout the
+declaration check refuses (<fault>)`, where Phase 722 wrote `an inline declaration the declaration check refuses
+(<fault>)`; no released version carried that sentence. It rides the `0.46.0` draft, whose class is breaking.
 
 ## 2026-11-28 — D292: the declaration check refuses an alias spelt as a key its object already carries and a declared default that is not canonical, so no backend meets either; the F\* model's refusal of the first is gone, and of the second only a value written in another spelling reaches it (amends D190.1, D190.2 and D291.3)
 
