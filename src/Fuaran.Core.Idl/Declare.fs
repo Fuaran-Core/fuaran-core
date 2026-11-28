@@ -52,6 +52,24 @@ module Declare =
             Judged: Instantiations.Judged
         }
 
+    /// For each of `keys`, in order, whether it is the SECOND of its key: a key given more than
+    /// once is refused once, where it is given again. Counted in one pass, so a vocabulary of `n`
+    /// declarations costs O(n), never the O(n²) of reading every earlier one at each.
+    let private givenAgain (keys: 'K list) : bool list when 'K: equality =
+        // Keyed by the key wrapped, so a null one is counted as any other.
+        let counts =
+            System.Collections.Generic.Dictionary<'K option, int>(HashIdentity.Structural)
+
+        keys
+        |> List.map (fun k ->
+            let before =
+                match counts.TryGetValue(Some k) with
+                | true, c -> c
+                | false, _ -> 0
+
+            counts[Some k] <- before + 1
+            before = 1)
+
     /// An enum whose wire strings ARE its case names — the common case, and the
     /// shape every declaration had before fuaran#707.
     let enumOf (name: string) (cases: string list) : IdlEnum =
@@ -1002,10 +1020,8 @@ module Declare =
                               what
                               n)
 
-              for k, (path, n) in List.indexed names do
-                  let earlier = names |> List.take k |> List.filter (fun (_, m) -> m = n)
-
-                  if List.length earlier = 1 then
+              for (path, n), again in List.zip names (givenAgain (List.map snd names)) do
+                  if again then
                       fault path (sprintf "%s '%s' is declared more than once" what n) ]
 
         let fieldErrors
@@ -1728,13 +1744,9 @@ module Declare =
                           [ key "defaults"; item i; key "value" ]
                           (sprintf "%s: the value does not fit the field's type (%s)" at m)
 
-          for k, d in List.indexed idl.Defaults do
-              let earlier =
-                  idl.Defaults
-                  |> List.take k
-                  |> List.filter (fun e -> e.Kind = d.Kind && e.Field = d.Field)
-
-              if List.length earlier = 1 then
+          for k, (d, again) in
+              List.indexed (List.zip idl.Defaults (givenAgain (idl.Defaults |> List.map (fun d -> d.Kind, d.Field)))) do
+              if again then
                   fault
                       [ key "defaults"; item k ]
                       (sprintf "default for '%s.%s' is declared more than once" d.Kind d.Field)
@@ -1763,13 +1775,10 @@ module Declare =
                                   single.Name)
                   | _ -> fault path (sprintf "%s must carry exactly one field — it is on the wire BARE" at)
 
-          for k, (name, _) in List.indexed idl.Harden.TransparentUnions do
-              let earlier =
-                  idl.Harden.TransparentUnions
-                  |> List.take k
-                  |> List.filter (fun (n, _) -> n = name)
+          let transparent = idl.Harden.TransparentUnions
 
-              if List.length earlier = 1 then
+          for k, ((name, _), again) in List.indexed (List.zip transparent (givenAgain (List.map fst transparent))) do
+              if again then
                   fault
                       [ key "harden"; key "transparentUnions"; item k ]
                       (sprintf "harden policy: union '%s' declares more than one transparent case" name)
