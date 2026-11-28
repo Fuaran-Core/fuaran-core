@@ -486,6 +486,29 @@ let private hostile: Idl =
                           Since = Some("1" + payload) } } ]
         Enums = [ Declare.enumWith "Level" [ "Low", payload; "High", "high" ] ] }
 
+/// Phase 723 — a hostile vocabulary the declaration check ADMITS, so the F* target models it: the
+/// payload is an enum case's wire string, a string member's omit-at-default value and the literal a
+/// `WhenEquals` condition compares that member with ([[hostile]]'s category and annotations are
+/// refused by the check, and the F* target asks the check first).
+let private admittedHostile: Idl =
+    { small with
+        Kinds =
+            [ kind
+                  "Note"
+                  [ f "level" (TEnum "Level") (OmitDefault(VEnum payload))
+                    f "text" TStr (OmitDefault(VStr("t" + payload)))
+                    { f "mode" TStr Optional with
+                        Presence = Some(WhenEquals("text", VStr("t" + payload))) } ] ]
+        Enums =
+            [ { Declare.enumWith "Level" [ "Low", payload; "High", "high" ] with
+                  Aliases = [ "High", [ "hi" ] ] } ] }
+
+/// The F* model and proof script of [[admittedHostile]], under the names the prover is given.
+let private admittedHostileFStar () : (string * Result<string, CodegenError>) list =
+    [ "Phase723Hostile", FStarTarget.vocabularyModule "Phase723Hostile" admittedHostile [ "Note" ]
+      "Phase723HostileProofs",
+      FStarTarget.proofsModule "Phase723HostileProofs" "Phase723Hostile" admittedHostile [ "Note" ] ]
+
 [<Tests>]
 let sourceLitTests =
     testList
@@ -562,12 +585,107 @@ let sourceLitTests =
                   match name, result with
                   | _, Ok emitted -> expectNoInjection name emitted
                   // Phase 723 — the F* target asks the declaration check first, which refuses the
-                  // hostile category, so no F* source is emitted at all (`fstarString` is pinned above).
+                  // hostile category, so no F* source is emitted here; the F* leg is the next test,
+                  // over a hostile vocabulary the check admits.
                   | "F* vocabulary", Error(CodegenError.UnmodellableInFStar(construct, _)) when
                       construct.StartsWith "a vocabulary the declaration check refuses ("
                       ->
                       ()
                   | _, Error e -> failtestf "%s refused the hostile vocabulary: %A" name e
+          }
+
+          test "go-red: hostile text a vocabulary the check admits carries reaches the F* model and proofs escaped" {
+              // Without `SourceLit.fstarString` each site below emitted the payload's second line as
+              // F* source: the enum case's wire string in the encoder, the condition's literal in the
+              // constructor's refinement, and the default in the decoder and the proof script.
+              Expect.isEmpty (Declare.errors admittedHostile) "the declaration check admits the vocabulary"
+              let lit = SourceLit.fstarString payload
+              let tLit = SourceLit.fstarString ("t" + payload)
+
+              let sites =
+                  dict
+                      [ "Phase723Hostile",
+                        [ "the enum case's wire string", "JStr " + lit
+                          "the condition's literal", "text = " + tLit
+                          "the default the decoder answers", "Ok " + tLit ]
+                        "Phase723HostileProofs", [ "the default the encoder omits", "(" + tLit + ")" ] ]
+
+              for name, result in admittedHostileFStar () do
+                  match result with
+                  | Ok emitted ->
+                      expectNoInjection name emitted
+
+                      for what, escaped in sites[name] do
+                          Expect.stringContains emitted escaped (sprintf "%s: %s is escaped" name what)
+                  | Error e -> failtestf "%s refused a vocabulary the check admits: %A" name e
+          }
+
+          // The prover runs in the proof leg, not this suite; when `FSTAR_HOME` names the pinned
+          // release, the same two modules are checked here at the leg's flags, so the escaped text is
+          // shown to be F* the prover accepts, not only text no line runs.
+          test "the hostile F* model and proofs verify where FSTAR_HOME names the prover" {
+              match System.Environment.GetEnvironmentVariable "FSTAR_HOME" with
+              | null
+              | "" -> skiptest "FSTAR_HOME is not set; the proof leg names the prover"
+              | home ->
+                  let exe =
+                      Path.Combine(
+                          home,
+                          "bin",
+                          (if System.OperatingSystem.IsWindows() then
+                               "fstar.exe"
+                           else
+                               "fstar")
+                      )
+
+                  if not (File.Exists exe) then
+                      failtestf "FSTAR_HOME names no prover: %s is absent" exe
+
+                  let dir =
+                      Path.Combine(Path.GetTempPath(), "fuaran-core-hostile-fstar-" + string (System.Guid.NewGuid()))
+
+                  let cache = Path.Combine(dir, "cache")
+                  Directory.CreateDirectory cache |> ignore
+
+                  try
+                      for name, result in admittedHostileFStar () do
+                          match result with
+                          | Error e -> failtestf "%s refused a vocabulary the check admits: %A" name e
+                          | Ok emitted ->
+                              let file = Path.Combine(dir, name + ".fst")
+                              File.WriteAllText(file, emitted)
+
+                              let checkedBy =
+                                  ChildProcess.argv
+                                      exe
+                                      [ "--z3rlimit"
+                                        "40"
+                                        "--quake"
+                                        "3"
+                                        "--report_assumes"
+                                        "error"
+                                        "--cache_checked_modules"
+                                        "--cache_dir"
+                                        cache
+                                        "--include"
+                                        dir
+                                        "--include"
+                                        Snapshots.repoFile "proofs"
+                                        file ]
+                                  |> ChildProcess.run
+
+                              match checkedBy with
+                              | Error why -> failtestf "%s: the prover did not run: %s" name why
+                              | Ok out ->
+                                  let said = out.Stdout + out.Stderr
+                                  let tail = said.Substring(max 0 (said.Length - 2000))
+                                  Expect.equal out.Exit 0 (sprintf "%s verifies: %s" name tail)
+                                  Expect.stringContains said ("Verified module: " + name) (name + " is verified")
+                  finally
+                      try
+                          Directory.Delete(dir, true)
+                      with _ ->
+                          ()
           }
 
           test "go-red: a hostile discriminator is spliced as a literal in every backend" {
